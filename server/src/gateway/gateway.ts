@@ -13,6 +13,7 @@ import { listOf } from '../palettes/common.js';
 import { acmeChallenge, getCert, getTls } from './tls.js';
 import crypto from 'node:crypto';
 import { MCP_PROTOCOLS, toolDefinition, toolResult } from '../mcp.js';
+import { metrics } from '../metrics.js';
 import { version as sutraVersion } from '../config.js';
 
 /**
@@ -237,7 +238,7 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
     delete header.Security;
     const input = { operation: ops.find(o => o.toLowerCase() === opName.toLowerCase()) || opName, body: env.Body[opName], header, headers, soapAction: req.headers.soapaction, auth: caller, client };
     try {
-      const { runId, reply: r } = await waitReply(onReply => engine.startRun({ doc: route.doc, flowId: route.flowId, projectId: route.projectId, version: route.version, triggerNodeId: n.id, input, source: 'soap', onReply }), config.replyTimeoutMs);
+      const { runId, reply: r } = await waitReply(onReply => engine.startRun({ doc: route.doc, flowId: route.flowId, projectId: route.projectId, version: route.version, triggerNodeId: n.id, input, source: 'soap', onReply, traceparent: String(req.headers.traceparent || '') }), config.replyTimeoutMs);
       reply.header('x-sutra-run', runId);
       const ns = String(n.config.namespace || 'urn:sutra');
       if (r.failed || r.soap?.fault) {
@@ -271,7 +272,7 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
   const params = Object.fromEntries(route.keys.map((k, i) => [k, m[i + 1]]));
   const input = { method, path, params, query: Object.fromEntries(url.searchParams), headers, body, auth: caller, client };
   try {
-    const { reply: r } = await waitReply(onReply => engine.startRun({ doc: route.doc, flowId: route.flowId, projectId: route.projectId, version: route.version, triggerNodeId: route.node.id, input, source: 'rest', onReply }), config.replyTimeoutMs);
+    const { reply: r } = await waitReply(onReply => engine.startRun({ doc: route.doc, flowId: route.flowId, projectId: route.projectId, version: route.version, triggerNodeId: route.node.id, input, source: 'rest', onReply, traceparent: String(req.headers.traceparent || '') }), config.replyTimeoutMs);
     if (r.failed) return sendRest(reply, { status: r.status || 500, body: { error: r.error || 'Sutra failed', run: r.runId }, runId: r.runId });
     return sendRest(reply, r);
   } catch (e: any) {
@@ -346,7 +347,7 @@ async function handleMcp(req: FastifyRequest, reply: FastifyReply, secure: boole
       if (missing.length) { ok(toolResult(`Missing argument${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}`, true)); continue; }
       const input = { arguments: args, tool: name, auth: caller, client: { ip: req.ip, secure, name: String(req.headers['user-agent'] || ''), version: '' } };
       try {
-        const { runId, reply: r } = await waitReply(onReply => engine.startRun({ doc: t.doc, flowId: t.flowId, projectId: t.projectId, version: t.version, triggerNodeId: t.node.id, input, source: 'mcp', onReply }), config.replyTimeoutMs);
+        const { runId, reply: r } = await waitReply(onReply => engine.startRun({ doc: t.doc, flowId: t.flowId, projectId: t.projectId, version: t.version, triggerNodeId: t.node.id, input, source: 'mcp', onReply, traceparent: String(req.headers.traceparent || '') }), config.replyTimeoutMs);
         reply.header('x-sutra-run', runId);
         if (r.failed) { ok(toolResult(`The Sutra failed: ${r.error || 'unknown error'}`, true)); continue; }
         const b = r.body;
@@ -375,6 +376,19 @@ function build(https?: any): FastifyInstance {
   app.removeAllContentTypeParsers();
   app.addContentTypeParser('*', { parseAs: 'string' }, (_req, body, done) => done(null, body));
   const secure = !!https;
+  // Every answer carries the run's trace context, and is counted by kind and status.
+  app.addHook('onSend', async (_req, reply, payload) => {
+    const run = reply.getHeader('x-sutra-run');
+    if (run && !reply.getHeader('traceparent')) reply.header('traceparent', engine.traceparentOf(String(run)));
+    return payload;
+  });
+  app.addHook('onResponse', async (req, reply) => {
+    const p = req.url.split('?')[0];
+    if (p === '/health' || p.startsWith('/.well-known/')) return;
+    const kind = /^\/mcp(\/|$)/.test(p) ? 'mcp' : String(req.headers['content-type'] || '').includes('xml') || req.headers.soapaction ? 'soap' : 'rest';
+    metrics.gatewayRequests.inc({ kind, status: String(reply.statusCode) });
+    metrics.gatewaySeconds.observe({ kind }, reply.elapsedTime / 1000);
+  });
   app.all('/', (req, reply) => handle(req, reply, secure));
   app.all('/*', (req, reply) => handle(req, reply, secure));
   return app;

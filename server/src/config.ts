@@ -47,6 +47,8 @@ export const config = {
   /** OpenTelemetry: traces of runs and steps are sent to this OTLP/HTTP endpoint when set. */
   otlpEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || '',
   serviceName: process.env.OTEL_SERVICE_NAME || 'sutraflow',
+  /** When set, GET /metrics needs Authorization: Bearer <this>. */
+  metricsToken: process.env.SUTRA_METRICS_TOKEN || '',
 };
 
 export function ensureDataDir() {

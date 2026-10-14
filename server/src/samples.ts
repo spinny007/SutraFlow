@@ -39,6 +39,7 @@ export const SAMPLES: { id: string; name: string; desc: string; palettes: string
   { id: 'google', name: 'Google Drive and Sheets', palettes: 'Triggers, Apps, AI', desc: 'Starts when a Google Doc changes in a folder, exports its text, summarises it, and appends a row to a Google Sheet.', needs: 'a Google OAuth connection, a folder and a spreadsheet; an AI provider' },
   { id: 'apps', name: 'Dropbox, YouTube and any API', palettes: 'Apps', desc: 'Searches YouTube, saves the results to Dropbox as JSON, and calls any API of the connected account with Connected API call.', needs: 'Google and Dropbox OAuth connections' },
   { id: 'aimore', name: 'AI: translate, extract, route and reply', palettes: 'AI', desc: 'With a local Ollama: lists the models, translates a Spanish message to English, extracts its fields, routes it to a team and drafts a reply.', needs: 'Ollama running on this machine with at least one model' },
+  { id: 'release', name: 'Release pipeline', palettes: 'Release, Flow control, Email', desc: 'A Sutra that releases a project: builds a package, checks it, deploys it to a test copy, waits for approval, deploys to production, and logs each step; any problem goes to one handler.', needs: 'release activities allowed in Server & APIs; for remote engines, their admin tokens in the vault' },
   { id: 'localai', name: 'Local AI with Ollama', palettes: 'AI', desc: 'Classifies, summarises and rates a customer email with a local Ollama model, offline.', needs: 'Ollama running on this machine with at least one model' },
   { id: 'email', name: 'Email a report', palettes: 'Email, Custom code', desc: 'Builds an HTML report and emails it; a failure is logged.', needs: 'an Email (SMTP) connection' },
   { id: 'queue', name: 'Queue in and out', palettes: 'Service Bus', desc: 'Takes orders from a queue, reshapes them, publishes them on, and confirms each message.', needs: 'a Kafka, RabbitMQ or ActiveMQ connection' },
@@ -566,6 +567,26 @@ export function addSamples(projectId: string, ids?: string[]) {
     edges: [E('s', 'o'), E('o', 't'), E('t', 'x'), E('x', 'r'), E('r', 'p', 'billing'), E('r', 'p', 'delivery'), E('r', 'p', 'technical'), E('r', 'n', 'otherwise'), E('p', 'l')],
   });
 
+  // Release pipeline: build, check, deploy to test, approval, deploy to production.
+  const release = want('release') && save({
+    name: 'Sample: Release pipeline',
+    description: 'Releases a project as a package: Build package, Check package, Deploy package to a test copy on this server, Human approval, Deploy package to production (choose "remote server" with its address and admin token for a real production engine). Any problem goes to the Error handler.',
+    nodes: [
+      N('s', 'start', 'Release request', 60, 240, { payload: JSON.stringify({ project: 'Default project', version: '1.0.0' }, null, 2) }),
+      N('b', 'releasePackage', 'Build package', 380, 240, { target: 'this server', project: '{{input.project}}', version: '{{input.version}}', note: 'Released by a Sutra', sutras: [], saveTo: '' }),
+      N('c', 'releaseCheck', 'Check package', 700, 240, { packageFrom: 'previous step', package: '{{input.package}}', target: 'this server', project: "=concat({trigger.project}, ' (test)')" }),
+      N('t', 'releaseDeploy', 'Deploy to test', 1020, 160, { packageFrom: 'previous step', package: '{{input.package}}', target: 'this server', project: "=concat({trigger.project}, ' (test)')", keepOthers: false, opsFile: '' }),
+      N('a', 'approval', 'Approve production', 1340, 160, { message: 'Deploy {{trigger.project}} {{trigger.version}} to production? Test deploy: {{input.sutras | length}} Sutras.', assignee: 'release-managers' }),
+      N('p', 'releaseDeploy', 'Deploy to production', 1660, 100, { packageFrom: 'previous step', package: '{{nodes.Build package.package}}', target: 'this server', project: "=concat({trigger.project}, ' (production)')", keepOthers: false, opsFile: '' }),
+      N('l', 'log', 'Log released', 1980, 100, { level: 'info', message: '{{trigger.project}} {{trigger.version}} released: {{input.sutras | length}} Sutras' }),
+      N('r', 'log', 'Log rejected', 1660, 260, { level: 'warn', message: 'Production release rejected: {{input.approval.comment}}' }),
+      N('x', 'log', 'Log check problems', 1020, 360, { level: 'error', message: 'Not released: {{input.errors}}' }),
+      N('h', 'catch', 'Error handler', 380, 480),
+      N('e', 'log', 'Log release failure', 700, 480, { level: 'error', message: 'Release failed at {{input.error.step}}: {{input.error.message}}' }),
+    ],
+    edges: [E('s', 'b'), E('b', 'c'), E('c', 't', 'ok'), E('c', 'x', 'problems'), E('t', 'a'), E('a', 'p', 'approved'), E('a', 'r', 'rejected'), E('p', 'l'), E('h', 'e')],
+  });
+
   // Local AI with Ollama (offline).
   const ollamaConn = !want('localai') ? null : listResources('aiProvider', projectId).find(r => r.name === 'Local Ollama')
     || saveResource({ kind: 'aiProvider', name: 'Local Ollama', project_id: projectId, config: { engine: 'Ollama', model: '', baseUrl: '', maxTokens: 600, ollamaApi: 'chat' } });
@@ -612,7 +633,7 @@ export function addSamples(projectId: string, ids?: string[]) {
     edges: [E('t', 'm'), E('m', 'p'), E('p', 'c')],
   });
 
-  return [forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, localAi, email, queue, timer, fileTrig, textFormats, dbUpd, dbProc, soapCall, emailIn, firebase, google, apps, aiMore]
+  return [forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, release, localAi, email, queue, timer, fileTrig, textFormats, dbUpd, dbProc, soapCall, emailIn, firebase, google, apps, aiMore]
     .filter((f): f is NonNullable<typeof f> & { id: string; name: string } => !!f)
     .map(f => ({ id: f.id, name: f.name }));
 }

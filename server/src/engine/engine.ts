@@ -9,6 +9,8 @@ import { schemaTree } from '../schemas.js';
 import { adhocTree, evaluateMapping, type MappingValue } from '../mapping.js';
 import { resolveSetting } from '../settings.js';
 import { truthy } from '../expr.js';
+import { metrics } from '../metrics.js';
+import { recordSpan, parseTraceparent, traceIdFor, runSpanId, stepSpanId, traceparent as tp } from '../tracing.js';
 import type { Activity, FlowDoc, FlowEdge, FlowNode, ReplyPayload, StepResult } from './types.js';
 
 /**
@@ -44,6 +46,8 @@ export interface RunState {
   depth?: number;
   /** The error handler (Catch) has taken over this run. */
   caught?: boolean;
+  /** Trace context from the caller's traceparent header (OpenTelemetry). */
+  trace?: { traceId: string; parentSpanId: string };
 }
 
 const MAX_CALL_DEPTH = 10;
@@ -159,6 +163,8 @@ export class Engine {
     /** Preset run id (Call process records it before the run starts). */
     id?: string;
     depth?: number;
+    /** W3C traceparent of the caller, to continue its trace. */
+    traceparent?: string;
   }): string {
     const trig = o.triggerNodeId
       ? o.doc.nodes.find(n => n.id === o.triggerNodeId)
@@ -166,7 +172,8 @@ export class Engine {
     if (!trig) throw new Error('The Sutra has no trigger step');
     if (!this.activities.get(trig.type)?.trigger) throw new Error(`${trig.name} is not a trigger`);
     const id = o.id || crypto.randomUUID();
-    const state: RunState = { outputs: {}, vars: initialVars(o.doc), live: { [trig.id]: true }, skips: {}, skipped: {}, joins: {}, logs: [], depth: o.depth || 0 };
+    const trace = parseTraceparent(o.traceparent);
+    const state: RunState = { outputs: {}, vars: initialVars(o.doc), live: { [trig.id]: true }, skips: {}, skipped: {}, joins: {}, logs: [], depth: o.depth || 0, ...(trace ? { trace } : {}) };
     tx(() => {
       q.run(
         `insert into runs(id, flow_id, project_id, flow_name, version, doc, status, source, trigger_node, input, state, debug, started_at)
@@ -179,6 +186,7 @@ export class Engine {
     this.docs.set(id, o.doc);
     if (o.onReply) this.replies.set(id, { resolve: o.onReply, done: false });
     if (o.onFinish) this.finishers.set(id, o.onFinish);
+    metrics.runsStarted.inc({ sutra: o.doc.name, source: o.source || 'manual' });
     projectLog(o.projectId, { level: 'info', msg: `Run started (${o.source || 'manual'}${o.version ? `, v${o.version}` : ', draft'})`, flow: o.doc.name, run: id });
     this.notify(id);
     queueMicrotask(() => this.pump());
@@ -392,21 +400,26 @@ export class Engine {
     let replyToSend: ReplyPayload | undefined;
     let childId: string | undefined;
     let callError: string | undefined;
+    let finished = true;
+    let trace: RunState['trace'];
     const call = res.call;
     tx(() => {
       const run = this.loadRun(t.run_id)!;
       const st = run.state;
+      trace = st.trace;
       st.logs.push(...extra.logs.map(l => ({ ...l, msg: maskSecrets(l.msg, extra.revealed) })));
       if (st.logs.length > MAX_LOGS) st.logs.splice(0, st.logs.length - MAX_LOGS);
       Object.assign(st.vars, maskSecrets(extra.varsSet, extra.revealed));
       if (extra.replied && !st.reply) { st.reply = maskSecrets(extra.replied, new Set()); replyToSend = extra.replied; }
 
       if (res.wait) {
+        finished = false;
         q.run(`update tasks set status = 'waiting', wait = ?, ms = ? where id = ?`, JSON.stringify(res.wait), extra.ms, t.id);
         this.saveState(t.run_id, st);
         return;
       }
       if (res.deferUntil) {
+        finished = false;
         q.run(`update tasks set status = 'pending', phase = 'resume', not_before = ? where id = ?`, res.deferUntil, t.id);
         this.saveState(t.run_id, st);
         return;
@@ -415,6 +428,7 @@ export class Engine {
         if ((st.depth || 0) >= MAX_CALL_DEPTH) { callError = `Sutras call each other more than ${MAX_CALL_DEPTH} levels deep. Check for a Sutra that calls itself.`; return; }
         childId = crypto.randomUUID();
         if (res.call.wait) {
+          finished = false;
           q.run(`update tasks set status = 'waiting', wait = ?, ms = ? where id = ?`, JSON.stringify({ kind: 'process', child: childId, name: res.call.name }), extra.ms, t.id);
           st.logs.push({ t: now(), level: 'info', msg: `${node.name}: calling ${res.call.name}`, step: node.name });
           this.saveState(t.run_id, st);
@@ -449,6 +463,7 @@ export class Engine {
     });
     if (replyToSend) this.sendReply(t.run_id, replyToSend);
     if (callError) return this.fail(t, doc, node, new Error(callError), { ms: extra.ms });
+    if (finished) this.observeStep(t, node, extra.ms, 'done', trace);
     if (call && childId) {
       const depth = (this.loadRun(t.run_id)?.state.depth || 0) + 1;
       try {
@@ -558,6 +573,7 @@ export class Engine {
     const retries = Math.max(0, Math.min(20, Number(s.retries) || 0));
     if (node && t.attempt < retries) {
       const delay = Math.max(0, Number(s.retryDelayMs ?? 1000)) * 2 ** t.attempt;
+      metrics.retries.inc({ activity: node.type });
       tx(() => {
         q.run(`update tasks set status = 'pending', attempt = attempt + 1, not_before = ?, error = ? where id = ?`, Date.now() + delay, err.message, t.id);
         this.appendLogs(t.run_id, [...(extra.logs || []), { t: now(), level: 'warn', msg: `${node.name}: ${err.message}. Retry ${t.attempt + 1} of ${retries} in ${delay} ms.`, step: node.name }]);
@@ -570,6 +586,7 @@ export class Engine {
       const st = run.state;
       st.logs.push(...(extra.logs || []), { t: now(), level: 'error', msg: `${node?.name ?? t.node_id}: ${err.message}`, step: node?.name });
       const errorEdges = node ? doc.edges.filter(e => e.from === node.id && e.port === 'error') : [];
+      if (node) this.observeStep(t, node, extra.ms ?? 0, errorEdges.length ? 'error' : 'failed', st.trace, err.message);
       const input = t.input == null ? null : JSON.parse(t.input);
       const details = (err as any).details;
       const errOut = { error: { message: err.message, step: node?.name, type: node?.type, at: now(), ...(details !== undefined ? { details } : {}) }, input };
@@ -604,6 +621,69 @@ export class Engine {
       q.run(`update tasks set status = 'cancelled', finished_at = ? where id = ?`, now(), r.id);
       this.controllers.get(r.id)?.abort();
     }
+  }
+
+  // ---------- observability ----------
+
+  private observeStep(t: TaskRow, node: FlowNode, ms: number, outcome: 'done' | 'error' | 'failed', trace?: RunState['trace'], error?: string) {
+    metrics.steps.inc({ activity: node.type, outcome });
+    metrics.stepSeconds.observe({ activity: node.type }, (ms || 0) / 1000);
+    const end = Date.now();
+    recordSpan({
+      traceId: trace?.traceId || traceIdFor(t.run_id), spanId: stepSpanId(t.run_id, t.id, t.attempt), parentSpanId: runSpanId(t.run_id),
+      name: node.name, kind: 1, startMs: end - (ms || 0), endMs: end, error: outcome === 'done' ? undefined : error,
+      attributes: { 'sutra.activity': node.type, 'sutra.step': node.name, 'sutra.outcome': outcome, 'sutra.attempt': t.attempt, 'sutra.engine': this.id, 'sutra.run_id': t.run_id },
+    });
+  }
+
+  private observeRun(runId: string, sutra: string, status: string, startedAt: string, source: string | null, trace?: RunState['trace'], error?: string) {
+    metrics.runsFinished.inc({ sutra, status });
+    const start = Date.parse(startedAt) || Date.now();
+    metrics.runSeconds.observe({ sutra, status }, (Date.now() - start) / 1000);
+    recordSpan({
+      traceId: trace?.traceId || traceIdFor(runId), spanId: runSpanId(runId), parentSpanId: trace?.parentSpanId,
+      name: `Sutra ${sutra}`, kind: source && ['rest', 'soap', 'mcp'].includes(source) ? 2 : 1, startMs: start, endMs: Date.now(), error: status === 'done' ? undefined : error || status,
+      attributes: { 'sutra.name': sutra, 'sutra.run_id': runId, 'sutra.status': status, 'sutra.source': source || 'manual' },
+    });
+  }
+
+  /** The traceparent to return to a caller: the run's trace and root span. */
+  traceparentOf(runId: string) {
+    const r = q.get<{ state: string }>('select state from runs where id = ?', runId);
+    const st = r ? (JSON.parse(r.state) as RunState) : undefined;
+    return tp(st?.trace?.traceId || traceIdFor(runId), runSpanId(runId));
+  }
+
+  /**
+   * Runs a failed run again from the step that failed: the same input, attempt 0, with everything
+   * the earlier steps produced kept. Only for runs that failed on a step (not ended by End: error).
+   */
+  resubmit(runId: string, by = 'someone') {
+    const run = this.loadRun(runId);
+    if (!run) throw new Error('Run not found');
+    if (run.row.status !== 'failed') throw new Error(`Only failed runs can be run again (this one is ${run.row.status})`);
+    const failedTasks = q.all<TaskRow>(`select * from tasks where run_id = ? and status = 'failed' order by id`, runId);
+    if (!failedTasks.length) throw new Error('This run did not fail on a step (it was stopped on purpose), so there is no step to run again');
+    tx(() => {
+      const st = run.state;
+      st.failed = false;
+      st.logs.push({ t: now(), level: 'info', msg: `Run again from ${failedTasks.map(x => run.doc.nodes.find(n => n.id === x.node_id)?.name || x.node_id).join(', ')} by ${by}` });
+      for (const ft of failedTasks) {
+        q.run(`update tasks set status = 'resubmitted' where id = ?`, ft.id);
+        q.run(`insert into tasks(run_id, node_id, input, status, not_before) values(?, ?, ?, 'pending', 0)`, runId, ft.node_id, ft.input);
+      }
+      // Branches cancelled when the step failed run again too.
+      const cancelled = q.all<TaskRow>(`select * from tasks where run_id = ? and status = 'cancelled'`, runId);
+      for (const ct of cancelled) {
+        q.run(`update tasks set status = 'resubmitted' where id = ?`, ct.id);
+        q.run(`insert into tasks(run_id, node_id, input, status, not_before) values(?, ?, ?, 'pending', 0)`, runId, ct.node_id, ct.input);
+      }
+      q.run(`update runs set status = 'running', error = null, finished_at = null, state = ? where id = ?`, JSON.stringify(st), runId);
+    });
+    this.docs.set(runId, run.doc);
+    this.notify(runId);
+    queueMicrotask(() => this.pump());
+    return { runId, resubmitted: failedTasks.length };
   }
 
   /** A run cancelled on another engine: stop the steps of it running here. */
@@ -647,6 +727,7 @@ export class Engine {
       this.resolveReply(runId, run.state, run.row.error);
       const err = q.get<{ error: string }>('select error from runs where id = ?', runId)?.error;
       projectLog(run.row.project_id, { level: status === 'failed' ? 'error' : 'info', msg: status === 'failed' ? `Run failed: ${err}` : 'Run finished', flow: run.doc.name, run: runId });
+      this.observeRun(runId, run.doc.name, status, run.row.started_at, run.row.source, run.state.trace, status === 'failed' ? err : undefined);
       this.finish(runId, status);
       if (run.row.source === 'sutra' || run.row.source === 'process') queueMicrotask(() => this.resumeCaller(runId, status));
     }
@@ -731,6 +812,7 @@ export class Engine {
     this.docs.delete(runId);
     this.finish(runId, 'cancelled');
     if (run.row.source === 'sutra' || run.row.source === 'process') queueMicrotask(() => this.resumeCaller(runId, 'cancelled'));
+    this.observeRun(runId, run.doc.name, 'cancelled', run.row.started_at, run.row.source, run.state.trace, 'Run cancelled');
     // A step waiting for a called process: cancel that process too.
     for (const w of q.all<{ wait: string }>(`select wait from tasks where run_id = ? and status = 'cancelled' and wait like '%"kind":"process"%'`, runId)) {
       try { const c = JSON.parse(w.wait).child; if (c) this.cancel(c); } catch { /* ignore */ }

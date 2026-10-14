@@ -1,0 +1,66 @@
+import crypto from 'node:crypto';
+import { config, version } from './config.js';
+
+/**
+ * OpenTelemetry traces over OTLP/HTTP (JSON), sent when OTEL_EXPORTER_OTLP_ENDPOINT is set, to a
+ * collector, Jaeger, Grafana Tempo, Honeycomb and the like. A run is one trace: a root span for the
+ * run and one span per step. Ids come from the run and step ids, so steps that different engines
+ * run land in the same trace. A caller's W3C traceparent header continues the caller's trace.
+ */
+export interface SpanIn {
+  traceId: string; spanId: string; parentSpanId?: string; name: string; kind: 1 | 2;
+  startMs: number; endMs: number; error?: string; attributes: Record<string, string | number | boolean | undefined>;
+}
+
+const hex = (s: string, bytes: number) => crypto.createHash('sha256').update(s).digest('hex').slice(0, bytes * 2);
+export const traceIdFor = (runId: string) => hex(`trace:${runId}`, 16);
+export const runSpanId = (runId: string) => hex(`run:${runId}`, 8);
+export const stepSpanId = (runId: string, taskId: number | string, attempt: number) => hex(`step:${runId}:${taskId}:${attempt}`, 8);
+
+/** 00-<trace id>-<parent span id>-<flags>; null when the header is absent or malformed. */
+export function parseTraceparent(h: unknown): { traceId: string; parentSpanId: string } | null {
+  const m = /^00-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/.exec(String(h || '').trim().toLowerCase());
+  if (!m || /^0+$/.test(m[1]) || /^0+$/.test(m[2])) return null;
+  return { traceId: m[1], parentSpanId: m[2] };
+}
+export const traceparent = (traceId: string, spanId: string) => `00-${traceId}-${spanId}-01`;
+
+let queue: any[] = [];
+let timer: NodeJS.Timeout | null = null;
+export const tracingStats = { exported: 0, failed: 0, lastError: '' };
+
+const attr = (k: string, v: string | number | boolean) => ({ key: k, value: typeof v === 'number' ? (Number.isInteger(v) ? { intValue: String(v) } : { doubleValue: v }) : typeof v === 'boolean' ? { boolValue: v } : { stringValue: v } });
+
+export function recordSpan(s: SpanIn) {
+  if (!config.otlpEndpoint) return;
+  queue.push({
+    traceId: s.traceId, spanId: s.spanId, ...(s.parentSpanId ? { parentSpanId: s.parentSpanId } : {}), name: s.name, kind: s.kind,
+    startTimeUnixNano: `${Math.round(s.startMs)}000000`, endTimeUnixNano: `${Math.round(Math.max(s.endMs, s.startMs))}000000`,
+    attributes: Object.entries(s.attributes).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => attr(k, v as any)),
+    status: s.error ? { code: 2, message: s.error.slice(0, 500) } : { code: 1 },
+  });
+  if (queue.length >= 200) void flushTracing();
+  else if (!timer) { timer = setTimeout(() => { timer = null; void flushTracing(); }, 2000); timer.unref?.(); }
+}
+
+/** Sends the spans waiting in the queue; also called on shutdown. */
+export async function flushTracing() {
+  if (timer) { clearTimeout(timer); timer = null; }
+  if (!queue.length || !config.otlpEndpoint) return;
+  const spans = queue; queue = [];
+  const body = {
+    resourceSpans: [{
+      resource: { attributes: [attr('service.name', config.serviceName), attr('service.version', version), attr('service.instance.id', config.engineId), attr('sutraflow.mode', config.mode)] },
+      scopeSpans: [{ scope: { name: 'sutraflow', version }, spans }],
+    }],
+  };
+  try {
+    const url = config.otlpEndpoint.replace(/\/+$/, '') + (/\/v1\/traces$/.test(config.otlpEndpoint) ? '' : '/v1/traces');
+    const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000) });
+    if (!r.ok) throw new Error(`collector answered ${r.status}`);
+    tracingStats.exported += spans.length;
+  } catch (e: any) {
+    tracingStats.failed += spans.length;
+    tracingStats.lastError = e?.message || String(e);
+  }
+}

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { testEnv, captureServer, node, edge } from './helpers.js';
+import { testEnv, captureServer, node, edge, port } from './helpers.js';
 
 testEnv(18910);
 const { boot } = await import('../server/src/index.js');
@@ -239,7 +239,7 @@ test('more samples across the palettes run as tests (REST, files, database, XML,
   r = await ok(doc('Sample: Counter, Wait and Sutra variables'));
   assert.match(logs(r), /batch-\d{4}: order number 1 today/);
 
-  // These need a connection or a local model: they are added and pass validation.
+  // These need a connection, a local model or release rights: they are added and pass validation.
   for (const n of ['Sample: Local AI with Ollama', 'Sample: Email a report', 'Sample: Queue in and out']) {
     assert.deepEqual(flows.validateDoc(doc(n)).errors, [], n);
   }
@@ -293,7 +293,7 @@ test('samples for every starter and palette: timer, file trigger, text formats, 
   flows.deploy(soap.id);
   rebuildRoutes();
   const call = doc('Sample: Call a SOAP service');
-  call.nodes.find((n: any) => n.type === 'soapInvoke')!.config.endpoint = 'http://127.0.0.1:18910/soap/orders';
+  call.nodes.find((n: any) => n.type === 'soapInvoke')!.config.endpoint = `http://127.0.0.1:${port(18910)}/soap/orders`;
   r = await ok(call);
   assert.match(logs(r), /Order A-1001 is SHIPPED/);
 

@@ -84,7 +84,7 @@ test('SOAP service with WS-Security UsernameToken, called by the SOAP palette fr
 
   const wsdl = await (await fetch(`${env.http}/soap/orders?wsdl`)).text();
   assert.match(wsdl, /<operation name="GetOrder">/);
-  assert.match(wsdl, /soap:address location="http:\/\/127\.0\.0\.1:18210\/soap\/orders"/);
+  assert.ok(wsdl.includes(`soap:address location="${env.http}/soap/orders"`), 'WSDL address');
 
   const goodAuth = saveResource({ kind: 'outboundAuth', name: 'ERP digest', config: { type: 'wssUsernameToken', username: 'erp', passwordSecret: 'SOAP_USER_PW', passwordType: 'PasswordDigest', timestamp: 300 } });
   setSecret('BAD_PW', 'nope-nope-nope');

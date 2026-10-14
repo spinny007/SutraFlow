@@ -72,6 +72,7 @@ export function Server() {
 
       <EngineVariables />
       <ScriptsPolicy />
+      <ReleasesPolicy />
 
       <div className="card">
         <h2>Gateway listeners</h2>
@@ -181,6 +182,24 @@ function ScriptsPolicy() {
       <label className="check">
         <input type="checkbox" checked={allowed} onChange={e => put<{ allowed: boolean }>('/api/scripts/policy', { allowed: e.target.checked }).then(p => { setAllowed(p.allowed); toast(p.allowed ? 'Script activities are allowed' : 'Script activities are switched off'); }).catch(err => toast(err.message, true))} />
         Allow script activities to run on this server
+      </label>
+    </div>
+  );
+}
+
+/** Release activities build and deploy packages from Sutras: only when the administrator allows them. */
+function ReleasesPolicy() {
+  const toast = useToast();
+  const [allowed, setAllowed] = useState<boolean | null>(null);
+  useEffect(() => { get<{ allowed: boolean }>('/api/releases/policy').then(p => setAllowed(p.allowed)).catch(() => {}); }, []);
+  if (allowed === null) return null;
+  return (
+    <div className="card">
+      <h2>Release activities</h2>
+      <p className="muted" style={{ fontSize: 13 }}>The Release palette (Build package, Check package, Deploy package, Roll back) lets a Sutra release projects, on this server or on remote engines with their admin tokens from the vault.</p>
+      <label className="check">
+        <input type="checkbox" checked={allowed} onChange={e => put<{ allowed: boolean }>('/api/releases/policy', { allowed: e.target.checked }).then(p => { setAllowed(p.allowed); toast(p.allowed ? 'Release activities are allowed' : 'Release activities are switched off'); }).catch(err => toast(err.message, true))} />
+        Allow release activities on this server
       </label>
     </div>
   );

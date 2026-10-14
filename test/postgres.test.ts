@@ -11,7 +11,7 @@ import { root, startServer, waitFor } from './proc.js';
  * several processes on one database (headless, cluster, the command-line cases) need a real server:
  * set SUTRA_TEST_PG_URL=postgres://user:pass@host/db to run the cluster check below as well.
  */
-const SUITES = ['admin', 'connectors', 'engine', 'expr', 'features', 'gateway', 'mcp', 'packages', 'palettes', 'process', 'project', 'scripts', 'sutras', 'template'];
+const SUITES = ['admin', 'connectors', 'engine', 'expr', 'features', 'gateway', 'mcp', 'observability', 'packages', 'palettes', 'process', 'project', 'release', 'scripts', 'sutras', 'template'];
 
 /** The child is a test run of its own: drop the variable that makes node --test report to a parent run. */
 function childEnv(extra: Record<string, string>) {
@@ -31,7 +31,7 @@ function runSuites(env: Record<string, string>) {
 }
 
 test('every in-process suite passes on PostgreSQL (PGlite)', { timeout: 900000 }, async () => {
-  const r = await runSuites({ SUTRA_DB: 'pglite:memory' });
+  const r = await runSuites({ SUTRA_DB: 'pglite:memory', SUTRA_TEST_PORT_OFFSET: '2000' });
   const pass = /ℹ pass (\d+)/.exec(r.out)?.[1], fail = /ℹ fail (\d+)/.exec(r.out)?.[1];
   const failing = r.out.split(/\r?\n/).filter(l => /^✖ /.test(l)).slice(0, 10).join('\n');
   assert.equal(r.code, 0, `PostgreSQL run: ${pass} passed, ${fail} failed\n${failing}`);

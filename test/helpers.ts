@@ -5,7 +5,12 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 
 /** Each test file gets its own data directory, master key and gateway ports. Call before importing server modules. */
-export function testEnv(basePort: number) {
+/** Shifts every test port, so a second copy of the suites (the PostgreSQL pass) can run alongside. */
+export const PORT_OFFSET = Number(process.env.SUTRA_TEST_PORT_OFFSET || 0);
+export const port = (n: number) => n + PORT_OFFSET;
+
+export function testEnv(base: number) {
+  const basePort = port(base);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-test-'));
   process.env.SUTRA_DATA_DIR = dir;
   process.env.SUTRA_MASTER_KEY = crypto.randomBytes(32).toString('base64');

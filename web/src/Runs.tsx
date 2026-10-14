@@ -87,6 +87,7 @@ export function Runs() {
               <h2 style={{ margin: 0 }}>{open.flowName} <span className={`badge ${open.status}`}>{open.status}</span></h2>
               <div className="row">
                 {['running', 'waiting'].includes(open.status) && <button className="btn danger small" onClick={() => post(`/api/runs/${open.id}/cancel`).then(() => openRun(open.id))}>Cancel run</button>}
+                {open.status === 'failed' && <button className="btn small" title="Runs the failed step again with the same input; the earlier steps' results are kept" onClick={() => post(`/api/runs/${open.id}/resubmit`).then(() => openRun(open.id)).catch((e: any) => alert(e.message))}>Run again from the failed step</button>}
                 <button className="btn small" onClick={() => openRun(open.id)}>Refresh</button>
                 <button className="btn small" onClick={() => setOpen(null)}>Close</button>
               </div>
@@ -94,7 +95,7 @@ export function Runs() {
             <p className="muted" style={{ fontSize: 12 }}>Run {open.id} · {open.source} · {open.version ? `version ${open.version}` : 'draft'} · {fmtTime(open.startedAt)} · {since(open.startedAt, open.finishedAt)}</p>
             {open.error && <div className="errbox">{open.error}</div>}
             <table className="t">
-              <thead><tr><th>#</th><th>Step</th><th>Status</th><th>Output</th><th>ms</th></tr></thead>
+              <thead><tr><th>#</th><th>Step</th><th>Status</th><th>Output</th><th>ms</th><th>Engine</th></tr></thead>
               <tbody>{open.tasks.map((t, i) => (
                 <tr key={t.id} className="click" onClick={() => setStep(step === t.id ? null : t.id)}>
                   <td className="muted">{i + 1}</td>
@@ -102,6 +103,7 @@ export function Runs() {
                   <td><span className={`badge ${t.status}`}>{t.status}</span></td>
                   <td><code>{t.port}</code></td>
                   <td className="muted">{t.ms}</td>
+                  <td className="muted xs">{(t as any).owner ?? ''}</td>
                 </tr>
               ))}</tbody>
             </table>

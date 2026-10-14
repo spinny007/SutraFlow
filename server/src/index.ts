@@ -16,6 +16,7 @@ import { config } from './config.js';
 import { lifecycle } from './lifecycle.js';
 import { startCluster, stopCluster, bumpDeployGen, leaveLeadership, cluster } from './cluster.js';
 import { housekeeping } from './housekeeping.js';
+import { flushTracing } from './tracing.js';
 import { deployPackage, readPackage, packageHistory } from './packages.js';
 import { listProjects } from './projects.js';
 import fs from 'node:fs';
@@ -115,6 +116,7 @@ export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gatew
     await closeBusPublishers();
     await closeDbPools();
     engine.stop();
+    await flushTracing();
     stopCluster();
     await admin.close();
   })());

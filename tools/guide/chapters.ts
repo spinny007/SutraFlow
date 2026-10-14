@@ -412,16 +412,75 @@ export const CHAPTERS: Chapter[] = [
 </ul>`,
   },
   {
-    id: 'production', title: 'Running in production',
+    id: 'releases', title: 'Releases: packages and the command line',
     html: `
+<p>Build in the studio; release a <strong>package</strong>: one <code>.sutra</code> file with the whole project. It has every deployed Sutra at its version, the connections and API policies (secret names, never secret values), shared schemas and WSDLs, project variables and logging. The same file goes from test to production; each environment keeps its own deployment config and secrets.</p>
+<p class="h">In the studio</p>
 <ol>
-<li>Set <code>SUTRA_MASTER_KEY</code> from your secret store, or protect and back up <code>data/master.key</code>.</li>
-<li>Keep the studio on 127.0.0.1, or behind a VPN.</li>
-<li>Set the gateway certificate (own or Let's Encrypt) and require HTTPS in every API policy.</li>
+<li>Open <strong>Project &rarr; Configuration &rarr; Releases (packages)</strong>.</li>
+<li>Give a version, such as <code>1.4.0</code>, and a note, then <strong>Build and download</strong>.</li>
+<li>On the target server, open the same panel, choose the file, read the check (missing secrets, addresses already used by another project), and <strong>Deploy</strong>.</li>
+<li>The history lists every deployment; <strong>Deploy again</strong> or <strong>Roll back</strong> returns to an earlier package.</li>
+</ol>
+<p>Deploying matches everything by name. A Sutra whose content changed gets a new version; an unchanged one is left alone, so the same package twice changes nothing. Sutras not in the package are undeployed (kept, not deleted) unless you tick <em>Keep Sutras that are not in the package deployed</em>.</p>
+<p class="h">From the command line or a CI pipeline</p>
+<pre>sutra package  --project "Orders" --version 1.4.0 --out orders-1.4.0.sutra
+sutra check    orders-1.4.0.sutra
+sutra test     orders-1.4.0.sutra --secrets-from-env
+sutra deploy   orders-1.4.0.sutra --server https://engine:4800 --token $TOKEN
+sutra rollback --project "Orders" --server https://engine:4800 --token $TOKEN</pre>
+<p>The token is the server's <code>SUTRA_ADMIN_TOKEN</code>. Without <code>--server</code> the tool works on the local data folder. Exit code 0 means success, 1 a failed check, test or deploy, 2 wrong usage. <code>sutra test</code> runs every Sutra of the package with its test data in a throw-away server.</p>
+<p class="h">From a Sutra</p>
+<p>The <strong>Release</strong> palette does the same steps inside a Sutra, so a release can itself be a Sutra: on a timer or a REST call, [[releasePackage]], [[releaseDeploy]] to a test engine, [[approval]], [[releaseDeploy]] to production, then [[emailSend]] the result. [[releaseCheck]] and [[releaseRollback]] complete it. These activities are off until an administrator allows them in Server &amp; APIs.</p>`,
+  },
+  {
+    id: 'production', title: 'Running in production: engines, Docker, clusters',
+    html: `
+<p class="h">Headless engines</p>
+<p>The same program started with <code>SUTRA_MODE=engine</code> runs Sutras without the studio: no studio pages, no sign-in, no editing. It keeps <code>/health</code>, <code>/ready</code> and <code>/metrics</code>, and an automation API that accepts only the admin token. Packages in <code>SUTRA_DEPLOY_DIR</code> are deployed when it starts; a package that cannot be deployed stops the start.</p>
+<p class="h">Docker</p>
+<pre>docker build -t sutraflow:1.0.0 .
+docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=... \\
+           -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:1.0.0</pre>
+<p>The image runs as a non-root user, checks its own health, and writes JSON logs. <code>docker-compose.yml</code> has a studio and an engine; <code>docker-compose.cluster.yml</code> has PostgreSQL, a studio and two engines.</p>
+<p class="h">Clusters</p>
+<p>Several engines share one database (<code>SUTRA_DB=postgres://...</code>), each with its own <code>SUTRA_ENGINE_ID</code> and all with the same <code>SUTRA_MASTER_KEY</code>.</p>
+<ul>
+<li>Work is shared, and each step is run by exactly one engine.</li>
+<li>One engine leads and runs timers and folder, mailbox, queue and Drive listeners, so they fire once. If it stops, another takes over within a few heartbeats.</li>
+<li>Steps of an engine that stopped are finished by another.</li>
+<li>Callers get their replies from whichever engine they reached.</li>
+<li>A deploy reaches every engine.</li>
+</ul>
+<p>Engines with <code>SUTRA_WORKERS=0</code> only serve APIs. <code>sutra status</code> or <code>GET /api/engine/status</code> lists the engines, the leader and the queue.</p>
+<p class="h">Stopping without losing work</p>
+<p>On <code>docker stop</code>, Ctrl+C or <code>POST /api/engine/drain</code>, an engine:</p>
+<ol>
+<li>reports not ready, so load balancers stop sending it requests;</li>
+<li>hands leadership over;</li>
+<li>lets running steps finish for <code>SUTRA_DRAIN_MS</code>, and hands the rest back to the queue for another engine;</li>
+<li>closes.</li>
+</ol>
+<p class="h">Monitoring</p>
+<table class="t"><thead><tr><th>What</th><th>Where</th></tr></thead><tbody>
+<tr><td>Liveness and readiness</td><td><code>/health</code>, <code>/ready</code> on the admin port</td></tr>
+<tr><td>Metrics</td><td><code>/metrics</code> (Prometheus): runs, steps by outcome, retries, durations, gateway requests, queue, leader, listeners</td></tr>
+<tr><td>Traces</td><td>Set <code>OTEL_EXPORTER_OTLP_ENDPOINT</code>: each run is a trace with a span per step, continuing a caller's <code>traceparent</code></td></tr>
+<tr><td>Logs</td><td><code>SUTRA_LOG_FORMAT=json</code>: one JSON line per event on standard output, plus each project's log file</td></tr>
+</tbody></table>
+<p class="h">Runs</p>
+<p>Finished runs older than <code>SUTRA_RUN_RETENTION_DAYS</code> (30 by default) are deleted; waiting runs are kept. A failed run can continue with <strong>Run again from the failed step</strong> in Runs: the failed step runs again with the same input, and the earlier steps' results are kept.</p>
+<p class="h">Checklist</p>
+<ol>
+<li>Set <code>SUTRA_MASTER_KEY</code> from your secret store, the same on every engine.</li>
+<li>Keep the studio on 127.0.0.1 or behind a VPN. Expose only the engines' gateway ports, behind a load balancer pointed at <code>/ready</code>.</li>
+<li>Set a long <code>SUTRA_ADMIN_TOKEN</code>; give it only to the release pipeline.</li>
+<li>Set the gateway certificate and require HTTPS in every API policy.</li>
 <li>Put environment-specific values in the deployment config, with <code>\${env:NAME}</code> for anything secret or host-specific.</li>
-<li>Set each project's log file and level; rotate by size.</li>
-<li>Back up the <code>data</code> folder regularly.</li>
-</ol>`,
+<li>Release with packages; keep the files, they are your rollback.</li>
+<li>Back up the database (or the <code>data</code> folder).</li>
+</ol>
+<p>The full operations guide is <code>docs/deployment.md</code> in the SutraFlow folder.</p>`,
   },
   {
     id: 'trouble', title: 'Troubleshooting',

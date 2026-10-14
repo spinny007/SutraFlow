@@ -242,6 +242,9 @@ export function setSutrasMayChangeSengine(on: boolean) { setSetting('sengineWrit
 /** Script activities (PowerShell, shell, programs) run on the server only when the administrator allows them. */
 export function scriptsAllowed() { return getSetting<boolean>('scriptsAllowed', false); }
 export function setScriptsAllowed(on: boolean) { setSetting('scriptsAllowed', !!on); }
+/** Release activities (build, deploy, roll back packages) only when the administrator allows them. */
+export function releasesAllowed() { return getSetting<boolean>('releasesAllowed', false); }
+export function setReleasesAllowed(on: boolean) { setSetting('releasesAllowed', !!on); }
 
 export function setEngineVariable(name: string, value: unknown) {
   if (!sutrasMayChangeSengine()) throw new Error(`Sengine variables are read-only for Sutras, so ${name} was not changed. An administrator can allow changes in Server & APIs.`);

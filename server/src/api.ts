@@ -29,6 +29,9 @@ import { listModels, ollamaPull, ollamaImport } from './ai/providers.js';
 import { addSamples, SAMPLES } from './samples.js';
 import { health, readiness, lifecycle } from './lifecycle.js';
 import { clusterStatus } from './cluster.js';
+import { prometheusText } from './metrics.js';
+import { tracingStats } from './tracing.js';
+import { housekeeping } from './housekeeping.js';
 import { buildPackage, checkPackage, deployPackage, packageHistory, readPackage, rollbackPackage, testPackage } from './packages.js';
 
 const COOKIE = 'sutra_session';
@@ -69,7 +72,7 @@ function activityMeta() {
 function runDetail(id: string) {
   const r = q.get<any>('select * from runs where id = ?', id);
   if (!r) throw new HttpError(404, 'Run not found');
-  const tasks = q.all<any>('select id, node_id, status, attempt, port, input, output, error, ms, wait, started_at, finished_at from tasks where run_id = ? order by id', id)
+  const tasks = q.all<any>('select id, node_id, status, attempt, port, input, output, error, ms, wait, started_at, finished_at, owner from tasks where run_id = ? order by id', id)
     .map(t => ({ ...t, input: t.input ? JSON.parse(t.input) : null, output: t.output ? JSON.parse(t.output) : null, wait: t.wait ? JSON.parse(t.wait) : null }));
   const state = JSON.parse(r.state);
   return {
@@ -91,6 +94,24 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   // ---------- health and readiness (no sign-in: probes) ----------
   app.get('/health', async () => health());
   app.get('/ready', async (_req, reply) => { const r = readiness(); return reply.code(r.ready ? 200 : 503).send(r); });
+  // Prometheus metrics: counters and histograms of this engine, gauges read now.
+  app.get('/metrics', async (req, reply) => {
+    if (config.metricsToken && String(req.headers.authorization || '') !== `Bearer ${config.metricsToken}`) return reply.code(401).send('metrics token required');
+    const st = clusterStatus();
+    const me = st.engines.find((e: any) => e.id === config.engineId);
+    const listeners = [...listenerStatus.values()].reduce((m: Record<string, number>, l) => { m[l.state] = (m[l.state] || 0) + 1; return m; }, {});
+    return reply.type('text/plain; version=0.0.4').send(prometheusText([
+      { name: 'sutra_info', help: 'This engine: version, mode and name.', values: [{ labels: { version, mode: config.mode, engine: config.engineId }, v: 1 }] },
+      { name: 'sutra_tasks', help: 'Steps in the shared queue by status.', values: Object.entries(st.tasks).map(([status, v]) => ({ labels: { status }, v: Number(v) })) },
+      { name: 'sutra_engine_running_steps', help: 'Steps running on this engine now.', values: [{ v: engine.running }] },
+      { name: 'sutra_engine_workers', help: 'Steps this engine may run at once.', values: [{ v: engine.concurrency }] },
+      { name: 'sutra_engine_leader', help: '1 when this engine leads the cluster (timers, listeners).', values: [{ v: me?.leader ? 1 : 0 }] },
+      { name: 'sutra_engines_alive', help: 'Engines with a recent heartbeat.', values: [{ v: st.engines.filter((e: any) => e.alive).length }] },
+      { name: 'sutra_listeners', help: 'Polling listeners on this engine by state.', values: Object.entries(listeners).map(([state, v]) => ({ labels: { state }, v })) },
+      { name: 'sutra_traces_exported_total', help: 'Spans sent to the OpenTelemetry collector.', values: [{ v: tracingStats.exported }] },
+      { name: 'sutra_traces_failed_total', help: 'Spans the collector did not accept.', values: [{ v: tracingStats.failed }] },
+    ]));
+  });
 
   // ---------- auth guard ----------
   // The OAuth callback is reached by a cross-site redirect (no SameSite=Strict cookie); its signed state protects it.
@@ -217,6 +238,12 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     setTimeout(() => { lifecycle.shutdown!().finally(() => { if (req.body?.exit !== false) process.exit(0); }); }, 50);
   });
 
+  app.get('/api/releases/policy', async () => ({ allowed: projects.releasesAllowed() }));
+  app.put('/api/releases/policy', async (req: any) => {
+    if ((req as any).user?.r !== 'admin') throw new HttpError(403, 'Only administrators can allow release activities');
+    projects.setReleasesAllowed(!!req.body?.allowed);
+    return { allowed: projects.releasesAllowed() };
+  });
   app.get('/api/scripts/policy', async () => ({ allowed: projects.scriptsAllowed() }));
   app.put('/api/scripts/policy', async (req: any) => {
     if ((req as any).user?.r !== 'admin') throw new HttpError(403, 'Only administrators can allow scripts');
@@ -325,6 +352,15 @@ export async function buildAdmin(): Promise<FastifyInstance> {
       from runs ${where.length ? 'where ' + where.join(' and ') : ''} order by started_at desc limit ?`, ...args, limit);
   });
   app.get('/api/runs/:id', async (req: any) => runDetail(req.params.id));
+  /** Runs a failed run again from the step that failed. */
+  app.post('/api/runs/:id/resubmit', async (req: any) => {
+    try { return engine.resubmit(req.params.id, req.user?.u); } catch (e: any) { throw bad(e.message); }
+  });
+  /** Deletes finished runs older than the retention period now (the leader also does it every minute). */
+  app.post('/api/engine/housekeeping', async (req: any) => {
+    if (req.user?.r !== 'admin') throw new HttpError(403, 'Only administrators can do this');
+    return housekeeping({ retentionDays: req.body?.retentionDays !== undefined ? Number(req.body.retentionDays) : undefined });
+  });
   app.post('/api/runs/:id/cancel', async (req: any) => ({ ok: engine.cancel(req.params.id) }));
   app.post('/api/runs/:id/debug', async (req: any) => {
     const a = String(req.body?.action || '');

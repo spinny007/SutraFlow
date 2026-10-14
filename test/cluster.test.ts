@@ -83,6 +83,10 @@ test('two engines start together: the package is deployed once, both are alive, 
   const s = await status(a);
   assert.equal(s.engines.filter((e: any) => e.leader).length, 1);
   assert.ok(['A', 'B'].includes(s.leader));
+  // Each engine's metrics: exactly one says it leads; both count the other as alive.
+  const leaderGauge = async (p: Proc) => Number(/^sutra_engine_leader (\d)/m.exec(await (await fetch(`${p.admin}/metrics`)).text())![1]);
+  assert.equal((await leaderGauge(a)) + (await leaderGauge(b)), 1);
+  assert.match(await (await fetch(`${b.admin}/metrics`)).text(), /^sutra_engines_alive 2$/m);
 });
 
 test('work is shared between engines, each step runs exactly once, every caller gets its reply', async () => {

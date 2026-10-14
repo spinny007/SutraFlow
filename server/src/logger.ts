@@ -52,6 +52,10 @@ function rotate(s: Sink) {
 export interface LogEvent { level: Level; msg: string; flow?: string; run?: string; step?: string; data?: unknown }
 
 export function projectLog(projectId: string | null | undefined, e: LogEvent) {
+  // Containers: one JSON object per line on standard output for the log collector.
+  if (config.logFormat === 'json') {
+    try { process.stdout.write(JSON.stringify({ time: new Date().toISOString(), level: e.level, engine: config.engineId, project: projectId || undefined, sutra: e.flow, run: e.run, step: e.step, msg: e.msg }) + '\n'); } catch { /* never stop a run */ }
+  }
   if (!projectId) return;
   const s = sink(projectId);
   if (!s || LEVELS[e.level] < LEVELS[s.cfg.level]) return;

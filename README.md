@@ -34,6 +34,17 @@ Run the test suite:
 npm test
 ```
 
+## Releasing and running in production
+
+Full guide: [docs/deployment.md](docs/deployment.md).
+
+- **Packages**: a release is one `.sutra` file with the whole project (Sutras at fixed versions, connections without secret values, schemas, variables), checked, deployed by name, recorded, and rolled back. In the studio: Project → Releases. From a Sutra: the **Release** palette (build, check, deploy, roll back, on this server or remote engines).
+- **Command line**: `sutra package | check | deploy | test | history | rollback | secret | status`, locally or against a server with `SUTRA_ADMIN_TOKEN`.
+- **Headless engines**: `SUTRA_MODE=engine` (no studio; token-only automation API; packages in `SUTRA_DEPLOY_DIR` deployed at start).
+- **Docker**: `Dockerfile`, `docker-compose.yml` (studio + engine), `docker-compose.cluster.yml` (PostgreSQL + studio + two engines).
+- **Clusters**: several engines on one database (`SUTRA_DB=postgres://...`). Work is shared and each step runs once; one leader runs timers and listeners, with failover; a dead engine's steps are finished by another; deploys reach every engine. Shutdown drains running steps (SIGTERM or `POST /api/engine/drain`).
+- **Monitoring**: `/health`, `/ready`, Prometheus `/metrics`, OpenTelemetry traces (`OTEL_EXPORTER_OTLP_ENDPOINT`), JSON logs (`SUTRA_LOG_FORMAT=json`). Finished runs are deleted after `SUTRA_RUN_RETENTION_DAYS`; failed runs can run again from the failed step.
+
 ## Sample Sutras
 
 **+ New Sutra → Choose samples** adds working examples, all or the ones you tick: 31 Sutras that between them use every starter and every activity. They cover mapping (For-Each, loops), flow control (sub-Sutras, try / catch, routing, connection conditions), REST and SOAP (serving and calling), files (timer archive, file trigger drop folder, CSV import, text formats), databases (SQLite queries, updates, stored procedures), channels, counters, scripts (PowerShell, bash, programs), AI (local Ollama: classify, summarize, sentiment, translate, extract, route, reply), email (sending, inbox trigger), the service bus, Firebase, Google Drive and Sheets, Dropbox, YouTube, and MCP skills. Those needing a connection or a local model say so.
@@ -204,7 +215,7 @@ POST /api/flows/{flowId}/run?wait=30000
 
 ## Tested here, and not
 
-The test suite (`npm test`, 78 tests) runs real servers for HTTP, SOAP with WS-Security, TLS, SMTP, an AMQP 1.0 peer (the ActiveMQ protocol), SQLite, and mock Google / Firebase / OAuth endpoints. PostgreSQL, MySQL, SQL Server, Oracle, Kafka, RabbitMQ, IMAP, Let's Encrypt and the live Google, Dropbox, YouTube and Facebook APIs use their standard client libraries but have not been run against real servers yet.
+The test suite (`npm test`, about 120 tests including real multi-process clusters, and every in-process suite again on PostgreSQL through PGlite) runs real servers for HTTP, SOAP with WS-Security, TLS, SMTP, an AMQP 1.0 peer (the ActiveMQ protocol), SQLite, and mock Google / Firebase / OAuth endpoints. PostgreSQL, MySQL, SQL Server, Oracle, Kafka, RabbitMQ, IMAP, Let's Encrypt and the live Google, Dropbox, YouTube and Facebook APIs use their standard client libraries but have not been run against real servers yet.
 
 ## Not yet included
 

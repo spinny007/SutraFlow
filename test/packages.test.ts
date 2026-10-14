@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { testEnv, node, edge } from './helpers.js';
+import { testEnv, node, edge, port } from './helpers.js';
 
 const env = testEnv(19010);
 process.env.SUTRA_ADMIN_TOKEN = 'test-admin-token-0123456789';
@@ -227,11 +227,11 @@ test('command line: package, check, deploy, history, rollback, test, usage error
 });
 
 test('command line against a running server with the token', async () => {
-  await srv.admin.listen({ host: '127.0.0.1', port: 19019 });
+  await srv.admin.listen({ host: '127.0.0.1', port: port(19019) });
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-cli-'));
   const run = (...args: string[]) => new Promise<{ status: number | null; stdout: string; stderr: string }>(res => {
     import('node:child_process').then(({ spawn }) => {
-      const c = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', '--import', 'tsx', path.join(root, 'server/src/cli.ts'), ...args, '--server', 'http://127.0.0.1:19019'], { cwd: root, env: process.env });
+      const c = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', '--import', 'tsx', path.join(root, 'server/src/cli.ts'), ...args, '--server', `http://127.0.0.1:${port(19019)}`], { cwd: root, env: process.env });
       let stdout = '', stderr = '';
       c.stdout.on('data', d => (stdout += d)); c.stderr.on('data', d => (stderr += d));
       c.on('close', status => res({ status, stdout, stderr }));
@@ -245,7 +245,7 @@ test('command line against a running server with the token', async () => {
   r = await run('secret', 'set', 'REMOTE_ONE', '--value', 'v1');
   assert.equal(r.status, 0, r.stderr);
   const bad = await new Promise<number | null>(res => import('node:child_process').then(({ spawn }) => {
-    const c = spawn(process.execPath, ['--import', 'tsx', path.join(root, 'server/src/cli.ts'), 'history', '--project', 'Shop', '--server', 'http://127.0.0.1:19019', '--token', 'nope-nope-nope-nope-nope-x'], { cwd: root, env: process.env });
+    const c = spawn(process.execPath, ['--import', 'tsx', path.join(root, 'server/src/cli.ts'), 'history', '--project', 'Shop', '--server', `http://127.0.0.1:${port(19019)}`, '--token', 'nope-nope-nope-nope-nope-x'], { cwd: root, env: process.env });
     c.on('close', res);
   }));
   assert.equal(bad, 1);
