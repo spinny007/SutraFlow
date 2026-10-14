@@ -239,6 +239,9 @@ export function engineVariableValues() {
 /** Sutras read Sengine variables; changing them from a Sutra needs the administrator's permission. */
 export function sutrasMayChangeSengine() { return getSetting<boolean>('sengineWritable', false); }
 export function setSutrasMayChangeSengine(on: boolean) { setSetting('sengineWritable', !!on); }
+/** Script activities (PowerShell, shell, programs) run on the server only when the administrator allows them. */
+export function scriptsAllowed() { return getSetting<boolean>('scriptsAllowed', false); }
+export function setScriptsAllowed(on: boolean) { setSetting('scriptsAllowed', !!on); }
 
 export function setEngineVariable(name: string, value: unknown) {
   if (!sutrasMayChangeSengine()) throw new Error(`Sengine variables are read-only for Sutras, so ${name} was not changed. An administrator can allow changes in Server & APIs.`);

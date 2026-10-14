@@ -71,6 +71,7 @@ export function Server() {
       </div>
 
       <EngineVariables />
+      <ScriptsPolicy />
 
       <div className="card">
         <h2>Gateway listeners</h2>
@@ -162,6 +163,24 @@ function EngineVariables() {
       <label className="check" style={{ marginTop: 12 }}>
         <input type="checkbox" checked={writable} onChange={e => put<{ sutrasMayChange: boolean }>('/api/engine-variables/policy', { sutrasMayChange: e.target.checked }).then(p => { setWritable(p.sutrasMayChange); toast(p.sutrasMayChange ? 'Sutras may now change Sengine variables' : 'Sengine variables are read-only for Sutras'); }).catch(err => toast(err.message, true))} />
         Allow Sutras to change Sengine variables (set-sengine-variable). Not advised: one Sutra could change the behaviour of every project.
+      </label>
+    </div>
+  );
+}
+
+/** Script activities run commands on this server: only when the administrator allows them. */
+function ScriptsPolicy() {
+  const toast = useToast();
+  const [allowed, setAllowed] = useState<boolean | null>(null);
+  useEffect(() => { get<{ allowed: boolean }>('/api/scripts/policy').then(p => setAllowed(p.allowed)).catch(() => {}); }, []);
+  if (allowed === null) return null;
+  return (
+    <div className="card">
+      <h2>Scripts</h2>
+      <p className="muted" style={{ fontSize: 13 }}>The Scripts palette (PowerShell script, Shell script, Run program) runs commands on this server with the SutraFlow service account's rights. Values reach scripts as environment variables, never as script text.</p>
+      <label className="check">
+        <input type="checkbox" checked={allowed} onChange={e => put<{ allowed: boolean }>('/api/scripts/policy', { allowed: e.target.checked }).then(p => { setAllowed(p.allowed); toast(p.allowed ? 'Script activities are allowed' : 'Script activities are switched off'); }).catch(err => toast(err.message, true))} />
+        Allow script activities to run on this server
       </label>
     </div>
   );

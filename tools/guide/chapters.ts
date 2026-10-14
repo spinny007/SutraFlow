@@ -355,6 +355,7 @@ export const CHAPTERS: Chapter[] = [
 <li>[[jsCode]] runs your JavaScript in a sandbox without host access, with time and memory limits.</li>
 <li>[[htmlTemplate]] builds HTML with escaped placeholders, loops and conditions.</li>
 <li>[[jsonata]] transforms JSON with one expression.</li>
+<li>The <strong>Scripts</strong> palette runs [[powershell]], [[shellScript]] (bash, sh or cmd) and [[runProgram]] on the server, capturing the output, the error output and the exit code. An administrator must allow scripts in Server &amp; APIs first; values reach scripts as environment variables, never as script text.</li>
 <li>The <strong>AI</strong> palette: [[aiPrompt]], [[aiClassify]], [[aiRouter]], [[aiExtract]], [[aiSummarize]], [[aiTranslate]] and [[aiSentiment]]. Each also returns <code>ai</code>: the provider, engine, model, input, output and total tokens, and the time taken.</li>
 </ul>
 <p class="h">AI providers</p>

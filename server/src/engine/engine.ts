@@ -296,7 +296,9 @@ export class Engine {
       if (this.wasCancelled(t.id)) return this.settle(t.run_id);
       const msg = maskSecrets(String(e?.message || e), revealed);
       projectLog(run.row.project_id, { level: t.attempt < (Number(s.retries) || 0) ? 'warn' : 'error', msg, flow: run.doc.name, run: t.run_id, step: node.name });
-      this.fail(t, run.doc, node, new Error(msg), { ms: Date.now() - started, logs });
+      // Activities may attach what they captured (a script's output and error output) for the error branch.
+      const failure = Object.assign(new Error(msg), e?.details !== undefined ? { details: maskSecrets(e.details, revealed) } : {});
+      this.fail(t, run.doc, node, failure, { ms: Date.now() - started, logs });
     }
   }
 
@@ -530,7 +532,8 @@ export class Engine {
       st.logs.push(...(extra.logs || []), { t: now(), level: 'error', msg: `${node?.name ?? t.node_id}: ${err.message}`, step: node?.name });
       const errorEdges = node ? doc.edges.filter(e => e.from === node.id && e.port === 'error') : [];
       const input = t.input == null ? null : JSON.parse(t.input);
-      const errOut = { error: { message: err.message, step: node?.name, type: node?.type, at: now() }, input };
+      const details = (err as any).details;
+      const errOut = { error: { message: err.message, step: node?.name, type: node?.type, at: now(), ...(details !== undefined ? { details } : {}) }, input };
       if (node && errorEdges.length) {
         st.outputs[node.name] = errOut;
         q.run(`update tasks set status = 'error', port = 'error', error = ?, output = ?, ms = ?, finished_at = ? where id = ?`,

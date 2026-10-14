@@ -157,6 +157,12 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     projects.requireProject(req.params.id);
     return addSamples(req.params.id, Array.isArray(req.body?.ids) ? req.body.ids.map(String) : undefined);
   });
+  app.get('/api/scripts/policy', async () => ({ allowed: projects.scriptsAllowed() }));
+  app.put('/api/scripts/policy', async (req: any) => {
+    if ((req as any).user?.r !== 'admin') throw new HttpError(403, 'Only administrators can allow scripts');
+    projects.setScriptsAllowed(!!req.body?.allowed);
+    return { allowed: projects.scriptsAllowed() };
+  });
   app.get('/api/engine-variables/policy', async () => ({ sutrasMayChange: projects.sutrasMayChangeSengine() }));
   app.put('/api/engine-variables/policy', async (req: any) => {
     if ((req as any).user?.r !== 'admin') throw new HttpError(403, 'Only administrators can change this');

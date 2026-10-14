@@ -28,6 +28,7 @@ export const SAMPLES: { id: string; name: string; desc: string; palettes: string
   { id: 'conditions', name: 'Connection conditions', palettes: 'Flow control', desc: 'Named connections taken when their condition on the output is true, and an otherwise connection.' },
   { id: 'channels', name: 'Channels between Sutras', palettes: 'General, Triggers', desc: 'One Sutra sends to a channel; a deployed Sutra with a Channel trigger receives each message.' },
   { id: 'counter', name: 'Counter, Wait and Sutra variables', palettes: 'General, Flow control', desc: 'A daily order counter, a pause, and Sutra variables used in a log line.' },
+  { id: 'scripts', name: 'Scripts: PowerShell and Run program', palettes: 'Scripts', desc: 'A PowerShell disk report that hands JSON to the next step, and a program run with arguments; failures carry the exit code and error output.', needs: 'scripts allowed by an administrator in Server & APIs' },
   { id: 'localai', name: 'Local AI with Ollama', palettes: 'AI', desc: 'Classifies, summarises and rates a customer email with a local Ollama model, offline.', needs: 'Ollama running on this machine with at least one model' },
   { id: 'email', name: 'Email a report', palettes: 'Email, Custom code', desc: 'Builds an HTML report and emails it; a failure is logged.', needs: 'an Email (SMTP) connection' },
   { id: 'queue', name: 'Queue in and out', palettes: 'Service Bus', desc: 'Takes orders from a queue, reshapes them, publishes them on, and confirms each message.', needs: 'a Kafka, RabbitMQ or ActiveMQ connection' },
@@ -365,6 +366,23 @@ export function addSamples(projectId: string, ids?: string[]) {
     edges: [E('s', 'v'), E('v', 'c'), E('c', 'w'), E('w', 'l')],
   });
 
+  // Scripts: PowerShell with JSON output, a program with arguments, error branch with the captured output.
+  const scripts = want('scripts') && save({
+    name: 'Sample: Scripts',
+    description: 'PowerShell lists the disks and hands JSON to the next step; Run program starts Node.js with one argument; each error output logs the exit code and error output. Needs "Allow script activities" in Server & APIs.',
+    nodes: [
+      N('s', 'start', 'Start', 60, 220, { payload: JSON.stringify({ minFreeGb: 10, note: 'checked by SutraFlow' }, null, 2) }),
+      N('p', 'powershell', 'Disk report', 380, 140, { interpreter: 'Windows PowerShell', timeoutMs: 60000, failOnExit: true, workDir: '',
+        env: [{ k: 'MIN_FREE_GB', v: '{{input.minFreeGb}}' }],
+        script: "$min = [double]$env:MIN_FREE_GB\n$disks = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Used -ne $null } | ForEach-Object {\n  $free = [math]::Round($_.Free / 1GB, 1)\n  [pscustomobject]@{ drive = $_.Name; freeGb = $free; low = ($free -lt $min) }\n}\n@{ disks = @($disks); low = @($disks | Where-Object low).Count } | ConvertTo-Json -Depth 3" }),
+      N('l1', 'log', 'Log disks', 720, 80, { level: 'info', message: "=concat(count({input.json.disks}), ' disks, ', {input.json.low}, ' low on space')" }),
+      N('r', 'runProgram', 'Node version', 720, 240, { program: 'node', args: ['-e', 'console.log(JSON.stringify({ node: process.version, note: process.argv[1] }))', '{{trigger.note}}'], stdin: '', timeoutMs: 30000, failOnExit: true, workDir: '', env: [] }),
+      N('l2', 'log', 'Log node', 1060, 240, { level: 'info', message: 'Node {{input.json.node}} ({{input.json.note}})' }),
+      N('e1', 'log', 'Log script error', 720, 400, { level: 'error', message: 'Exit {{input.error.details.exitCode}}: {{input.error.details.stderr}}' }),
+    ],
+    edges: [E('s', 'p'), E('p', 'l1'), E('l1', 'r'), E('r', 'l2'), E('p', 'e1', 'error'), E('r', 'e1', 'error')],
+  });
+
   // Local AI with Ollama (offline).
   const ollamaConn = !want('localai') ? null : listResources('aiProvider', projectId).find(r => r.name === 'Local Ollama')
     || saveResource({ kind: 'aiProvider', name: 'Local Ollama', project_id: projectId, config: { engine: 'Ollama', model: '', baseUrl: '', maxTokens: 600, ollamaApi: 'chat' } });
@@ -411,7 +429,7 @@ export function addSamples(projectId: string, ids?: string[]) {
     edges: [E('t', 'm'), E('m', 'p'), E('p', 'c')],
   });
 
-  return [forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, localAi, email, queue]
+  return [forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, localAi, email, queue]
     .filter((f): f is NonNullable<typeof f> & { id: string; name: string } => !!f)
     .map(f => ({ id: f.id, name: f.name }));
 }

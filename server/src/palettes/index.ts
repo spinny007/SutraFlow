@@ -4,6 +4,7 @@ import { soapActivities } from './soap.js';
 import { aiActivities } from './ai.js';
 import { processActivities } from './process.js';
 import { mcpActivities } from './mcp.js';
+import { scriptActivities } from './scripts.js';
 import { fileActivities } from './file.js';
 import { codeActivities } from './code.js';
 import { transformActivities } from './transform.js';
@@ -27,11 +28,12 @@ export const PALETTES = [
   { id: 'firebase', name: 'Firebase', color: 'ai' },
   { id: 'apps', name: 'Apps (Google, Dropbox, Facebook)', color: 'auto' },
   { id: 'custom', name: 'Custom code', color: 'general' },
+  { id: 'scripts', name: 'Scripts (PowerShell, shell)', color: 'general' },
   { id: 'general', name: 'General', color: 'general' },
   { id: 'ai', name: 'AI', color: 'ai' },
 ];
 
 export const allActivities = [
   ...coreActivities, ...processActivities, ...transformActivities, ...httpActivities, ...soapActivities, ...fileActivities, ...dbActivities, ...busActivities,
-  ...emailActivities, ...firebaseActivities, ...saasActivities, ...codeActivities, ...aiActivities, ...mcpActivities,
+  ...emailActivities, ...firebaseActivities, ...saasActivities, ...codeActivities, ...scriptActivities, ...aiActivities, ...mcpActivities,
 ];

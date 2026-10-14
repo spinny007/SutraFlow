@@ -1,0 +1,121 @@
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { execSync } from 'node:child_process';
+import { testEnv, node, edge } from './helpers.js';
+
+testEnv(18990);
+const { boot } = await import('../server/src/index.js');
+const { engine } = await import('../server/src/engine/engine.js');
+const { q } = await import('../server/src/db.js');
+const { shellPath } = await import('../server/src/palettes/scripts.js');
+const projects = await import('../server/src/projects.js');
+
+let srv: Awaited<ReturnType<typeof boot>>;
+let pid = '';
+before(async () => {
+  srv = await boot({ listenAdmin: false });
+  pid = projects.saveProject({ name: 'Scripts', config: { variables: [] } }).id;
+});
+after(async () => { await srv.stop(); });
+
+async function run(nodes: any[], edges: any[], input?: any) {
+  const id = engine.startRun({ doc: { name: 'S', nodes, edges }, projectId: pid, input });
+  await engine.waitFor(id, 30000);
+  const r: any = q.get('select * from runs where id = ?', id);
+  return { status: r.status, error: r.error, state: JSON.parse(r.state) };
+}
+const has = (cmd: string) => { try { execSync(cmd, { stdio: 'ignore' }); return true; } catch { return false; } };
+const win = process.platform === 'win32';
+
+test('scripts run only when the administrator allows them', async () => {
+  projects.setScriptsAllowed(false);
+  const s = node('start', 'Start'), p = node('runProgram', 'Node', { program: process.execPath, args: ['-e', 'console.log(1)'] });
+  const r = await run([s, p], [edge(s, p)]);
+  assert.equal(r.status, 'failed');
+  assert.match(r.error, /switched off on this server/);
+});
+
+test('Run program: arguments are passed as they are, output and error output captured, JSON read', async () => {
+  projects.setScriptsAllowed(true);
+  const s = node('start', 'Start');
+  const p = node('runProgram', 'Node', {
+    program: process.execPath,
+    args: ['-e', 'console.error("careful"); console.log(JSON.stringify({ arg: process.argv[1], env: process.env.ORDER_ID, stdin: require("fs").readFileSync(0, "utf8") }))', '{{input.text}}'],
+    env: [{ k: 'ORDER_ID', v: '{{input.id}}' }], stdin: 'hello {{input.id}}',
+  });
+  const r = await run([s, p], [edge(s, p)], { id: 'A-1', text: 'x & echo HACKED; rm -rf /' });
+  assert.equal(r.status, 'done', r.error);
+  const o = r.state.outputs.Node;
+  assert.equal(o.exitCode, 0);
+  assert.deepEqual(o.json, { arg: 'x & echo HACKED; rm -rf /', env: 'A-1', stdin: 'hello A-1' });
+  assert.equal(o.stderr.trim(), 'careful');
+  assert.match(o.output, /careful/);
+  assert.match(r.state.logs.map((l: any) => l.msg).join('\n'), /wrote to its error output: careful/);
+});
+
+test('a failing script goes to the error output with its exit code, output and error output', async () => {
+  projects.setScriptsAllowed(true);
+  const s = node('start', 'Start');
+  const p = node('runProgram', 'Fails', { program: process.execPath, args: ['-e', 'console.log("half done"); console.error("disk full"); process.exit(3)'] });
+  const h = node('log', 'Handle', { message: '{{input.error.details.exitCode}} / {{input.error.details.stderr}}' });
+  let r = await run([s, p, h], [edge(s, p), edge(p, h, 'error')]);
+  assert.equal(r.status, 'done', r.error);
+  const err = r.state.outputs.Fails.error;
+  assert.match(err.message, /Exit code 3: disk full/);
+  assert.equal(err.details.exitCode, 3);
+  assert.equal(err.details.stdout.trim(), 'half done');
+  assert.equal(err.details.stderr.trim(), 'disk full');
+
+  const tolerant = node('runProgram', 'Tolerant', { program: process.execPath, args: ['-e', 'process.exit(2)'], failOnExit: false });
+  r = await run([s, tolerant], [edge(s, tolerant)]);
+  assert.equal(r.status, 'done');
+  assert.equal(r.state.outputs.Tolerant.exitCode, 2);
+
+  const slow = node('runProgram', 'Slow', { program: process.execPath, args: ['-e', 'setTimeout(() => {}, 10000)'], timeoutMs: 1000 });
+  r = await run([s, slow], [edge(s, slow)]);
+  assert.equal(r.status, 'failed');
+  assert.match(r.error, /time limit/);
+});
+
+test('PowerShell script: variables, the input file, JSON output and error output', { skip: !win && !has('pwsh -v') }, async () => {
+  projects.setScriptsAllowed(true);
+  const s = node('start', 'Start');
+  const p = node('powershell', 'PS', {
+    interpreter: win ? 'Windows PowerShell' : 'PowerShell 7 (pwsh)',
+    script: '$in = Get-Content $env:SUTRA_INPUT_FILE -Raw | ConvertFrom-Json\n[Console]::Error.WriteLine("note from PowerShell")\n[pscustomobject]@{ order = $env:ORDER_ID; total = ($in.lines | Measure-Object -Property price -Sum).Sum; city = "Pune" } | ConvertTo-Json -Compress',
+    env: [{ k: 'ORDER_ID', v: '{{input.id}}' }], timeoutMs: 60000,
+  });
+  const r = await run([s, p], [edge(s, p)], { id: 'A-7', lines: [{ price: 40 }, { price: 60 }] });
+  assert.equal(r.status, 'done', r.error);
+  assert.deepEqual(r.state.outputs.PS.json, { order: 'A-7', total: 100, city: 'Pune' });
+  assert.match(r.state.outputs.PS.stderr, /note from PowerShell/);
+});
+
+test('Shell script: bash and cmd', { skip: !has(`"${shellPath('bash')}" -c true`) }, async () => {
+  projects.setScriptsAllowed(true);
+  const s = node('start', 'Start');
+  const b = node('shellScript', 'Bash', { interpreter: 'bash', script: 'echo "order $ORDER_ID"\necho "warned" >&2\nexit 0', env: [{ k: 'ORDER_ID', v: '{{input.id}}' }] });
+  let r = await run([s, b], [edge(s, b)], { id: 'B-2' });
+  assert.equal(r.status, 'done', r.error);
+  assert.deepEqual(r.state.outputs.Bash.lines, ['order B-2']);
+  assert.equal(r.state.outputs.Bash.stderr.trim(), 'warned');
+  if (win) {
+    const c = node('shellScript', 'Cmd', { interpreter: 'cmd (Windows)', script: 'echo order %ORDER_ID%', env: [{ k: 'ORDER_ID', v: '{{input.id}}' }] });
+    r = await run([s, c], [edge(s, c)], { id: 'C-3' });
+    assert.equal(r.status, 'done', r.error);
+    assert.equal(r.state.outputs.Cmd.stdout.trim(), 'order C-3');
+  }
+});
+
+test('the Scripts sample runs: PowerShell JSON, a program with an argument', { skip: !win }, async () => {
+  projects.setScriptsAllowed(true);
+  const { addSamples } = await import('../server/src/samples.js');
+  const flows = await import('../server/src/flows.js');
+  const [f] = addSamples(pid, ['scripts']);
+  const doc = flows.getFlow(f.id)!.doc;
+  doc.nodes.find((n: any) => n.type === 'runProgram')!.config.program = process.execPath;
+  const r = await run(doc.nodes, doc.edges);
+  assert.equal(r.status, 'done', r.error);
+  assert.ok(Array.isArray(r.state.outputs['Disk report'].json.disks));
+  assert.equal(r.state.outputs['Node version'].json.note, 'checked by SutraFlow');
+});

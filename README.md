@@ -85,6 +85,7 @@ The Designer's left panel has two tabs: **Project** (explorer) and **Palettes**.
 | Firebase | Firestore (get, set, add, query, delete), Realtime Database, Push notification (FCM) |
 | Apps | Google Sheets, Google Drive / Docs, Google Drive / Docs trigger, Dropbox, YouTube, Facebook Page, Connected API call (any REST API of an OAuth account) |
 | Custom code | JavaScript code (sandboxed: no host access, time and memory limits), HTML template (escaped placeholders, each / if) |
+| Scripts | PowerShell script (Windows PowerShell or 7), Shell script (bash, sh, cmd), Run program (arguments without a shell). Output, error output, exit code and JSON output captured; failures carry them on the error output. Off until an administrator allows scripts in Server & APIs; values arrive as environment variables, never as script text |
 | General | Log, Validate fields, Send to channel (in-memory messages to other deployed Sutras), Counter (per project, kept across restarts) |
 | AI | AI prompt, AI classify, AI router, AI extract, AI summarize, AI translate, AI sentiment. Engines: Claude, Gemini and OpenAI APIs, Ollama, and the Claude, Gemini and Codex command-line tools. Every AI activity also returns the provider, model, tokens and time |
 
@@ -203,7 +204,7 @@ POST /api/flows/{flowId}/run?wait=30000
 
 ## Tested here, and not
 
-The test suite (`npm test`, 70 tests) runs real servers for HTTP, SOAP with WS-Security, TLS, SMTP, an AMQP 1.0 peer (the ActiveMQ protocol), SQLite, and mock Google / Firebase / OAuth endpoints. PostgreSQL, MySQL, SQL Server, Oracle, Kafka, RabbitMQ, IMAP, Let's Encrypt and the live Google, Dropbox, YouTube and Facebook APIs use their standard client libraries but have not been run against real servers yet.
+The test suite (`npm test`, 76 tests) runs real servers for HTTP, SOAP with WS-Security, TLS, SMTP, an AMQP 1.0 peer (the ActiveMQ protocol), SQLite, and mock Google / Firebase / OAuth endpoints. PostgreSQL, MySQL, SQL Server, Oracle, Kafka, RabbitMQ, IMAP, Let's Encrypt and the live Google, Dropbox, YouTube and Facebook APIs use their standard client libraries but have not been run against real servers yet.
 
 ## Not yet included
 
