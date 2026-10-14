@@ -25,7 +25,7 @@ import * as oauth from './connectors/oauth.js';
 import { listenerStatus } from './listeners.js';
 import { testResource, prepare } from './resourceTest.js';
 import { listModels, ollamaPull, ollamaImport } from './ai/providers.js';
-import { addSamples } from './samples.js';
+import { addSamples, SAMPLES } from './samples.js';
 
 const COOKIE = 'sutra_session';
 
@@ -152,9 +152,10 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.delete('/api/projects/:id/runtime-variables', async (req: any) => { projects.clearRuntimeVariables(req.params.id); return { ok: true }; });
   app.get('/api/engine-variables', async () => projects.listEngineVariables());
   /** Adds the sample Sutras (For-Each mapping, loops, sub-Sutra, try / catch) to a project. */
+  app.get('/api/samples', async () => SAMPLES);
   app.post('/api/projects/:id/samples', async (req: any) => {
     projects.requireProject(req.params.id);
-    return addSamples(req.params.id);
+    return addSamples(req.params.id, Array.isArray(req.body?.ids) ? req.body.ids.map(String) : undefined);
   });
   app.get('/api/engine-variables/policy', async () => ({ sutrasMayChange: projects.sutrasMayChangeSengine() }));
   app.put('/api/engine-variables/policy', async (req: any) => {

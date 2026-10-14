@@ -36,7 +36,7 @@ async function runDoc(doc: any, input?: any) {
 }
 
 test('sample Sutras: For-Each mapping, activity loops, sub-Sutra, try and catch', async () => {
-  const added = addSamples(pid);
+  const added = addSamples(pid, ['foreach', 'loops', 'subsutra', 'trycatch', 'skills']);
   assert.equal(added.length, 7);
   const doc = (n: string) => flows.getFlow(added.find(a => a.name.startsWith(n))!.id)!.doc;
 
@@ -76,7 +76,7 @@ test('sample Sutras: For-Each mapping, activity loops, sub-Sutra, try and catch'
   assert.equal(r.state.outputs['Reply with the file'].result.rows, 2);
   assert.match(fs.readFileSync(path.join(dir, 'skill-test.csv'), 'utf8'), /sku,qty\r?\nTEA-250,4/);
 
-  assert.equal(addSamples(pid)[0].name, 'Sample: For-Each mapping 2', 'adding again keeps names unique');
+  assert.equal(addSamples(pid, ['foreach'])[0].name, 'Sample: For-Each mapping 2', 'adding again keeps names unique');
 });
 
 test('AI engines: OpenAI, Gemini, Ollama and a command-line tool return text plus provider, model and tokens', async () => {
@@ -190,4 +190,57 @@ test('connections: names, "when" conditions on the previous output, and "otherwi
 
   const bad = flows.validateDoc({ name: 'x', nodes: [s, chk], edges: [edge(s, chk), { ...edge(chk, s), when: 'when' } as any] });
   assert.ok(bad.errors.some(e => /has no condition/.test(e)));
+});
+
+test('more samples across the palettes run as tests (REST, files, database, XML, transform, routing, channels, counter)', async () => {
+  const added = addSamples(pid, ['rest', 'csv', 'folder', 'database', 'xml', 'transform', 'routing', 'conditions', 'channels', 'counter', 'localai', 'email', 'queue']);
+  const doc = (n: string) => flows.getFlow(added.find(a => a.name === n)!.id)!.doc;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-samples-'));
+  const logs = (r: any) => r.state.logs.map((l: any) => `${l.level} ${l.msg}`).join('\n');
+  const ok = async (d: any) => { const r = await runDoc(d); assert.equal(r.status, 'done', `${d.name}: ${r.error}`); return r; };
+
+  let r = await ok(doc('Sample: REST API with validation'));
+  assert.equal(r.state.outputs['Reply 200'].body.orderId, 'A-1001');
+
+  const csv = doc('Sample: CSV import and totals');
+  for (const n of csv.nodes) if (n.config.folder) n.config.folder = dir;
+  r = await ok(csv);
+  assert.equal(r.state.outputs['Total per country'].result, 2640);
+  assert.deepEqual(r.state.outputs['Total per country'].groups, { IN: { result: 1650, count: 2 }, LK: { result: 990, count: 1 } });
+
+  const folder = doc('Sample: Folder of files');
+  folder.nodes.find((n: any) => n.type === 'fileList')!.config.location = `${dir}/*.csv`;
+  r = await ok(folder);
+  assert.match(logs(r), /sales\.csv: \d+ bytes/);
+  assert.match(logs(r), /1 files handled/);
+
+  r = await ok(doc('Sample: Database (SQLite)'));
+  assert.deepEqual(r.state.outputs['Big orders'].rows.map((x: any) => x.id), ['A-1']);
+  assert.match(logs(r), /1 orders above 500; largest Asha Traders/);
+
+  r = await ok(doc('Sample: XML in and out'));
+  assert.match(r.state.outputs['Render invoice'].text, /<Number>INV-A-7<\/Number>/);
+  assert.match(r.state.outputs['Render invoice'].text, /<Amount>240<\/Amount>/);
+
+  r = await ok(doc('Sample: JSONata, JavaScript and HTML'));
+  assert.deepEqual(r.state.outputs['Rank countries'].ranked.map((c: any) => [c.rank, c.country]), [[1, 'IN'], [2, 'LK']]);
+  assert.match(r.state.outputs.Report.html, /<td>IN<\/td>/);
+
+  r = await ok(doc('Sample: Router, Switch and Merge'));
+  assert.ok(r.state.outputs['Large order'] && r.state.outputs['Indian order'] && !r.state.outputs['Other order']);
+  assert.ok(r.state.outputs['Ship it'] && !r.state.outputs.Remind);
+
+  r = await ok(doc('Sample: Connection conditions'));
+  assert.ok(r.state.outputs['Big order'] && !r.state.outputs['From India'] && !r.state.outputs['Small order']);
+
+  r = await ok(doc('Sample: Channel sender'));
+  assert.equal(r.state.outputs['Send to channel'].delivered, 0);
+
+  r = await ok(doc('Sample: Counter, Wait and Sutra variables'));
+  assert.match(logs(r), /batch-\d{4}: order number 1 today/);
+
+  // These need a connection or a local model: they are added and pass validation.
+  for (const n of ['Sample: Local AI with Ollama', 'Sample: Email a report', 'Sample: Queue in and out']) {
+    assert.deepEqual(flows.validateDoc(doc(n)).errors, [], n);
+  }
 });

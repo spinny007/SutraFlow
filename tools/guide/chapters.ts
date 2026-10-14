@@ -127,13 +127,8 @@ export const CHAPTERS: Chapter[] = [
 </tbody></table>
 <p>A connection that is not taken counts as a skipped branch, so a [[merge]] after it still continues. For many routes, or for routes on the same message used in several places, a [[router]] activity keeps them in one place.</p>
 <p class="h">Sample Sutras</p>
-<p>Click <strong>+ New Sutra</strong>, then <strong>Add sample Sutras to this project</strong>. Five working Sutras are added; test each one and open its activities' Input and Output tabs to see how it is built.</p>
-<table class="t"><thead><tr><th>Sample</th><th>What it shows</th></tr></thead><tbody>
-<tr><td><strong>Sample: For-Each mapping</strong></td><td>[[mapper]] turns order lines into invoice lines with a For-Each: <em>Where</em> skips zero quantities, <em>Sort by</em> orders them, <code>position()</code> numbers them; a second For-Each groups the lines by country with <code>{group.key}</code> and <code>sum({group.items}, 'price')</code>.</td></tr>
-<tr><td><strong>Sample: Loop on an activity</strong></td><td>One activity run once per order (Loop: for each item, results collected as <code>iterations</code>), and a [[counter]] repeated while its value is below 3, with a delay: the shape of polling a job until it is done.</td></tr>
-<tr><td><strong>Sample: Calculate tax (called Sutra)</strong> and <strong>Sample: Invoice with a sub-Sutra</strong></td><td>A reusable Sutra that ends with [[return]], and a Sutra that runs it with [[callProcess]], logs its result, and logs a failure from its error output.</td></tr>
-<tr><td><strong>Sample: Try and catch with logs</strong></td><td>Try and catch around one activity (its own error output connected), and the [[catch]] for every other error: it logs the failed step and the message, then ends the Sutra as handled. [[log]] records each stage at info, warn and error level.</td></tr>
-</tbody></table>
+<p>Click <strong>+ New Sutra</strong>, then <strong>Choose samples</strong> to tick the ones you want, or <strong>Add all</strong>. Test each one and open its activities' Input and Output tabs to see how it is built. Samples that write files use <code>C:/sutra/samples</code>; change the folder to suit your machine.</p>
+[[samples]]
 [[img:sample-foreach|Sample: For-Each mapping. The repeating target <em>lines</em> is selected: its For-Each takes the order lines, keeps rows where qty &gt; 0 and sorts them by sku.]]
 [[img:sample-trycatch|Sample: Try and catch with logs after a test: Check stock's own error output handled one failure; the Error handler caught Reject and logged it.]]
 <p class="h">Reusable Sutras</p>

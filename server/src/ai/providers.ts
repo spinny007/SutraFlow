@@ -49,7 +49,7 @@ export const engineOf = (r: Resource): AiEngine => (AI_ENGINES.includes(r.config
 export const isCli = (e: AiEngine) => e.endsWith('CLI');
 export const defaultsFor = (e: AiEngine) => DEFAULTS[e];
 
-export interface AiRequest { system: string; prompt: string; effort?: string; signal?: AbortSignal }
+export interface AiRequest { system: string; prompt: string; effort?: string; signal?: AbortSignal; /** The answer must be one JSON object. */ json?: boolean }
 export interface AiResult {
   text: string;
   /** The details every AI activity returns. */
@@ -113,6 +113,7 @@ export async function aiCall(r: Resource, secret: Secret, q: AiRequest): Promise
       const auth: Record<string, string> = NEEDS_KEY.includes(engine) || r.config.apiKeySecret ? { authorization: `Bearer ${key(engine)}` } : {};
       const body = await http(`${base}/chat/completions`, auth, {
         model, max_completion_tokens: maxTokens,
+        ...(q.json && engine === 'OpenAI API' ? { response_format: { type: 'json_object' } } : {}),
         messages: [...(q.system ? [{ role: 'system', content: q.system }] : []), { role: 'user', content: q.prompt }],
       });
       const text = body?.choices?.[0]?.message?.content ?? '';
@@ -122,7 +123,7 @@ export async function aiCall(r: Resource, secret: Secret, q: AiRequest): Promise
       const body = await http(`${base}/v1beta/models/${encodeURIComponent(model)}:generateContent`, { 'x-goog-api-key': key('Gemini') }, {
         ...(q.system ? { systemInstruction: { parts: [{ text: q.system }] } } : {}),
         contents: [{ role: 'user', parts: [{ text: q.prompt }] }],
-        generationConfig: { maxOutputTokens: maxTokens },
+        generationConfig: { maxOutputTokens: maxTokens, ...(q.json ? { responseMimeType: 'application/json' } : {}) },
       });
       const cand = body?.candidates?.[0];
       if (!cand && body?.promptFeedback?.blockReason) throw new Error(`Gemini blocked the request: ${body.promptFeedback.blockReason}`);
@@ -134,9 +135,9 @@ export async function aiCall(r: Resource, secret: Secret, q: AiRequest): Promise
       let body: any;
       try {
         body = ollamaApiOf(r) === 'generate'
-          ? await http(`${base}/api/generate`, {}, { model, stream: false, options: { num_predict: maxTokens }, prompt: q.prompt, ...(q.system ? { system: q.system } : {}) })
+          ? await http(`${base}/api/generate`, {}, { model, stream: false, options: { num_predict: maxTokens }, prompt: q.prompt, ...(q.system ? { system: q.system } : {}), ...(q.json ? { format: 'json' } : {}) })
           : await http(`${base}/api/chat`, {}, {
-            model, stream: false, options: { num_predict: maxTokens },
+            model, stream: false, options: { num_predict: maxTokens }, ...(q.json ? { format: 'json' } : {}),
             messages: [...(q.system ? [{ role: 'system', content: q.system }] : []), { role: 'user', content: q.prompt }],
           });
       } catch (e: any) {

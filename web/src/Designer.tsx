@@ -357,8 +357,8 @@ function DesignerInner() {
     setFlowId(f.id);
     setDialog(null);
   };
-  const addSamples = async () => {
-    const added = await post<{ id: string; name: string }[]>(`/api/projects/${encodeURIComponent(projectId)}/samples`);
+  const addSamples = async (ids: string[]) => {
+    const added = await post<{ id: string; name: string }[]>(`/api/projects/${encodeURIComponent(projectId)}/samples`, { ids });
     await refreshFlows();
     if (added[0]) setFlowId(added[0].id);
     setDialog(null);
@@ -458,9 +458,7 @@ function DesignerInner() {
               <li key={t.id}><button onClick={() => createFlow(t.id).catch(e => toast(e.message, true))}><b>{t.name}</b><span className="muted" style={{ fontSize: 12 }}>{t.desc}</span></button></li>
             ))}
           </ul>
-          <p className="muted" style={{ marginTop: 14 }}>Or learn from working examples:</p>
-          <button className="btn" onClick={() => addSamples().catch(e => toast(e.message, true))}>Add sample Sutras to this project</button>
-          <p className="muted xs" style={{ marginTop: 6 }}>Five Sutras: For-Each mapping; loops on an activity; a reusable Sutra and one that calls it; try and catch with logs. Test each one and open its activities' Input and Output tabs.</p>
+          <SamplePicker onAdd={ids => addSamples(ids).catch(e => toast(e.message, true))} />
         </Modal>
       )}
       {dialog === 'deploy' && doc && flowId && (
@@ -518,3 +516,31 @@ export function Designer() {
 }
 
 export type { ActivityMeta };
+
+/** Working examples to add to the project, by scenario and palette. */
+function SamplePicker({ onAdd }: { onAdd(ids: string[]): void }) {
+  const [list, setList] = useState<{ id: string; name: string; desc: string; palettes: string; needs?: string }[]>([]);
+  const [pick, setPick] = useState<Set<string>>(new Set());
+  const [open, setOpen] = useState(false);
+  useEffect(() => { get<typeof list>('/api/samples').then(l => { setList(l); setPick(new Set(l.map(x => x.id))); }).catch(() => {}); }, []);
+  if (!list.length) return null;
+  const toggle = (id: string) => setPick(p => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  return (
+    <div className="samples">
+      <p className="muted" style={{ marginTop: 14 }}>Or learn from working examples: {list.length} sample Sutras across the palettes.</p>
+      <div className="row"><button className="btn" onClick={() => setOpen(o => !o)} aria-expanded={open}>{open ? 'Hide samples' : 'Choose samples'}</button>
+        <button className="btn primary" disabled={!pick.size} onClick={() => onAdd([...pick])}>Add {pick.size === list.length ? 'all' : pick.size} sample{pick.size === 1 ? '' : 's'}</button></div>
+      {open && (
+        <ul className="slist">
+          <li className="row" style={{ gap: 10 }}><button className="btn small" onClick={() => setPick(new Set(list.map(x => x.id)))}>All</button><button className="btn small" onClick={() => setPick(new Set())}>None</button></li>
+          {list.map(x => (
+            <li key={x.id}><label className="check">
+              <input type="checkbox" checked={pick.has(x.id)} onChange={() => toggle(x.id)} />
+              <span><b>{x.name}</b> <span className="muted xs">{x.palettes}</span><br /><span className="muted xs">{x.desc}{x.needs ? ` Needs ${x.needs}.` : ''}</span></span>
+            </label></li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}

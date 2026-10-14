@@ -15,12 +15,45 @@ async function ask(c: ExecCtx, system: string, prompt: string, effort: string) {
   return aiCall(r, c.secret, { system, prompt, effort, signal: c.signal });
 }
 
+/**
+ * For activities that need a JSON answer: asks the engine for JSON, reads the object even when the
+ * model wraps it in text or code fences, and asks once more, more strictly, when it still is not JSON.
+ * Small local models (Ollama, LM Studio) need this more often than large ones.
+ */
+async function askJson(c: ExecCtx, system: string, prompt: string, effort: string) {
+  const r = requireResource(c.raw('provider'), 'aiProvider', 'AI provider');
+  const first = await aiCall(r, c.secret, { system, prompt, effort, signal: c.signal, json: true });
+  const j = jsonFrom(first.text);
+  if (j !== undefined) return { ...first, json: j };
+  c.log('warn', 'The AI reply was not valid JSON; asking again');
+  const again = await aiCall(r, c.secret, { system: `${system} Your reply must be one JSON object and nothing else: no explanation, no code fences.`, prompt, effort, signal: c.signal, json: true });
+  const j2 = jsonFrom(again.text);
+  if (j2 === undefined) throw new Error(`The AI did not reply with valid JSON (model ${again.ai.model}). Try a larger model or simpler instructions. It replied: ${again.text.slice(0, 200)}`);
+  return { ...again, ai: { ...again.ai, inputTokens: sum(first.ai.inputTokens, again.ai.inputTokens), outputTokens: sum(first.ai.outputTokens, again.ai.outputTokens), totalTokens: sum(first.ai.totalTokens, again.ai.totalTokens), ms: first.ai.ms + again.ai.ms }, json: j2 };
+}
+const sum = (a: number | null, b: number | null) => (a == null || b == null ? null : a + b);
+
 /** The details every AI activity returns, shown in the Output tab before a run. */
 const AI = { ai: { provider: '', engine: '', model: '', inputTokens: 0, outputTokens: 0, totalTokens: 0, ms: 0 } };
 
-function jsonFrom(text: string) {
-  const m = text.match(/```(?:json)?\s*([\s\S]*?)```/) || text.match(/(\{[\s\S]*\})/);
-  try { return JSON.parse((m ? m[1] : text).trim()); } catch { throw new Error('The AI did not reply with valid JSON. Run again or simplify the instructions.'); }
+/** The JSON object in a reply: the whole text, a fenced block, or the first balanced {...}; undefined when none. */
+function jsonFrom(text: string): any {
+  const tryParse = (t: string) => { try { const v = JSON.parse(t.trim()); return v && typeof v === 'object' ? v : undefined; } catch { return undefined; } };
+  const whole = tryParse(text);
+  if (whole) return whole;
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(text);
+  if (fenced) { const v = tryParse(fenced[1]); if (v) return v; }
+  for (let start = text.indexOf('{'); start >= 0; start = text.indexOf('{', start + 1)) {
+    let depth = 0, inStr = false, esc = false;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false; continue; }
+      if (ch === '"') inStr = true;
+      else if (ch === '{') depth++;
+      else if (ch === '}' && --depth === 0) { const v = tryParse(text.slice(start, i + 1)); if (v) return v; break; }
+    }
+  }
+  return undefined;
 }
 
 const provider = F('provider', 'AI provider', 'resource', '', { resourceKind: 'aiProvider', help: 'The AI engine and model: Claude, Gemini, OpenAI, Ollama or a CLI. Set up under Resources.' });
@@ -99,9 +132,9 @@ export const aiActivities: Activity[] = [
     execute: async c => {
       const labels = listOf(c.raw('labels'));
       if (!labels.length) throw new Error('Add at least one label');
-      const r = await ask(c, 'You classify text for an integration Sutra. Reply with JSON only.',
+      const r = await askJson(c, 'You classify text for an integration Sutra. Reply with JSON only.',
         `Labels: ${labels.join(', ')}${c.raw('guidance') ? `\nGuidance: ${c.raw('guidance')}` : ''}\nReply with JSON: {"label": "<one label or other>", "confidence": <0-1>, "reason": "<one sentence>"}\n\nText:\n${asPrompt(c.v('text'))}`, c.raw('effort'));
-      const j = jsonFrom(r.text);
+      const j = r.json;
       const label = labels.find(l => l.toLowerCase() === String(j.label || '').toLowerCase()) || 'other';
       return { port: label, out: { label, confidence: Number(j.confidence) || 0, reason: String(j.reason || ''), input: c.input, ai: r.ai } };
     },
@@ -122,9 +155,9 @@ export const aiActivities: Activity[] = [
       const rows = ((c.raw('routes') as any[]) || []).filter(r => r?.k).map(r => ({ name: String(r.k).trim(), desc: String(r.v || '') }));
       if (!rows.length) throw new Error('Add at least one route');
       const all = c.raw('mode') === 'all matches';
-      const r = await ask(c, 'You route messages in an integration Sutra. Reply with JSON only.',
+      const r = await askJson(c, 'You route messages in an integration Sutra. Reply with JSON only.',
         `Routes:\n${rows.map(x => `- ${x.name}: ${x.desc}`).join('\n')}\n${all ? 'Choose every route that fits.' : 'Choose the one route that fits best.'} Choose none when nothing fits.\nReply with JSON: {"routes": ["<route name>"], "reason": "<one sentence>"}\n\nText:\n${asPrompt(c.v('text'))}`, c.raw('effort'));
-      const j = jsonFrom(r.text);
+      const j = r.json;
       let hits = (Array.isArray(j.routes) ? j.routes : [j.route]).map((x: any) => rows.find(rw => rw.name.toLowerCase() === String(x ?? '').toLowerCase())?.name).filter(Boolean) as string[];
       hits = [...new Set(hits)];
       if (!all) hits = hits.slice(0, 1);
@@ -141,9 +174,9 @@ export const aiActivities: Activity[] = [
     execute: async c => {
       const fl = ((c.raw('fields') as any[]) || []).filter(r => r?.k);
       if (!fl.length) throw new Error('List at least one field');
-      const r = await ask(c, 'You extract data for an integration Sutra. Reply with JSON only. Use null for missing values; numbers as JSON numbers.',
+      const r = await askJson(c, 'You extract data for an integration Sutra. Reply with JSON only. Use null for missing values; numbers as JSON numbers.',
         `Fields:\n${fl.map(f => `- ${f.k}: ${f.v}`).join('\n')}\nReply with one JSON object with exactly those keys.\n\nText:\n${asPrompt(c.v('text'))}`, c.raw('effort'));
-      const j = jsonFrom(r.text);
+      const j = r.json;
       return { out: { ...Object.fromEntries(fl.map(f => [f.k, j?.[f.k] ?? null])), ai: r.ai } };
     },
   },
@@ -162,9 +195,9 @@ export const aiActivities: Activity[] = [
     outputHint: { summary: '', points: [''], words: 0, ...AI },
     execute: async c => {
       const lang = String(c.raw('language') || '').trim();
-      const r = await ask(c, 'You summarise text for an integration Sutra. Reply with JSON only.',
+      const r = await askJson(c, 'You summarise text for an integration Sutra. Reply with JSON only.',
         `Summarise the text as ${c.raw('style') || 'paragraph'}, about ${Number(c.raw('length')) || 120} words${lang && lang !== 'same as the text' ? `, in ${lang}` : ', in the language of the text'}.${c.raw('focus') ? ` Focus on: ${c.raw('focus')}.` : ''}\nReply with JSON: {"summary": "<the summary as text>", "points": ["<each point>"]}\n\nText:\n${asPrompt(c.v('text'))}`, c.raw('effort'));
-      const j = jsonFrom(r.text);
+      const j = r.json;
       const summary = String(j.summary ?? '');
       return { out: { summary, points: Array.isArray(j.points) ? j.points.map(String) : [], words: summary.split(/\s+/).filter(Boolean).length, ai: r.ai } };
     },
@@ -186,9 +219,9 @@ export const aiActivities: Activity[] = [
       const to = String(c.v('to') || 'English');
       const from = String(c.raw('from') || 'detect');
       const tone = c.raw('tone') && c.raw('tone') !== 'as written' ? ` Use a ${c.raw('tone')} tone.` : '';
-      const r = await ask(c, 'You translate text for an integration Sutra. Keep names, numbers, codes, line breaks and markup unchanged. Reply with JSON only.',
+      const r = await askJson(c, 'You translate text for an integration Sutra. Keep names, numbers, codes, line breaks and markup unchanged. Reply with JSON only.',
         `Translate into ${to}${from !== 'detect' ? ` from ${from}` : ''}.${tone}${c.raw('glossary') ? ` Do not translate: ${c.raw('glossary')}.` : ''}\nReply with JSON: {"text": "<translation>", "from": "<source language name>"}\n\nText:\n${asPrompt(c.v('text'))}`, c.raw('effort'));
-      const j = jsonFrom(r.text);
+      const j = r.json;
       return { out: { text: String(j.text ?? ''), from: String(j.from || from), to, ai: r.ai } };
     },
   },
@@ -204,9 +237,9 @@ export const aiActivities: Activity[] = [
     outputHint: { sentiment: 'neutral', score: 0, emotions: [''], aspects: {}, reason: '', ...AI },
     execute: async c => {
       const aspects = listOf(c.raw('aspects'));
-      const r = await ask(c, 'You rate sentiment for an integration Sutra. Reply with JSON only.',
+      const r = await askJson(c, 'You rate sentiment for an integration Sutra. Reply with JSON only.',
         `Rate the sentiment of the text.${aspects.length ? ` Also rate each of: ${aspects.join(', ')} (positive, neutral, negative or not mentioned).` : ''}\nReply with JSON: {"sentiment": "positive|neutral|negative", "score": <-1 to 1>, "emotions": ["<emotion>"], ${aspects.length ? '"aspects": {"<aspect>": "<rating>"}, ' : ''}"reason": "<one sentence>"}\n\nText:\n${asPrompt(c.v('text'))}`, c.raw('effort'));
-      const j = jsonFrom(r.text);
+      const j = r.json;
       const s = String(j.sentiment || '').toLowerCase();
       const sentiment = ['positive', 'neutral', 'negative'].includes(s) ? s : 'neutral';
       const score = Math.max(-1, Math.min(1, Number(j.score) || 0));

@@ -16,6 +16,7 @@ import { version } from '../server/src/config.js';
 import type { Activity, Field } from '../server/src/engine/types.js';
 import { CHAPTERS } from './guide/chapters.js';
 import { ACTIVITY_TEXT } from './guide/activities.js';
+import { SAMPLES } from '../server/src/samples.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const IMG = path.join(root, 'docs', 'guide-images');
@@ -35,6 +36,7 @@ function link(type: string) {
 /** Expands [[img:..]], [[note:..]], [[tip:..]] and [[type]] markers. */
 function expand(html: string): string {
   return html
+    .replace('[[samples]]', () => `<table class="t"><thead><tr><th>Sample</th><th>What it shows</th><th>Palettes</th></tr></thead><tbody>${SAMPLES.map(x => `<tr><td><strong>${esc(x.name)}</strong></td><td>${esc(x.desc)}${x.needs ? ` <span class="cond">Needs ${esc(x.needs)}.</span>` : ''}</td><td>${esc(x.palettes)}</td></tr>`).join('')}</tbody></table>`)
     .replace(/\[\[img:([\w-]+)\|([^\]]*)\]\]/g, (_m, name, cap) => {
       const f = path.join(IMG, `${name}.jpg`);
       if (!fs.existsSync(f)) { missing.push(`image ${name}`); return ''; }

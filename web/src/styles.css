@@ -309,3 +309,5 @@ table.t tr.click:hover td { background: var(--paper); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 999px; padding: 3px 10px; font-family: var(--mono); font-size: 12px; }
 .chip.on, .chip:hover { border-color: var(--focus); color: var(--focus); }
+.slist { list-style: none; padding: 0; margin: 10px 0 0; max-height: 46vh; overflow: auto; display: grid; gap: 8px; }
+.slist label.check { align-items: flex-start; gap: 8px; }
