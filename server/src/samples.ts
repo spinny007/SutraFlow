@@ -29,6 +29,16 @@ export const SAMPLES: { id: string; name: string; desc: string; palettes: string
   { id: 'channels', name: 'Channels between Sutras', palettes: 'General, Triggers', desc: 'One Sutra sends to a channel; a deployed Sutra with a Channel trigger receives each message.' },
   { id: 'counter', name: 'Counter, Wait and Sutra variables', palettes: 'General, Flow control', desc: 'A daily order counter, a pause, and Sutra variables used in a log line.' },
   { id: 'scripts', name: 'Scripts: PowerShell and Run program', palettes: 'Scripts', desc: 'A PowerShell disk report that hands JSON to the next step, and a program run with arguments; failures carry the exit code and error output.', needs: 'scripts allowed by an administrator in Server & APIs' },
+  { id: 'timer', name: 'Timer: nightly archive', palettes: 'Triggers, Files, Flow control', desc: 'Every night at 02:00, lists the CSV files in a folder (oldest first) and moves each one to an archive folder.' },
+  { id: 'filetrigger', name: 'File trigger: CSV drop folder', palettes: 'Triggers, Files, Data & mapping', desc: 'Starts when a CSV file arrives, sorts its rows, writes a cleaned copy and moves the original to processed/.' },
+  { id: 'textformats', name: 'Parse JSON and CSV text', palettes: 'Data & mapping, Flow control', desc: 'Parses JSON text and CSV text from a message, sorts the rows, and renders them as CSV with a semicolon; a No operation marks a step still to design.' },
+  { id: 'dbmore', name: 'SQL update and stored procedure', palettes: 'DB Ops', desc: 'Updates a row with a bound parameter and fails clearly when no row matched; a second Sutra calls a stored procedure.', needs: 'the Database sample run first; for the procedure, a PostgreSQL, MySQL, SQL Server or Oracle connection' },
+  { id: 'soapcall', name: 'Call a SOAP service', palettes: 'SOAP / Web services', desc: 'Calls the GetOrder operation of the "Order SOAP service" starter with a raw envelope and maps the reply; a SOAP fault has its own output.', needs: 'the "SOAP service: orders" starter deployed' },
+  { id: 'emailin', name: 'Email trigger: orders by email', palettes: 'Triggers, Email, AI', desc: 'Starts for each new email in a mailbox, pulls the order number and amount out of the text with AI extract, and logs them.', needs: 'an Email (IMAP) connection and an AI provider' },
+  { id: 'firebase', name: 'Firebase: order to app', palettes: 'Firebase', desc: 'Saves the order in Firestore, updates its live status in the Realtime Database, and sends a push notification to the customer\'s phone.', needs: 'a Firebase connection' },
+  { id: 'google', name: 'Google Drive and Sheets', palettes: 'Triggers, Apps, AI', desc: 'Starts when a Google Doc changes in a folder, exports its text, summarises it, and appends a row to a Google Sheet.', needs: 'a Google OAuth connection, a folder and a spreadsheet; an AI provider' },
+  { id: 'apps', name: 'Dropbox, YouTube and any API', palettes: 'Apps', desc: 'Searches YouTube, saves the results to Dropbox as JSON, and calls any API of the connected account with Connected API call.', needs: 'Google and Dropbox OAuth connections' },
+  { id: 'aimore', name: 'AI: translate, extract, route and reply', palettes: 'AI', desc: 'With a local Ollama: lists the models, translates a Spanish message to English, extracts its fields, routes it to a team and drafts a reply.', needs: 'Ollama running on this machine with at least one model' },
   { id: 'localai', name: 'Local AI with Ollama', palettes: 'AI', desc: 'Classifies, summarises and rates a customer email with a local Ollama model, offline.', needs: 'Ollama running on this machine with at least one model' },
   { id: 'email', name: 'Email a report', palettes: 'Email, Custom code', desc: 'Builds an HTML report and emails it; a failure is logged.', needs: 'an Email (SMTP) connection' },
   { id: 'queue', name: 'Queue in and out', palettes: 'Service Bus', desc: 'Takes orders from a queue, reshapes them, publishes them on, and confirms each message.', needs: 'a Kafka, RabbitMQ or ActiveMQ connection' },
@@ -369,7 +379,7 @@ export function addSamples(projectId: string, ids?: string[]) {
   // Scripts: PowerShell with JSON output, a program with arguments, error branch with the captured output.
   const scripts = want('scripts') && save({
     name: 'Sample: Scripts',
-    description: 'PowerShell lists the disks and hands JSON to the next step; Run program starts Node.js with one argument; each error output logs the exit code and error output. Needs "Allow script activities" in Server & APIs.',
+    description: 'PowerShell lists the disks and hands JSON to the next step; Run program starts Node.js with one argument; a bash Shell script counts files and prints JSON; each error output logs the exit code and error output. Needs "Allow script activities" in Server & APIs.',
     nodes: [
       N('s', 'start', 'Start', 60, 220, { payload: JSON.stringify({ minFreeGb: 10, note: 'checked by SutraFlow' }, null, 2) }),
       N('p', 'powershell', 'Disk report', 380, 140, { interpreter: 'Windows PowerShell', timeoutMs: 60000, failOnExit: true, workDir: '',
@@ -378,9 +388,182 @@ export function addSamples(projectId: string, ids?: string[]) {
       N('l1', 'log', 'Log disks', 720, 80, { level: 'info', message: "=concat(count({input.json.disks}), ' disks, ', {input.json.low}, ' low on space')" }),
       N('r', 'runProgram', 'Node version', 720, 240, { program: 'node', args: ['-e', 'console.log(JSON.stringify({ node: process.version, note: process.argv[1] }))', '{{trigger.note}}'], stdin: '', timeoutMs: 30000, failOnExit: true, workDir: '', env: [] }),
       N('l2', 'log', 'Log node', 1060, 240, { level: 'info', message: 'Node {{input.json.node}} ({{input.json.note}})' }),
+      N('sh', 'shellScript', 'Shell: count files', 1400, 240, { interpreter: 'bash', timeoutMs: 30000, failOnExit: true, workDir: '', env: [{ k: 'NOTE', v: '{{trigger.note}}' }],
+        script: 'set -e\ncount=$(ls -1 "${TMPDIR:-/tmp}" 2>/dev/null | wc -l)\necho "{\\"tempFiles\\": $count, \\"note\\": \\"$NOTE\\"}"' }),
+      N('l3', 'log', 'Log shell', 1740, 240, { level: 'info', message: '{{input.json.tempFiles}} files in the temp folder' }),
       N('e1', 'log', 'Log script error', 720, 400, { level: 'error', message: 'Exit {{input.error.details.exitCode}}: {{input.error.details.stderr}}' }),
     ],
-    edges: [E('s', 'p'), E('p', 'l1'), E('l1', 'r'), E('r', 'l2'), E('p', 'e1', 'error'), E('r', 'e1', 'error')],
+    edges: [E('s', 'p'), E('p', 'l1'), E('l1', 'r'), E('r', 'l2'), E('l2', 'sh'), E('sh', 'l3'), E('p', 'e1', 'error'), E('r', 'e1', 'error'), E('sh', 'e1', 'error')],
+  });
+
+  // Timer: nightly archive of a folder.
+  const timer = want('timer') && save({
+    name: 'Sample: Timer nightly archive',
+    description: `While deployed, runs every night at 02:00 (Asia/Kolkata): lists ${folder}/*.csv oldest first and moves each file to ${folder}/archive. A test run starts it at once with the payload.`,
+    nodes: [
+      N('t', 'timer', 'Every night 02:00', 60, 220, { mode: 'cron', cron: '0 0 2 * * *', every: 300, timezone: 'Asia/Kolkata', payload: JSON.stringify({ folder }, null, 2) }),
+      N('d', 'fileList', 'Files to archive', 380, 220, { location: '{{input.folder}}/*.csv', pattern: '', recursive: false, sort: 'oldest first', max: 500, format: 'do not read' }),
+      N('fe', 'forEach', 'Each file', 700, 160, { list: '{{input.files}}', max: 500 }),
+      N('m', 'fileMove', 'Move to archive', 1020, 100, { folder: '{{trigger.folder}}', action: 'move', from: '{{input.name}}', to: "=concat('archive/', format-dateTime('YYYY-MM-DD', current-dateTime(), 'Asia/Kolkata'), '-', {input.name})", overwrite: true }),
+      N('l', 'log', 'Log archived', 1020, 260, { level: 'info', message: '{{input.count}} files archived' }),
+      N('n', 'log', 'Nothing to archive', 700, 380, { level: 'info', message: 'Nothing to archive in {{trigger.folder}}' }),
+    ],
+    edges: [E('t', 'd'), E('d', 'fe'), E('fe', 'm', 'item'), E('fe', 'l', 'done'), E('d', 'n', 'empty')],
+  });
+
+  // File trigger: a CSV drop folder.
+  const inbox = 'C:/sutra/inbox';
+  const fileTrig = want('filetrigger') && save({
+    name: 'Sample: File trigger CSV drop folder',
+    description: `While deployed, starts when a CSV file arrives in ${inbox}: sorts its rows by amount, writes a cleaned copy to ${folder}/clean, and moves the original to ${inbox}/processed. Test runs use the trigger's test event.`,
+    nodes: [
+      N('t', 'fileTrigger', 'CSV arrives', 60, 220, { folder: inbox, pattern: '*.csv', events: ['added'], recursive: false, pollSeconds: 10, stableSeconds: 2, format: 'CSV rows', encoding: 'utf-8', delimiter: ',', header: true, skipRows: 0, trimValues: true, decimal: '.', schema: '',
+        testEvent: JSON.stringify({ event: 'added', name: 'orders.csv', path: `${inbox}/orders.csv`, folder: inbox, size: 120, rows: [{ id: 'A-1', amount: 300 }, { id: 'A-2', amount: 1200 }, { id: 'A-3', amount: 75 }], count: 3 }, null, 2) }),
+      N('s', 'sort', 'Largest first', 380, 220, { list: '{{input.rows}}', field: 'amount', dir: 'descending' }),
+      N('r', 'renderCsv', 'As CSV', 700, 220, { list: '{{input.items}}', delim: ',' }),
+      N('w', 'fileWrite', 'Write clean copy', 1020, 220, { folder: `${folder}/clean`, path: '{{trigger.name}}', format: 'text', content: '{{input.text}}', encoding: 'utf-8', append: false, overwrite: true }),
+      N('m', 'fileMove', 'Move original', 1340, 160, { folder: inbox, action: 'move', from: '{{trigger.name}}', to: "=concat('processed/', {trigger.name})", overwrite: true }),
+      N('l', 'log', 'Log done', 1660, 160, { level: 'info', message: '{{trigger.name}}: {{trigger.count}} rows, cleaned copy at {{nodes.Write clean copy.path}}' }),
+      N('x', 'log', 'Could not move', 1660, 320, { level: 'warn', message: 'Original not moved: {{input.error.message}}' }),
+    ],
+    edges: [E('t', 's', 'added'), E('s', 'r'), E('r', 'w'), E('w', 'm'), E('m', 'l'), E('m', 'x', 'error')],
+  });
+
+  // Parse JSON and CSV text, sort, No operation, Render CSV.
+  const textFormats = want('textformats') && save({
+    name: 'Sample: Parse JSON and CSV text',
+    description: 'A message carries JSON text and CSV text. Parse JSON and Parse CSV turn them into data; Sort list orders the rows; No operation marks a step still to design; Render CSV writes them with a semicolon separator.',
+    nodes: [
+      N('s', 'start', 'Message', 60, 220, { payload: JSON.stringify({ json: '{"customer": "Asha Traders", "currency": "INR"}', csv: 'sku,qty,price\nTEA-250,4,120\nPOT-02,1,900\nCUP-12,2,90' }, null, 2) }),
+      N('j', 'parseJson', 'Parse JSON', 380, 220, { schema: '', text: '{{input.json}}' }),
+      N('c', 'parseCsv', 'Parse CSV', 700, 220, { text: '{{trigger.csv}}', delim: ',' }),
+      N('o', 'sort', 'By price', 1020, 220, { list: '{{input.rows}}', field: 'price', dir: 'descending' }),
+      N('n', 'noop', 'Check stock here later', 1340, 220),
+      N('r', 'renderCsv', 'As CSV with ;', 1660, 220, { list: '{{input.items}}', delim: ';' }),
+      N('l', 'log', 'Log', 1980, 220, { level: 'info', message: 'For {{nodes.Parse JSON.customer}} ({{nodes.Parse JSON.currency}}):\n{{input.text}}' }),
+    ],
+    edges: [E('s', 'j'), E('j', 'c'), E('c', 'o'), E('o', 'n'), E('n', 'r'), E('r', 'l')],
+  });
+
+  // SQL update (and a stored procedure, which needs a server database).
+  const dbConn2 = !want('dbmore') ? null : listResources('database', projectId).find(r => r.name === 'Sample SQLite')
+    || saveResource({ kind: 'database', name: 'Sample SQLite', project_id: projectId, config: { driver: 'sqlite', file: 'samples.sqlite' } });
+  const dbUpd = dbConn2 && save({
+    name: 'Sample: SQL update',
+    description: 'Adds to an order amount in the "Sample SQLite" database with bound parameters. "Fail when no row is affected" sends an unknown order id to the error output. Run "Sample: Database (SQLite)" first to create the table.',
+    nodes: [
+      N('s', 'start', 'Change', 60, 220, { payload: JSON.stringify({ id: 'A-1', add: 50 }, null, 2) }),
+      N('u', 'dbUpdate', 'Add to amount', 380, 220, { connection: dbConn2.id, sql: 'UPDATE sample_orders SET amount = amount + :add WHERE id = :id', params: [{ k: 'add', v: '{{input.add}}' }, { k: 'id', v: '{{input.id}}' }], expect: true }),
+      N('q', 'dbQuery', 'Read it back', 700, 160, { connection: dbConn2.id, sql: 'SELECT id, amount FROM sample_orders WHERE id = :id', params: [{ k: 'id', v: '{{trigger.id}}' }], maxRows: 10 }),
+      N('l', 'log', 'Log new amount', 1020, 160, { level: 'info', message: 'Order {{input.first.id}} is now {{input.first.amount}}' }),
+      N('x', 'log', 'Log no such order', 700, 340, { level: 'warn', message: 'Not updated: {{input.error.message}}' }),
+    ],
+    edges: [E('s', 'u'), E('u', 'q'), E('q', 'l'), E('u', 'x', 'error')],
+  });
+  const dbProc = dbConn2 && save({
+    name: 'Sample: Stored procedure',
+    description: 'Calls a stored procedure with named parameters. Pick a PostgreSQL, MySQL, SQL Server or Oracle connection that has a procedure process_order(p_order_id, p_status); SQLite has no procedures.',
+    nodes: [
+      N('s', 'start', 'Order', 60, 220, { payload: JSON.stringify({ orderId: 'A-1', status: 'SHIPPED' }, null, 2) }),
+      N('p', 'dbProcedure', 'process_order', 380, 220, { connection: '', procedure: 'process_order', params: [{ k: 'p_order_id', v: '{{input.orderId}}' }, { k: 'p_status', v: '{{input.status}}' }] }),
+      N('l', 'log', 'Log result', 700, 160, { level: 'info', message: '{{input.rowCount}} rows; outputs {{input.outputs | json}}' }),
+      N('x', 'log', 'Log failure', 700, 320, { level: 'error', message: 'Procedure failed: {{input.error.message}}' }),
+    ],
+    edges: [E('s', 'p'), E('p', 'l'), E('p', 'x', 'error')],
+  });
+
+  // Call a SOAP service (the SOAP starter, deployed).
+  const soapCall = want('soapcall') && save({
+    name: 'Sample: Call a SOAP service',
+    description: 'Invoke SOAP service sends a GetOrder envelope to the deployed "Order SOAP service" starter (http://127.0.0.1:8080/soap/orders) and maps the reply. A SOAP fault goes to the fault output; a network error to the error output. With a WSDL, choose "wsdl" and pick the operation instead.',
+    nodes: [
+      N('s', 'start', 'Order id', 60, 220, { payload: JSON.stringify({ orderId: 'A-1001' }, null, 2) }),
+      N('c', 'soapInvoke', 'GetOrder', 380, 220, { mode: 'raw envelope', connection: '', auth: '', wsdlSource: 'url', wsdlUrl: '', wsdlRef: '', service: '', port: '', operation: '', argsSource: 'template', args: '', argsSchema: '', responseSchema: '',
+        endpoint: 'http://127.0.0.1:8080/soap/orders', soapVersion: '1.1', soapAction: 'urn:sutra:orders/GetOrder',
+        bodyXml: '<ord:GetOrder xmlns:ord="urn:sutra:orders">\n  <ord:OrderId>{{input.orderId | xmlescape}}</ord:OrderId>\n</ord:GetOrder>', extraHeaders: '' }),
+      N('m', 'mapper', 'Read reply', 700, 120, { start: 'empty', schema: '', mapping: { rules: { orderId: { expr: '{input.body.GetOrderResponse.OrderId}' }, status: { expr: '{input.body.GetOrderResponse.Status}' }, ms: { expr: '{input.ms}' } } } }),
+      N('l', 'log', 'Log order', 1020, 120, { level: 'info', message: 'Order {{input.orderId}} is {{input.status}} ({{input.ms}} ms)' }),
+      N('f', 'log', 'Log fault', 700, 280, { level: 'warn', message: 'SOAP fault {{input.fault.code}}: {{input.fault.message}}' }),
+      N('x', 'log', 'Log call failure', 700, 420, { level: 'error', message: 'Call failed: {{input.error.message}}' }),
+    ],
+    edges: [E('s', 'c'), E('c', 'm'), E('m', 'l'), E('c', 'f', 'fault'), E('c', 'x', 'error')],
+  });
+
+  // Email trigger with AI extract.
+  const aiConn = (want('emailin') || want('google') || want('aimore'))
+    ? listResources('aiProvider', projectId).find(r => r.name === 'Local Ollama') || saveResource({ kind: 'aiProvider', name: 'Local Ollama', project_id: projectId, config: { engine: 'Ollama', model: '', baseUrl: '', maxTokens: 600, ollamaApi: 'chat' } })
+    : null;
+  const emailIn = want('emailin') && save({
+    name: 'Sample: Email trigger orders by email',
+    description: 'While deployed, starts for each new email in the inbox whose subject contains "Order", pulls out the order number, amount and request with AI extract, and logs them; the email is then marked read. Pick an Email (IMAP) connection first.',
+    nodes: [
+      N('t', 'emailTrigger', 'New order email', 60, 220, { connection: '', mailbox: 'INBOX', filterFrom: '', filterSubject: 'Order', pollSeconds: 60, after: 'mark read', moveTo: 'Processed', attachments: 'no',
+        testEmail: JSON.stringify({ from: 'buyer@example.com', subject: 'Order A-2002', text: 'Hello, please send 12 boxes of Assam tea, order A-2002, total 3,600 rupees, by Friday. Thanks, Ravi', attachments: [] }, null, 2) }),
+      N('x', 'aiExtract', 'Read the email', 380, 220, { provider: aiConn ? aiConn.id : '', text: 'Subject: {{input.subject}}\n{{input.text}}', fields: [{ k: 'orderId', v: 'the order number' }, { k: 'amount', v: 'total amount as a number' }, { k: 'request', v: 'what the customer asks for, in a few words' }], effort: 'low' }),
+      N('l', 'log', 'Log order', 700, 160, { level: 'info', message: 'From {{trigger.from}}: order {{input.orderId}}, {{input.amount}}: {{input.request}}' }),
+      N('e', 'log', 'Log failure', 700, 320, { level: 'error', message: 'Could not read the email: {{input.error.message}}' }),
+    ],
+    edges: [E('t', 'x'), E('x', 'l'), E('x', 'e', 'error')],
+  });
+
+  // Firebase: Firestore, Realtime Database, push notification.
+  const firebase = want('firebase') && save({
+    name: 'Sample: Firebase order to app',
+    description: 'Saves the order as a Firestore document, sets its live status in the Realtime Database, and sends a push notification to the customer\'s device token. Pick a Firebase connection in all three.',
+    nodes: [
+      N('s', 'start', 'Order', 60, 220, { payload: JSON.stringify({ orderId: 'A-3003', customer: 'Asha', amount: 1450, deviceToken: 'paste-a-device-token' }, null, 2) }),
+      N('f', 'firestore', 'Save order', 380, 220, { connection: '', op: 'set', collection: 'orders', docId: '{{input.orderId}}', data: '{"customer": "{{input.customer}}", "amount": {{input.amount}}, "status": "confirmed"}', merge: true, where: [], orderBy: '', limit: 100 }),
+      N('r', 'firebaseRtdb', 'Live status', 700, 220, { connection: '', op: 'update', path: 'status/{{trigger.orderId}}', data: '{"state": "confirmed", "at": "{{now}}"}' }),
+      N('p', 'firebaseNotify', 'Tell the customer', 1020, 220, { connection: '', target: 'token', to: '{{trigger.deviceToken}}', title: "=concat('Order ', {trigger.orderId}, ' confirmed')", body: 'Thank you, {{trigger.customer}}. We are packing it now.', image: '', data: [{ k: 'orderId', v: '{{trigger.orderId}}' }], link: '' }),
+      N('l', 'log', 'Log sent', 1340, 160, { level: 'info', message: 'Order {{trigger.orderId}} saved and notified' }),
+      N('x', 'log', 'Log failure', 1340, 320, { level: 'error', message: '{{input.error.step}}: {{input.error.message}}' }),
+    ],
+    edges: [E('s', 'f'), E('f', 'r'), E('r', 'p'), E('p', 'l'), E('f', 'x', 'error'), E('r', 'x', 'error'), E('p', 'x', 'error')],
+  });
+
+  // Google: Drive / Docs trigger, Drive export, AI summarize, Sheets append.
+  const google = want('google') && save({
+    name: 'Sample: Google Drive and Sheets',
+    description: 'While deployed, starts when a Google Doc in the folder changes; exports its text; summarises it in one line; appends the name, time and summary to a Google Sheet. Pick the Google OAuth connection, the folder id and the spreadsheet id.',
+    nodes: [
+      N('t', 'googleDriveTrigger', 'Doc changed', 60, 220, { connection: '', folderId: 'paste-folder-id', mimeType: 'Google Docs', pollSeconds: 60, testEvent: JSON.stringify({ event: 'modified', id: '1AbC', name: 'Quarterly plan', mimeType: 'application/vnd.google-apps.document', modifiedTime: '2026-10-14T09:00:00Z' }, null, 2) }),
+      N('d', 'googleDrive', 'Export text', 380, 220, { connection: '', op: 'export', folderId: '', q: '', fileId: '{{input.id}}', exportAs: 'text/plain', name: '', content: '', encoding: 'text', mimeType: '', convert: false }),
+      N('a', 'aiSummarize', 'One-line summary', 700, 220, { provider: aiConn ? aiConn.id : '', text: '{{input.content}}', style: 'one line', length: 30, language: 'same as the text', focus: '', effort: 'low' }),
+      N('g', 'googleSheets', 'Add to sheet', 1020, 220, { connection: '', op: 'append', spreadsheetId: 'paste-spreadsheet-id', range: 'Changes!A1:C', header: true, rows: '=list(object(\'Document\', {trigger.name}, \'Changed\', {trigger.modifiedTime}, \'Summary\', {input.summary}))', valueInput: 'USER_ENTERED' }),
+      N('l', 'log', 'Log', 1340, 220, { level: 'info', message: '{{trigger.name}} summarised and added to the sheet' }),
+    ],
+    edges: [E('t', 'd', 'modified'), E('t', 'd', 'added'), E('d', 'a'), E('a', 'g'), E('g', 'l')],
+  });
+
+  // Dropbox, YouTube and any API of a connected account.
+  const apps = want('apps') && save({
+    name: 'Sample: Dropbox YouTube and any API',
+    description: 'Searches YouTube, saves the results to Dropbox as a JSON file, and calls the Google userinfo API with Connected API call, which reaches any REST API of an OAuth account. Pick a Google connection (YouTube, API call) and a Dropbox connection.',
+    nodes: [
+      N('s', 'start', 'Topic', 60, 220, { payload: JSON.stringify({ q: 'Assam tea harvest', max: 5 }, null, 2) }),
+      N('y', 'youtube', 'Search YouTube', 380, 220, { connection: '', op: 'search', q: '{{input.q}}', videoIds: '', max: 5 }),
+      N('d', 'dropbox', 'Save to Dropbox', 700, 220, { connection: '', op: 'upload', path: "=concat('/reports/youtube-', current-date(), '.json')", content: '{{input | json}}', encoding: 'text' }),
+      N('a', 'oauthRequest', 'Who am I', 1020, 220, { connection: '', method: 'GET', url: 'https://www.googleapis.com/oauth2/v3/userinfo', query: [], body: '' }),
+      N('l', 'log', 'Log', 1340, 220, { level: 'info', message: 'Saved {{nodes.Search YouTube.items | length}} videos for {{input.body.email}}' }),
+    ],
+    edges: [E('s', 'y'), E('y', 'd'), E('d', 'a'), E('a', 'l')],
+  });
+
+  // AI: Ollama, translate, extract, router, prompt.
+  const aiMore = aiConn && want('aimore') && save({
+    name: 'Sample: AI translate extract route and reply',
+    description: 'With the "Local Ollama" connection: the Ollama activity lists the installed models; AI translate turns a Spanish message into English; AI extract pulls the order number and problem; AI router sends it to billing, delivery or technical; AI prompt drafts the reply. Small models (such as phi4-mini) handle common languages; a larger one (such as qwen3) does better with others.',
+    nodes: [
+      N('s', 'start', 'Message', 60, 260, { payload: JSON.stringify({ text: 'Hola, mi pedido A-4004 todavía no ha llegado. Lo pagué hace diez días. ¿Cuándo llegará?' }, null, 2) }),
+      N('o', 'ollama', 'Installed models', 380, 260, { provider: aiConn.id, op: 'list models', model: '', to: '', system: '', prompt: '', messages: '', input: '', images: '', format: '', options: [], keepAlive: '', think: false }),
+      N('t', 'aiTranslate', 'To English', 700, 260, { provider: aiConn.id, text: '{{trigger.text}}', to: 'English', from: 'detect', tone: 'as written', glossary: '', effort: 'low' }),
+      N('x', 'aiExtract', 'Order and problem', 1020, 260, { provider: aiConn.id, text: '{{input.text}}', fields: [{ k: 'orderId', v: 'the order number' }, { k: 'problem', v: 'the problem in a few words' }], effort: 'low' }),
+      N('r', 'aiRouter', 'Which team', 1340, 260, { provider: aiConn.id, text: '{{nodes.To English.text}}', routes: [{ k: 'billing', v: 'payments, invoices, refunds' }, { k: 'delivery', v: 'late, missing or damaged deliveries' }, { k: 'technical', v: 'the website or app does not work' }], mode: 'best match', effort: 'low' }),
+      N('p', 'aiPrompt', 'Draft reply', 1680, 200, { provider: aiConn.id, system: 'You write short, kind customer service replies in English. Two or three sentences.', prompt: "=concat('Customer message: ', {nodes.To English.text}, ' Order: ', {nodes.Order and problem.orderId}, '. Team: ', {input.routes}, '. Write the reply.')", effort: 'low' }),
+      N('l', 'log', 'Log reply', 2000, 200, { level: 'info', message: 'Models: {{nodes.Installed models.models | length}}. {{input.text}}' }),
+      N('n', 'log', 'No team', 1680, 380, { level: 'warn', message: 'No team matched: {{input.reason}}' }),
+    ],
+    edges: [E('s', 'o'), E('o', 't'), E('t', 'x'), E('x', 'r'), E('r', 'p', 'billing'), E('r', 'p', 'delivery'), E('r', 'p', 'technical'), E('r', 'n', 'otherwise'), E('p', 'l')],
   });
 
   // Local AI with Ollama (offline).
@@ -429,7 +612,7 @@ export function addSamples(projectId: string, ids?: string[]) {
     edges: [E('t', 'm'), E('m', 'p'), E('p', 'c')],
   });
 
-  return [forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, localAi, email, queue]
+  return [forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, localAi, email, queue, timer, fileTrig, textFormats, dbUpd, dbProc, soapCall, emailIn, firebase, google, apps, aiMore]
     .filter((f): f is NonNullable<typeof f> & { id: string; name: string } => !!f)
     .map(f => ({ id: f.id, name: f.name }));
 }

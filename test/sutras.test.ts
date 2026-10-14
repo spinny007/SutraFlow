@@ -244,3 +244,91 @@ test('more samples across the palettes run as tests (REST, files, database, XML,
     assert.deepEqual(flows.validateDoc(doc(n)).errors, [], n);
   }
 });
+
+test('samples for every starter and palette: timer, file trigger, text formats, SQL update, SOAP call, scripts', async () => {
+  const { rebuildRoutes } = await import('../server/src/gateway/gateway.js');
+  projects.setScriptsAllowed(true);
+  const added = addSamples(pid, ['database', 'timer', 'filetrigger', 'textformats', 'dbmore', 'soapcall', 'emailin', 'firebase', 'google', 'apps', 'aimore', 'scripts']);
+  const doc = (n: string) => flows.getFlow(added.find(a => a.name === n || a.name.startsWith(`${n} `))!.id)!.doc;
+  const logs = (r: any) => r.state.logs.map((l: any) => `${l.level} ${l.msg}`).join('\n');
+  const ok = async (d: any, input?: any) => { const r = await runDoc(d, input); assert.equal(r.status, 'done', `${d.name}: ${r.error}`); return r; };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-more-'));
+
+  // Timer: archives the CSV files of the folder.
+  fs.writeFileSync(path.join(dir, 'old.csv'), 'a,b\n1,2');
+  const timer = doc('Sample: Timer nightly archive');
+  timer.nodes[0].config.payload = JSON.stringify({ folder: dir.split(path.sep).join('/') });
+  let r = await ok(timer);
+  assert.match(logs(r), /1 files archived/);
+  assert.equal(fs.readdirSync(path.join(dir, 'archive')).length, 1);
+
+  // File trigger: sorts the rows, writes a clean copy, moves the original.
+  const inbox = path.join(dir, 'inbox');
+  fs.mkdirSync(inbox);
+  fs.writeFileSync(path.join(inbox, 'orders.csv'), 'id,amount\nA-1,300');
+  const ft = doc('Sample: File trigger CSV drop folder');
+  for (const n of ft.nodes) { if (n.config.folder === 'C:/sutra/inbox') n.config.folder = inbox; else if (n.config.folder) n.config.folder = path.join(dir, 'clean'); }
+  r = await ok(ft);
+  assert.deepEqual(r.state.outputs['Largest first'].items.map((x: any) => x.id), ['A-2', 'A-1', 'A-3']);
+  assert.ok(fs.existsSync(path.join(inbox, 'processed', 'orders.csv')));
+  assert.match(fs.readFileSync(path.join(dir, 'clean', 'orders.csv'), 'utf8'), /A-2/);
+
+  r = await ok(doc('Sample: Parse JSON and CSV text'));
+  assert.equal(r.state.outputs['Parse JSON'].customer, 'Asha Traders');
+  assert.deepEqual(r.state.outputs['By price'].items.map((x: any) => x.sku), ['POT-02', 'TEA-250', 'CUP-12']);
+  assert.match(r.state.outputs['As CSV with ;'].text, /sku;qty;price/);
+
+  await ok(doc('Sample: Database (SQLite)'));
+  r = await ok(doc('Sample: SQL update'));
+  assert.match(logs(r), /Order A-1 is now 1250/);
+  r = await ok(doc('Sample: SQL update'), { id: 'NOPE', add: 1 });
+  assert.match(logs(r), /Not updated: No row was affected/);
+
+  // SOAP call against the SOAP starter, deployed on this test gateway.
+  const soap = flows.saveFlow(undefined, { name: 'Order SOAP service', nodes: [
+    { id: 't', type: 'soapService', name: 'Order WS', x: 0, y: 0, config: { serviceName: 'OrderService', namespace: 'urn:sutra:orders', path: '/soap/orders', operations: 'GetOrder, CancelOrder', soapVersion: '1.1', policy: '' } },
+    { id: 'm', type: 'mapper', name: 'Build order', x: 0, y: 0, config: { start: 'empty', schema: '', mapping: { rules: { OrderId: { expr: '{input.body.OrderId}' }, Status: { expr: "'SHIPPED'" } } } } },
+    { id: 'r', type: 'soapReply', name: 'Reply', x: 0, y: 0, config: { kind: 'response', body: '{{input}}' } },
+  ], edges: [{ id: 'a', from: 't', port: 'GetOrder', to: 'm' }, { id: 'b', from: 'm', port: 'out', to: 'r' }] }, pid);
+  flows.deploy(soap.id);
+  rebuildRoutes();
+  const call = doc('Sample: Call a SOAP service');
+  call.nodes.find((n: any) => n.type === 'soapInvoke')!.config.endpoint = 'http://127.0.0.1:18910/soap/orders';
+  r = await ok(call);
+  assert.match(logs(r), /Order A-1001 is SHIPPED/);
+
+  // Scripts sample: PowerShell, a program and a bash script.
+  const sc = doc('Sample: Scripts');
+  sc.nodes.find((n: any) => n.type === 'runProgram')!.config.program = process.execPath;
+  if (process.platform === 'win32') {
+    r = await ok(sc);
+    assert.equal(typeof r.state.outputs['Shell: count files'].json.tempFiles, 'number');
+  }
+
+  // Samples that need a connection, a mailbox or a local model are complete and valid.
+  for (const n of ['Sample: Stored procedure', 'Sample: Email trigger orders by email', 'Sample: Firebase order to app', 'Sample: Google Drive and Sheets', 'Sample: Dropbox YouTube and any API', 'Sample: AI translate extract route and reply']) {
+    assert.deepEqual(flows.validateDoc(doc(n)).errors, [], n);
+  }
+});
+
+test('every sample uses only pipes and functions that exist', async () => {
+  const { PIPES } = await import('../server/src/template.js');
+  const added = addSamples(pid);
+  const bad: string[] = [];
+  const names = new Set(functionCatalog().map(f => f.name.toLowerCase()).concat(['get-engine-variable', 'set-engine-variable', 'position', 'last']));
+  const walk = (v: unknown, where: string) => {
+    if (typeof v === 'string') {
+      for (const m of v.matchAll(/\{\{([^}]*)\}\}/g)) for (const p of m[1].split('|').slice(1)) { const name = p.trim().split(':')[0].trim(); if (name && !(name in PIPES)) bad.push(`${where}: pipe ${name}`); }
+      if (v.startsWith('=') || /^(expr|condition|where|sortBy|groupBy|forEach)$/.test(where.split('.').pop() || '')) {
+        for (const m of v.replace(/'[^']*'/g, '').matchAll(/([A-Za-z][\w:-]*)\s*\(/g)) { const f = m[1].toLowerCase(); if (!names.has(f) && !names.has(f.replace(/^xs:/, ''))) bad.push(`${where}: function ${m[1]}`); }
+      }
+    } else if (Array.isArray(v)) v.forEach((x, i) => walk(x, `${where}[${i}]`));
+    else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) walk(x, `${where}.${k}`);
+  };
+  for (const a of added) {
+    const d = flows.getFlow(a.id)!.doc;
+    for (const n of d.nodes) if (!['jsCode', 'powershell', 'shellScript', 'htmlTemplate', 'jsonata'].includes(n.type)) walk(n.config, `${a.name} / ${n.name}`);
+    for (const e of d.edges) walk(e, `${a.name} / connection`);
+  }
+  assert.deepEqual(bad, []);
+});

@@ -36,7 +36,7 @@ npm test
 
 ## Sample Sutras
 
-**+ New Sutra → Choose samples** adds working examples (all, or the ones you tick): For-Each mapping; loops on an activity; a sub-Sutra with Return; try / catch with logs; a REST API with validation; CSV import and totals; a folder of files; a SQLite database; XML in and out; JSONata, JavaScript and HTML; Router, Switch and Merge; connection conditions; channels between Sutras; counter, wait and Sutra variables; local AI with Ollama; emailing a report; a queue in and out; and two MCP skills (write a CSV file, post to a Facebook page). Those needing a connection or a local model say so.
+**+ New Sutra → Choose samples** adds working examples, all or the ones you tick: 31 Sutras that between them use every starter and every activity. They cover mapping (For-Each, loops), flow control (sub-Sutras, try / catch, routing, connection conditions), REST and SOAP (serving and calling), files (timer archive, file trigger drop folder, CSV import, text formats), databases (SQLite queries, updates, stored procedures), channels, counters, scripts (PowerShell, bash, programs), AI (local Ollama: classify, summarize, sentiment, translate, extract, route, reply), email (sending, inbox trigger), the service bus, Firebase, Google Drive and Sheets, Dropbox, YouTube, and MCP skills. Those needing a connection or a local model say so.
 
 ## MCP skills
 
@@ -204,7 +204,7 @@ POST /api/flows/{flowId}/run?wait=30000
 
 ## Tested here, and not
 
-The test suite (`npm test`, 76 tests) runs real servers for HTTP, SOAP with WS-Security, TLS, SMTP, an AMQP 1.0 peer (the ActiveMQ protocol), SQLite, and mock Google / Firebase / OAuth endpoints. PostgreSQL, MySQL, SQL Server, Oracle, Kafka, RabbitMQ, IMAP, Let's Encrypt and the live Google, Dropbox, YouTube and Facebook APIs use their standard client libraries but have not been run against real servers yet.
+The test suite (`npm test`, 78 tests) runs real servers for HTTP, SOAP with WS-Security, TLS, SMTP, an AMQP 1.0 peer (the ActiveMQ protocol), SQLite, and mock Google / Firebase / OAuth endpoints. PostgreSQL, MySQL, SQL Server, Oracle, Kafka, RabbitMQ, IMAP, Let's Encrypt and the live Google, Dropbox, YouTube and Facebook APIs use their standard client libraries but have not been run against real servers yet.
 
 ## Not yet included
 
