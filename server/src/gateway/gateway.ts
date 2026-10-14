@@ -370,7 +370,8 @@ async function handleMcp(req: FastifyRequest, reply: FastifyReply, secure: boole
 // ---------- listeners ----------
 
 function build(https?: any): FastifyInstance {
-  const app = Fastify({ https, trustProxy: false, bodyLimit: 50 * 1024 * 1024, logger: false });
+  // Idle keep-alive connections are closed on shutdown (not waited for), so a draining engine stops promptly.
+  const app = Fastify({ https, trustProxy: false, bodyLimit: 50 * 1024 * 1024, logger: false, forceCloseConnections: 'idle', keepAliveTimeout: 5000 });
   app.removeAllContentTypeParsers();
   app.addContentTypeParser('*', { parseAs: 'string' }, (_req, body, done) => done(null, body));
   const secure = !!https;

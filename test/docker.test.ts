@@ -67,3 +67,14 @@ test('the image builds (when Docker is installed)', { skip: spawnSync('docker', 
   const r = spawnSync('docker', ['build', '-t', 'sutraflow:test', '.'], { cwd: root, encoding: 'utf8', timeout: 900000 });
   assert.equal(r.status, 0, r.stderr);
 });
+
+test('cluster compose: PostgreSQL, a studio and two engines with one master key and token', () => {
+  const c = fs.readFileSync(path.join(root, 'docker-compose.cluster.yml'), 'utf8');
+  assert.match(c, /image: postgres:\d+/);
+  assert.match(c, /SUTRA_DB: postgres:\/\/sutra:/);
+  assert.match(c, /SUTRA_MASTER_KEY: \$\{SUTRA_MASTER_KEY:\?/, 'one vault key for every engine');
+  assert.match(c, /engine-1:[\s\S]*SUTRA_ENGINE_ID: engine-1/);
+  assert.match(c, /engine-2:[\s\S]*SUTRA_ENGINE_ID: engine-2/);
+  assert.match(c, /condition: service_healthy/, 'engines wait for the database');
+  assert.match(c, /SUTRA_WORKERS: "0"/, 'the studio leaves the work to the engines');
+});

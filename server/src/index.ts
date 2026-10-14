@@ -1,4 +1,4 @@
-import { openDb } from './db.js';
+import { openDb, q } from './db.js';
 import { engine } from './engine/engine.js';
 import { allActivities } from './palettes/index.js';
 import { onDeploymentsChange } from './flows.js';
@@ -14,6 +14,8 @@ import { closeBusPublishers } from './connectors/bus.js';
 import { closeDbPools } from './connectors/db.js';
 import { config } from './config.js';
 import { lifecycle } from './lifecycle.js';
+import { startCluster, stopCluster, bumpDeployGen, leaveLeadership, cluster } from './cluster.js';
+import { housekeeping } from './housekeeping.js';
 import { deployPackage, readPackage, packageHistory } from './packages.js';
 import { listProjects } from './projects.js';
 import fs from 'node:fs';
@@ -24,9 +26,28 @@ import path from 'node:path';
  * latest deployment of its project. A package that cannot be deployed stops the start: a container
  * should fail loudly rather than serve an incomplete release.
  */
-function deployFolder(dir: string) {
+async function deployFolder(dir: string) {
   if (!dir) return;
   if (!fs.existsSync(dir)) throw new Error(`SUTRA_DEPLOY_DIR ${dir} does not exist`);
+  // Replicas start with the same folder: one deploys while the others wait, then find it done.
+  const lock = await takeLock('deploy-folder', 120000);
+  try { deployFolderLocked(dir); } finally { lock(); }
+}
+
+/** A cluster-wide lock in the leases table; returns its release. */
+async function takeLock(name: string, waitMs: number) {
+  const end = Date.now() + waitMs;
+  for (;;) {
+    const t = Date.now();
+    q.run(`insert into leases(name, holder, expires_at) values(?, ?, ?) on conflict(name) do nothing`, name, config.engineId, t + 60000);
+    const got = Number(q.run(`update leases set holder = ?, expires_at = ? where name = ? and (holder = ? or expires_at < ?)`, config.engineId, t + 60000, name, config.engineId, t).changes) > 0;
+    if (got) return () => { q.run('delete from leases where name = ? and holder = ?', name, config.engineId); };
+    if (Date.now() > end) throw new Error(`Timed out waiting for the ${name} lock`);
+    await new Promise(r => setTimeout(r, 200));
+  }
+}
+
+function deployFolderLocked(dir: string) {
   for (const f of fs.readdirSync(dir).filter(x => x.endsWith('.sutra')).sort()) {
     const text = fs.readFileSync(path.join(dir, f), 'utf8');
     let pkg;
@@ -57,31 +78,46 @@ export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gatew
     setEngine: (name, value) => setEngineVariable(name, value),
   });
   loadOpsFiles(m => console.log(m));
-  deployFolder(config.deployDir);
+  await deployFolder(config.deployDir);
   lifecycle.packagesDeployed = true;
   engine.start();
-  const relisten = () => { rebuildListeners().catch(e => console.error('Listeners:', e)); };
-  onDeploymentsChange.push(rebuildRoutes, rebuildSchedules, relisten);
-  onResourceChange.push(() => { rebuildRoutes(); relisten(); });
-  onProjectChange.push(() => relisten());
-  rebuildSchedules();
-  relisten();
+  // Timers and polling listeners run once per cluster, on the leader; routes are served by every engine.
+  const relisten = () => { if (cluster.leader) rebuildListeners().catch(e => console.error('Listeners:', e)); };
+  const reschedule = () => { if (cluster.leader) rebuildSchedules(); };
+  onDeploymentsChange.push(rebuildRoutes, reschedule, relisten, bumpDeployGen);
+  onResourceChange.push(() => { rebuildRoutes(); relisten(); bumpDeployGen(); });
+  onProjectChange.push(() => { relisten(); bumpDeployGen(); });
+  startCluster({
+    becameLeader: () => { rebuildSchedules(); rebuildListeners().catch(e => console.error('Listeners:', e)); },
+    lostLeader: () => { stopSchedules(); stopListeners().catch(() => {}); },
+    deploymentsChanged: () => { rebuildRoutes(); reschedule(); relisten(); },
+    housekeeping: () => { try { housekeeping(); } catch (e) { console.error('Housekeeping:', e); } },
+  });
+  rebuildRoutes();
   if (opts.gateway !== false) {
     await startGateway();
     startRenewal(reloadTls);
   }
   const admin = await buildAdmin();
   if (opts.listenAdmin !== false) await admin.listen({ host: config.adminHost, port: config.adminPort });
-  return {
-    admin,
-    async stop() {
-      stopSchedules();
-      await stopListeners();
-      await closeBusPublishers();
-      await closeDbPools();
-      engine.stop();
-      if (opts.gateway !== false) await stopGateway();
-      await admin.close();
-    },
-  };
+  let stopping: Promise<void> | null = null;
+  const stop = () => (stopping ||= (async () => {
+    // 1. Not ready: load balancers stop sending new requests. 2. Another engine takes over timers and
+    // listeners. 3. Running steps finish, or go back to the queue for another engine. 4. Close.
+    lifecycle.draining = true;
+    leaveLeadership();
+    stopSchedules();
+    await stopListeners();
+    const d = await engine.drain(config.drainMs);
+    if (d.handedOver) console.log(`Drain: ${d.handedOver} running steps handed back to the queue`);
+    // Callers still waiting on this gateway get their replies (run elsewhere) before it closes.
+    if (opts.gateway !== false) await stopGateway();
+    await closeBusPublishers();
+    await closeDbPools();
+    engine.stop();
+    stopCluster();
+    await admin.close();
+  })());
+  lifecycle.shutdown = stop;
+  return { admin, stop };
 }

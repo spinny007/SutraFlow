@@ -120,7 +120,7 @@ export const processActivities: Activity[] = [
       if (op === 'get') return { out: { name, value: prev, previous: prev } };
       const by = Number(c.raw('by') ?? 1) || 0;
       const sql = op === 'increment' || op === 'decrement'
-        ? `insert into counters(project_id, name, value, updated_at) values(?, ?, ?, ?) on conflict(project_id, name) do update set value = value + excluded.value, updated_at = excluded.updated_at`
+        ? `insert into counters(project_id, name, value, updated_at) values(?, ?, ?, ?) on conflict(project_id, name) do update set value = counters.value + excluded.value, updated_at = excluded.updated_at`
         : `insert into counters(project_id, name, value, updated_at) values(?, ?, ?, ?) on conflict(project_id, name) do update set value = excluded.value, updated_at = excluded.updated_at`;
       const v = op === 'increment' ? by : op === 'decrement' ? -by : op === 'set' ? Number(c.raw('value')) || 0 : 0;
       q.run(sql, pid, name, v, now());

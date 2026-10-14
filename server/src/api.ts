@@ -27,7 +27,8 @@ import { listenerStatus } from './listeners.js';
 import { testResource, prepare } from './resourceTest.js';
 import { listModels, ollamaPull, ollamaImport } from './ai/providers.js';
 import { addSamples, SAMPLES } from './samples.js';
-import { health, readiness } from './lifecycle.js';
+import { health, readiness, lifecycle } from './lifecycle.js';
+import { clusterStatus } from './cluster.js';
 import { buildPackage, checkPackage, deployPackage, packageHistory, readPackage, rollbackPackage, testPackage } from './packages.js';
 
 const COOKIE = 'sutra_session';
@@ -80,7 +81,7 @@ function runDetail(id: string) {
 }
 
 export async function buildAdmin(): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false, bodyLimit: 20 * 1024 * 1024 });
+  const app = Fastify({ logger: false, bodyLimit: 20 * 1024 * 1024, forceCloseConnections: 'idle', keepAliveTimeout: 5000 });
 
   app.setErrorHandler((err: any, _req, reply) => {
     const status = err instanceof HttpError ? err.status : err.statusCode && err.statusCode < 500 ? err.statusCode : 500;
@@ -204,6 +205,16 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.post('/api/projects/:id/rollback', async (req: any) => {
     admin(req);
     try { return rollbackPackage(req.params.id, { to: req.body?.to, by: req.user?.u }); } catch (e: any) { throw packErr(e); }
+  });
+
+  // ---------- engine and cluster ----------
+  app.get('/api/engine/status', async () => ({ ...clusterStatus(), ready: readiness(), health: health() }));
+  /** Graceful stop of this engine (for orchestrators and Windows, where signals cannot drain). */
+  app.post('/api/engine/drain', async (req: any, reply) => {
+    if (req.user?.r !== 'admin') throw new HttpError(403, 'Only administrators can stop the engine');
+    if (!lifecycle.shutdown) throw bad('This server cannot be stopped from the API');
+    reply.code(202).send({ draining: true, engine: config.engineId, drainMs: config.drainMs });
+    setTimeout(() => { lifecycle.shutdown!().finally(() => { if (req.body?.exit !== false) process.exit(0); }); }, 50);
   });
 
   app.get('/api/scripts/policy', async () => ({ allowed: projects.scriptsAllowed() }));

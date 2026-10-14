@@ -14,6 +14,8 @@ export const lifecycle = {
   draining: false,
   gatewayWanted: true,
   problems: [] as string[],
+  /** Graceful stop of this server, set by boot(); used by signals and POST /api/engine/drain. */
+  shutdown: null as null | (() => Promise<void>),
 };
 
 export function health() {

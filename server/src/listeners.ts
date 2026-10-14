@@ -7,7 +7,6 @@ import { parseContent } from './palettes/fileformat.js';
 import { schemaTree } from './schemas.js';
 import { effectiveVariables, engineVariableValues } from './projects.js';
 import { resolveSettings } from './settings.js';
-import { subscribeChannel } from './channels.js';
 
 /**
  * Long-running triggers of deployed flows: file watchers, mailbox polling,
@@ -71,13 +70,6 @@ export async function stopListeners() {
   listenerStatus.clear();
   await Promise.all(all.map(async r => { try { await r.stop(); } catch { /* best effort */ } }));
 }
-
-// ---------- Channel trigger: in-memory messages from Send to channel ----------
-registerListener('channelTrigger', c => {
-  const channel = String(c.node.config.channel || '').trim();
-  if (!channel) throw new Error('Channel is not set');
-  return subscribeChannel(c.projectId, channel, msg => c.fire(msg));
-});
 
 // ---------- File trigger: polling with stability check ----------
 registerListener('fileTrigger', c => {

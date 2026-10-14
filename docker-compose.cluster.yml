@@ -1,0 +1,62 @@
+# A cluster: PostgreSQL, a studio, and two headless engines sharing the database.
+# Work is shared, each step runs once, one engine leads (timers, folder and mailbox listeners),
+# and a stopped engine's steps are finished by the other.
+#
+#   SUTRA_ADMIN_TOKEN=change-me SUTRA_MASTER_KEY=$(openssl rand -base64 32) POSTGRES_PASSWORD=change-me \
+#     docker compose -f docker-compose.cluster.yml up -d
+#
+# Every engine must use the same SUTRA_MASTER_KEY (the vault is in the shared database).
+# Put a load balancer in front of the engines' gateway ports (8080/8443) and point it at /ready.
+x-engine: &engine
+  image: sutraflow:1.0.0
+  depends_on:
+    postgres: { condition: service_healthy }
+  environment: &engine-env
+    SUTRA_MODE: engine
+    SUTRA_DB: postgres://sutra:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/sutra
+    SUTRA_ADMIN_TOKEN: ${SUTRA_ADMIN_TOKEN:?set SUTRA_ADMIN_TOKEN}
+    SUTRA_MASTER_KEY: ${SUTRA_MASTER_KEY:?set SUTRA_MASTER_KEY}
+  volumes: ["./deploy:/deploy:ro"]
+  stop_grace_period: 45s
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: sutra
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: sutra
+    volumes: ["pg-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sutra -d sutra"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+
+  studio:
+    build: .
+    image: sutraflow:1.0.0
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      SUTRA_MODE: studio
+      SUTRA_DB: postgres://sutra:${POSTGRES_PASSWORD}@postgres:5432/sutra
+      SUTRA_ADMIN_TOKEN: ${SUTRA_ADMIN_TOKEN}
+      SUTRA_MASTER_KEY: ${SUTRA_MASTER_KEY}
+      SUTRA_WORKERS: "0"
+    ports: ["4800:4800"]
+    restart: unless-stopped
+
+  engine-1:
+    <<: *engine
+    environment: { <<: *engine-env, SUTRA_ENGINE_ID: engine-1 }
+    ports: ["9080:8080"]
+
+  engine-2:
+    <<: *engine
+    environment: { <<: *engine-env, SUTRA_ENGINE_ID: engine-2 }
+    ports: ["9081:8080"]
+
+volumes:
+  pg-data:

@@ -80,6 +80,12 @@ export class Engine {
   private finishers = new Map<string, (status: string, runId: string) => void>();
   private controllers = new Map<number, AbortController>();
   private pumping = false;
+  /** Shutting down: no new tasks are claimed. */
+  private draining = false;
+  /** Tasks handed back to the queue during a drain: their late results are ignored. */
+  private handedOver = new Set<number>();
+  /** This engine's name, written as the owner of the tasks it runs. */
+  readonly id = config.engineId;
   /** Listeners notified when a run changes (for live status in the studio). */
   readonly listeners = new Set<(runId: string) => void>();
   concurrency = config.workerConcurrency;
@@ -101,10 +107,33 @@ export class Engine {
   }
 
   start() {
-    q.run(`update tasks set status = 'pending' where status = 'running'`);
-    this.timer = setInterval(() => this.pump(), 250);
+    this.draining = false;
+    // Steps this engine (same name) or an unnamed one was running when it stopped go back to the queue.
+    // Steps of other engines are recovered by the cluster leader when their heartbeat stops.
+    q.run(`update tasks set status = 'pending', owner = null where status = 'running' and (owner = ? or owner is null)`, this.id);
+    this.timer = setInterval(() => { this.pump(); this.checkRemoteWaiters(); }, 250);
     this.timer.unref?.();
     this.pump();
+  }
+
+  /** Steps running on this engine now. */
+  get running() { return this.active; }
+
+  /**
+   * Graceful shutdown: claim nothing new, let running steps finish for up to ms, then hand the rest
+   * back to the queue (pending, no owner) so another engine, or this one after a restart, resumes them.
+   */
+  async drain(ms: number) {
+    this.draining = true;
+    const end = Date.now() + Math.max(0, ms);
+    while (this.active > 0 && Date.now() < end) await new Promise(r => setTimeout(r, 50));
+    const left = q.all<{ id: number }>(`select id from tasks where status = 'running' and owner = ?`, this.id);
+    for (const t of left) {
+      this.handedOver.add(Number(t.id));
+      q.run(`update tasks set status = 'pending', owner = null where id = ? and status = 'running'`, t.id);
+      this.controllers.get(Number(t.id))?.abort();
+    }
+    return { finished: left.length === 0, handedOver: left.length };
   }
   stop() {
     if (this.timer) clearInterval(this.timer);
@@ -167,16 +196,23 @@ export class Engine {
     if (this.pumping) return;
     this.pumping = true;
     try {
-      while (this.active < this.concurrency) {
+      while (!this.draining && this.active < this.concurrency) {
+        // Claim the next due task in one statement: with several engines on one database, only one
+        // of them changes the row from pending to running, and it records itself as the owner.
         const t = q.get<TaskRow>(
-          `select * from tasks where status = 'pending' and not_before <= ? order by id limit 1`, Date.now());
-        if (!t) break;
+          `update tasks set status = 'running', started_at = ?, owner = ?
+           where id = (select id from tasks where status = 'pending' and not_before <= ? order by id limit 1) and status = 'pending'
+           returning *`, now(), this.id, Date.now());
+        if (!t) {
+          if (q.get(`select 1 from tasks where status = 'pending' and not_before <= ? limit 1`, Date.now())) continue; // another engine won; try the next
+          break;
+        }
+        t.id = Number(t.id);
         if (!t.released && this.shouldPause(t)) {
-          q.run(`update tasks set status = 'paused' where id = ?`, t.id);
+          q.run(`update tasks set status = 'paused', owner = null where id = ?`, t.id);
           this.settle(t.run_id);
           continue;
         }
-        q.run(`update tasks set status = 'running', started_at = ? where id = ?`, now(), t.id);
         this.active++;
         this.execute(t).finally(() => {
           this.active--;
@@ -288,10 +324,13 @@ export class Engine {
       this.controllers.delete(t.id);
       for (const l of logs) projectLog(run.row.project_id, { level: l.level as any, msg: maskSecrets(l.msg, revealed), flow: run.doc.name, run: t.run_id, step: node.name });
       if (wantsStepData(run.row.project_id)) projectLog(run.row.project_id, { level: 'debug', msg: 'Step finished', flow: run.doc.name, run: t.run_id, step: node.name, data: maskSecrets({ input, output: (res as any)?.out ?? (res as any)?.store }, revealed) });
+      if (this.handedOver.delete(t.id)) return;
       if (this.wasCancelled(t.id)) return this.settle(t.run_id);
       this.complete(t, run.doc, node, res || {}, { ms: Date.now() - started, revealed, logs, varsSet, replied });
     } catch (e: any) {
       this.controllers.delete(t.id);
+      // Handed back during a drain: another engine runs it again.
+      if (this.handedOver.delete(t.id)) return;
       // Stopped by another branch (End: stop process) or by a person: not a failure of this step.
       if (this.wasCancelled(t.id)) return this.settle(t.run_id);
       const msg = maskSecrets(String(e?.message || e), revealed);
@@ -567,6 +606,13 @@ export class Engine {
     }
   }
 
+  /** A run cancelled on another engine: stop the steps of it running here. */
+  abortCancelledHere() {
+    const mine = [...this.controllers.keys()];
+    if (!mine.length) return;
+    for (const r of q.all<{ id: number }>(`select id from tasks where owner = ? and status = 'cancelled'`, this.id)) this.controllers.get(Number(r.id))?.abort();
+  }
+
   private wasCancelled(taskId: number) {
     return q.get<{ status: string }>('select status from tasks where id = ?', taskId)?.status === 'cancelled';
   }
@@ -598,20 +644,47 @@ export class Engine {
     q.run('update runs set status = ?, finished_at = ? where id = ?', status, finished ? now() : null, runId);
     if (finished) {
       this.docs.delete(runId);
-      const h = this.replies.get(runId);
-      if (h && !h.done) {
-        const err = run.row.error || q.get<{ error: string }>('select error from runs where id = ?', runId)?.error;
-        h.resolve(run.state.failed
-          ? { runId, failed: true, error: err || 'Sutra failed', status: 500, body: { error: err || 'Sutra failed' } }
-          : { runId, status: 200, body: run.state.last ?? null });
-      }
-      this.replies.delete(runId);
+      this.resolveReply(runId, run.state, run.row.error);
       const err = q.get<{ error: string }>('select error from runs where id = ?', runId)?.error;
       projectLog(run.row.project_id, { level: status === 'failed' ? 'error' : 'info', msg: status === 'failed' ? `Run failed: ${err}` : 'Run finished', flow: run.doc.name, run: runId });
       this.finish(runId, status);
       if (run.row.source === 'sutra' || run.row.source === 'process') queueMicrotask(() => this.resumeCaller(runId, status));
     }
     this.notify(runId);
+  }
+
+  /** The answer for a caller waiting on this run: its reply step's reply, or its outcome when it ended without one. */
+  private resolveReply(runId: string, st: RunState, rowError?: string | null) {
+    const h = this.replies.get(runId);
+    if (h && !h.done) {
+      h.done = true;
+      const err = rowError || q.get<{ error: string }>('select error from runs where id = ?', runId)?.error;
+      if (st.reply) h.resolve({ ...st.reply, runId });
+      else h.resolve(st.failed
+        ? { runId, failed: true, error: err || 'Sutra failed', status: 500, body: { error: err || 'Sutra failed' } }
+        : { runId, status: 200, body: st.last ?? null });
+    }
+    this.replies.delete(runId);
+  }
+
+  /**
+   * Callers wait on the engine that received them, but in a cluster another engine may run the reply
+   * step or the last step. Every 250 ms this engine looks up the runs it is waiting on.
+   */
+  private checkRemoteWaiters() {
+    const ids = [...new Set([...this.replies.keys(), ...this.finishers.keys()])];
+    if (!ids.length) return;
+    for (const runId of ids) {
+      const r = q.get<{ status: string; state: string; error: string | null }>('select status, state, error from runs where id = ?', runId);
+      if (!r) continue;
+      const st = JSON.parse(r.state) as RunState;
+      const h = this.replies.get(runId);
+      if (h && !h.done && st.reply) { h.done = true; h.resolve({ ...st.reply, runId }); this.replies.delete(runId); }
+      if (['done', 'failed', 'cancelled'].includes(r.status)) {
+        if (this.replies.has(runId)) this.resolveReply(runId, st, r.error);
+        if (this.finishers.has(runId)) this.finish(runId, r.status);
+      }
+    }
   }
 
   private finish(runId: string, status: string) {
