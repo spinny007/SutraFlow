@@ -1,0 +1,156 @@
+import { Worker } from 'node:worker_threads';
+import type { Activity } from '../engine/types.js';
+import { resolve } from '../template.js';
+import { getPath } from '../values.js';
+import { F } from './common.js';
+
+/**
+ * Custom code runs in a worker thread inside a fresh V8 context:
+ *  - data goes in as JSON text and is parsed inside the sandbox, so no host
+ *    objects (and no route to require/process) are reachable;
+ *  - eval/new Function and WebAssembly are disabled in the sandbox;
+ *  - CPU time is capped (the worker is terminated) and heap size is limited.
+ * Treat code steps as trusted-author code all the same: only studio users can write them.
+ */
+const WORKER_SRC = `
+const { parentPort, workerData } = require('node:worker_threads');
+const vm = require('node:vm');
+const { code, data, timeoutMs } = workerData;
+const context = vm.createContext(Object.create(null), { codeGeneration: { strings: false, wasm: false } });
+const boot = \`
+  'use strict';
+  const __logs = [];
+  const console = { log: (...a) => __logs.push(['info', a.map(String).join(' ')]), info: (...a) => __logs.push(['info', a.map(String).join(' ')]),
+                    warn: (...a) => __logs.push(['warn', a.map(String).join(' ')]), error: (...a) => __logs.push(['error', a.map(String).join(' ')]) };
+  const __d = JSON.parse(__json);
+  const { input, nodes, vars, gv, trigger, run } = __d;
+  const __fn = async () => { \${code}\n };
+  __fn().then(v => JSON.stringify({ ok: true, value: v === undefined ? null : v, logs: __logs }),
+             e => JSON.stringify({ ok: false, error: (e && e.message) || String(e), logs: __logs }));
+\`;
+context.__json = data;
+try {
+  const p = vm.runInContext(boot, context, { timeout: timeoutMs, filename: 'code-step.js' });
+  Promise.resolve(p).then(s => parentPort.postMessage(s), e => parentPort.postMessage(JSON.stringify({ ok: false, error: String(e && e.message || e) })));
+} catch (e) {
+  parentPort.postMessage(JSON.stringify({ ok: false, error: String(e && e.message || e) }));
+}
+`;
+
+export function runSandboxed(code: string, data: unknown, timeoutMs = 5000, memoryMb = 64): Promise<{ value: any; logs: [string, string][] }> {
+  return new Promise((res, rej) => {
+    const w = new Worker(WORKER_SRC, {
+      eval: true,
+      workerData: { code, data: JSON.stringify(data ?? null), timeoutMs },
+      resourceLimits: { maxOldGenerationSizeMb: memoryMb, maxYoungGenerationSizeMb: 16, codeRangeSizeMb: 16 },
+      env: {},
+    });
+    const timer = setTimeout(() => { w.terminate(); rej(new Error(`Code did not finish within ${timeoutMs} ms`)); }, timeoutMs + 200);
+    w.once('message', (msg: string) => {
+      clearTimeout(timer);
+      w.terminate();
+      const r = JSON.parse(msg);
+      if (r.ok) res({ value: r.value, logs: r.logs || [] });
+      else rej(Object.assign(new Error(r.error), { logs: r.logs }));
+    });
+    w.once('error', (e: Error) => { clearTimeout(timer); rej(new Error(/memory/i.test(e.message) ? `Code used more than ${memoryMb} MB of memory` : e.message)); });
+  });
+}
+
+// ---------- HTML templates ----------
+const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+const show = (v: unknown) => (v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+
+/**
+ * {{path}} escaped, {{{path}}} raw, {{=formula}} escaped formula,
+ * {{#each list}}…{{/each}} with {{this.x}} / {{@index}}, {{#if value}}…{{else}}…{{/if}}.
+ */
+export function renderHtml(tpl: string, ctx: Record<string, any>): string {
+  const evalRef = (expr: string, scope: Record<string, any>) => {
+    const e = expr.trim();
+    if (e.startsWith('=')) return resolve(e, scope);
+    if (e === 'this') return scope.this;
+    if (e.startsWith('this.')) return getPath(scope.this, e.slice(5));
+    if (e === '@index') return scope['@index'];
+    return resolve(`{{${e}}}`, scope);
+  };
+  // Tags: {{{x}}} raw, {{x}} escaped, {{#each x}} {{#if x}} {{else}} {{/each}} {{/if}}.
+  type Tag = { start: number; end: number; raw: boolean; body: string };
+  const nextTag = (t: string, from: number): Tag | null => {
+    const start = t.indexOf('{{', from);
+    if (start < 0) return null;
+    const raw = t[start + 2] === '{';
+    const close = raw ? '}}}' : '}}';
+    const end = t.indexOf(close, start + (raw ? 3 : 2));
+    if (end < 0) throw new Error('HTML template: a {{ tag is not closed');
+    return { start, end: end + close.length, raw, body: t.slice(start + (raw ? 3 : 2), end).trim() };
+  };
+  const render = (t: string, scope: Record<string, any>): string => {
+    let out = '', i = 0;
+    for (;;) {
+      const tag = nextTag(t, i);
+      if (!tag) { out += t.slice(i); break; }
+      out += t.slice(i, tag.start);
+      const block = /^#(each|if)\s+([\s\S]+)$/.exec(tag.body);
+      if (block) {
+        const kw = block[1];
+        let depth = 1, j = tag.end, elseAt: Tag | null = null, closeTag: Tag | null = null;
+        for (let n = nextTag(t, j); n; n = nextTag(t, n.end)) {
+          if (n.body.startsWith(`#${kw} `)) depth++;
+          else if (n.body === `/${kw}`) { if (!--depth) { closeTag = n; break; } }
+          else if (n.body === 'else' && depth === 1 && kw === 'if') elseAt = n;
+        }
+        if (!closeTag) throw new Error(`HTML template: {{#${kw}}} has no {{/${kw}}}`);
+        const body = t.slice(tag.end, elseAt ? elseAt.start : closeTag.start);
+        const alt = elseAt ? t.slice(elseAt.end, closeTag.start) : '';
+        const v = evalRef(block[2], scope);
+        if (kw === 'each') {
+          const list = Array.isArray(v) ? v : v && typeof v === 'object' ? Object.values(v) : [];
+          out += list.map((item, idx) => render(body, { ...scope, this: item, '@index': idx })).join('');
+        } else {
+          const truthy = Array.isArray(v) ? v.length > 0 : !!v && v !== 'false';
+          out += render(truthy ? body : alt, scope);
+        }
+        i = closeTag.end;
+        continue;
+      }
+      const v = evalRef(tag.body, scope);
+      out += tag.raw ? show(v) : esc(show(v));
+      i = tag.end;
+    }
+    return out;
+  };
+  return render(tpl, ctx);
+}
+
+export const codeActivities: Activity[] = [
+  {
+    type: 'jsCode', palette: 'custom', name: 'JavaScript code', glyph: 'JS', ports: ['out'],
+    desc: 'Runs your JavaScript in a sandbox. Use input, nodes, vars, gv, trigger and run; return the output. console.log goes to the run log. No network or file access.',
+    fields: [
+      F('code', 'Code', 'code', '// input = previous step output; nodes["Step name"] = any earlier step\nconst total = (input.lines || []).reduce((s, l) => s + l.qty * l.price, 0);\nreturn { ...input, total: Math.round(total * 100) / 100 };'),
+      F('timeoutMs', 'Time limit (ms)', 'number', 5000),
+      F('memoryMb', 'Memory limit (MB)', 'number', 64),
+    ],
+    execute: async c => {
+      const data = { input: c.input, nodes: c.scope.nodes, vars: c.scope.vars, gv: c.scope.gv, trigger: c.scope.trigger, run: c.scope.run };
+      try {
+        const r = await runSandboxed(String(c.raw('code') || ''), data, Math.min(60000, Number(c.raw('timeoutMs')) || 5000), Math.min(512, Number(c.raw('memoryMb')) || 64));
+        for (const [lvl, msg] of r.logs) c.log(lvl as any, msg);
+        return { out: r.value };
+      } catch (e: any) {
+        for (const [lvl, msg] of e.logs || []) c.log(lvl, msg);
+        throw e;
+      }
+    },
+  },
+  {
+    type: 'htmlTemplate', palette: 'custom', name: 'HTML template', glyph: '</>', ports: ['out'],
+    desc: 'Builds HTML (an email body, a page, a report) from a template: {{input.x}} is escaped, {{{x}}} is raw, {{=formula}}, {{#each list}}…{{/each}}, {{#if x}}…{{else}}…{{/if}}.',
+    fields: [
+      F('html', 'HTML', 'code', '<h1>Order {{input.orderId}}</h1>\n<table>\n  {{#each input.lines}}<tr><td>{{this.sku}}</td><td>{{this.qty}}</td></tr>{{/each}}\n</table>\n{{#if input.note}}<p>{{input.note}}</p>{{else}}<p>No note.</p>{{/if}}\n<p>Printed {{=format-dateTime(\'DD MMM YYYY HH:mm\', current-dateTime(), \'Asia/Kolkata\')}}</p>'),
+    ],
+    outputHint: { html: '' },
+    execute: c => ({ out: { html: renderHtml(String(c.raw('html') || ''), c.scope) } }),
+  },
+];

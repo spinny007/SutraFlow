@@ -1,0 +1,412 @@
+/**
+ * User guide chapters. Plain HTML with a few markers the builder expands:
+ *   [[img:name|Caption]]   a screenshot from docs/guide-images/name.jpg
+ *   [[type]]               a link to an activity's reference entry
+ *   [[note:Title|text]]    a blue note;  [[tip:Title|text]] a yellow guideline box
+ */
+export interface Chapter { id: string; title: string; html: string }
+
+export const CHAPTERS: Chapter[] = [
+  {
+    id: 'overview', title: 'What SutraFlow is',
+    html: `
+<p>SutraFlow is a visual integration designer and engine. You build a <strong>Sutra</strong> by dragging <strong>activities</strong> from palettes onto a canvas and connecting them; you map data from earlier activities into later ones; you test and debug it in the studio; and you <strong>deploy</strong> it to run on the server: on a schedule, when a file or message arrives, or as a REST or SOAP API protected by a security policy and TLS.</p>
+<p>One program contains three parts:</p>
+<ul>
+<li><strong>The studio</strong> at <code>http://127.0.0.1:4800</code>: the Designer, Runs, Resources and Server &amp; APIs screens.</li>
+<li><strong>The engine</strong>, which runs Sutras step by step and saves each finished step, so runs survive a restart and long waits cost nothing.</li>
+<li><strong>The gateway</strong> on ports 8080 (HTTP) and 8443 (HTTPS), which serves deployed APIs, separately from the studio.</li>
+</ul>
+[[note:Words used in this guide|A <em>project</em> holds Sutras, shared resources (connections), schemas and variables. A <em>Sutra</em> is one process diagram. An <em>activity</em> is one box on it; a <em>step</em> is one execution of an activity in a run; a <em>run</em> is one execution of a Sutra. <em>Sutra variables</em> live for one run, <em>Project variables</em> are shared by a project's Sutras, and <em>Sengine variables</em> are server settings made by the administrator.]]
+[[img:designer|The Designer: palettes on the left, the process in the middle, the selected activity's tabs on the right.]]`,
+  },
+  {
+    id: 'start', title: 'Install and start the server',
+    html: `
+<p>SutraFlow needs Node.js 22.13 or later; version 24 is recommended. Nothing else is installed: the database is SQLite, built into Node.</p>
+<p class="h">Procedure</p>
+<ol>
+<li>Open a terminal in the SutraFlow folder.</li>
+<li>Install the packages: <code>npm install</code></li>
+<li>Build the studio and server: <code>npm run build</code></li>
+<li>Start the server: <code>npm start</code></li>
+<li>Open <code>http://127.0.0.1:4800</code>. The first time, create the administrator account.</li>
+</ol>
+<p>For development with automatic reload, run <code>npm run dev</code> and open <code>http://localhost:5173</code>. The tests run with <code>npm test</code>.</p>
+[[tip:Guidelines|Back up the <code>data</code> folder, and above all <code>data/master.key</code>: without it the encrypted secrets cannot be read.<br>Keep the studio on 127.0.0.1. Publish APIs through the gateway ports, not the studio port.]]
+<p class="h">Server settings</p>
+<table class="t"><thead><tr><th>Environment variable</th><th>Default</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>SUTRA_DATA_DIR</code></td><td><code>./data</code></td><td>Database, master key, deployment config files.</td></tr>
+<tr><td><code>SUTRA_MASTER_KEY</code></td><td>the key file</td><td>The vault key, 32 bytes in base64.</td></tr>
+<tr><td><code>SUTRA_ADMIN_HOST</code>, <code>SUTRA_ADMIN_PORT</code></td><td>127.0.0.1, 4800</td><td>Where the studio listens.</td></tr>
+<tr><td><code>SUTRA_GATEWAY_HTTP_PORT</code>, <code>SUTRA_GATEWAY_HTTPS_PORT</code></td><td>8080, 8443</td><td>Gateway ports until changed in Server &amp; APIs.</td></tr>
+<tr><td><code>SUTRA_WORKERS</code></td><td>16</td><td>Steps that run at the same time.</td></tr>
+<tr><td><code>SUTRA_MAX_STEPS</code></td><td>10000</td><td>Safety limit of steps per run.</td></tr>
+<tr><td><code>SUTRA_REPLY_TIMEOUT_MS</code></td><td>60000</td><td>How long an API caller waits for the reply step.</td></tr>
+</tbody></table>`,
+  },
+  {
+    id: 'tour', title: 'The studio, screen by screen',
+    html: `
+<p>The top bar holds the four screens, the version in the middle, the light/dark switch and Sign out.</p>
+<table class="t"><thead><tr><th>Screen</th><th>What it is for</th></tr></thead><tbody>
+<tr><td><strong>Designer</strong></td><td>Building, testing, debugging and deploying Sutras. Left: the <em>Project</em> explorer and the <em>Palettes</em>. Middle: the canvas and its toolbar. Right: the selected activity's General, Input, Output and Settings tabs.</td></tr>
+<tr><td><strong>Runs</strong></td><td>Every run with its status, steps, inputs and outputs, logs; approvals waiting for a person.</td></tr>
+<tr><td><strong>Resources</strong></td><td>Shared connections and security of the current project, and the secrets vault.</td></tr>
+<tr><td><strong>Server &amp; APIs</strong></td><td>Exposed services, Sengine variables, gateway ports, TLS certificate, active listeners.</td></tr>
+</tbody></table>
+<p class="h">The Designer toolbar</p>
+<ul>
+<li><strong>Sutra list</strong>: opens another Sutra of the project.</li>
+<li><strong>+ New Sutra</strong>: a blank Sutra or a starter (REST API, SOAP service, approval with timer).</li>
+<li><strong>&#9654; Test</strong>: runs the current draft once with the trigger's test data, without deploying.</li>
+<li><strong>Debug</strong>: runs the draft one activity at a time (see <a href="#ch-debug">Testing and debugging</a>).</li>
+<li><strong>&#8630; Undo</strong> and <strong>&#8631; Redo</strong> (Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z): step back and forward through your changes to the Sutra, up to 100 of them, such as a deleted activity or connection, a move or a changed mapping. While you type in a field, Ctrl+Z undoes the typing in that field instead.</li>
+<li><strong>Deploy</strong>: makes the current draft the live version.</li>
+<li>Status badges: <em>Saved</em>, <em>Deployed v2</em> or <em>Draft only</em>, and the last test result.</li>
+</ul>
+<p>The <strong>Delete</strong> key deletes the selected activity or connection (Backspace does not, so editing text never removes an activity). Changes save automatically. Zoom with the wheel or the + and &minus; buttons; the small map at the bottom left shows where you are.</p>`,
+  },
+  {
+    id: 'projects', title: 'Projects and the explorer',
+    html: `
+<p>Open the <strong>Project</strong> tab on the left of the Designer. The project list at the top switches projects; <strong>+</strong> creates one. Each project holds:</p>
+<table class="t"><thead><tr><th>Section</th><th>What it holds</th></tr></thead><tbody>
+<tr><td><strong>Sutras</strong></td><td>The Sutras, with their deployed version. Each Sutra also has <em>Sutra variables</em>, read as <code>{vars.name}</code>.</td></tr>
+<tr><td><strong>Resources</strong></td><td>The project's connections and security, each listed under the name you gave it with a symbol for its kind. <strong>+</strong> opens the list of kinds: HTTP connection, Outbound security, API security policy, AI provider, Email (SMTP and IMAP), Database, Kafka, RabbitMQ, ActiveMQ, Firebase, OAuth connection. The name is its key in the deployment config, so you can rename it safely.</td></tr>
+<tr><td><strong>Schemas</strong></td><td>Shared JSON (JSON Schema or a sample document) and XML (XSD) schemas. Activities pick them to describe payloads, bodies, CSV rows and mapping targets.</td></tr>
+<tr><td><strong>Service descriptors</strong></td><td>WSDL files that [[soapInvoke]] can call.</td></tr>
+<tr><td><strong>Configuration</strong></td><td>Project variables, the deployment config and the log file settings.</td></tr>
+</tbody></table>
+[[img:project-explorer|The Project explorer with a shared XSD schema open: its fields are shown as a tree, as activities will see them.]]
+<p class="h">Add a connection</p>
+<ol>
+<li>Next to <em>Resources</em>, click <strong>+</strong> and choose the kind, for example <em>HTTP connection</em>.</li>
+<li>Give it your own name, such as <em>Orders API</em>. The explorer lists it under that name.</li>
+<li>Fill in its settings: address and port, user, the vault secret for the password. Settings marked <strong>{x}</strong> take a project variable, such as <code>{{gv.ORDERS_URL}}</code>, so each environment can use its own value.</li>
+<li>Click <strong>Test connection</strong>. SutraFlow tries the settings as they are on screen, with variables filled in, and says what happened: the HTTP status, the database it reached, the mailbox count, the AI model that answered.</li>
+<li>Click <strong>Save</strong>.</li>
+</ol>
+[[img:resource-menu|Resources: + opens the list of kinds. Existing connections are listed under their own names.]]
+[[img:resource-new|A new HTTP connection named Orders API, after Test connection.]]
+<p class="h">Add a shared schema</p>
+<ol>
+<li>Next to <em>Schemas</em>, click <strong>+</strong>.</li>
+<li>Give it a name and choose the type: JSON or XML (XSD).</li>
+<li>Paste the content, or load a file. A JSON sample document is enough; SutraFlow works out the fields.</li>
+<li>For an XSD with several root elements, choose the default root element.</li>
+<li>Save. The <em>Fields</em> tree shows the result: <code>*</code> marks a required field, <code>**</code> a repeating one.</li>
+</ol>`,
+  },
+  {
+    id: 'build', title: 'Building a Sutra',
+    html: `
+<ol>
+<li>Click <strong>+ New Sutra</strong> and choose a starter, or start blank.</li>
+<li>Drag a <strong>trigger</strong> from the Triggers palette (or keep Manual start). A Sutra has one trigger.</li>
+<li>Drag activities onto the canvas. Search the palettes with the box at the top.</li>
+<li>Connect an activity's output (a circle on its right) to the next activity's input (on its left). Activities with several outputs, such as [[if]] or [[router]], have one circle per output.</li>
+<li>Select each activity and fill in its tabs.</li>
+<li>Click <strong>Test</strong>. Each activity shows its result; select one and open <strong>Output</strong> to see the values.</li>
+<li>When it works, click <strong>Deploy</strong>.</li>
+</ol>
+<p class="h">Branches, errors and ends</p>
+<ul>
+<li>Every activity except triggers and End has a red <strong>error</strong> output. Connect it to handle a failure; otherwise the failure ends the run as failed.</li>
+<li>A branch that is not taken is <em>skipped</em>; a [[merge]] after it still continues.</li>
+<li>[[end]] ends a branch. With <em>Sutra: success</em> or <em>Sutra: error</em> it stops the whole Sutra at once and cancels the other branches.</li>
+<li>[[throw]] fails a branch with your message, so an error output before it can handle it.</li>
+<li>The [[catch]] activity catches every error whose activity has no error output connected: one place to log, alert and clean up.</li>
+</ul>
+<p class="h">Connections: names and conditions</p>
+<p>Click a connection to name it and decide when it is taken. The name and condition show on the canvas.</p>
+<table class="t"><thead><tr><th>Taken</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><strong>Always</strong></td><td>Every time the activity finishes on that output. The default.</td></tr>
+<tr><td><strong>When a condition is true</strong></td><td>A formula on the previous activity's output, which it reads as <code>{input.x}</code>; for example <code>={input.amount} &gt; 1000</code> named <em>Order &gt; 1000</em>. Several "when" connections can be taken together.</td></tr>
+<tr><td><strong>Otherwise</strong></td><td>Taken when none of the "when" connections from the same output was taken.</td></tr>
+</tbody></table>
+<p>A connection that is not taken counts as a skipped branch, so a [[merge]] after it still continues. For many routes, or for routes on the same message used in several places, a [[router]] activity keeps them in one place.</p>
+<p class="h">Sample Sutras</p>
+<p>Click <strong>+ New Sutra</strong>, then <strong>Add sample Sutras to this project</strong>. Five working Sutras are added; test each one and open its activities' Input and Output tabs to see how it is built.</p>
+<table class="t"><thead><tr><th>Sample</th><th>What it shows</th></tr></thead><tbody>
+<tr><td><strong>Sample: For-Each mapping</strong></td><td>[[mapper]] turns order lines into invoice lines with a For-Each: <em>Where</em> skips zero quantities, <em>Sort by</em> orders them, <code>position()</code> numbers them; a second For-Each groups the lines by country with <code>{group.key}</code> and <code>sum({group.items}, 'price')</code>.</td></tr>
+<tr><td><strong>Sample: Loop on an activity</strong></td><td>One activity run once per order (Loop: for each item, results collected as <code>iterations</code>), and a [[counter]] repeated while its value is below 3, with a delay: the shape of polling a job until it is done.</td></tr>
+<tr><td><strong>Sample: Calculate tax (called Sutra)</strong> and <strong>Sample: Invoice with a sub-Sutra</strong></td><td>A reusable Sutra that ends with [[return]], and a Sutra that runs it with [[callProcess]], logs its result, and logs a failure from its error output.</td></tr>
+<tr><td><strong>Sample: Try and catch with logs</strong></td><td>Try and catch around one activity (its own error output connected), and the [[catch]] for every other error: it logs the failed step and the message, then ends the Sutra as handled. [[log]] records each stage at info, warn and error level.</td></tr>
+</tbody></table>
+[[img:sample-foreach|Sample: For-Each mapping. The repeating target <em>lines</em> is selected: its For-Each takes the order lines, keeps rows where qty &gt; 0 and sorts them by sku.]]
+[[img:sample-trycatch|Sample: Try and catch with logs after a test: Check stock's own error output handled one failure; the Error handler caught Reject and logged it.]]
+<p class="h">Reusable Sutras</p>
+<p>Put logic used in several places in its own Sutra: a Manual start with a payload schema, the steps, and [[return]] with the result. Other Sutras run it with [[callProcess]], wait for the result and continue; a failure inside it arrives on Call Sutra's error output. While you test, the draft of the called Sutra runs; deployed Sutras call its deployed version.</p>
+<p class="h">Loops</p>
+<p>Any activity can run more than once (Settings tab &rarr; <em>Loop</em>):</p>
+<ul>
+<li><strong>For each item of a list</strong>: once per item of <em>Loop over</em>. Map <code>{iteration.value}</code> (or <code>{item}</code>) and <code>{iteration.index}</code>; the mapper lists them under <code>$iteration</code>. The output is <code>iterations</code> (every result) and <code>count</code>.</li>
+<li><strong>Repeat while a condition holds</strong>: runs, then checks the condition, for example <code>={iteration.output.status} != 'DONE'</code>, with a delay between runs: polling until a job is finished. The output is the last result plus <code>_iterations</code>.</li>
+</ul>
+<p>A looping activity shows &#8635; after its type on the canvas. Each loop has a maximum number of runs (1000 by default).</p>
+<p class="h">Sutras working together</p>
+<ul>
+<li>[[callProcess]]: run another Sutra and use its result.</li>
+<li>[[channelPublish]] and [[channelTrigger]]: tell other deployed Sutras that something happened, in memory.</li>
+<li>[[counter]]: a number shared by all runs of the project, such as a sequence or a daily total.</li>
+</ul>
+[[tip:Guidelines|Name activities by what they do (<em>Get order</em>, not <em>HTTP 1</em>): mappings refer to activities by name, and renaming one updates them.<br>Give every API branch a reply, including the error branches.]]`,
+  },
+  {
+    id: 'tabs', title: 'The activity tabs',
+    html: `
+<table class="t"><thead><tr><th>Tab</th><th>What it holds</th></tr></thead><tbody>
+<tr><td><strong>General</strong></td><td>The activity's name and its fixed settings: folders, URLs, methods, connections, formats. Fields with <strong>{x}</strong> accept project and Sengine variables (<code>{{gv.OUTBOX}}</code>, <code>{{ev.REGION}}</code>) and <code>=</code> formulas. <em>Map inputs</em> opens the Input tab.</td></tr>
+<tr><td><strong>Input</strong></td><td>The mapper: values that come from earlier activities (see <a href="#ch-mapping">Mapping data</a>).</td></tr>
+<tr><td><strong>Output</strong></td><td>The fields this activity produces, before any run; after a run, the values it received and produced.</td></tr>
+<tr><td><strong>Settings</strong></td><td>Retries with a growing delay, a timeout, a breakpoint for debugging, and <em>skip this activity</em>.</td></tr>
+</tbody></table>
+[[img:general-tab|The General tab of Write file: the folder accepts variables through {x}; Append and Overwrite are checkboxes.]]
+[[img:output-tab|The Output tab after a test: the fields and their values.]]
+<p class="h">Settings tab reference</p>
+<table class="t"><thead><tr><th>Setting</th><th>What it does</th><th>Default</th></tr></thead><tbody>
+<tr><td><strong>Retries on failure</strong></td><td>Runs the activity again after a failure, up to this many times (at most 20), before the error output is used.</td><td>0</td></tr>
+<tr><td><strong>First retry delay (ms)</strong></td><td>Wait before the first retry; each retry waits twice as long as the one before.</td><td>1000</td></tr>
+<tr><td><strong>Timeout (ms)</strong></td><td>Fails the activity if it takes longer.</td><td>120000</td></tr>
+<tr><td><strong>Skip this activity</strong></td><td>Passes the input through without running the activity.</td><td>off</td></tr>
+<tr><td><strong>Breakpoint</strong></td><td>The debugger pauses before this activity.</td><td>off</td></tr>
+<tr><td><strong>Loop</strong></td><td>Run once, for each item of a list, or repeat while a condition holds (see <a href="#ch-build">Loops</a>).</td><td>Run once</td></tr>
+<tr><td><strong>Loop over</strong> / <strong>Repeat while</strong></td><td>The list, or the condition checked after each run.</td><td>&mdash;</td></tr>
+<tr><td><strong>Delay between runs (ms)</strong></td><td>Wait between two runs of the loop.</td><td>0</td></tr>
+<tr><td><strong>Maximum runs</strong></td><td>Fails the activity when the loop would run more often (at most 10000).</td><td>1000</td></tr>
+</tbody></table>`,
+  },
+  {
+    id: 'mapping', title: 'Mapping data',
+    html: `
+<p>Select an activity and open <strong>Input</strong>. <strong>Sutra Data</strong> on the left lists everything the activity can use: <code>$_projectVariables</code>, <code>$_sengineVariables</code> (read only), <code>$_sutraContext</code> (this run: id, name, version, step), <code>$_sutraVariables</code>, the previous step as <code>input</code>, and every earlier activity by name. <strong>Activity Input</strong> on the right lists what the activity needs; for structured inputs, the tree of the chosen schema.</p>
+[[img:mapper|The mapper: Process Data on the left, the target on the right, the selected target's formula below with the function library.]]
+<p class="h">Procedure</p>
+<ol>
+<li>Drag a field from the left onto a target field on the right. A line shows the link.</li>
+<li>Or select a target and write its formula in the box below. Click a function in the library to insert it; the preview under the box shows the result against the last test run.</li>
+<li>Drop a <strong>list</strong> onto a <strong>repeating</strong> target: a For-Each is created and fields with the same names are mapped. Inside it, <code>{item.x}</code> is the current row and <code>{index}</code> its position.</li>
+<li>Click <strong>Auto map</strong> to map every field that has the same name on both sides.</li>
+<li>Click any field, on either side, to highlight where it is mapped; other lines fade.</li>
+</ol>
+[[img:mapper-highlight|A selected source field: its mapping line is highlighted and the others fade.]]
+<p class="h">For-Each, If and Choose</p>
+<ul>
+<li><strong>Where</strong> keeps only rows where a condition holds, using the row's own column names: <code>upper-case(Country) = 'INDIA'</code>.</li>
+<li><strong>Group by</strong> makes one element per distinct value; inside, <code>{group.key}</code>, <code>{group.items}</code> and <code>{group.count}</code>.</li>
+<li><strong>Sort by</strong> orders the rows, ascending or descending.</li>
+<li><strong>If</strong> includes the target only when its condition is true.</li>
+<li><strong>Choose</strong> takes the first <em>When</em> whose condition is true, otherwise the <em>Otherwise</em> value.</li>
+</ul>
+<p class="h">Formulas</p>
+<p>A formula starts with <code>=</code> in a plain field, and is implied in mapping targets. References are written in braces: <code>{input.name}</code>, <code>{nodes.Get order.body.id}</code>, <code>{gv.OUTBOX}</code>, <code>{vars.total}</code>.</p>
+<pre>=concat('Name : ', {input.name})
+=upper-case(substring-before({input.email}, '@'))
+=format-date('DD-MM-YY', {nodes.Parse XML.Order.date})
+=format-dateTime('DD MMM YYYY HH:mm', current-dateTime(), 'Asia/Kolkata')
+=string-to-base64(concat({gv.USER}, ':', {gv.PASSWORD}))
+=if({input.amount} &gt; 1000, 'bulk', 'retail')
+={input.rows}[upper-case(Country) = 'INDIA']        rows where the condition holds
+=count({input.rows}[Amount &gt; 1000])
+={input.rows}[1].City                                  first row, then a field
+=xs:integer({input.qty})
+=concat({gv.OUT}, '\\', current-timestamp('YYYYMMDD'), '.csv')
+=set-project-variable('LAST_RUN', current-dateTime())</pre>
+<p>Backslashes in quoted text are literal, so Windows paths need no escaping. Write a quote twice to include it: <code>'O''Brien'</code>. Function names ignore case. Every function is listed in <a href="#ch-functions">Function reference</a>.</p>
+<p class="h">Templates in text fields</p>
+<p>Text fields such as an email body or a log message use <code>{{ }}</code> templates with pipes: <code>Order {{input.id | upper}} for {{input.amount | number:2}}</code>. The pipes are listed in <a href="#ch-pipes">Template pipes</a>.</p>
+[[tip:When to use JSONata instead|For heavy reshaping of repeating JSON (filter, group, total and nest in one go) a single [[jsonata]] activity is often clearer than many mapper rules.]]`,
+  },
+  {
+    id: 'schemas', title: 'Schemas and WSDLs',
+    html: `
+<p>Activities that receive or produce structured data let you pick a <strong>shared schema</strong>: Manual start (payload), REST service (request body), Send HTTP request (body and response), Map data (target), Parse/Render JSON and XML, the file activities (CSV row schema), Invoke SOAP service (arguments and response).</p>
+<ul>
+<li>With a schema, later activities see the fields in the mapper before any run, with types and repeating markers.</li>
+<li>Without one, SutraFlow infers the fields from the test data or the first run.</li>
+<li>Activities keep their standard fields when a schema is chosen: for example Read file still returns the file name, path and size next to the rows, and Write file always returns the written file's details.</li>
+</ul>
+<p>An XSD with several global elements is chosen as <code>Schema::Element</code>. A WSDL added under <em>Service descriptors</em> appears in [[soapInvoke]], which lists its services, ports and operations.</p>`,
+  },
+  {
+    id: 'variables', title: 'Variables and the deployment config',
+    html: `
+<table class="t"><thead><tr><th>Kind</th><th>Read as</th><th>Set where</th><th>Lifetime</th></tr></thead><tbody>
+<tr><td><strong>Sutra variables</strong></td><td><code>{vars.name}</code></td><td>Sutra properties; [[setVar]]</td><td>One run.</td></tr>
+<tr><td><strong>Project variables</strong></td><td><code>{gv.NAME}</code>, <code>{{gv.NAME}}</code>, <code>get-project-variable('NAME')</code></td><td>Project &rarr; Configuration; the deployment config; <code>set-project-variable</code></td><td>Kept; a value set at run time lasts until the server restarts or the config changes.</td></tr>
+<tr><td><strong>Sengine variables</strong></td><td><code>{ev.NAME}</code>, <code>{{ev.NAME}}</code>, <code>get-sengine-variable('NAME')</code></td><td>Server &amp; APIs (administrator)</td><td>Kept; shared by every project on the server. Sutras read them only.</td></tr>
+</tbody></table>
+<p>Project variables have a type: string, number, boolean or secret. A secret variable holds the name of a vault secret, never the value.</p>
+[[tip:Read Sengine variables, do not change them|Sengine variables are mostly engine settings (a region, a data centre, a shared folder) that every project relies on. Read them in Sutras; change them only in Server &amp; APIs. <code>set-sengine-variable</code> works only when the administrator ticks <em>Allow Sutras to change Sengine variables</em>, and one Sutra could then change the behaviour of every project.]]
+<p class="h">The deployment config file</p>
+<p>Operations staff change settings per environment without opening the studio. The deployment config holds overrides for project variables, resource settings (hosts, ports, URLs, queue names) and logging. Export it from the project, edit it, and import it, or place it at <code>data/config/&lt;project&gt;.json</code>.</p>
+<pre>{
+  "variables": { "OUTBOX": "D:\\\\exports", "API_BASE": "\${env:ORDERS_API:-https://test.example.com}" },
+  "resources": { "Orders DB": { "host": "\${env:DB_HOST}", "port": 5432 } },
+  "logging":   { "path": "D:\\\\logs\\\\orders.log", "level": "info" }
+}</pre>
+<p><code>\${env:NAME}</code> reads an environment variable of the server; <code>\${env:NAME:-default}</code> gives a default.</p>
+<p class="h">Logging</p>
+<p>Each project writes its own log file: path, level, text or JSON lines, rotation by size, and optionally each step's input and output. Set it under Configuration or in the deployment config.</p>`,
+  },
+  {
+    id: 'debug', title: 'Testing and debugging',
+    html: `
+<p><strong>Test</strong> runs the draft once with the trigger's test data. Each activity shows a status dot; select one and open <strong>Output</strong> to read what it received and produced. API triggers use their <em>test request</em>, message and file triggers their test message or event.</p>
+<p><strong>Debug</strong> runs the draft one activity at a time:</p>
+<ol>
+<li>Optionally set breakpoints: Settings tab &rarr; <em>Breakpoint: pause here when debugging</em>.</li>
+<li>Click <strong>Debug</strong>. The run pauses before the first activity. The canvas outlines it, and its Output tab shows the input it will receive.</li>
+<li><strong>Step</strong> runs that activity and pauses before the next. <strong>Continue</strong> runs to the next breakpoint. <strong>Pause</strong> stops before the next activity. <strong>Stop</strong> cancels the run.</li>
+</ol>
+[[img:debugger|Debugging: paused before Build order. The toolbar shows Step, Continue, Pause and Stop; the Output tab shows the input it will receive.]]
+<p class="h">Runs</p>
+<p>The Runs screen lists every run: Sutra, version, trigger, status, time. Open one to see each step with its input, output, time and error, and the run log. <em>Approvals</em> lists runs waiting for a person.</p>
+[[img:runs|A run: its steps, each with input and output, and the log.]]`,
+  },
+  {
+    id: 'deploy', title: 'Deploying and versions',
+    html: `
+<p>The Sutra you edit is a <strong>draft</strong>. <strong>Deploy</strong> saves it as the next version (v1, v2, ...) and makes it live: its timer, file, email, message or Drive trigger starts listening, and its REST or SOAP service is published on the gateway.</p>
+<ul>
+<li>Runs already in progress finish on the version they started with.</li>
+<li>Editing after a deploy changes only the draft until you deploy again.</li>
+<li>Other systems start a deployed Sutra with the Run API: <code>POST /api/flows/{flowId}/run?wait=30000</code> with <code>{ "input": { ... } }</code>.</li>
+</ul>`,
+  },
+  {
+    id: 'expose', title: 'Exposing APIs: security and TLS',
+    html: `
+<p>A [[restService]] or [[soapService]] trigger publishes the Sutra on the gateway. Server &amp; APIs lists every exposed service with its addresses and security policy.</p>
+[[img:server|Server &amp; APIs: exposed services, engine variables, gateway ports and the TLS certificate.]]
+<p class="h">API security policy</p>
+<p>Create a policy in Resources &rarr; <em>API security policy</em> and pick it on the trigger. It checks, in order: HTTPS required, IP allow list (addresses or IPv4 ranges), caller authentication, then a rate limit per caller. CORS origins are optional.</p>
+<table class="t"><thead><tr><th>Authentication</th><th>How callers prove who they are</th></tr></thead><tbody>
+<tr><td>None</td><td>Open to anyone. For testing only.</td></tr>
+<tr><td>Basic</td><td>User name and password; passwords are vault secrets.</td></tr>
+<tr><td>API key</td><td>A key in a header; keys are vault secrets.</td></tr>
+<tr><td>JWT bearer</td><td>A signed token, checked with a JWKS URL, a public key or a shared secret; issuer, audience and scopes.</td></tr>
+<tr><td>WS-Security UsernameToken</td><td>SOAP only; password digest with a time window and replay protection.</td></tr>
+<tr><td>Mutual TLS</td><td>A client certificate signed by the client CA set in Server &amp; APIs; optionally only listed subjects.</td></tr>
+</tbody></table>
+[[img:resources|Resources: an API security policy using API keys held in the vault.]]
+<p class="h">TLS certificate of the gateway</p>
+<ul>
+<li><strong>Self-signed</strong>: for testing.</li>
+<li><strong>Own certificate</strong>: paste the PEM chain and key; the key is checked against the certificate and stored encrypted.</li>
+<li><strong>Let's Encrypt</strong>: enter the domains and an email. The gateway's HTTP port must be reachable as port 80 on each domain. Start with staging; certificates renew 30 days before they expire, without dropping connections.</li>
+<li><strong>Client CA</strong>: enables mutual TLS for policies that use it.</li>
+</ul>
+<p>TLS 1.2 is the minimum.</p>`,
+  },
+  {
+    id: 'call', title: 'Calling services: REST, SOAP and WS-Security',
+    html: `
+<p>Outbound calls take two shared resources:</p>
+<ul>
+<li><strong>HTTP connection</strong>: base URL, timeout, default headers, certificate checking, extra trusted CAs, client certificate and key for mutual TLS, proxy.</li>
+<li><strong>Outbound security</strong>: how SutraFlow proves who it is.</li>
+</ul>
+<p class="h">Circuit breaker</p>
+<p>When a service is down, waiting for every call to time out slows every run. On the HTTP connection, set <em>Open the circuit after</em> to a number of failures in a row (errors or 5xx replies). The circuit then opens: calls through that connection fail at once with "Circuit open" for the time you set, then one trial call decides whether it closes again. SOAP faults do not count; they mean the service is up. Combine it with retries and an error output that, for example, queues the work for later.</p>
+<table class="t"><thead><tr><th>Method</th><th>For</th><th>What is sent</th></tr></thead><tbody>
+<tr><td>Basic</td><td>REST, SOAP</td><td><code>Authorization: Basic</code></td></tr>
+<tr><td>Bearer</td><td>REST, SOAP</td><td><code>Authorization: Bearer</code></td></tr>
+<tr><td>API key</td><td>REST, SOAP</td><td>A header or query parameter.</td></tr>
+<tr><td>OAuth 2.0 client credentials</td><td>REST, SOAP</td><td>A token from the token URL, cached until it expires.</td></tr>
+<tr><td>Custom headers</td><td>REST, SOAP</td><td>Any headers; values may use <code>{{secret.X}}</code>.</td></tr>
+<tr><td>WS-Security UsernameToken</td><td>SOAP</td><td>Password digest (nonce and created) or text, optional timestamp.</td></tr>
+<tr><td>WS-Security SAML token</td><td>SOAP</td><td>A SAML 1.1 or 2.0 assertion from the vault or from an earlier step (for example a token service call).</td></tr>
+<tr><td>WS-Security X.509</td><td>SOAP</td><td>A binary security token and an XML signature over Body and Timestamp.</td></tr>
+</tbody></table>
+<p>See [[httpRequest]] and [[soapInvoke]].</p>`,
+  },
+  {
+    id: 'messaging', title: 'Messaging: Kafka, RabbitMQ and ActiveMQ',
+    html: `
+<p>The Service Bus palette works the JMS way: [[busPublish]] sends, [[busSubscribe]] starts a run per message, and [[busConfirm]] acknowledges at a point you choose.</p>
+<ul>
+<li>Put queue and topic names in project variables (<code>{{gv.ORDER_QUEUE}}</code>) so each environment can use its own.</li>
+<li>JMS headers: delivery mode (persistent or not), priority, time to live, message id, correlation id, reply-to and type; plus your own properties.</li>
+<li>Acknowledgement: <em>auto</em> on receipt, <em>client</em> after the run succeeds, <em>explicit</em> with Confirm message. On failure: requeue, or send to the dead-letter queue after a number of redeliveries.</li>
+</ul>`,
+  },
+  {
+    id: 'files', title: 'Files',
+    html: `
+<p>File activities read and write text, CSV rows, lines, JSON, XML and binary (base64) in UTF-8, UTF-16, ISO-8859-1, Windows-1252 and other encodings.</p>
+<ul>
+<li>With a <strong>row schema</strong>, CSV and lines become typed, repeating rows, ready for a For-Each in the mapper.</li>
+<li>[[fileList]] takes wildcards: <code>C:\\in\\*.csv</code>, or <code>=concat({gv.DIR}, '\\*.csv')</code>.</li>
+<li>[[fileWrite]] appends or overwrites, and always returns the file's name, path, size and what it did.</li>
+<li>[[fileTrigger]] reacts to added, modified and removed files; move processed files away with [[fileMove]].</li>
+</ul>`,
+  },
+  {
+    id: 'apps', title: 'Databases, email, Firebase and apps',
+    html: `
+<ul>
+<li><strong>DB Ops</strong> works with PostgreSQL, MySQL/MariaDB, SQL Server, Oracle and SQLite. Parameters are written <code>:name</code> and are always bound, never pasted into the SQL.</li>
+<li><strong>Email</strong>: SMTP to send, IMAP to start a run per incoming message.</li>
+<li><strong>Firebase</strong>: Firestore, Realtime Database and push notifications, with a service-account key held in the vault.</li>
+<li><strong>Apps</strong> (Google Sheets, Drive and Docs, Dropbox, YouTube, Facebook Pages) use an <strong>OAuth connection</strong>: create it in Resources, then click <em>Connect account</em> and sign in once. Tokens are stored in the vault and refreshed automatically. [[oauthRequest]] reaches any other API of the same account.</li>
+</ul>`,
+  },
+  {
+    id: 'code', title: 'Custom code, HTML and AI',
+    html: `
+<ul>
+<li>[[jsCode]] runs your JavaScript in a sandbox without host access, with time and memory limits.</li>
+<li>[[htmlTemplate]] builds HTML with escaped placeholders, loops and conditions.</li>
+<li>[[jsonata]] transforms JSON with one expression.</li>
+<li>The <strong>AI</strong> palette: [[aiPrompt]], [[aiClassify]], [[aiRouter]], [[aiExtract]], [[aiSummarize]], [[aiTranslate]] and [[aiSentiment]]. Each also returns <code>ai</code>: the provider, engine, model, input, output and total tokens, and the time taken.</li>
+</ul>
+<p class="h">AI providers</p>
+<p>An <em>AI provider</em> connection chooses the engine. Several can exist side by side, for example a fast one for routing and a strong one for summaries.</p>
+<table class="t"><thead><tr><th>Engine</th><th>What it needs</th><th>Default model</th></tr></thead><tbody>
+<tr><td>Claude API</td><td>An Anthropic API key in the vault.</td><td><code>claude-opus-5-5</code>; also <code>claude-sonnet-5-5</code>, <code>claude-haiku-5-5</code></td></tr>
+<tr><td>Gemini API</td><td>A Google AI Studio or Vertex API key.</td><td><code>gemini-3-pro-preview</code>; also other Gemini 3 models</td></tr>
+<tr><td>OpenAI API</td><td>An OpenAI API key. Any compatible server works with its own API base URL.</td><td><code>gpt-5</code></td></tr>
+<tr><td>Ollama</td><td>An Ollama server; on this machine by default (<code>http://127.0.0.1:11434</code>). No key, no data leaves your network.</td><td><code>llama3.3</code>, or any model you have pulled</td></tr>
+<tr><td>Claude CLI, Gemini CLI, OpenAI Codex CLI</td><td>The command-line tool installed and signed in on the server (<code>claude</code>, <code>gemini</code>, <code>codex</code>). Uses that tool's own account.</td><td>The tool's default, or the one you set</td></tr>
+</tbody></table>
+<p>Model names change often; check the provider's list and type the one you want. Click <strong>Test connection</strong> to see which model answered.</p>
+[[tip:Command-line tools|The prompt is sent to the tool on standard input, never on the command line, and the tool runs in an empty folder as the SutraFlow server user. Keep the tool's own permissions for running commands and editing files switched off: a message from outside could otherwise ask it to act on the server.]]
+[[tip:Guidelines|Route AI decisions that matter (money, customers) through [[approval]] until you trust them.]]`,
+  },
+  {
+    id: 'secrets', title: 'Secrets and studio security',
+    html: `
+<ul>
+<li>Passwords, keys and tokens live in the <strong>vault</strong> (Resources &rarr; Secrets), encrypted with AES-256-GCM. Settings hold the secret's <em>name</em>.</li>
+<li>Secret values are never returned by the API. A secret used in a step is masked in stored outputs and logs.</li>
+<li>The studio listens on 127.0.0.1 by default. Sessions are HttpOnly, SameSite=Strict cookies; every change needs a request header that browsers cannot forge across sites; repeated failed sign-ins are slowed down.</li>
+</ul>`,
+  },
+  {
+    id: 'production', title: 'Running in production',
+    html: `
+<ol>
+<li>Set <code>SUTRA_MASTER_KEY</code> from your secret store, or protect and back up <code>data/master.key</code>.</li>
+<li>Keep the studio on 127.0.0.1, or behind a VPN.</li>
+<li>Set the gateway certificate (own or Let's Encrypt) and require HTTPS in every API policy.</li>
+<li>Put environment-specific values in the deployment config, with <code>\${env:NAME}</code> for anything secret or host-specific.</li>
+<li>Set each project's log file and level; rotate by size.</li>
+<li>Back up the <code>data</code> folder regularly.</li>
+</ol>`,
+  },
+  {
+    id: 'trouble', title: 'Troubleshooting',
+    html: `
+<table class="t"><thead><tr><th>Symptom</th><th>Cause and remedy</th></tr></thead><tbody>
+<tr><td>A mapping shows <em>not run</em></td><td>The activity was on a branch that was not taken in the last test. Test with data that takes that branch.</td></tr>
+<tr><td>An API caller waits a minute, then gets 504</td><td>A branch ended without [[httpResponse]] or [[soapReply]]. Add replies on every branch, including error branches.</td></tr>
+<tr><td>A timer or file trigger does nothing</td><td>Only the deployed version listens. Deploy, then check the listeners table in Server &amp; APIs.</td></tr>
+<tr><td>Required fields not mapped</td><td>The Input tab names them. Map them, or remove the requirement from the schema.</td></tr>
+<tr><td>Formula error</td><td>The preview under the formula names the problem: an unknown function, a missing bracket, or a quote not doubled.</td></tr>
+<tr><td>The run stops after 10000 steps</td><td>A loop that never ends. Check the condition that leaves it.</td></tr>
+<tr><td>Let's Encrypt fails</td><td>Port 80 on the domain must reach the gateway's HTTP port.</td></tr>
+</tbody></table>`,
+  },
+];

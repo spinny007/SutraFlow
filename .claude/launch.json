@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "sutraflow",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--disable-warning=ExperimentalWarning", "--import", "tsx", "server/src/main.ts"],
+      "port": 4800
+    }
+  ]
+}

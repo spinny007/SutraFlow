@@ -1,0 +1,131 @@
+import type { Activity } from '../engine/types.js';
+import { getFlow, versionDoc } from '../flows.js';
+import { q, now } from '../db.js';
+import { publishChannel } from '../channels.js';
+import { F, when, parseJsonText } from './common.js';
+
+const safeJson = (t: unknown): any => { if (typeof t !== 'string') return t; try { return JSON.parse(t); } catch { return undefined; } };
+
+/**
+ * Processes working together: Call process / Return (reusable sub-processes), an error handler
+ * per process, internal channels between processes, counters, and a placeholder activity.
+ */
+const USE = ['deployed (draft while testing)', 'deployed', 'draft'];
+
+export const processActivities: Activity[] = [
+  {
+    type: 'callProcess', palette: 'flow', name: 'Call Sutra', glyph: '⤷', ports: ['out'],
+    desc: 'Runs another Sutra of this project with the input you give it and, when Wait is on, continues with its result (set by its Return activity). Build a piece of logic once and call it from many Sutras.',
+    fields: [
+      F('process', 'Sutra', 'process', '', { help: 'The called Sutra starts at its trigger (usually Manual start) with this input.' }),
+      F('use', 'Version', 'select', USE[0], { options: USE, help: 'Test runs call the draft, so you can change both Sutras together; deployed runs call the deployed version.' }),
+      F('wait', 'Wait for the result', 'bool', true, { help: 'Off: start it and continue at once (fire and forget).' }),
+      F('source', 'Input from', 'select', 'value', { options: ['value', 'mapping'] }),
+      F('input', 'Input', 'text', '{{input}}', { tpl: true, ...when('source', 'value') }),
+      F('inputSchema', 'Input schema', 'schema', '', { help: 'Usually the called Sutra\'s payload schema.', ...when('source', 'mapping') }),
+      F('inputMapping', 'Input', 'mapping', { rules: {} }, { schemaField: 'inputSchema', ...when('source', 'mapping') }),
+      F('resultSchema', 'Result schema', 'schema', '', { help: 'Optional. Describes the result for mapping in later steps.' }),
+    ],
+    outputSchema: (cfg, h) => (cfg.wait === false ? h.infer({ runId: '', process: '', started: true }) : h.schema(cfg.resultSchema) || { name: 'out', type: 'any' }),
+    execute: c => {
+      const flowId = String(c.raw('process') || '');
+      if (!flowId) throw new Error('Choose the Sutra to call');
+      const f = getFlow(flowId);
+      if (!f) throw new Error('The called Sutra no longer exists');
+      if (c.projectId && f.project_id !== c.projectId) throw new Error(`${f.name} belongs to another project`);
+      const use = c.raw('use') || USE[0];
+      const testing = !Number(c.scope.run?.version);
+      let doc = f.doc, version = 0;
+      if (use === 'deployed' || (use === USE[0] && !testing)) {
+        if (!f.deployed) throw new Error(`${f.name} is not deployed. Deploy it, or set Version to draft.`);
+        doc = versionDoc(flowId, f.deployed.version)!;
+        version = f.deployed.version;
+      }
+      const input = c.raw('source') === 'mapping' ? c.mapping('inputMapping') : c.v('input');
+      return { call: { doc, flowId, version, projectId: f.project_id, input, wait: c.raw('wait') !== false, name: f.name } };
+    },
+  },
+  {
+    type: 'return', palette: 'flow', name: 'Return', glyph: '↩', ports: [], noErrorPort: true,
+    desc: 'Ends the Sutra and hands its result to the Sutra that called it (Call Sutra). Other branches stop. Also the run\'s result in Runs and for the Run API.',
+    fields: [
+      F('source', 'Result from', 'select', 'value', { options: ['value', 'mapping'] }),
+      F('value', 'Result', 'text', '{{input}}', { tpl: true, ...when('source', 'value') }),
+      F('schema', 'Result schema', 'schema', '', when('source', 'mapping')),
+      F('mapping', 'Result', 'mapping', { rules: {} }, { schemaField: 'schema', ...when('source', 'mapping') }),
+    ],
+    execute: c => {
+      const v = c.raw('source') === 'mapping' ? c.mapping('mapping') : c.v('value');
+      return { out: v, result: v, stop: { status: 'done' } };
+    },
+  },
+  {
+    type: 'catch', palette: 'flow', name: 'Error handler', glyph: '⚠', ports: ['out'], noInput: true, noErrorPort: true,
+    desc: 'Runs when any activity fails and its own error output is not connected. Other branches stop; the handler\'s path decides how the run ends (End with process: error to mark it failed). One per process.',
+    fields: [],
+    outputHint: { error: { message: '', step: '', type: '', at: '' }, input: null },
+    execute: c => ({ out: c.input }),
+  },
+  {
+    type: 'noop', palette: 'flow', name: 'No operation', glyph: '○', ports: ['out'],
+    desc: 'Does nothing and passes its input on. A placeholder while you design, or a joining point for connections.',
+    fields: [],
+    passThrough: true,
+    execute: c => ({ out: c.input }),
+  },
+  {
+    type: 'channelPublish', palette: 'general', name: 'Send to channel', glyph: '⇶', ports: ['out'],
+    desc: 'Sends a message to an internal channel. Every deployed Sutra of this project with a Channel trigger on that channel starts with it. In memory, no broker needed; use the Service Bus for messages that must survive a restart.',
+    fields: [
+      F('channel', 'Channel', 'text', 'orders', { help: 'May use {{gv.CHANNEL}}.' }),
+      F('message', 'Message', 'text', '{{input}}', { tpl: true }),
+      F('required', 'Fail when no Sutra listens', 'bool', false),
+    ],
+    outputHint: { channel: '', delivered: 0, runIds: [''] },
+    execute: c => {
+      const channel = String(c.raw('channel') || '').trim();
+      if (!channel) throw new Error('Channel is not set');
+      const runIds = publishChannel(c.projectId, channel, c.v('message'));
+      if (!runIds.length && c.raw('required')) throw new Error(`No deployed Sutra listens on channel "${channel}"`);
+      return { out: { channel, delivered: runIds.length, runIds } };
+    },
+  },
+  {
+    type: 'channelTrigger', palette: 'triggers', name: 'Channel trigger', glyph: '⇶', trigger: true, ports: ['out'],
+    desc: 'Starts the Sutra for each message sent to an internal channel with Send to channel, while the Sutra is deployed.',
+    fields: [
+      F('channel', 'Channel', 'text', 'orders', { help: 'May use {{gv.CHANNEL}}.' }),
+      F('schema', 'Message schema', 'schema', '', { help: 'Optional. Describes the message for mapping.' }),
+      F('testMessage', 'Test message (JSON)', 'code', '{\n  "orderId": "A-1001"\n}'),
+    ],
+    outputSchema: (cfg, h) => h.schema(cfg.schema) || h.infer(safeJson(cfg.testMessage) ?? {}),
+    execute: c => ({ out: c.input ?? parseJsonText(c.raw('testMessage'), 'Test message') ?? {} }),
+  },
+  {
+    type: 'counter', palette: 'general', name: 'Counter', glyph: '#', ports: ['out'],
+    desc: 'A named number kept by the server for this project: increment, decrement, read, set or reset it. Safe when many runs change it at once; kept across restarts.',
+    fields: [
+      F('name', 'Counter name', 'text', 'orders', { help: 'May use {{gv.X}}; a formula gives one counter per value, e.g. =concat(\'orders-\', current-date()).' }),
+      F('op', 'Operation', 'select', 'increment', { options: ['increment', 'decrement', 'get', 'set', 'reset'] }),
+      F('by', 'By', 'number', 1, when('op', 'increment', 'decrement')),
+      F('value', 'Value', 'number', 0, when('op', 'set')),
+    ],
+    outputHint: { name: '', value: 0, previous: 0 },
+    execute: c => {
+      const pid = c.projectId || '';
+      const name = String(c.raw('name') || '').trim();
+      if (!name) throw new Error('Counter name is not set');
+      const op = c.raw('op') || 'increment';
+      const prev = q.get<{ value: number }>('select value from counters where project_id = ? and name = ?', pid, name)?.value ?? 0;
+      if (op === 'get') return { out: { name, value: prev, previous: prev } };
+      const by = Number(c.raw('by') ?? 1) || 0;
+      const sql = op === 'increment' || op === 'decrement'
+        ? `insert into counters(project_id, name, value, updated_at) values(?, ?, ?, ?) on conflict(project_id, name) do update set value = value + excluded.value, updated_at = excluded.updated_at`
+        : `insert into counters(project_id, name, value, updated_at) values(?, ?, ?, ?) on conflict(project_id, name) do update set value = excluded.value, updated_at = excluded.updated_at`;
+      const v = op === 'increment' ? by : op === 'decrement' ? -by : op === 'set' ? Number(c.raw('value')) || 0 : 0;
+      q.run(sql, pid, name, v, now());
+      const value = q.get<{ value: number }>('select value from counters where project_id = ? and name = ?', pid, name)!.value;
+      return { out: { name, value, previous: prev } };
+    },
+  },
+];

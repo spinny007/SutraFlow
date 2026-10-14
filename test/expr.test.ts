@@ -1,0 +1,109 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { evalExpression as ev, parse, refsOf, formatNumber } from '../server/src/expr.js';
+import { resolve } from '../server/src/template.js';
+
+const ctx = {
+  input: { name: '  Asha Rao ', email: 'asha@example.com', amount: '1,250.5', qty: 12, date: '2026-03-07T09:05:03Z', items: [{ p: 2 }, { p: 3 }], none: null, empty: '' },
+  nodes: { 'Parse XML': { Party: { FName: 'Ravi', Contact: [{ HomePhone: '1' }, { Mobile: '9' }] } } },
+};
+
+test('string functions and nesting', () => {
+  assert.equal(ev("concat('Name :', {input.name})", ctx), 'Name :  Asha Rao ');
+  assert.equal(ev("upper-case(substring-before({input.email}, '@'))", ctx), 'ASHA');
+  assert.equal(ev("substring-after({input.email}, '@')", ctx), 'example.com');
+  assert.equal(ev("substring('ABCDEF', 2, 3)", ctx), 'BCD');
+  assert.equal(ev("substring-after-last('a/b/c.txt', '/')", ctx), 'c.txt');
+  assert.equal(ev("normalize-space({input.name})", ctx), 'Asha Rao');
+  assert.equal(ev("pad-front(42, 6, '0')", ctx), '000042');
+  assert.equal(ev("string-join(tokenize('a,b,c', ','), ' | ')", ctx), 'a | b | c');
+  assert.equal(ev("tib:concat('x', 'y')", ctx), 'xy', 'tib: prefix accepted');
+  assert.equal(ev("'It''s'", ctx), "It's", 'doubled quote');
+});
+
+test('encode / decode', () => {
+  assert.equal(ev("string-to-base64('user:pw')", ctx), 'dXNlcjpwdw==');
+  assert.equal(ev("base64-to-string(string-to-base64({nodes.Parse XML.Party.FName}))", ctx), 'Ravi');
+  assert.equal(ev("url-encode('a b&c')", ctx), 'a%20b%26c');
+  assert.equal(ev("sha256('abc')", ctx), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+  assert.equal(ev("escape-xml('<a & b>')", ctx), '&lt;a &amp; b&gt;');
+});
+
+test('date and time', () => {
+  assert.equal(ev("format-date('DD-MM-YY', {input.date}, 'UTC')", ctx), '07-03-26');
+  assert.equal(ev("format-dateTime('dddd, D MMMM YYYY [at] HH:mm', {input.date}, 'UTC')", ctx), 'Saturday, 7 March 2026 at 09:05');
+  assert.equal(ev("format-dateTime('YYYY-MM-DD HH:mm Z', {input.date}, 'Asia/Kolkata')", ctx), '2026-03-07 14:35 +05:30');
+  assert.equal(ev("format-date('[Y0001]-[M01]-[D01]', {input.date}, 'UTC')", ctx), '2026-03-07', 'XPath picture');
+  assert.equal(ev("format-time('hh:mm A', {input.date}, 'UTC')", ctx), '09:05 AM');
+  assert.equal(ev("parse-date('DD/MM/YYYY', '31/12/2026')", ctx), '2026-12-31T00:00:00.000Z');
+  assert.equal(ev("parse-date('DD MMM YYYY hh:mm A', '05 Jan 2026 02:30 PM')", ctx), '2026-01-05T14:30:00.000Z');
+  assert.equal(ev("add-to-date('2026-01-31', 0, 1, 0)", ctx), '2026-03-03T00:00:00.000Z');
+  assert.equal(ev("days-between('2026-01-01', '2026-03-01')", ctx), 59);
+});
+
+test('numbers and lists', () => {
+  assert.equal(ev("round(number({input.amount}) * 1.18, 2)", ctx), 1475.59);
+  assert.equal(ev("format-number(1234.5, '#,##0.00')", ctx), '1,234.50');
+  assert.equal(formatNumber(0.5, '0.###'), '0.5');
+  assert.equal(formatNumber(-1234567.891, '₹#,##0.0'), '-₹1,234,567.9');
+  assert.equal(ev("sum({input.items}, 'p') + count({input.items})", ctx), 7);
+  assert.equal(ev("{input.qty} div 4 + 10 mod 3", ctx), 4);
+  assert.equal(ev("count({nodes.Parse XML.Party.Contact})", ctx), 2);
+  assert.deepEqual(ev("pluck({input.items}, 'p')", ctx), [2, 3]);
+});
+
+test('logic', () => {
+  assert.equal(ev("if({input.qty} > 10, 'bulk', 'retail')", ctx), 'bulk');
+  assert.equal(ev("if({input.qty} > 10 and contains({input.email}, '@'), 1, 0)", ctx), 1);
+  assert.equal(ev("coalesce({input.none}, {input.empty}, 'fallback')", ctx), 'fallback');
+  assert.equal(ev("empty({input.missing}) and not(exists({input.none}))", ctx), true);
+  assert.equal(ev("if(false, {input.x.y.z}, 'lazy')", ctx), 'lazy', 'only the chosen side runs');
+  assert.equal(ev("'10' = 10", ctx), true);
+});
+
+test('errors are clear', () => {
+  assert.throws(() => parse("concat('a'"), /Expected "\)"/);
+  assert.throws(() => parse('nope(1)'), /Unknown function nope/);
+  assert.throws(() => parse('input.name'), /Put field references in braces/);
+  assert.throws(() => ev("substring('a')", ctx), /needs at least 2 arguments/);
+  assert.throws(() => parse("'open"), /closing quote/);
+});
+
+test('refs and the = prefix in fields', () => {
+  assert.deepEqual(refsOf("concat({input.name}, upper-case({nodes.Parse XML.Party.FName}))"), ['input.name', 'nodes.Parse XML.Party.FName']);
+  assert.equal(resolve("=concat('Hi ', trim({input.name}))", ctx), 'Hi Asha Rao');
+  assert.equal(resolve('\\=not an expression', ctx), '=not an expression');
+  assert.equal(resolve('{{input.qty}}', ctx), 12, 'templates still work');
+});
+
+test('XPath-style predicates filter repeating rows; position(), last() and indexes', () => {
+  const c = { input: { rows: [{ Country: 'India', City: 'Pune', Qty: 2 }, { Country: 'USA', City: 'NYC', Qty: 5 }, { Country: 'india', City: 'Delhi', Qty: 7 }] } };
+  assert.deepEqual(ev("{input.rows}[upper-case(Country) = 'INDIA']", c).map((r: any) => r.City), ['Pune', 'Delhi']);
+  assert.equal(ev("count({input.rows}[Qty > 3])", c), 2);
+  assert.equal(ev("{input.rows}[2].City", c) ?? ev("item-at({input.rows}, 2)", c).City, 'NYC');
+  assert.deepEqual(ev("{input.rows}[position() < last()]", c).length, 2);
+  assert.equal(ev("sum({input.rows}[Country != 'USA'], 'Qty')", c), 9);
+  assert.equal(ev("{input.rows}[City = 'Delhi'][1]", c).Qty, 7);
+});
+
+test('xs: conversion functions and utility functions', () => {
+  assert.equal(ev("xs:integer('42.9')", ctx), 42);
+  assert.equal(ev("xs:decimal('1,250.50')", ctx), 1250.5);
+  assert.equal(ev("xs:boolean('no')", ctx), false);
+  assert.equal(ev("xs:boolean('Yes')", ctx), true);
+  assert.equal(ev("xs:date('2026-03-07T22:05:03Z')", ctx), '2026-03-07');
+  assert.equal(ev("xs:string(12)", ctx), '12');
+  assert.throws(() => ev("xs:integer('abc')", ctx), /not a number/);
+  assert.equal(ev(String.raw`file-name('C:\in\orders.csv')`, ctx), 'orders.csv');
+  assert.equal(ev("file-extension('a/b/report.final.csv')", ctx), 'csv');
+  assert.equal(ev("file-base-name('report.csv')", ctx), 'report');
+  assert.equal(ev(String.raw`dir-name('C:\in\orders.csv')`, ctx), String.raw`C:\in`);
+  assert.equal(ev(String.raw`path-join('C:\in\', '\*.csv')`, ctx), String.raw`C:\in\*.csv`);
+  assert.equal(ev(String.raw`concat('C:\new', newline(), 'x')`, ctx), 'C:\\new\nx', 'backslashes stay literal');
+  assert.equal(ev("format-bytes(1536)", ctx), '1.5 KB');
+  assert.match(ev("current-timestamp('YYYYMMDD')", ctx), /^\d{8}$/);
+  assert.equal(String(ev('uuid()', ctx)).length, 36);
+  assert.equal(ev("type-of({input.items})", ctx), 'list');
+  assert.deepEqual(ev("group-by({input.items}, 'p')", ctx).map((g: any) => g.key), ['2', '3']);
+  assert.deepEqual(ev("flatten(list(object('id', 1, 'lines', list(object('sku', 'A'), object('sku', 'B')))), 'lines')", ctx).map((x: any) => [x.sku, x._parent.id]), [['A', 1], ['B', 1]]);
+});

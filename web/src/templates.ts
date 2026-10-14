@@ -1,0 +1,71 @@
+import type { FlowDoc } from './types';
+
+/** Starter flows offered by "New Sutra". */
+const RAW: { id: string; name: string; desc: string; doc: FlowDoc }[] = [
+  {
+    id: 'blank', name: 'Blank Sutra', desc: 'A manual start step.',
+    doc: { name: 'Untitled Sutra', nodes: [{ id: 's', type: 'start', name: 'Start', x: 60, y: 160, config: { payload: '{\n  "orderId": "A-1001"\n}' } }], edges: [] },
+  },
+  {
+    id: 'rest', name: 'REST API: order lookup', desc: 'Exposes GET /orders/:id, validates, calls a backend API and replies, with an error branch.',
+    doc: {
+      name: 'Order lookup API',
+      nodes: [
+        { id: 't', type: 'restService', name: 'Order API', x: 40, y: 160, config: { method: 'GET', path: '/orders/:id', policy: '', maxBodyKb: 256, testRequest: '{\n  "method": "GET",\n  "params": { "id": "A-1001" },\n  "query": { "expand": "lines" },\n  "headers": {},\n  "body": null\n}' } },
+        { id: 'v', type: 'validate', name: 'Check id', x: 300, y: 160, config: { required: ['params.id'], source: '{{input}}' } },
+        { id: 'h', type: 'httpRequest', name: 'Get order', x: 560, y: 100, config: { connection: '', auth: '', method: 'GET', url: 'https://httpbin.org/anything/orders/{{input.params.id}}', query: [{ k: 'expand', v: '{{input.query.expand | default:"none"}}' }], headers: [{ k: 'Accept', v: 'application/json' }], bodyType: 'none', body: '', parse: 'auto', failOn: '4xx or 5xx' }, settings: { retries: 2, retryDelayMs: 500, timeoutMs: 15000 } },
+        { id: 'm', type: 'mapper', name: 'Shape reply', x: 820, y: 100, config: { start: 'empty', schema: '', mapping: { rules: {
+          orderId: { expr: '{nodes.Order API.params.id}' },
+          source: { expr: "substring-before({input.body.url}, '?')" },
+          checkedAt: { expr: "format-dateTime('DD-MM-YYYY HH:mm', current-dateTime(), 'Asia/Kolkata')" },
+          status: { expr: "if({input.status} = 200, 'FOUND', 'UNKNOWN')" },
+        } } } },
+        { id: 'r', type: 'httpResponse', name: 'Reply 200', x: 1080, y: 100, config: { status: '200', contentType: 'application/json', body: '{{input}}', headers: [] } },
+        { id: 'bad', type: 'httpResponse', name: 'Reply 400', x: 560, y: 300, config: { status: '400', contentType: 'application/json', body: '{"errors": {{input.problems | json}}}', headers: [] } },
+        { id: 'e', type: 'httpResponse', name: 'Reply 502', x: 820, y: 280, config: { status: '502', contentType: 'application/json', body: '{"error": "Order service unavailable", "detail": {{input.error.message | json}}}', headers: [] } },
+      ],
+      edges: [
+        { id: 'e1', from: 't', port: 'out', to: 'v' }, { id: 'e2', from: 'v', port: 'valid', to: 'h' }, { id: 'e3', from: 'v', port: 'invalid', to: 'bad' },
+        { id: 'e4', from: 'h', port: 'out', to: 'm' }, { id: 'e5', from: 'm', port: 'out', to: 'r' }, { id: 'e6', from: 'h', port: 'error', to: 'e' },
+      ],
+    },
+  },
+  {
+    id: 'soap', name: 'SOAP service: orders', desc: 'Exposes a SOAP web service with a WSDL and two operations; one replies, one returns a fault.',
+    doc: {
+      name: 'Order SOAP service',
+      nodes: [
+        { id: 't', type: 'soapService', name: 'Order WS', x: 40, y: 160, config: { serviceName: 'OrderService', namespace: 'urn:sutra:orders', path: '/soap/orders', operations: 'GetOrder, CancelOrder', soapVersion: '1.1', policy: '', testRequest: '{\n  "operation": "GetOrder",\n  "body": { "OrderId": "A-1001" }\n}' } },
+        { id: 'm', type: 'mapper', name: 'Build order', x: 320, y: 100, config: { start: 'empty', schema: '', mapping: { rules: {
+          OrderId: { expr: '{input.body.OrderId}' },
+          Status: { expr: "'SHIPPED'" },
+          Caller: { expr: '{input.auth.subject}' },
+        } } } },
+        { id: 'r', type: 'soapReply', name: 'Reply', x: 580, y: 100, config: { kind: 'response', body: '{{input}}' } },
+        { id: 'f', type: 'soapReply', name: 'Not allowed', x: 320, y: 260, config: { kind: 'fault', faultCode: 'soap:Client', faultString: 'Order {{input.body.OrderId}} cannot be cancelled' } },
+      ],
+      edges: [{ id: 'e1', from: 't', port: 'GetOrder', to: 'm' }, { id: 'e2', from: 'm', port: 'out', to: 'r' }, { id: 'e3', from: 't', port: 'CancelOrder', to: 'f' }],
+    },
+  },
+  {
+    id: 'approval', name: 'Approval with timer', desc: 'Scheduled check that waits for a person to approve before calling an API.',
+    doc: {
+      name: 'Refund approval',
+      nodes: [
+        { id: 's', type: 'start', name: 'Refund request', x: 40, y: 160, config: { payload: '{\n  "orderId": "A-1001",\n  "amount": 1250,\n  "reason": "Damaged item"\n}' } },
+        { id: 'i', type: 'if', name: 'Over 1000', x: 300, y: 160, config: { left: '{{input.amount}}', op: 'greater than', right: '1000' } },
+        { id: 'a', type: 'approval', name: 'Manager approval', x: 560, y: 80, config: { message: 'Refund ₹{{input.amount}} for {{input.orderId}}? Reason: {{input.reason}}', assignee: 'finance' } },
+        { id: 'g', type: 'merge', name: 'Go ahead', x: 820, y: 160, config: {} },
+        { id: 'l', type: 'log', name: 'Refund issued', x: 1060, y: 160, config: { message: 'Refund for {{trigger.orderId}} issued', level: 'info' } },
+        { id: 'n', type: 'log', name: 'Refund declined', x: 820, y: 20, config: { message: 'Declined: {{input.approval.comment}}', level: 'warn' } },
+      ],
+      edges: [
+        { id: 'e1', from: 's', port: 'out', to: 'i' }, { id: 'e2', from: 'i', port: 'true', to: 'a' }, { id: 'e3', from: 'i', port: 'false', to: 'g' },
+        { id: 'e4', from: 'a', port: 'approved', to: 'g' }, { id: 'e5', from: 'a', port: 'rejected', to: 'n' }, { id: 'e6', from: 'g', port: 'out', to: 'l' },
+      ],
+    },
+  },
+];
+
+/** Activities are 250px wide: spread the template layouts out to match. */
+export const TEMPLATES = RAW.map(t => ({ ...t, doc: { ...t.doc, nodes: t.doc.nodes.map(n => ({ ...n, x: Math.round(n.x * 1.25), y: Math.round(n.y * 1.35) })) } }));

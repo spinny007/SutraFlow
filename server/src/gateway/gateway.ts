@@ -1,0 +1,328 @@
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import { XMLBuilder } from 'fast-xml-parser';
+import { config } from '../config.js';
+import { getSetting, setSetting } from '../db.js';
+import { engine } from '../engine/engine.js';
+import type { FlowDoc, FlowNode, ReplyPayload } from '../engine/types.js';
+import { deployedFlows } from '../flows.js';
+import { effectiveResource, getResource } from '../resources.js';
+import { authorize, corsHeaders, PolicyError } from '../security/inbound.js';
+import { xmlParser } from '../security/outbound.js';
+import { NS } from '../security/wss.js';
+import { listOf } from '../palettes/common.js';
+import { acmeChallenge, getCert, getTls } from './tls.js';
+
+/**
+ * The gateway serves deployed REST and SOAP services on its own HTTP and HTTPS
+ * listeners, separate from the studio/admin port. Each request is checked
+ * against the service's API security policy, starts a run of the deployed flow
+ * version and waits for the flow's reply step.
+ */
+export interface GatewaySettings { host: string; httpPort: number; httpsPort: number; }
+export const getGatewaySettings = (): GatewaySettings => ({
+  host: '0.0.0.0', httpPort: config.gatewayHttpPort, httpsPort: config.gatewayHttpsPort,
+  ...getSetting<Partial<GatewaySettings>>('gateway', {}),
+});
+export const setGatewaySettings = (s: Partial<GatewaySettings>) => setSetting('gateway', { ...getGatewaySettings(), ...s });
+
+interface Route {
+  kind: 'rest' | 'soap';
+  method: string;
+  path: string;
+  re: RegExp;
+  keys: string[];
+  flowId: string;
+  projectId: string;
+  version: number;
+  doc: FlowDoc;
+  node: FlowNode;
+}
+
+let routes: Route[] = [];
+
+export function rebuildRoutes() {
+  const out: Route[] = [];
+  for (const d of deployedFlows()) {
+    for (const n of d.doc.nodes) {
+      if (n.type !== 'restService' && n.type !== 'soapService') continue;
+      const path = '/' + String(n.config.path || '').trim().replace(/^\/+|\/+$/g, '');
+      const keys: string[] = [];
+      const re = new RegExp('^' + path.replace(/[.+*?^${}()|[\]\\]/g, '\\$&').replace(/:([A-Za-z_]\w*)/g, (_, k) => { keys.push(k); return '([^/]+)'; }) + '/?$');
+      out.push({ kind: n.type === 'restService' ? 'rest' : 'soap', method: String(n.config.method || 'ANY').toUpperCase(), path, re, keys, flowId: d.flowId, projectId: d.projectId, version: d.version, doc: d.doc, node: n });
+    }
+  }
+  // Literal paths before parameterised ones.
+  routes = out.sort((a, b) => a.keys.length - b.keys.length);
+}
+
+export function listRoutes() {
+  const s = getGatewaySettings();
+  const tls = getTls();
+  return routes.map(r => ({
+    kind: r.kind, method: r.kind === 'soap' ? 'POST' : r.method, path: r.path, flowId: r.flowId, flow: r.doc.name, version: r.version, step: r.node.name,
+    policy: r.node.config.policy ? getResource(r.node.config.policy)?.name ?? '(missing)' : null,
+    urls: [
+      `http://${tls.domains[0] || 'localhost'}:${s.httpPort}${r.path}`,
+      ...(tls.mode !== 'off' && getCert() ? [`https://${tls.domains[0] || 'localhost'}:${s.httpsPort}${r.path}`] : []),
+    ],
+    wsdl: r.kind === 'soap' ? `${r.path}?wsdl` : undefined,
+  }));
+}
+
+const xmlBuilder = new XMLBuilder({ ignoreAttributes: false, attributeNamePrefix: '@_', suppressEmptyNode: true });
+const xmlEsc = (s: string) => s.replace(/[<>&'"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[c]!);
+
+// ---------- WSDL ----------
+
+export function buildWsdl(n: FlowNode, baseUrl: string) {
+  const name = String(n.config.serviceName || 'Service').replace(/[^\w]/g, '') || 'Service';
+  const tns = String(n.config.namespace || 'urn:sutra');
+  const ops = listOf(n.config.operations).map(o => o.replace(/[^\w]/g, '')).filter(Boolean);
+  const v12 = n.config.soapVersion === '1.2';
+  const sp = v12 ? 'soap12' : 'soap';
+  const anyType = (el: string) => `<xsd:element name="${el}"><xsd:complexType><xsd:sequence><xsd:any minOccurs="0" maxOccurs="unbounded" processContents="lax"/></xsd:sequence></xsd:complexType></xsd:element>`;
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<definitions name="${name}" targetNamespace="${xmlEsc(tns)}" xmlns="http://schemas.xmlsoap.org/wsdl/" xmlns:tns="${xmlEsc(tns)}"
+  xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:soap12="http://schemas.xmlsoap.org/wsdl/soap12/" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <types>
+    <xsd:schema targetNamespace="${xmlEsc(tns)}" elementFormDefault="qualified">
+      ${ops.map(o => anyType(o) + anyType(o + 'Response')).join('\n      ')}
+    </xsd:schema>
+  </types>
+  ${ops.map(o => `<message name="${o}Request"><part name="parameters" element="tns:${o}"/></message>
+  <message name="${o}Response"><part name="parameters" element="tns:${o}Response"/></message>`).join('\n  ')}
+  <portType name="${name}PortType">
+    ${ops.map(o => `<operation name="${o}"><input message="tns:${o}Request"/><output message="tns:${o}Response"/></operation>`).join('\n    ')}
+  </portType>
+  <binding name="${name}Binding" type="tns:${name}PortType">
+    <${sp}:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    ${ops.map(o => `<operation name="${o}"><${sp}:operation soapAction="${xmlEsc(tns)}/${o}"/><input><${sp}:body use="literal"/></input><output><${sp}:body use="literal"/></output></operation>`).join('\n    ')}
+  </binding>
+  <service name="${name}">
+    <port name="${name}Port" binding="tns:${name}Binding"><${sp}:address location="${xmlEsc(baseUrl)}"/></port>
+  </service>
+</definitions>`;
+}
+
+function soapEnvelope(v12: boolean, body: string) {
+  return `<?xml version="1.0" encoding="UTF-8"?><soap:Envelope xmlns:soap="${v12 ? NS.soap12 : NS.soap11}"><soap:Body>${body}</soap:Body></soap:Envelope>`;
+}
+
+function soapFault(v12: boolean, code: string, message: string) {
+  const local = code.replace(/^\w+:/, '');
+  if (v12) {
+    const v = /client|sender/i.test(local) ? 'soap:Sender' : 'soap:Receiver';
+    return soapEnvelope(true, `<soap:Fault><soap:Code><soap:Value>${v}</soap:Value></soap:Code><soap:Reason><soap:Text xml:lang="en">${xmlEsc(message)}</soap:Text></soap:Reason></soap:Fault>`);
+  }
+  const c = /client|sender/i.test(local) ? 'soap:Client' : /server|receiver/i.test(local) ? 'soap:Server' : code.includes(':') ? code : `soap:${code}`;
+  return soapEnvelope(false, `<soap:Fault><faultcode>${xmlEsc(c)}</faultcode><faultstring>${xmlEsc(message)}</faultstring></soap:Fault>`);
+}
+
+// ---------- request handling ----------
+
+const HIDDEN = new Set(['authorization', 'cookie', 'proxy-authorization', 'x-api-key']);
+
+function waitReply(start: (onReply: (r: any) => void) => string, timeoutMs: number) {
+  return new Promise<{ runId: string; reply: any }>((res, rej) => {
+    let runId = '';
+    const to = setTimeout(() => rej(Object.assign(new Error('The Sutra did not reply in time'), { runId })), timeoutMs);
+    try {
+      runId = start(r => { clearTimeout(to); res({ runId, reply: r }); });
+    } catch (e) {
+      clearTimeout(to);
+      rej(e);
+    }
+  });
+}
+
+function parseRestBody(raw: string, ct: string) {
+  if (!raw) return null;
+  if (ct.includes('json')) {
+    try { return JSON.parse(raw); } catch { throw new PolicyError(400, 'Request body is not valid JSON'); }
+  }
+  if (ct.includes('xml')) {
+    try { return xmlParser.parse(raw); } catch { throw new PolicyError(400, 'Request body is not valid XML'); }
+  }
+  if (ct.includes('x-www-form-urlencoded')) return Object.fromEntries(new URLSearchParams(raw));
+  return raw;
+}
+
+function sendRest(reply: FastifyReply, r: ReplyPayload & { failed?: boolean; error?: string; runId?: string }) {
+  if (r.runId) reply.header('x-sutra-run', r.runId);
+  for (const [k, v] of Object.entries(r.headers || {})) reply.header(k, v);
+  const ct = r.contentType || (typeof r.body === 'string' ? 'text/plain; charset=utf-8' : 'application/json');
+  reply.code(r.status || 200).type(ct);
+  if (r.body == null) return reply.send(r.status === 204 ? undefined : '');
+  if (typeof r.body === 'string') return reply.send(r.body);
+  if (ct.includes('xml')) return reply.send(xmlBuilder.build(r.body));
+  return reply.send(JSON.stringify(r.body));
+}
+
+async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean) {
+  const url = new URL(req.url, 'http://x');
+  const path = decodeURIComponent(url.pathname);
+
+  if (path.startsWith('/.well-known/acme-challenge/')) {
+    const ka = acmeChallenge(path.split('/').pop() || '');
+    return ka ? reply.type('text/plain').send(ka) : reply.code(404).send('Not found');
+  }
+  if (path === '/health') return reply.send({ ok: true });
+
+  const method = req.method.toUpperCase();
+  const candidates = routes.filter(r => r.re.test(path));
+  const route = candidates.find(r => r.kind === 'soap' || r.method === 'ANY' || r.method === method || method === 'OPTIONS')
+    || (candidates.length ? null : undefined);
+  if (route === undefined) return reply.code(404).send({ error: 'No deployed service at this path' });
+  if (route === null) return reply.code(405).header('allow', candidates.map(c => c.method).join(', ')).send({ error: 'Method not allowed' });
+
+  const policy = route.node.config.policy ? effectiveResource(route.node.config.policy) : undefined;
+  if (route.node.config.policy && !policy) return reply.code(503).send({ error: 'The service\'s security policy is missing; refusing to serve it unprotected' });
+  const cors = corsHeaders(policy, req.headers.origin);
+  if (cors) reply.headers(cors);
+  if (method === 'OPTIONS') return reply.code(cors ? 204 : 403).send();
+
+  const raw = typeof req.body === 'string' ? req.body : req.body == null ? '' : String(req.body);
+  const ct = String(req.headers['content-type'] || '').toLowerCase();
+  const headers = Object.fromEntries(Object.entries(req.headers).filter(([k]) => !HIDDEN.has(k) && k !== String(policy?.config.apiKeyHeader || '').toLowerCase()));
+  const client = { ip: req.ip, secure };
+
+  if (route.kind === 'soap') {
+    const n = route.node;
+    const v12cfg = n.config.soapVersion === '1.2';
+    if (method === 'GET' && url.searchParams.has('wsdl')) {
+      const host = req.headers.host || 'localhost';
+      return reply.type('text/xml; charset=utf-8').send(buildWsdl(n, `${secure ? 'https' : 'http'}://${host}${route.path}`));
+    }
+    const fault = (status: number, code: string, msg: string, v12 = v12cfg) =>
+      reply.code(status).type(v12 ? 'application/soap+xml; charset=utf-8' : 'text/xml; charset=utf-8').send(soapFault(v12, code, msg));
+    if (method !== 'POST') return fault(405, 'soap:Client', 'SOAP requests must use POST');
+    let env: any;
+    try { env = xmlParser.parse(raw)?.Envelope; } catch { /* handled below */ }
+    if (!env?.Body) return fault(400, 'soap:Client', 'Request is not a SOAP envelope');
+    const v12 = ct.includes('application/soap+xml') || raw.includes(NS.soap12);
+    const opName = Object.keys(env.Body).find(k => !k.startsWith('@_'));
+    if (!opName) return fault(400, 'soap:Client', 'SOAP Body is empty', v12);
+    let caller;
+    try {
+      caller = await authorize(policy, { headers: req.headers, ip: req.ip, secure, socket: req.raw.socket, wsSecurity: env.Header?.Security });
+    } catch (e: any) {
+      const pe = e as PolicyError;
+      if (pe.headers) reply.headers(pe.headers);
+      return fault(pe.status || 500, 'soap:Client', pe.message, v12);
+    }
+    const ops = listOf(n.config.operations);
+    if (ops.length && !ops.some(o => o.toLowerCase() === opName.toLowerCase())) return fault(400, 'soap:Client', `Unknown operation ${opName}`, v12);
+    const header = { ...(env.Header || {}) };
+    delete header.Security;
+    const input = { operation: ops.find(o => o.toLowerCase() === opName.toLowerCase()) || opName, body: env.Body[opName], header, headers, soapAction: req.headers.soapaction, auth: caller, client };
+    try {
+      const { runId, reply: r } = await waitReply(onReply => engine.startRun({ doc: route.doc, flowId: route.flowId, projectId: route.projectId, version: route.version, triggerNodeId: n.id, input, source: 'soap', onReply }), config.replyTimeoutMs);
+      reply.header('x-sutra-run', runId);
+      const ns = String(n.config.namespace || 'urn:sutra');
+      if (r.failed || r.soap?.fault) {
+        const f = r.soap?.fault || { code: 'soap:Server', message: r.error || 'Sutra failed' };
+        return fault(500, f.code, f.message, v12);
+      }
+      const opResp = `${r.soap?.operation || input.operation}Response`;
+      const bodyXml = r.body == null ? '' : typeof r.body === 'object' ? xmlBuilder.build(r.body) : xmlEsc(String(r.body));
+      return reply.code(200).type(v12 ? 'application/soap+xml; charset=utf-8' : 'text/xml; charset=utf-8')
+        .send(soapEnvelope(v12, `<${opResp} xmlns="${xmlEsc(ns)}">${bodyXml}</${opResp}>`));
+    } catch (e: any) {
+      if (e.runId) reply.header('x-sutra-run', e.runId);
+      return fault(e.runId !== undefined ? 504 : 500, 'soap:Server', e.message, v12);
+    }
+  }
+
+  // REST
+  let caller;
+  try {
+    caller = await authorize(policy, { headers: req.headers, ip: req.ip, secure, socket: req.raw.socket });
+  } catch (e: any) {
+    const pe = e as PolicyError;
+    if (pe.headers) reply.headers(pe.headers);
+    return reply.code(pe.status || 500).send({ error: pe.message });
+  }
+  const maxKb = Number(route.node.config.maxBodyKb) || 1024;
+  if (Buffer.byteLength(raw) > maxKb * 1024) return reply.code(413).send({ error: `Body is larger than ${maxKb} KB` });
+  let body;
+  try { body = parseRestBody(raw, ct); } catch (e: any) { return reply.code(400).send({ error: e.message }); }
+  const m = path.match(route.re)!;
+  const params = Object.fromEntries(route.keys.map((k, i) => [k, m[i + 1]]));
+  const input = { method, path, params, query: Object.fromEntries(url.searchParams), headers, body, auth: caller, client };
+  try {
+    const { reply: r } = await waitReply(onReply => engine.startRun({ doc: route.doc, flowId: route.flowId, projectId: route.projectId, version: route.version, triggerNodeId: route.node.id, input, source: 'rest', onReply }), config.replyTimeoutMs);
+    if (r.failed) return sendRest(reply, { status: r.status || 500, body: { error: r.error || 'Sutra failed', run: r.runId }, runId: r.runId });
+    return sendRest(reply, r);
+  } catch (e: any) {
+    if (e.runId) reply.header('x-sutra-run', e.runId);
+    return reply.code(e.runId !== undefined ? 504 : 500).send({ error: e.message });
+  }
+}
+
+// ---------- listeners ----------
+
+function build(https?: any): FastifyInstance {
+  const app = Fastify({ https, trustProxy: false, bodyLimit: 50 * 1024 * 1024, logger: false });
+  app.removeAllContentTypeParsers();
+  app.addContentTypeParser('*', { parseAs: 'string' }, (_req, body, done) => done(null, body));
+  const secure = !!https;
+  app.all('/', (req, reply) => handle(req, reply, secure));
+  app.all('/*', (req, reply) => handle(req, reply, secure));
+  return app;
+}
+
+let httpApp: FastifyInstance | null = null;
+let httpsApp: FastifyInstance | null = null;
+export const gatewayStatus = { http: '', https: '', error: '' };
+
+function tlsOptions() {
+  const t = getTls();
+  const c = getCert();
+  if (t.mode === 'off' || !c) return null;
+  return {
+    cert: c.certPem,
+    key: c.keyPem,
+    ca: t.clientCaPem?.trim() || undefined,
+    requestCert: !!t.clientCaPem?.trim(),
+    rejectUnauthorized: false, // policies decide; non-mTLS services stay reachable
+    minVersion: 'TLSv1.2' as const,
+  };
+}
+
+export async function startGateway() {
+  await stopGateway();
+  rebuildRoutes();
+  const s = getGatewaySettings();
+  gatewayStatus.error = '';
+  httpApp = build();
+  try {
+    await httpApp.listen({ host: s.host, port: s.httpPort });
+    gatewayStatus.http = `http://${s.host}:${s.httpPort}`;
+  } catch (e: any) {
+    gatewayStatus.http = '';
+    gatewayStatus.error = `HTTP port ${s.httpPort}: ${e.message}`;
+  }
+  const tls = tlsOptions();
+  if (tls) {
+    httpsApp = build(tls);
+    try {
+      await httpsApp.listen({ host: s.host, port: s.httpsPort });
+      gatewayStatus.https = `https://${s.host}:${s.httpsPort}`;
+    } catch (e: any) {
+      gatewayStatus.https = '';
+      gatewayStatus.error += `${gatewayStatus.error ? '; ' : ''}HTTPS port ${s.httpsPort}: ${e.message}`;
+    }
+  } else gatewayStatus.https = '';
+}
+
+/** Applies a renewed certificate without dropping connections. */
+export function reloadTls() {
+  const tls = tlsOptions();
+  if (httpsApp && tls) (httpsApp.server as any).setSecureContext(tls);
+  else startGateway().catch(() => {});
+}
+
+export async function stopGateway() {
+  await Promise.all([httpApp?.close(), httpsApp?.close()]);
+  httpApp = httpsApp = null;
+}

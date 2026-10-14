@@ -1,0 +1,81 @@
+import { getSecret } from './secrets.js';
+import { effectiveVariables, engineVariableValues } from './projects.js';
+import { resolveResourceConfig } from './settings.js';
+import type { Resource } from './resources.js';
+import { applyAuth, dispatcherFor, httpCall, tlsFromConnection } from './security/outbound.js';
+import { aiCall } from './ai/providers.js';
+import { testDatabase } from './connectors/db.js';
+import { testBroker } from './connectors/bus.js';
+import { testMail } from './connectors/email.js';
+import { testFirebase } from './connectors/firebase.js';
+import { connectionStatus } from './connectors/oauth.js';
+
+/**
+ * "Test connection" in the resource editor: tries the settings as they are on screen (saved or not),
+ * with project and Sengine variables resolved, and reports what happened in one sentence.
+ */
+export async function testResource(input: { id?: string; kind: string; name?: string; project_id?: string | null; config: Record<string, any> }) {
+  const t0 = Date.now();
+  const config = resolveResourceConfig(input.config || {}, { gv: effectiveVariables(input.project_id ?? null).values, ev: engineVariableValues() });
+  const r: Resource = { id: input.id || `test-${t0}`, kind: input.kind, name: input.name || input.kind, project_id: input.project_id ?? null, config, rev: `test-${t0}` } as Resource;
+  const secret = (name: string, what = 'Secret') => {
+    if (!name) throw new Error(`${what} is not set`);
+    const v = getSecret(name);
+    if (v === undefined) throw new Error(`${what}: secret "${name}" does not exist. Add it under Resources > Secrets.`);
+    return v;
+  };
+  try {
+    const message = await run(r, secret);
+    return { ok: true, message, ms: Date.now() - t0 };
+  } catch (e: any) {
+    return { ok: false, message: String(e?.message || e), ms: Date.now() - t0 };
+  }
+}
+
+async function run(r: Resource, secret: (n: string, w?: string) => string): Promise<string> {
+  switch (r.kind) {
+    case 'httpConnection': {
+      if (!r.config.baseUrl) throw new Error('Base URL is not set');
+      const res = await httpCall({ method: 'GET', url: r.config.baseUrl, headers: {}, dispatcher: dispatcherFor(r, tlsFromConnection(r, secret)), timeoutMs: Math.min(Number(r.config.timeoutMs) || 15000, 30000), parse: 'text' });
+      return `Reached ${new URL(r.config.baseUrl).host}: HTTP ${res.status} in ${res.ms} ms${res.status >= 400 ? ' (the server answered; the base URL itself may not be a page)' : ''}`;
+    }
+    case 'outboundAuth': {
+      const a = await applyAuth(r, secret, x => x, {});
+      const parts = [...Object.keys(a.headers).map(h => `header ${h}`), ...Object.keys(a.query).map(k => `query ${k}`)];
+      return r.config.type === 'oauth2ClientCredentials' ? `Token received from the token URL; calls send ${parts.join(', ') || 'it'}` : `Ready: calls send ${parts.join(', ') || (String(r.config.type || '').startsWith('wss') ? 'a WS-Security header' : 'nothing extra')}`;
+    }
+    case 'inboundPolicy': {
+      if (r.config.auth === 'jwt' && r.config.jwksUrl) {
+        const res = await httpCall({ method: 'GET', url: r.config.jwksUrl, headers: {}, timeoutMs: 15000, parse: 'json' });
+        const n = Array.isArray(res.body?.keys) ? res.body.keys.length : 0;
+        if (res.status >= 400 || !n) throw new Error(`The JWKS URL answered ${res.status} without keys`);
+        return `JWKS URL reachable: ${n} signing key${n === 1 ? '' : 's'}`;
+      }
+      if (r.config.auth === 'apiKey') for (const s of (r.config.apiKeySecrets || [])) secret(String(s), 'Accepted key');
+      return 'Settings are complete. A policy has nothing to connect to: call a service that uses it to try it.';
+    }
+    case 'aiProvider': {
+      const res = await aiCall(r, secret, { system: 'Reply with exactly one word.', prompt: 'Say OK.', effort: 'low' });
+      return `${res.ai.engine} answered "${res.text.trim().slice(0, 40)}" using ${res.ai.model}${res.ai.totalTokens != null ? `, ${res.ai.totalTokens} tokens` : ''}, in ${res.ai.ms} ms`;
+    }
+    case 'smtp':
+    case 'imap':
+      return testMail(r, secret);
+    case 'database':
+      return testDatabase(r, secret);
+    case 'kafka':
+    case 'rabbitmq':
+    case 'amqp1':
+      return testBroker(r, secret);
+    case 'firebase':
+      return testFirebase(r, secret);
+    case 'oauthApp': {
+      if (!r.id || r.id.startsWith('test-')) throw new Error('Save the connection, then use Connect account to sign in');
+      const st = connectionStatus(r.id);
+      if (!st.connected) throw new Error('No account connected yet: use Connect account below');
+      return `Account connected${st.expiresAt ? `; token valid until ${new Date(st.expiresAt).toLocaleString()}` : ''}${st.canRefresh ? ', refreshed automatically' : ''}`;
+    }
+    default:
+      throw new Error(`No test for ${r.kind}`);
+  }
+}

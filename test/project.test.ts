@@ -1,0 +1,215 @@
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { testEnv, node, edge } from './helpers.js';
+
+testEnv(18410);
+const { boot } = await import('../server/src/index.js');
+const { engine } = await import('../server/src/engine/engine.js');
+const { q } = await import('../server/src/db.js');
+const projects = await import('../server/src/projects.js');
+const schemas = await import('../server/src/schemas.js');
+const { saveResource, requireResource } = await import('../server/src/resources.js');
+const { setSecret } = await import('../server/src/secrets.js');
+const { evaluateMapping } = await import('../server/src/mapping.js');
+const { designSchemas } = await import('../server/src/design.js');
+const { tailLog } = await import('../server/src/logger.js');
+
+let srv: Awaited<ReturnType<typeof boot>>;
+let pid = '';
+before(async () => {
+  srv = await boot({ listenAdmin: false });
+  pid = projects.saveProject({
+    name: 'Orders', config: {
+      variables: [
+        { name: 'REGION', type: 'string', value: 'south' },
+        { name: 'LIMIT', type: 'number', value: '1000' },
+        { name: 'API_TOKEN', type: 'secret', value: 'ORDERS_TOKEN' },
+      ],
+      logging: { enabled: true, file: 'logs/{project}.log', level: 'debug', format: 'text', maxSizeMb: 1, maxFiles: 2, stepData: true },
+    },
+  }).id;
+  setSecret('ORDERS_TOKEN', 'tok-123456');
+});
+after(async () => { await srv.stop(); });
+
+async function run(nodes: any[], edges: any[], extra: any = {}) {
+  const id = engine.startRun({ doc: { name: 'P', nodes, edges, ...(extra.doc || {}) }, projectId: pid, ...extra.opts });
+  await engine.waitFor(id, 15000, true);
+  const r: any = q.get('select * from runs where id = ?', id);
+  return { id, status: r.status, error: r.error, state: JSON.parse(r.state) };
+}
+
+test('project variables, Sutra variables and ops overrides with ${env:}', async () => {
+  process.env.SUTRA_TEST_REGION = 'north';
+  projects.setOps(pid, { variables: { REGION: '${env:SUTRA_TEST_REGION}' } });
+  const s = node('start', 'Start', { payload: '{}' });
+  const m = node('mapper', 'Map', { mapping: { rules: {
+    region: { expr: '{gv.REGION}' }, limit: { expr: '{gv.LIMIT} * 2' }, token: { expr: '{gv.API_TOKEN}' }, counter: { expr: '{vars.counter} + 1' }, step: { expr: '{process.step}' },
+  } } });
+  const r = await run([s, m], [edge(s, m)], { doc: { variables: [{ name: 'counter', type: 'number', value: '41' }] } });
+  assert.equal(r.status, 'done', r.error);
+  assert.deepEqual({ ...r.state.outputs.Map, token: undefined }, { region: 'north', limit: 2000, counter: 42, step: 'Map', token: undefined });
+  assert.equal(r.state.outputs.Map.token, '••••••', 'secret project variables are masked in history');
+  delete process.env.SUTRA_TEST_REGION;
+  projects.setOps(pid, {});
+});
+
+test('ops config file export / import overrides a resource for this environment', () => {
+  const conn = saveResource({ kind: 'httpConnection', name: 'Billing API', project_id: pid, config: { baseUrl: 'https://test.example.com', timeoutMs: 5000 } });
+  const file = projects.exportOpsFile(pid);
+  assert.equal(file.resources['Billing API'].baseUrl, 'https://test.example.com');
+  file.resources['Billing API'].baseUrl = '${env:BILLING_URL:-https://prod.example.com}';
+  file.variables.LIMIT = '5000';
+  const ops = projects.importOpsFile(pid, file);
+  assert.deepEqual(ops.variables, { LIMIT: '5000' });
+  assert.deepEqual(ops.resources, { 'Billing API': { baseUrl: '${env:BILLING_URL:-https://prod.example.com}' } });
+  assert.equal(requireResource(conn.id, 'httpConnection', 'x').config.baseUrl, 'https://prod.example.com');
+  assert.throws(() => projects.importOpsFile(pid, { project: 'Other' }), /for project "Other"/);
+  projects.setOps(pid, {});
+});
+
+const XSD = `<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="Message">
+    <xs:complexType><xs:sequence>
+      <xs:element name="Parties"><xs:complexType><xs:sequence>
+        <xs:element name="Party" maxOccurs="unbounded" type="PartyType"/>
+      </xs:sequence></xs:complexType></xs:element>
+    </xs:sequence><xs:attribute name="version" type="xs:string" use="required"/></xs:complexType>
+  </xs:element>
+  <xs:complexType name="PartyType"><xs:sequence>
+    <xs:element name="Name" type="xs:string"/>
+    <xs:element name="Contacts" minOccurs="0"><xs:complexType><xs:sequence>
+      <xs:element name="Contact" maxOccurs="unbounded"><xs:complexType><xs:sequence>
+        <xs:element name="Kind" type="xs:string"/><xs:element name="Value" type="xs:string"/>
+      </xs:sequence></xs:complexType></xs:element>
+    </xs:sequence><xs:attribute name="count" type="xs:int"/></xs:complexType></xs:element>
+    <xs:element name="RoleType" type="RoleEnum"/>
+  </xs:sequence></xs:complexType>
+  <xs:simpleType name="RoleEnum"><xs:restriction base="xs:string"><xs:enumeration value="Borrower"/><xs:enumeration value="Lender"/></xs:restriction></xs:simpleType>
+</xs:schema>`;
+
+test('XSD, JSON Schema and sample JSON become schema trees', () => {
+  const x = schemas.saveSchema({ project_id: pid, name: 'TitleMessage', kind: 'xsd', text: XSD });
+  const t = schemas.schemaTree(x.id)!;
+  const msg = t.children![0];
+  assert.equal(msg.name, 'Message');
+  assert.deepEqual(msg.children!.map(c => c.name), ['Parties', '@_version']);
+  const party = schemas.nodeAt(t, 'Message/Parties/Party')!;
+  assert.equal(party.repeats, true);
+  assert.deepEqual(party.children!.map(c => c.name), ['Name', 'Contacts', 'RoleType']);
+  assert.deepEqual(schemas.nodeAt(t, 'Message/Parties/Party/RoleType')!.enum, ['Borrower', 'Lender']);
+  assert.equal(schemas.nodeAt(t, 'Message/Parties/Party/Contacts/@_count')!.type, 'integer');
+
+  const js = schemas.saveSchema({ project_id: pid, name: 'Order', kind: 'json', text: JSON.stringify({
+    $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object', required: ['id'],
+    properties: { id: { type: 'string' }, lines: { type: 'array', items: { $ref: '#/$defs/line' } }, placed: { type: 'string', format: 'date-time' } },
+    $defs: { line: { type: 'object', properties: { sku: { type: 'string' }, qty: { type: 'integer' } } } },
+  }) });
+  const jt = schemas.schemaTree(js.id)!;
+  assert.equal(jt.children![0].required, true);
+  assert.equal(jt.children![1].repeats, true);
+  assert.deepEqual(jt.children![1].children!.map(c => c.type), ['string', 'integer']);
+  assert.equal(jt.children![2].type, 'date');
+
+  const sample = schemas.saveSchema({ project_id: pid, name: 'Sample', kind: 'json', text: '{"a":1,"tags":["x"],"items":[{"p":2.5}]}' });
+  const st = schemas.schemaTree(sample.id)!;
+  assert.deepEqual(st.children!.map(c => [c.name, c.type, !!c.repeats]), [['a', 'integer', false], ['tags', 'string', true], ['items', 'object', true]]);
+  assert.throws(() => schemas.saveSchema({ project_id: pid, name: 'Bad', kind: 'xsd', text: '<nope/>' }), /not an XSD/);
+});
+
+test('mapping with For-Each, Choose/When, If and nested functions', () => {
+  const t = schemas.schemaTree(schemas.listSchemas(pid).find(s => s.name === 'TitleMessage')!.id)!;
+  const scope = { nodes: { 'Parse XML': { Request: { Party: [
+    { FName: 'ravi', LName: 'Kumar', EntityType: 'Borrower', Contact: [{ HomePhone: '111' }, { Mobile: '999' }] },
+    { FName: 'meera', LName: 'Shah', EntityType: 'Lender', Contact: [] },
+  ] } } } };
+  const out = evaluateMapping(t, { rules: {
+    'Message/@_version': { expr: "'2.0'" },
+    'Message/Parties/Party': { forEach: '{nodes.Parse XML.Request.Party}' },
+    'Message/Parties/Party/Name': { expr: "concat(capitalize({item.FName}), ' ', upper-case({item.LName}))" },
+    'Message/Parties/Party/Contacts': { ifCond: 'count({item.Contact}) > 0' },
+    'Message/Parties/Party/Contacts/@_count': { expr: 'count({item.Contact})' },
+    'Message/Parties/Party/Contacts/Contact': { forEach: '{item.Contact}' },
+    'Message/Parties/Party/Contacts/Contact/Kind': { choose: [{ when: 'exists({item.HomePhone})', expr: "'Home'" }, { when: 'exists({item.Mobile})', expr: "'Mobile'" }], otherwise: "'Other'" },
+    'Message/Parties/Party/Contacts/Contact/Value': { expr: 'coalesce({item.HomePhone}, {item.Mobile})' },
+    'Message/Parties/Party/RoleType': { expr: '{item.EntityType}' },
+  } }, scope);
+  assert.deepEqual(out, { Message: { '@_version': '2.0', Parties: { Party: [
+    { Name: 'Ravi KUMAR', Contacts: { '@_count': 2, Contact: [{ Kind: 'Home', Value: '111' }, { Kind: 'Mobile', Value: '999' }] }, RoleType: 'Borrower' },
+    { Name: 'Meera SHAH', RoleType: 'Lender' },
+  ] } } });
+});
+
+test('Render XML from a mapped XSD, and design-time shapes before any run', async () => {
+  const xsdId = schemas.listSchemas(pid).find(s => s.name === 'TitleMessage')!.id;
+  const orderId = schemas.listSchemas(pid).find(s => s.name === 'Order')!.id;
+  const s = node('start', 'Start', { schema: orderId, payload: '{"id":"A-1","lines":[{"sku":"X","qty":2}]}' });
+  const fe = node('forEach', 'Each line', { list: '{{input.lines}}' });
+  const lg = node('log', 'Line', { message: '={input.sku}' });
+  const rx = node('renderXml', 'Build XML', { source: 'mapping', schema: xsdId, declaration: false, mapping: { rules: {
+    'Message/@_version': { expr: "'1'" }, 'Message/Parties/Party': { forEach: '{nodes.Start.lines}' }, 'Message/Parties/Party/Name': { expr: '{item.sku}' }, 'Message/Parties/Party/RoleType': { expr: "'Borrower'" },
+  } } });
+  const nodes = [s, fe, lg, rx], edges = [edge(s, fe), edge(fe, lg, 'item'), edge(fe, rx, 'done')];
+
+  const d = designSchemas({ name: 'P', nodes, edges });
+  assert.deepEqual(d[s.id].out!.children!.map(c => c.name), ['id', 'lines', 'placed'], 'trigger shape from its schema');
+  assert.deepEqual(d[lg.id].in!.children!.map(c => c.name), ['sku', 'qty', '_index'], 'item branch receives one line');
+  assert.equal(d[rx.id].inputTrees.mapping.children![0].name, 'Message');
+  assert.deepEqual(d[rx.id].out!.children!.map(c => c.name), ['text']);
+
+  const r = await run(nodes, edges);
+  assert.equal(r.status, 'done', r.error);
+  assert.equal(r.state.outputs['Build XML'].text.replace(/>\s+</g, '><').trim(),'<Message version="1"><Parties><Party><Name>X</Name><RoleType>Borrower</RoleType></Party></Parties></Message>');
+});
+
+test('Router takes the first matching route, or all, or otherwise', async () => {
+  const mk = (mode: string, amount: number) => {
+    const s = node('start', 'Start', { payload: JSON.stringify({ amount, tier: 'gold' }) });
+    const rt = node('router', 'Route', { mode, routes: [{ k: 'large', v: '={input.amount} > 1000' }, { k: 'gold', v: "={input.tier} = 'gold'" }] });
+    const a = node('log', 'Large', { message: 'L' }), b = node('log', 'Gold', { message: 'G' }), o = node('log', 'Other', { message: 'O' });
+    return run([s, rt, a, b, o], [edge(s, rt), edge(rt, a, 'large'), edge(rt, b, 'gold'), edge(rt, o, 'otherwise')]);
+  };
+  const first = await mk('first match', 5000);
+  assert.deepEqual(['Large', 'Gold', 'Other'].filter(n => n in first.state.outputs), ['Large']);
+  const all = await mk('all matches', 5000);
+  assert.deepEqual(['Large', 'Gold', 'Other'].filter(n => n in all.state.outputs), ['Large', 'Gold']);
+  const s = node('start', 'Start', { payload: '{"amount":1}' });
+  const rt = node('router', 'Route', { routes: [{ k: 'large', v: '={input.amount} > 1000' }] });
+  const o = node('log', 'Other', { message: 'O' });
+  const none = await run([s, rt, o], [edge(s, rt), edge(rt, o, 'otherwise')]);
+  assert.ok('Other' in none.state.outputs);
+});
+
+test('debugger: step one activity at a time, breakpoints, continue', async () => {
+  const s = node('start', 'Start', { payload: '{"n":1}' });
+  const a = node('mapper', 'A', { mapping: { rules: { n: { expr: '{input.n} + 1' } } } });
+  const b = node('mapper', 'B', { mapping: { rules: { n: { expr: '{input.n} * 10' } } } });
+  const c = node('log', 'C', { message: 'done' });
+  const id = engine.startRun({ doc: { name: 'Dbg', nodes: [s, a, b, c], edges: [edge(s, a), edge(a, b), edge(b, c)] }, projectId: pid, debug: { stepping: true, breakpoints: [] } });
+  const status = () => (q.get('select status from runs where id = ?', id) as any).status;
+  const pausedAt = () => (q.get(`select node_id from tasks where run_id = ? and status = 'paused'`, id) as any)?.node_id;
+  const settle = () => new Promise(r => setTimeout(r, 120));
+  await settle();
+  assert.equal(status(), 'paused');
+  assert.equal(pausedAt(), s.id, 'pauses before the first activity');
+  engine.debug(id, 'step'); await settle();
+  assert.equal(pausedAt(), a.id);
+  engine.debug(id, 'step'); await settle();
+  assert.equal(pausedAt(), b.id);
+  const st = JSON.parse((q.get('select state from runs where id = ?', id) as any).state);
+  assert.deepEqual(st.outputs.A, { n: 2 }, 'output of the stepped activity is visible while paused');
+  engine.debug(id, 'continue', [c.id]); await settle();
+  assert.equal(pausedAt(), c.id, 'continue runs until the breakpoint');
+  engine.debug(id, 'continue', []);
+  assert.equal(await engine.waitFor(id), 'done');
+});
+
+test('project log file records runs, steps and errors', () => {
+  const { file, lines } = tailLog(pid, 500);
+  assert.ok(file && fs.existsSync(file));
+  assert.ok(lines.some(l => l.includes('Run started')));
+  assert.ok(lines.some(l => l.includes('DEBUG') && l.includes('Step finished')), 'step data at debug level');
+  assert.ok(!lines.some(l => l.includes('tok-123456')), 'secrets never reach the log');
+});

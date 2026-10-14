@@ -1,0 +1,611 @@
+import crypto from 'node:crypto';
+import { hostname as osHostname } from 'node:os';
+import { getPath, asText, toNumber } from './values.js';
+
+/**
+ * Mapping expressions (XPath-style functions and predicates, without XPath's quirks).
+ *
+ *   concat('Name : ', {input.name})
+ *   format-date('DD-MM-YY', {nodes.Parse XML.Order.date})
+ *   string-to-base64(upper-case(substring-before({input.email}, '@')))
+ *   if({input.amount} > 1000, 'big', 'small')
+ *
+ * {path} reads data (same paths as {{ }} templates: input, nodes.<Step>, trigger, vars, gv,
+ * secret, run, item, index). Functions nest freely; a "tib:" prefix is accepted and ignored.
+ * Operators: + - * / div mod, = != < <= > >=, and, or. Parsed, never eval'ed.
+ */
+
+type Node =
+  | { t: 'lit'; v: any }
+  | { t: 'ref'; path: string }
+  | { t: 'call'; name: string; args: Node[] }
+  | { t: 'bin'; op: string; a: Node; b: Node }
+  | { t: 'neg'; a: Node }
+  | { t: 'list'; items: Node[] }
+  /** XPath-style predicate: list[condition] filters rows, list[3] picks the third. */
+  | { t: 'pred'; base: Node; cond: Node }
+  /** .field after an expression: first({input.rows}).City, {input.rows}[1].City */
+  | { t: 'get'; base: Node; path: string };
+
+export class ExprError extends Error {
+  constructor(message: string, public at?: number) { super(message); }
+}
+
+// ---------- lexer ----------
+type Tok = { k: 'num' | 'str' | 'ref' | 'id' | 'op' | 'eof'; v: string; at: number };
+
+function lex(src: string): Tok[] {
+  const out: Tok[] = [];
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    if (/\s/.test(c)) { i++; continue; }
+    const at = i;
+    if (c === '"' || c === "'") {
+      let s = '';
+      let closed = false;
+      i++;
+      while (i < src.length) {
+        const d = src[i];
+        // XPath rules: backslashes are literal (Windows paths); a quote inside text is written twice.
+        if (d === c) {
+          // XPath style: a doubled quote inside the text is one quote.
+          if (src[i + 1] === c) { s += c; i += 2; continue; }
+          closed = true;
+          i++;
+          break;
+        }
+        s += d;
+        i++;
+      }
+      if (!closed) throw new ExprError('Text is missing its closing quote', at);
+      out.push({ k: 'str', v: s, at });
+      continue;
+    }
+    if (c === '{') {
+      let depth = 1, j = i + 1, q: string | null = null;
+      while (j < src.length && depth) {
+        const d = src[j];
+        if (q) { if (d === q) q = null; }
+        else if (d === '"' || d === "'") q = d;
+        else if (d === '{') depth++;
+        else if (d === '}') depth--;
+        j++;
+      }
+      if (depth) throw new ExprError('A {field reference} is missing its closing }', at);
+      out.push({ k: 'ref', v: src.slice(i + 1, j - 1).trim(), at });
+      i = j;
+      continue;
+    }
+    const num = /^\d+(\.\d+)?([eE][+-]?\d+)?/.exec(src.slice(i));
+    if (num) { out.push({ k: 'num', v: num[0], at }); i += num[0].length; continue; }
+    const id = /^[A-Za-z_][\w]*(?:[-:.][A-Za-z_][\w]*)*/.exec(src.slice(i));
+    if (id) { out.push({ k: 'id', v: id[0], at }); i += id[0].length; continue; }
+    const op = /^(<=|>=|!=|==|&&|\|\||[-+*/%(),<>=!\[\].])/.exec(src.slice(i));
+    if (op) { out.push({ k: 'op', v: op[0], at }); i += op[0].length; continue; }
+    throw new ExprError(`Unexpected character "${c}"`, at);
+  }
+  out.push({ k: 'eof', v: '', at: src.length });
+  return out;
+}
+
+// ---------- parser ----------
+/** itemFields: bare names read fields of the current item (Where / Group by / Sort by). */
+export function parse(src: string, itemFields = false): Node {
+  const toks = lex(src);
+  let p = 0;
+  const peek = () => toks[p];
+  const next = () => toks[p++];
+  const isOp = (...v: string[]) => peek().k === 'op' && v.includes(peek().v);
+  const isWord = (...v: string[]) => peek().k === 'id' && v.includes(peek().v.toLowerCase());
+  const expect = (v: string) => {
+    const t = next();
+    if (t.k !== 'op' || t.v !== v) throw new ExprError(`Expected "${v}" but found "${t.v || 'end'}"`, t.at);
+  };
+
+  const or = (): Node => { let a = and(); while (isWord('or') || isOp('||')) { next(); a = { t: 'bin', op: 'or', a, b: and() }; } return a; };
+  const and = (): Node => { let a = cmp(); while (isWord('and') || isOp('&&')) { next(); a = { t: 'bin', op: 'and', a, b: cmp() }; } return a; };
+  const cmp = (): Node => {
+    const a = add();
+    if (isOp('=', '==', '!=', '<', '<=', '>', '>=') || isWord('eq', 'ne', 'lt', 'le', 'gt', 'ge')) {
+      const raw = next().v.toLowerCase();
+      const op = ({ '==': '=', eq: '=', ne: '!=', lt: '<', le: '<=', gt: '>', ge: '>=' } as any)[raw] || raw;
+      return { t: 'bin', op, a, b: add() };
+    }
+    return a;
+  };
+  const add = (): Node => { let a = mul(); while (isOp('+', '-')) { const op = next().v; a = { t: 'bin', op, a, b: mul() }; } return a; };
+  const mul = (): Node => {
+    let a = unary();
+    while (isOp('*', '/', '%') || isWord('div', 'mod')) {
+      const raw = next().v.toLowerCase();
+      a = { t: 'bin', op: raw === 'div' ? '/' : raw === 'mod' ? '%' : raw, a, b: unary() };
+    }
+    return a;
+  };
+  const unary = (): Node => {
+    if (isOp('-')) { next(); return { t: 'neg', a: unary() }; }
+    if (isOp('!')) { next(); return { t: 'call', name: 'not', args: [unary()] }; }
+    return postfix(primary());
+  };
+  // Inside [ ] a bare name is a column of the current row: rows[upper-case(Country) = 'INDIA'].
+  let inPred = itemFields ? 1 : 0;
+  const postfix = (base: Node): Node => {
+    while (isOp('[', '.')) {
+      if (isOp('.')) {
+        next();
+        const f = next();
+        if (f.k !== 'id') throw new ExprError('Expected a field name after "."', f.at);
+        base = { t: 'get', base, path: f.v };
+        continue;
+      }
+      next();
+      inPred++;
+      const cond = or();
+      inPred--;
+      expect(']');
+      base = { t: 'pred', base, cond };
+    }
+    return base;
+  };
+  const primary = (): Node => {
+    const t = next();
+    if (t.k === 'num') return { t: 'lit', v: Number(t.v) };
+    if (t.k === 'str') return { t: 'lit', v: t.v };
+    if (t.k === 'ref') {
+      if (!t.v) throw new ExprError('Empty {} reference', t.at);
+      return { t: 'ref', path: t.v };
+    }
+    if (t.k === 'op' && t.v === '(') { const e = or(); expect(')'); return e; }
+    if (t.k === 'op' && t.v === '[') {
+      const items: Node[] = [];
+      if (!isOp(']')) { items.push(or()); while (isOp(',')) { next(); items.push(or()); } }
+      expect(']');
+      return { t: 'list', items };
+    }
+    if (t.k === 'id') {
+      const low = t.v.toLowerCase();
+      if (isOp('(')) {
+        next();
+        const args: Node[] = [];
+        if (!isOp(')')) { args.push(or()); while (isOp(',')) { next(); args.push(or()); } }
+        expect(')');
+        const name = fnIndex().get(low.replace(/^(tib|fn|xs|sutra):/, ''));
+        if (!name) throw new ExprError(`Unknown function ${t.v}()`, t.at);
+        return { t: 'call', name, args };
+      }
+      if (low === 'true') return { t: 'lit', v: true };
+      if (low === 'false') return { t: 'lit', v: false };
+      if (low === 'null') return { t: 'lit', v: null };
+      if (inPred) return { t: 'ref', path: `item.${t.v}` };
+      throw new ExprError(`"${t.v}" is not a function call or value. Put field references in braces, e.g. {input.${t.v}}`, t.at);
+    }
+    throw new ExprError(t.k === 'eof' ? 'The expression ends too early' : `Unexpected "${t.v}"`, t.at);
+  };
+
+  const tree = or();
+  if (peek().k !== 'eof') throw new ExprError(`Unexpected "${peek().v}" after the end of the expression`, peek().at);
+  return tree;
+}
+
+// ---------- evaluation ----------
+const cache = new Map<string, Node>();
+export function compile(src: string, itemFields = false): Node {
+  const key = (itemFields ? '' : '') + src;
+  let n = cache.get(key);
+  if (!n) {
+    n = parse(src, itemFields);
+    if (cache.size > 5000) cache.clear();
+    cache.set(key, n);
+  }
+  return n;
+}
+
+const isEmpty = (v: unknown) => v == null || v === '' || (Array.isArray(v) && !v.length);
+function eq(a: any, b: any) {
+  if (typeof a === 'number' || typeof b === 'number') { const x = toNumber(a), y = toNumber(b); if (isFinite(x) && isFinite(y)) return x === y; }
+  if (typeof a === 'boolean' || typeof b === 'boolean') return truthy(a) === truthy(b);
+  return asText(a) === asText(b);
+}
+export const truthy = (v: unknown) => (typeof v === 'string' ? v !== '' && v.toLowerCase() !== 'false' && v !== '0' : Array.isArray(v) ? v.length > 0 : !!v);
+const ord = (a: any, b: any) => {
+  const x = toNumber(a), y = toNumber(b);
+  if (isFinite(x) && isFinite(y)) return x - y;
+  return asText(a).localeCompare(asText(b));
+};
+
+export function evaluate(node: Node, ctx: Record<string, any>): any {
+  switch (node.t) {
+    case 'lit': return node.v;
+    case 'ref': return getPath(ctx, node.path);
+    case 'list': return node.items.map(i => evaluate(i, ctx));
+    case 'get': {
+      const v = evaluate(node.base, ctx);
+      return getPath(Array.isArray(v) ? v[0] : v, node.path);
+    }
+    case 'pred': {
+      const v = evaluate(node.base, ctx);
+      const items = v == null ? [] : Array.isArray(v) ? v : [v];
+      if (node.cond.t === 'lit' && typeof node.cond.v === 'number') return items[node.cond.v - 1];
+      return items.filter((item, i) => {
+        const r = evaluate(node.cond, { ...ctx, outer: ctx.item, item, index: i + 1, __size: items.length });
+        return typeof r === 'number' ? r === i + 1 : truthy(r);
+      });
+    }
+    case 'neg': return -toNumber(evaluate(node.a, ctx));
+    case 'bin': {
+      if (node.op === 'and') return truthy(evaluate(node.a, ctx)) && truthy(evaluate(node.b, ctx));
+      if (node.op === 'or') return truthy(evaluate(node.a, ctx)) || truthy(evaluate(node.b, ctx));
+      const a = evaluate(node.a, ctx), b = evaluate(node.b, ctx);
+      switch (node.op) {
+        case '+': return toNumber(a) + toNumber(b);
+        case '-': return toNumber(a) - toNumber(b);
+        case '*': return toNumber(a) * toNumber(b);
+        case '/': return toNumber(a) / toNumber(b);
+        case '%': return toNumber(a) % toNumber(b);
+        case '=': return eq(a, b);
+        case '!=': return !eq(a, b);
+        case '<': return ord(a, b) < 0;
+        case '<=': return ord(a, b) <= 0;
+        case '>': return ord(a, b) > 0;
+        case '>=': return ord(a, b) >= 0;
+      }
+      throw new ExprError(`Unknown operator ${node.op}`);
+    }
+    case 'call': {
+      const f = FUNCTIONS[node.name];
+      if (f.lazy) return f.lazy(node.args, ctx);
+      const args = node.args.map(a => evaluate(a, ctx));
+      if (args.length < f.min) throw new ExprError(`${node.name}() needs at least ${f.min} argument${f.min === 1 ? '' : 's'}: ${f.sig}`);
+      if (f.max !== undefined && args.length > f.max) throw new ExprError(`${node.name}() takes at most ${f.max} argument${f.max === 1 ? '' : 's'}: ${f.sig}`);
+      return f.fn!(...args);
+    }
+  }
+}
+
+export function evalExpression(src: string, ctx: Record<string, any>, itemFields = false) {
+  return evaluate(compile(src, itemFields), ctx);
+}
+
+/** Field paths an expression reads, for drawing mapping lines. */
+export function refsOf(src: string): string[] {
+  try {
+    const out: string[] = [];
+    const walk = (n: Node) => {
+      if (n.t === 'ref') out.push(n.path);
+      else if (n.t === 'call') n.args.forEach(walk);
+      else if (n.t === 'bin') { walk(n.a); walk(n.b); }
+      else if (n.t === 'neg') walk(n.a);
+      else if (n.t === 'list') n.items.forEach(walk);
+      else if (n.t === 'get') walk(n.base);
+      else if (n.t === 'pred') { walk(n.base); const inner: string[] = []; const w2 = (m: Node) => { if (m.t === 'ref' && !m.path.startsWith('item.')) inner.push(m.path); else if (m.t === 'call') m.args.forEach(w2); else if (m.t === 'bin') { w2(m.a); w2(m.b); } }; w2(n.cond); out.push(...inner); }
+    };
+    walk(compile(src));
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+// ---------- dates ----------
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+export function toDate(v: unknown): Date {
+  if (v instanceof Date) return v;
+  if (v == null || v === '') throw new ExprError('A date is required but the value is empty');
+  if (typeof v === 'number' || /^-?\d{10,}$/.test(String(v))) return new Date(Number(v));
+  const s = String(v).trim();
+  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(s) ? s + 'T00:00:00Z' : s);
+  if (isNaN(d.getTime())) throw new ExprError(`"${s}" is not a date`);
+  return d;
+}
+
+/** Converts an XPath picture like [Y0001]-[M01]-[D01] to the token format. */
+function picture(fmt: string) {
+  if (!fmt.includes('[')) return fmt;
+  if (!/\[[YMDHhmsfFP]/.test(fmt)) return fmt;
+  return fmt.replace(/\[([YMDHhmsfFP])([^\]]*)\]/g, (_, c, m) => {
+    switch (c) {
+      case 'Y': return m.length >= 4 || m === '' ? 'YYYY' : 'YY';
+      case 'M': return /N/.test(m) ? (m.includes(',*-3') ? 'MMM' : 'MMMM') : m.startsWith('01') ? 'MM' : 'M';
+      case 'D': return m.startsWith('01') ? 'DD' : 'D';
+      case 'H': return m.startsWith('01') ? 'HH' : 'H';
+      case 'h': return m.startsWith('01') ? 'hh' : 'h';
+      case 'm': return 'mm';
+      case 's': return 'ss';
+      case 'f': return 'SSS';
+      case 'F': return m.includes(',*-3') ? 'ddd' : 'dddd';
+      case 'P': return 'A';
+    }
+    return '';
+  });
+}
+
+function partsIn(d: Date, tz?: string) {
+  if (!tz) {
+    return { Y: d.getFullYear(), M: d.getMonth() + 1, D: d.getDate(), H: d.getHours(), m: d.getMinutes(), s: d.getSeconds(), ms: d.getMilliseconds(), wd: d.getDay(), off: -d.getTimezoneOffset() };
+  }
+  const f = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric', weekday: 'short' });
+  const p = Object.fromEntries(f.formatToParts(d).map(x => [x.type, x.value]));
+  const local = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second);
+  return { Y: +p.year, M: +p.month, D: +p.day, H: +p.hour % 24, m: +p.minute, s: +p.second, ms: d.getUTCMilliseconds(), wd: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday), off: Math.round((local - (d.getTime() - d.getUTCMilliseconds())) / 60000) };
+}
+
+export function formatDate(v: unknown, fmt: string, tz?: string) {
+  const d = toDate(v);
+  const p = partsIn(d, tz || undefined);
+  const pad = (n: number, l = 2) => String(Math.abs(n)).padStart(l, '0');
+  const off = (sep: string) => (p.off >= 0 ? '+' : '-') + pad(Math.trunc(Math.abs(p.off) / 60)) + sep + pad(Math.abs(p.off) % 60);
+  const map: Record<string, () => string> = {
+    YYYY: () => String(p.Y), YY: () => pad(p.Y % 100), MMMM: () => MONTHS[p.M - 1], MMM: () => MONTHS[p.M - 1].slice(0, 3),
+    MM: () => pad(p.M), M: () => String(p.M), DD: () => pad(p.D), D: () => String(p.D),
+    dddd: () => DAYS[p.wd], ddd: () => DAYS[p.wd].slice(0, 3), HH: () => pad(p.H), H: () => String(p.H),
+    hh: () => pad(p.H % 12 || 12), h: () => String(p.H % 12 || 12), mm: () => pad(p.m), m: () => String(p.m),
+    ss: () => pad(p.s), s: () => String(p.s), SSS: () => pad(p.ms, 3), A: () => (p.H < 12 ? 'AM' : 'PM'), a: () => (p.H < 12 ? 'am' : 'pm'),
+    ZZ: () => off(''), Z: () => off(':'),
+  };
+  return picture(fmt).replace(/\[([^\]]*)\]|YYYY|YY|MMMM|MMM|MM|M|DD|D|dddd|ddd|HH|H|hh|h|mm|m|ss|s|SSS|A|a|ZZ|Z/g, (t, lit) => (lit !== undefined ? lit : map[t]()));
+}
+
+export function parseDate(s: unknown, fmt: string) {
+  const text = asText(s).trim();
+  const f = picture(fmt);
+  const groups: string[] = [];
+  const re = f.replace(/\[([^\]]*)\]|YYYY|YY|MMMM|MMM|MM|M|DD|D|dddd|ddd|HH|H|hh|h|mm|m|ss|s|SSS|A|a|ZZ|Z|[.*+?^${}()|\\]/g, (t, lit) => {
+    if (lit !== undefined) return lit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (/^[.*+?^${}()|\\]$/.test(t)) return '\\' + t;
+    groups.push(t);
+    return t === 'MMMM' || t === 'dddd' ? '([A-Za-z]+)' : t === 'MMM' || t === 'ddd' ? '([A-Za-z]{3})' : t === 'A' || t === 'a' ? '([AaPp][Mm])' : t === 'Z' || t === 'ZZ' ? '(Z|[+-]\\d{2}:?\\d{2})' : t === 'YYYY' ? '(\\d{4})' : t === 'SSS' ? '(\\d{1,3})' : '(\\d{1,2})';
+  });
+  const m = new RegExp('^' + re + '$').exec(text);
+  if (!m) throw new ExprError(`"${text}" does not match the date format "${fmt}"`);
+  const v = { Y: 1970, M: 1, D: 1, H: 0, m: 0, s: 0, ms: 0, pm: null as boolean | null, off: null as number | null };
+  groups.forEach((g, i) => {
+    const x = m[i + 1];
+    switch (g) {
+      case 'YYYY': v.Y = +x; break;
+      case 'YY': v.Y = 2000 + +x; break;
+      case 'MMMM': case 'MMM': v.M = MONTHS.findIndex(n => n.toLowerCase().startsWith(x.toLowerCase().slice(0, 3))) + 1; break;
+      case 'MM': case 'M': v.M = +x; break;
+      case 'DD': case 'D': v.D = +x; break;
+      case 'HH': case 'H': case 'hh': case 'h': v.H = +x; break;
+      case 'mm': case 'm': v.m = +x; break;
+      case 'ss': case 's': v.s = +x; break;
+      case 'SSS': v.ms = +x.padEnd(3, '0'); break;
+      case 'A': case 'a': v.pm = x.toLowerCase() === 'pm'; break;
+      case 'Z': case 'ZZ': v.off = x === 'Z' ? 0 : (x[0] === '-' ? -1 : 1) * (+x.slice(1, 3) * 60 + +x.slice(-2)); break;
+    }
+  });
+  if (v.pm !== null) v.H = (v.H % 12) + (v.pm ? 12 : 0);
+  if (v.M < 1) throw new ExprError(`Unknown month in "${text}"`);
+  const utc = Date.UTC(v.Y, v.M - 1, v.D, v.H, v.m, v.s, v.ms) - (v.off ?? 0) * 60000;
+  return new Date(utc).toISOString();
+}
+
+function addToDate(v: unknown, y = 0, mo = 0, d = 0, h = 0, mi = 0, s = 0) {
+  const x = new Date(toDate(v).getTime());
+  x.setUTCFullYear(x.getUTCFullYear() + toNumber(y || 0), x.getUTCMonth() + toNumber(mo || 0), x.getUTCDate() + toNumber(d || 0));
+  x.setUTCHours(x.getUTCHours() + toNumber(h || 0), x.getUTCMinutes() + toNumber(mi || 0), x.getUTCSeconds() + toNumber(s || 0));
+  return x.toISOString();
+}
+
+// ---------- numbers ----------
+export function formatNumber(n: unknown, pattern = '#,##0.##') {
+  const x = toNumber(n);
+  if (!isFinite(x)) return 'NaN';
+  const m = /^([^#0,.]*)([#0,]*)(?:\.([#0]*))?(.*)$/.exec(pattern);
+  if (!m) throw new ExprError(`Unsupported number format "${pattern}"`);
+  const [, pre, int, frac = '', suf] = m;
+  const minFrac = (frac.match(/0/g) || []).length, maxFrac = frac.length;
+  let s = Math.abs(x).toFixed(maxFrac);
+  if (maxFrac > minFrac) s = s.replace(new RegExp(`0{1,${maxFrac - minFrac}}$`), '').replace(/\.$/, '');
+  let [ip, fp] = s.split('.');
+  const minInt = (int.replace(/,/g, '').match(/0/g) || []).length;
+  ip = ip.padStart(minInt, '0');
+  if (ip === '0' && minInt === 0 && fp) ip = '';
+  const group = int.includes(',') ? int.length - int.lastIndexOf(',') - 1 : 0;
+  if (group > 0) ip = ip.replace(new RegExp(`\\B(?=(\\d{${group}})+(?!\\d))`, 'g'), ',');
+  return (x < 0 ? '-' : '') + pre + ip + (fp ? '.' + fp : '') + suf;
+}
+
+// ---------- function library ----------
+/** Engine-provided access to project and engine (administrator) variables. */
+export interface VariableHooks {
+  getProject(projectId: string | null, name: string): any;
+  setProject(projectId: string | null, name: string, value: unknown): void;
+  getEngine(name: string): any;
+  setEngine(name: string, value: unknown): void;
+}
+let hooks: VariableHooks | null = null;
+export function setVariableHooks(h: VariableHooks) { hooks = h; }
+const needHooks = () => { if (!hooks) throw new ExprError('Variables are not available here'); return hooks; };
+
+export interface FnDef {
+  group: string;
+  sig: string;
+  help: string;
+  example?: string;
+  /** Kept for older formulas; left out of the function library. */
+  hidden?: boolean;
+  min: number;
+  max?: number;
+  fn?: (...a: any[]) => any;
+  lazy?: (args: Node[], ctx: Record<string, any>) => any;
+}
+
+const s = asText;
+const list = (v: unknown): any[] => (v == null ? [] : Array.isArray(v) ? v : [v]);
+const hash = (alg: string) => (v: unknown) => crypto.createHash(alg).update(s(v)).digest('hex');
+const num = toNumber;
+
+function def(group: string, name: string, sig: string, help: string, min: number, max: number | undefined, fn: FnDef['fn'], example?: string): [string, FnDef] {
+  return [name, { group, sig, help, min, max, fn, example }];
+}
+
+export const FUNCTIONS: Record<string, FnDef> = Object.fromEntries([
+  // String
+  def('String', 'concat', 'concat(a, b, ...)', 'Joins text values.', 1, undefined, (...a) => a.map(s).join(''), "concat('Name : ', {input.name})"),
+  def('String', 'substring', 'substring(text, start, length?)', 'Part of the text; start counts from 1.', 2, 3, (t, st, l) => { const x = s(t); const b = Math.max(0, Math.round(num(st)) - 1); return l === undefined ? x.slice(b) : x.substr(b, Math.max(0, Math.round(num(l)))); }, "substring('ABCDEF', 2, 3) = 'BCD'"),
+  def('String', 'substring-before', 'substring-before(text, find)', 'Text before the first match.', 2, 2, (t, f) => { const x = s(t), i = x.indexOf(s(f)); return i < 0 ? '' : x.slice(0, i); }, "substring-before('a@b.com', '@') = 'a'"),
+  def('String', 'substring-after', 'substring-after(text, find)', 'Text after the first match.', 2, 2, (t, f) => { const x = s(t), i = x.indexOf(s(f)); return i < 0 ? '' : x.slice(i + s(f).length); }, "substring-after('a@b.com', '@') = 'b.com'"),
+  def('String', 'substring-before-last', 'substring-before-last(text, find)', 'Text before the last match.', 2, 2, (t, f) => { const x = s(t), i = x.lastIndexOf(s(f)); return i < 0 ? '' : x.slice(0, i); }),
+  def('String', 'substring-after-last', 'substring-after-last(text, find)', 'Text after the last match.', 2, 2, (t, f) => { const x = s(t), i = x.lastIndexOf(s(f)); return i < 0 ? '' : x.slice(i + s(f).length); }, "substring-after-last('a/b/c.txt', '/') = 'c.txt'"),
+  def('String', 'upper-case', 'upper-case(text)', 'Upper case.', 1, 1, t => s(t).toUpperCase()),
+  def('String', 'lower-case', 'lower-case(text)', 'Lower case.', 1, 1, t => s(t).toLowerCase()),
+  def('String', 'trim', 'trim(text)', 'Removes spaces at both ends.', 1, 1, t => s(t).trim()),
+  def('String', 'left-trim', 'left-trim(text)', 'Removes leading spaces.', 1, 1, t => s(t).trimStart()),
+  def('String', 'right-trim', 'right-trim(text)', 'Removes trailing spaces.', 1, 1, t => s(t).trimEnd()),
+  def('String', 'normalize-space', 'normalize-space(text)', 'Trims and collapses inner spaces.', 1, 1, t => s(t).trim().replace(/\s+/g, ' ')),
+  def('String', 'string-length', 'string-length(text)', 'Number of characters.', 1, 1, t => s(t).length),
+  def('String', 'contains', 'contains(text, find)', 'True when text contains find.', 2, 2, (t, f) => s(t).includes(s(f))),
+  def('String', 'starts-with', 'starts-with(text, prefix)', 'True when text starts with prefix.', 2, 2, (t, f) => s(t).startsWith(s(f))),
+  def('String', 'ends-with', 'ends-with(text, suffix)', 'True when text ends with suffix.', 2, 2, (t, f) => s(t).endsWith(s(f))),
+  def('String', 'index-of', 'index-of(text, find)', 'Position of find (1-based), 0 when absent.', 2, 2, (t, f) => s(t).indexOf(s(f)) + 1),
+  def('String', 'replace', 'replace(text, find, with)', 'Replaces every occurrence (plain text).', 3, 3, (t, f, w) => s(t).split(s(f)).join(s(w))),
+  def('String', 'replace-regex', 'replace-regex(text, pattern, with)', 'Regular expression replace; $1 refers to groups.', 3, 3, (t, p, w) => s(t).replace(new RegExp(s(p), 'g'), s(w))),
+  def('String', 'matches', 'matches(text, pattern)', 'True when the regular expression matches.', 2, 2, (t, p) => new RegExp(s(p)).test(s(t))),
+  def('String', 'translate', 'translate(text, from, to)', 'Replaces characters one for one.', 3, 3, (t, f, w) => [...s(t)].map(ch => { const i = s(f).indexOf(ch); return i < 0 ? ch : s(w)[i] ?? ''; }).join('')),
+  def('String', 'pad', 'pad(text, length, char?)', 'Pads on the right.', 2, 3, (t, l, c = ' ') => s(t).padEnd(num(l), s(c) || ' ')),
+  def('String', 'pad-front', 'pad-front(text, length, char?)', 'Pads on the left, e.g. leading zeros.', 2, 3, (t, l, c = ' ') => s(t).padStart(num(l), s(c) || ' '), "pad-front(42, 6, '0') = '000042'"),
+  def('String', 'tokenize', 'tokenize(text, separator)', 'Splits text into a list.', 2, 2, (t, sep) => s(t).split(s(sep))),
+  def('String', 'string-join', 'string-join(list, separator)', 'Joins a list into text.', 2, 2, (l, sep) => list(l).map(s).join(s(sep))),
+  def('String', 'capitalize', 'capitalize(text)', 'First letter of each word upper case.', 1, 1, t => s(t).toLowerCase().replace(/(^|\s)\S/g, x => x.toUpperCase())),
+  def('Conversion', 'string', 'xs:string(value)', 'Converts to text (objects become JSON).', 1, 1, v => s(v)),
+  // Encode / decode
+  def('Encode/Decode', 'string-to-base64', 'string-to-base64(text)', 'Base64 encode.', 1, 1, t => Buffer.from(s(t), 'utf8').toString('base64')),
+  def('Encode/Decode', 'base64-to-string', 'base64-to-string(base64)', 'Base64 decode.', 1, 1, t => Buffer.from(s(t), 'base64').toString('utf8')),
+  def('Encode/Decode', 'url-encode', 'url-encode(text)', 'Encode for URLs.', 1, 1, t => encodeURIComponent(s(t))),
+  def('Encode/Decode', 'url-decode', 'url-decode(text)', 'Decode URL encoding.', 1, 1, t => decodeURIComponent(s(t))),
+  def('Encode/Decode', 'hex-encode', 'hex-encode(text)', 'Text to hexadecimal.', 1, 1, t => Buffer.from(s(t), 'utf8').toString('hex')),
+  def('Encode/Decode', 'hex-decode', 'hex-decode(hex)', 'Hexadecimal to text.', 1, 1, t => Buffer.from(s(t), 'hex').toString('utf8')),
+  def('Encode/Decode', 'escape-xml', 'escape-xml(text)', 'Escape < > & \' " for XML.', 1, 1, t => s(t).replace(/[<>&'"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[c]!)),
+  def('Encode/Decode', 'unescape-xml', 'unescape-xml(text)', 'Undo XML escaping.', 1, 1, t => s(t).replace(/&(lt|gt|amp|apos|quot);/g, (_, e) => ({ lt: '<', gt: '>', amp: '&', apos: "'", quot: '"' })[e as 'lt']!)),
+  def('Encode/Decode', 'md5', 'md5(text)', 'MD5 hash (hex).', 1, 1, hash('md5')),
+  def('Encode/Decode', 'sha1', 'sha1(text)', 'SHA-1 hash (hex).', 1, 1, hash('sha1')),
+  def('Encode/Decode', 'sha256', 'sha256(text)', 'SHA-256 hash (hex).', 1, 1, hash('sha256')),
+  def('Encode/Decode', 'hmac-sha256', 'hmac-sha256(key, text, encoding?)', 'HMAC signature, hex or base64.', 2, 3, (k, t, e = 'hex') => crypto.createHmac('sha256', s(k)).update(s(t)).digest(s(e) === 'base64' ? 'base64' : 'hex')),
+
+  def('Encode/Decode', 'to-json', 'to-json(value)', 'Data to JSON text.', 1, 2, (v, pretty) => JSON.stringify(v, null, truthy(pretty) ? 2 : 0)),
+  def('Encode/Decode', 'from-json', 'from-json(text)', 'JSON text to data.', 1, 1, t => { try { return typeof t === 'string' ? JSON.parse(t) : t; } catch (e: any) { throw new ExprError(`from-json(): ${e.message}`); } }),
+  // Conversion / casting (XML Schema style; the xs: prefix is optional)
+  def('Conversion', 'integer', 'xs:integer(value)', 'Whole number (fraction dropped); error when not a number.', 1, 1, v => { const n = num(v); if (!isFinite(n)) throw new ExprError(`xs:integer(): "${s(v)}" is not a number`); return Math.trunc(n); }),
+  def('Conversion', 'int', 'xs:int(value)', 'Same as xs:integer.', 1, 1, v => { const n = num(v); if (!isFinite(n)) throw new ExprError(`xs:int(): "${s(v)}" is not a number`); return Math.trunc(n); }),
+  def('Conversion', 'long', 'xs:long(value)', 'Same as xs:integer.', 1, 1, v => Math.trunc(num(v))),
+  def('Conversion', 'decimal', 'xs:decimal(value)', 'Decimal number; error when not a number.', 1, 1, v => { const n = num(v); if (!isFinite(n)) throw new ExprError(`xs:decimal(): "${s(v)}" is not a number`); return n; }),
+  def('Conversion', 'double', 'xs:double(value)', 'Floating-point number (NaN when not a number).', 1, 1, v => num(v)),
+  def('Conversion', 'float', 'xs:float(value)', 'Same as xs:double.', 1, 1, v => num(v)),
+  def('Conversion', 'date', 'xs:date(value)', 'Date as YYYY-MM-DD.', 1, 1, v => toDate(v).toISOString().slice(0, 10)),
+  def('Conversion', 'dateTime', 'xs:dateTime(value)', 'Date and time as ISO 8601.', 1, 1, v => toDate(v).toISOString()),
+  def('Conversion', 'time', 'xs:time(value)', 'Time as HH:mm:ss.', 1, 1, v => toDate(v).toISOString().slice(11, 19)),
+  // Variables
+  ['get-project-variable', { group: 'Variables', sig: "get-project-variable('NAME')", help: 'Current value of a project variable (same as {gv.NAME}, but the name can be computed).', min: 1, max: 1,
+    lazy: (a, ctx) => needHooks().getProject(ctx.process?.project ?? null, s(evaluate(a[0], ctx))) }],
+  ['set-project-variable', { group: 'Variables', sig: "set-project-variable('NAME', value)", help: 'Changes a project variable for every later run (kept until the next deployment config change). Returns the value.', min: 2, max: 2,
+    lazy: (a, ctx) => { const v = evaluate(a[1], ctx); needHooks().setProject(ctx.process?.project ?? null, s(evaluate(a[0], ctx)), v); return v; } }],
+  ['get-sengine-variable', { group: 'Variables', sig: "get-sengine-variable('NAME')", help: 'Sengine variable: a server setting made by the administrator in Server & APIs, shared by all projects. Read it; do not change it from Sutras.', min: 1, max: 1,
+    lazy: (a, ctx) => needHooks().getEngine(s(evaluate(a[0], ctx))) }],
+  ['set-sengine-variable', { group: 'Variables', sig: "set-sengine-variable('NAME', value)", help: 'Changes a Sengine variable for every project. Not advised: works only when the administrator allows it in Server & APIs.', min: 2, max: 2,
+    lazy: (a, ctx) => { const v = evaluate(a[1], ctx); needHooks().setEngine(s(evaluate(a[0], ctx)), v); return v; } }],
+  // Earlier names, still accepted; not listed in the function library.
+  ['get-engine-variable', { group: 'Variables', hidden: true, sig: "get-engine-variable('NAME')", help: 'Same as get-sengine-variable.', min: 1, max: 1,
+    lazy: (a, ctx) => needHooks().getEngine(s(evaluate(a[0], ctx))) }],
+  ['set-engine-variable', { group: 'Variables', hidden: true, sig: "set-engine-variable('NAME', value)", help: 'Same as set-sengine-variable.', min: 2, max: 2,
+    lazy: (a, ctx) => { const v = evaluate(a[1], ctx); needHooks().setEngine(s(evaluate(a[0], ctx)), v); return v; } }],
+  // Utility
+  def('Utility', 'newline', 'newline()', 'A line break, for concat().', 0, 0, () => '\n'),
+  def('Utility', 'tab', 'tab()', 'A tab character.', 0, 0, () => '\t'),
+  def('Utility', 'uuid', 'uuid()', 'A new random id (UUID v4).', 0, 0, () => crypto.randomUUID()),
+  def('Utility', 'timestamp', 'timestamp(date?)', 'Milliseconds since 1970 (now when empty).', 0, 1, d => (d === undefined ? Date.now() : toDate(d).getTime()), "timestamp() = 1791900000000"),
+  def('Utility', 'timestamp-seconds', 'timestamp-seconds(date?)', 'Seconds since 1970 (Unix time).', 0, 1, d => Math.floor((d === undefined ? Date.now() : toDate(d).getTime()) / 1000)),
+  def('Utility', 'current-timestamp', "current-timestamp(format?, timezone?)", "Now as text; default 'YYYYMMDDHHmmssSSS', handy for file names and ids.", 0, 2, (f = 'YYYYMMDDHHmmssSSS', tz) => formatDate(new Date(), s(f), tz ? s(tz) : undefined), "concat('orders-', current-timestamp('YYYYMMDD-HHmmss'), '.csv')"),
+  def('Utility', 'random-string', 'random-string(length, characters?)', 'Random letters and digits.', 1, 2, (l, chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789') => { const c = s(chars); return Array.from(crypto.randomBytes(Math.min(512, num(l))), b => c[b % c.length]).join(''); }),
+  def('Utility', 'type-of', 'type-of(value)', 'text, number, boolean, list, object or null.', 1, 1, v => (v == null ? 'null' : Array.isArray(v) ? 'list' : typeof v === 'string' ? 'text' : typeof v)),
+  def('Utility', 'hostname', 'hostname()', 'Name of the server running the Sutra.', 0, 0, () => osHostname()),
+  def('Utility', 'file-name', 'file-name(path)', 'Last part of a path: C:\\in\\a.csv gives a.csv.', 1, 1, p => s(p).split(/[\\/]/).pop() || ''),
+  def('Utility', 'file-base-name', 'file-base-name(path)', 'File name without its extension.', 1, 1, p => { const n = s(p).split(/[\\/]/).pop() || ''; const i = n.lastIndexOf('.'); return i > 0 ? n.slice(0, i) : n; }),
+  def('Utility', 'file-extension', 'file-extension(path)', 'Extension without the dot (csv).', 1, 1, p => { const n = s(p).split(/[\\/]/).pop() || ''; const i = n.lastIndexOf('.'); return i > 0 ? n.slice(i + 1) : ''; }),
+  def('Utility', 'dir-name', 'dir-name(path)', 'Folder part of a path.', 1, 1, p => { const x = s(p); const i = Math.max(x.lastIndexOf('/'), x.lastIndexOf('\\')); return i >= 0 ? x.slice(0, i) : ''; }),
+  def('Utility', 'path-join', 'path-join(a, b, ...)', 'Joins path parts with one separator.', 1, undefined, (...a) => { const sep = a.some(x => s(x).includes('\\')) ? '\\' : '/'; return a.map(s).filter(Boolean).map((x, i) => (i ? x.replace(/^[\\/]+/, '') : x)).map((x, i, arr) => (i < arr.length - 1 ? x.replace(/[\\/]+$/, '') : x)).join(sep); }, "path-join({gv.INBOX}, '*.csv')"),
+  def('Utility', 'format-bytes', 'format-bytes(bytes)', 'Human size: 1536 gives 1.5 KB.', 1, 1, b => { let n = num(b); const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return `${Math.round(n * 10) / 10} ${u[i]}`; }),
+  def('Utility', 'default', 'default(value, fallback)', 'The value, or fallback when it is empty.', 2, 2, (v, d) => (isEmpty(v) ? d : v)),
+  def('Utility', 'json-path', 'json-path(object, path)', "Reads a nested field by path text: json-path({input}, 'order.lines[0].sku').", 2, 2, (o, p) => getPath(o, s(p))),
+  // Date / time
+  def('Date/Time', 'current-dateTime', 'current-dateTime()', 'Now, ISO 8601 (UTC).', 0, 0, () => new Date().toISOString()),
+  def('Date/Time', 'current-date', 'current-date()', 'Today as YYYY-MM-DD (server time zone).', 0, 0, () => formatDate(new Date(), 'YYYY-MM-DD')),
+  def('Date/Time', 'current-time', 'current-time()', 'Time now as HH:mm:ss.', 0, 0, () => formatDate(new Date(), 'HH:mm:ss')),
+  def('Date/Time', 'format-date', 'format-date(format, date, timezone?)', 'Formats a date. Tokens: YYYY YY MMMM MMM MM DD dddd ddd; text in [brackets] stays.', 2, 3, (f, d, tz) => formatDate(d, s(f), tz ? s(tz) : undefined), "format-date('DD-MM-YY', {input.date})"),
+  def('Date/Time', 'format-time', 'format-time(format, date, timezone?)', 'Formats a time. Tokens: HH hh mm ss SSS A Z.', 2, 3, (f, d, tz) => formatDate(d, s(f), tz ? s(tz) : undefined), "format-time('hh:mm A', {input.at})"),
+  def('Date/Time', 'format-dateTime', 'format-dateTime(format, date, timezone?)', 'Formats date and time, e.g. in Asia/Kolkata.', 2, 3, (f, d, tz) => formatDate(d, s(f), tz ? s(tz) : undefined), "format-dateTime('DD MMM YYYY HH:mm', {now}, 'Asia/Kolkata')"),
+  def('Date/Time', 'parse-date', 'parse-date(format, text)', 'Reads a date written in the given format; returns ISO 8601.', 2, 2, (f, t) => parseDate(t, s(f)), "parse-date('DD/MM/YYYY', '31/12/2026')"),
+  def('Date/Time', 'add-to-date', 'add-to-date(date, years, months, days)', 'Adds (or with negatives subtracts) years, months and days.', 2, 4, (d, y, m, dd) => addToDate(d, y, m, dd)),
+  def('Date/Time', 'add-to-dateTime', 'add-to-dateTime(date, years, months, days, hours, minutes, seconds)', 'Adds to a date-time.', 2, 7, addToDate),
+  def('Date/Time', 'days-between', 'days-between(from, to)', 'Whole days from one date to another.', 2, 2, (a, b) => Math.floor((toDate(b).getTime() - toDate(a).getTime()) / 86400000)),
+  def('Date/Time', 'year-from-date', 'year-from-date(date)', 'Year number.', 1, 1, d => toDate(d).getUTCFullYear()),
+  def('Date/Time', 'month-from-date', 'month-from-date(date)', 'Month number 1 to 12.', 1, 1, d => toDate(d).getUTCMonth() + 1),
+  def('Date/Time', 'day-from-date', 'day-from-date(date)', 'Day of month.', 1, 1, d => toDate(d).getUTCDate()),
+  def('Date/Time', 'from-timestamp', 'from-timestamp(ms)', 'Milliseconds since 1970 to ISO date.', 1, 1, ms => new Date(num(ms)).toISOString()),
+  // Number
+  def('Number', 'number', 'number(value)', 'Converts to a number (commas and currency signs removed).', 1, 1, v => num(v)),
+  def('Number', 'round', 'round(number, decimals?)', 'Rounds half up.', 1, 2, (v, d = 0) => { const p = 10 ** num(d); return Math.round(num(v) * p) / p; }),
+  def('Number', 'floor', 'floor(number)', 'Rounds down.', 1, 1, v => Math.floor(num(v))),
+  def('Number', 'ceiling', 'ceiling(number)', 'Rounds up.', 1, 1, v => Math.ceil(num(v))),
+  def('Number', 'abs', 'abs(number)', 'Absolute value.', 1, 1, v => Math.abs(num(v))),
+  def('Number', 'power', 'power(base, exponent)', 'Base to the power.', 2, 2, (a, b) => num(a) ** num(b)),
+  def('Number', 'format-number', "format-number(number, pattern)", "Formats with a pattern such as '#,##0.00'.", 2, 2, (v, p) => formatNumber(v, s(p)), "format-number(1234.5, '#,##0.00') = '1,234.50'"),
+  def('Number', 'sum', 'sum(list, field?)', 'Total of a list, or of a field in each item.', 1, 2, (l, f) => list(l).reduce((a, x) => a + (num(f ? getPath(x, s(f)) : x) || 0), 0)),
+  def('Number', 'avg', 'avg(list, field?)', 'Average.', 1, 2, (l, f) => { const v = list(l).map(x => num(f ? getPath(x, s(f)) : x)).filter(isFinite); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0; }),
+  def('Number', 'min', 'min(a, b, ...) or min(list)', 'Smallest value.', 1, undefined, (...a) => Math.min(...a.flatMap(list).map(num))),
+  def('Number', 'max', 'max(a, b, ...) or max(list)', 'Largest value.', 1, undefined, (...a) => Math.max(...a.flatMap(list).map(num))),
+  def('Number', 'random', 'random(min, max)', 'Random whole number between min and max.', 0, 2, (a = 0, b = 1000000) => Math.floor(num(a) + Math.random() * (num(b) - num(a) + 1))),
+  def('Number', 'is-number', 'is-number(value)', 'True when the value is a number.', 1, 1, v => isFinite(num(v))),
+  // Logical
+  ['if', { group: 'Logical', sig: 'if(condition, then, else)', help: 'Chooses a value; only the chosen side is evaluated.', min: 2, max: 3, example: "if({input.qty} > 10, 'bulk', 'retail')",
+    lazy: (a, ctx) => { if (a.length < 2) throw new ExprError('if() needs a condition and a value'); return truthy(evaluate(a[0], ctx)) ? evaluate(a[1], ctx) : a[2] ? evaluate(a[2], ctx) : null; } }],
+  ['coalesce', { group: 'Logical', sig: 'coalesce(a, b, ...)', help: 'First value that is not empty.', min: 1, example: "coalesce({input.mobile}, {input.phone}, 'n/a')",
+    lazy: (a, ctx) => { for (const x of a) { const v = evaluate(x, ctx); if (!isEmpty(v)) return v; } return null; } }],
+  def('Logical', 'not', 'not(value)', 'True when the value is false or empty.', 1, 1, v => !truthy(v)),
+  def('Conversion', 'boolean', 'xs:boolean(value)', 'Converts to true/false ("true", "1" and "yes" are true).', 1, 1, v => (typeof v === 'string' ? ['true', '1', 'yes', 'y'].includes(v.trim().toLowerCase()) : truthy(v))),
+  def('Sequence', 'exists', 'exists(value)', 'True when the field is present (even if empty text).', 1, 1, v => v !== undefined && v !== null),
+  def('Sequence', 'empty', 'empty(value)', 'True when missing, empty text or an empty list.', 1, 1, isEmpty),
+  def('Logical', 'equals-ignore-case', 'equals-ignore-case(a, b)', 'Case-insensitive comparison.', 2, 2, (a, b) => s(a).toLowerCase() === s(b).toLowerCase()),
+  // List
+  ['last', { group: 'Sequence', sig: 'last() or last(list)', help: 'Inside a For-Each or [filter]: number of items; with a list: its last item.', min: 0, max: 1,
+    lazy: (a, ctx) => { if (!a.length) return ctx.__size ?? 1; const x = list(evaluate(a[0], ctx)); return x[x.length - 1]; } }],
+  ['position', { group: 'Sequence', sig: 'position()', help: 'Inside a For-Each or [filter]: position of the current item (from 1).', min: 0, max: 0, example: "{input.rows}[position() <= 10]", lazy: (_a, ctx) => ctx.index ?? 1 }],
+  def('Sequence', 'count', 'count(list)', 'Number of items (0 when missing, 1 for a single value).', 1, 1, v => (v == null ? 0 : Array.isArray(v) ? v.length : 1)),
+  def('Sequence', 'item-at', 'item-at(list, position)', 'Item at a position (1-based).', 2, 2, (l, i) => list(l)[num(i) - 1]),
+  def('Sequence', 'first', 'first(list)', 'First item.', 1, 1, l => list(l)[0]),
+
+  def('Sequence', 'distinct', 'distinct(list)', 'Removes duplicates.', 1, 1, l => [...new Map(list(l).map(x => [JSON.stringify(x), x])).values()]),
+  def('List', 'pluck', 'pluck(list, field)', 'Takes one field from every item.', 2, 2, (l, f) => list(l).map(x => getPath(x, s(f)))),
+  def('List', 'sort', 'sort(list, field?, descending?)', 'Sorts a list.', 1, 3, (l, f, desc) => [...list(l)].sort((a, b) => ord(f ? getPath(a, s(f)) : a, f ? getPath(b, s(f)) : b) * (truthy(desc) ? -1 : 1))),
+  def('List', 'filter-by', 'filter-by(list, field, value)', 'Items whose field equals value.', 3, 3, (l, f, v) => list(l).filter(x => eq(getPath(x, s(f)), v))),
+  def('List', 'list', 'list(a, b, ...)', 'Makes a list.', 0, undefined, (...a) => a),
+  def('List', 'group-by', 'group-by(list, field)', 'Groups items by a field: a list of { key, items, count }.', 2, 2, (l, f) => {
+    const m = new Map<string, any[]>();
+    for (const x of list(l)) { const k = s(getPath(x, s(f))); (m.get(k) || m.set(k, []).get(k)!).push(x); }
+    return [...m].map(([key, items]) => ({ key, items, count: items.length }));
+  }, "group-by({input.orders}, 'customer')"),
+  def('List', 'count-by', 'count-by(list, field)', 'How many items have each value: { value: count }.', 2, 2, (l, f) => { const o: Record<string, number> = {}; for (const x of list(l)) { const k = s(getPath(x, s(f))); o[k] = (o[k] || 0) + 1; } return o; }),
+  def('List', 'flatten', 'flatten(list, childField?)', 'Flattens nested lists; with a child field, one item per child carrying its parent as _parent.', 1, 2, (l, f) => {
+    if (f === undefined) return list(l).flat(Infinity);
+    return list(l).flatMap(x => { const { [s(f)]: kids, ...parent } = x || {}; return list(kids).map(k => (k && typeof k === 'object' && !Array.isArray(k) ? { ...k, _parent: parent } : { value: k, _parent: parent })); });
+  }, "flatten({input.orders}, 'lines')"),
+  def('List', 'slice', 'slice(list, start, count?)', 'Part of a list; start counts from 1.', 2, 3, (l, st, c) => { const b = Math.max(0, num(st) - 1); return list(l).slice(b, c === undefined ? undefined : b + num(c)); }),
+  def('List', 'concat-lists', 'concat-lists(list, list, ...)', 'Joins lists into one.', 1, undefined, (...a) => a.flatMap(list)),
+  def('List', 'contains-item', 'contains-item(list, value)', 'True when the list holds the value.', 2, 2, (l, v) => list(l).some(x => eq(x, v))),
+  def('List', 'object', "object('key', value, 'key2', value2, ...)", 'Builds an object from key/value pairs.', 0, undefined, (...a) => { const o: Record<string, any> = {}; for (let i = 0; i + 1 < a.length; i += 2) o[s(a[i])] = a[i + 1]; return o; }),
+  def('List', 'merge', 'merge(object, object, ...)', 'Combines objects; later fields win.', 1, undefined, (...a) => Object.assign({}, ...a.filter(x => x && typeof x === 'object'))),
+]);
+
+let lowerIndex: Map<string, string> | null = null;
+/** Function names are case-insensitive: format-datetime() finds format-dateTime(). */
+function fnIndex() {
+  if (!lowerIndex) lowerIndex = new Map(Object.keys(FUNCTIONS).map(k => [k.toLowerCase(), k]));
+  return lowerIndex;
+}
+
+export function functionCatalog() {
+  return Object.entries(FUNCTIONS).filter(([, f]) => !f.hidden).map(([name, f]) => ({ name, group: f.group, sig: f.sig, help: f.help, example: f.example }));
+}

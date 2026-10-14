@@ -1,0 +1,274 @@
+import { useState } from 'react';
+import { post } from './api';
+import { FieldList, visible } from './Fields';
+import { Mapper, inferShape } from './Mapper';
+import { famOf, Json, since, useCatalog, useToast } from './ui';
+import { ACTIVE, portsOf, type FlowDoc, type FlowEdge, type FlowNode, type NodeDesign, type ProcessVariable, type RunDetail, type SNode } from './types';
+
+export type InspectorTab = 'general' | 'input' | 'output' | 'settings';
+
+interface Props {
+  flowId: string;
+  doc: FlowDoc;
+  sel: { kind: 'node' | 'edge'; id: string } | null;
+  selNode?: FlowNode;
+  run: RunDetail | null;
+  sample: { outputs: Record<string, any>; vars?: Record<string, any> };
+  design: Record<string, NodeDesign>;
+  tab: InspectorTab;
+  setTab(t: InspectorTab): void;
+  breakpoints: string[];
+  toggleBreakpoint(id: string): void;
+  setDoc(fn: (d: FlowDoc) => FlowDoc): void;
+  updateNode(id: string, fn: (n: FlowNode) => FlowNode): void;
+  renameNode(id: string, name: string): void;
+  removeSel(): void;
+  duplicate(id: string): void;
+  onDecided(): void;
+  onTest(triggerId?: string): void;
+  onDelete(): void;
+}
+
+export function Inspector(p: Props) {
+  if (p.sel?.kind === 'edge') {
+    const e = p.doc.edges.find(x => x.id === p.sel!.id);
+    const a = p.doc.nodes.find(n => n.id === e?.from), b = p.doc.nodes.find(n => n.id === e?.to);
+    const setEdge = (patch: Partial<FlowEdge>) => p.setDoc(d => ({ ...d, edges: d.edges.map(x => (x.id === e?.id ? { ...x, ...patch } : x)) }));
+    const when = e?.when || 'always';
+    const sameOutput = p.doc.edges.filter(x => e && x.from === e.from && x.port === e.port);
+    return (
+      <aside className="side"><div className="tabbody">
+        <div className="phead"><div><h2>{e?.label || 'Connection'}</h2><p>{a?.name} ({e?.port}) to {b?.name}</p></div></div>
+        {e?.port === 'error' && <p className="muted">Runs when {a?.name} fails after its retries. The step receives <code>{'{input.error.message}'}</code> and the original <code>{'{input.input}'}</code>.</p>}
+        <div className="fld"><label htmlFor="elabel">Name</label>
+          <input id="elabel" type="text" placeholder="e.g. Order > 1000" value={e?.label || ''} onChange={ev => setEdge({ label: ev.target.value })} />
+          <div className="hint">Shown on the connection in the canvas.</div></div>
+        <div className="fld"><label htmlFor="ewhen">Taken</label>
+          <select id="ewhen" value={when} onChange={ev => setEdge({ when: ev.target.value as FlowEdge['when'], ...(ev.target.value === 'when' && !e?.condition ? { condition: '={input.amount} > 1000' } : {}) })}>
+            <option value="always">Always</option>
+            <option value="when">When a condition is true</option>
+            <option value="otherwise">Otherwise (no other condition matched)</option>
+          </select>
+          <div className="hint">{when === 'otherwise' ? `Taken when none of the "when" connections from ${a?.name} (${e?.port}) is taken.` : when === 'when' ? `Checked on ${a?.name}'s output each time it finishes. Several "when" connections can be taken at once.` : `Taken every time ${a?.name} finishes on ${e?.port}.`}</div></div>
+        {when === 'when' && (
+          <div className="fld"><label htmlFor="econd">Condition</label>
+            <input id="econd" type="text" className="code" spellCheck={false} value={e?.condition || ''} onChange={ev => setEdge({ condition: ev.target.value })} />
+            <div className="hint"><code>{'{input.x}'}</code> is {a?.name}'s output; <code>{'{nodes.Name.x}'}</code>, <code>{'{vars.x}'}</code> and <code>{'{gv.X}'}</code> work too. Examples: <code>{'={input.amount} > 1000'}</code>, <code>{"=upper-case({input.country}) = 'IN'"}</code>, <code>{'=count({input.rows}) = 0'}</code>.</div></div>
+        )}
+        {sameOutput.length > 1 && <p className="muted xs">{sameOutput.length} connections leave {a?.name} ({e?.port}): {sameOutput.map(x => x.label || (x.when === 'when' ? x.condition : x.when) || 'always').join(' · ')}</p>}
+        <button className="btn danger" onClick={p.removeSel}>Delete connection</button>
+      </div></aside>
+    );
+  }
+  if (!p.selNode) return <aside className="side"><Overview {...p} /></aside>;
+  const tabs: [InspectorTab, string][] = [['general', 'General'], ['input', 'Input'], ['output', 'Output'], ['settings', 'Settings']];
+  return (
+    <aside className="side">
+      <div className="tabs" role="tablist">
+        {tabs.map(([t, l]) => <button key={t} role="tab" aria-selected={p.tab === t} className={p.tab === t ? 'act' : ''} onClick={() => p.setTab(t)}>{l}</button>)}
+      </div>
+      <div className="tabbody">
+        {p.tab === 'general' && <General {...p} node={p.selNode} />}
+        {p.tab === 'input' && <InputTab {...p} node={p.selNode} />}
+        {p.tab === 'output' && <StepOutput {...p} node={p.selNode} />}
+        {p.tab === 'settings' && <StepSettings {...p} node={p.selNode} />}
+      </div>
+    </aside>
+  );
+}
+
+const runOutputs = (p: Props) => (p.run && !ACTIVE.includes(p.run.status) ? p.run.outputs : p.run?.outputs && Object.keys(p.run.outputs).length ? p.run.outputs : p.sample.outputs);
+
+function Overview({ doc, setDoc, run, onDelete }: Props) {
+  const { meta } = useCatalog();
+  const triggers = doc.nodes.filter(n => meta.activities.find(a => a.type === n.type)?.trigger);
+  return (
+    <div className="tabbody">
+      <div className="fld"><label htmlFor="fname">Sutra name</label><input id="fname" type="text" value={doc.name} onChange={e => setDoc(d => ({ ...d, name: e.target.value }))} /></div>
+      <div className="fld"><label htmlFor="fdesc">Description</label><textarea id="fdesc" rows={2} value={doc.description || ''} onChange={e => setDoc(d => ({ ...d, description: e.target.value }))} /></div>
+      <p className="muted" style={{ fontSize: 12 }}>{doc.nodes.length} activities · {doc.edges.length} transitions · {triggers.length} trigger{triggers.length === 1 ? '' : 's'}</p>
+      <ProcessVariables vars={doc.variables || []} onChange={v => setDoc(d => ({ ...d, variables: v }))} />
+      {run && <>
+        <p className="sub">Last test run</p>
+        <p style={{ marginTop: 0 }}><span className={`badge ${run.status}`}>{run.status}</span> <span className="muted">{run.steps} steps in {since(run.startedAt, run.finishedAt)}</span></p>
+        {run.error && <div className="errbox">{run.error}</div>}
+        {run.reply && <><p className="sub">Reply sent to the caller</p><Json value={run.reply} /></>}
+        {run.logs.length > 0 && <ul className="log">{run.logs.slice(-30).reverse().map((l, i) => <li key={i}><time>{l.t.slice(11, 19)}</time><span className={l.level}>{l.step ? `${l.step}: ` : ''}{l.msg}</span></li>)}</ul>}
+      </>}
+      <div className="group">Mapping</div>
+      <div className="muted" style={{ fontSize: 12.5 }}>
+        <p>Select an activity and open its <b>Input</b> tab: drag fields from Sutra Data onto the activity's inputs, and build formulas with functions such as <code>{"concat('Name : ', {input.name})"}</code> or <code>{"format-date('DD-MM-YY', {input.date})"}</code>.</p>
+        <p>Every activity except triggers has a red <b>error</b> output. Connect it to handle failures; otherwise a failure stops the run.</p>
+      </div>
+      <button className="btn danger" onClick={onDelete}>Delete Sutra</button>
+    </div>
+  );
+}
+
+function ProcessVariables({ vars, onChange }: { vars: ProcessVariable[]; onChange(v: ProcessVariable[]): void }) {
+  const set = (i: number, k: keyof ProcessVariable, v: string) => onChange(vars.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
+  return (
+    <div className="fld">
+      <span className="lbl">Sutra variables <span className="muted" style={{ fontWeight: 400 }}>(local to this Sutra: {'{vars.name}'})</span></span>
+      {vars.map((v, i) => (
+        <div className="kv" key={i} style={{ gridTemplateColumns: '1fr 90px 1fr auto' }}>
+          <input className="inp code" aria-label={`Variable ${i + 1} name`} value={v.name} placeholder="name" onChange={e => set(i, 'name', e.target.value)} />
+          <select className="inp" aria-label={`Variable ${i + 1} type`} value={v.type} onChange={e => set(i, 'type', e.target.value)}>{['string', 'number', 'boolean', 'json'].map(t => <option key={t}>{t}</option>)}</select>
+          <input className="inp code" aria-label={`Variable ${i + 1} initial value`} value={String(v.value ?? '')} placeholder="initial value" onChange={e => set(i, 'value', e.target.value)} />
+          <button className="x" aria-label="Remove variable" onClick={() => onChange(vars.filter((_, j) => j !== i))}>✕</button>
+        </div>
+      ))}
+      <button className="btn small" onClick={() => onChange([...vars, { name: '', type: 'string', value: '' }])}>+ Variable</button>
+    </div>
+  );
+}
+
+function General(p: Props & { node: FlowNode }) {
+  const { node } = p;
+  const { meta, resources, secrets } = useCatalog();
+  const a = meta.activities.find(x => x.type === node.type);
+  if (!a) return <div className="errbox">Unknown activity type {node.type}</div>;
+  // Mappable inputs (templates, formulas, structured mappings) are edited in the Input tab.
+  const fields = a.fields.filter(f => !f.tpl && f.type !== 'mapping');
+  const mappable = a.fields.some(f => (f.tpl || f.type === 'mapping') && visible(f, node.config, a.fields));
+  const setCfg = (k: string, v: any) => p.updateNode(node.id, n => ({ ...n, config: { ...n.config, [k]: v } }));
+  const warnings = p.design[node.id]?.warnings || [];
+  return (
+    <>
+      <div className={`phead ${famOf(meta, a.palette)}`}><span className="glyph">{a.glyph}</span><div><h2>{a.name}</h2><p>{a.desc}</p></div></div>
+      <div className="fld"><label htmlFor="sname">Activity name</label>
+        <input id="sname" type="text" defaultValue={node.name} key={node.id + node.name} onBlur={e => p.renameNode(node.id, e.target.value)} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
+        <div className="hint">Mappings refer to activities by name; renaming updates them.</div>
+      </div>
+      {warnings.length > 0 && <div className="warnbox">{warnings.join('\n')}</div>}
+      <FieldList fields={fields} values={node.config} onChange={setCfg} resources={resources} secrets={secrets}
+        extra={f => (node.type === 'soapInvoke' && (f.k === 'wsdlUrl' || f.k === 'wsdlRef') ? <WsdlLoader node={node} setCfg={setCfg} /> : null)} />
+      {mappable && <p><button className="btn" onClick={() => p.setTab('input')}>Map inputs ›</button></p>}
+      <div className="row" style={{ marginTop: 6 }}>
+        {a.trigger && <button className="btn go" onClick={() => p.onTest(node.id)}>▶ Test from here</button>}
+        <button className="btn" onClick={() => p.duplicate(node.id)}>Duplicate</button>
+        <button className="btn danger" onClick={p.removeSel}>Delete activity</button>
+      </div>
+    </>
+  );
+}
+
+function InputTab(p: Props & { node: FlowNode }) {
+  const { meta } = useCatalog();
+  const a = meta.activities.find(x => x.type === p.node.type);
+  if (!a) return null;
+  return <Mapper node={p.node} act={a} doc={p.doc} design={p.design} run={p.run} outputs={runOutputs(p)} updateNode={p.updateNode} />;
+}
+
+function WsdlLoader({ node, setCfg }: { node: FlowNode; setCfg(k: string, v: any): void }) {
+  const toast = useToast();
+  const [desc, setDesc] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const fromProject = node.config.wsdlSource === 'project';
+  const load = async () => {
+    setBusy(true);
+    try {
+      setDesc(await post('/api/soap/describe', fromProject ? { wsdlRef: node.config.wsdlRef } : { wsdlUrl: node.config.wsdlUrl, connection: node.config.connection || undefined, auth: node.config.auth || undefined }));
+    } catch (e: any) { toast(e.message, true); } finally { setBusy(false); }
+  };
+  const choose = (svc: string, port: string, op: string) => {
+    setCfg('service', svc); setCfg('port', port); setCfg('operation', op);
+    const input = desc?.[svc]?.[port]?.[op]?.input;
+    if (input && typeof input === 'object') {
+      const skel = (o: any): any => Object.fromEntries(Object.entries(o).filter(([k]) => !k.startsWith('targetNS')).map(([k, v]) => [k.replace(/\[\]$/, ''), v && typeof v === 'object' ? skel(v) : '']));
+      setCfg('args', JSON.stringify(skel(input), null, 2));
+    }
+    setDesc(null);
+  };
+  if ((fromProject && !node.config.wsdlRef) || (!fromProject && !node.config.wsdlUrl)) return null;
+  return (
+    <div style={{ margin: '-6px 0 12px' }}>
+      <button className="btn small" disabled={busy} onClick={load}>{busy ? 'Loading' : 'Load operations from WSDL'}</button>
+      {desc && (
+        <ul className="list" style={{ marginTop: 6 }}>
+          {Object.entries(desc).flatMap(([svc, ports]: any) => Object.entries(ports).flatMap(([port, ops]: any) => Object.keys(ops).map(op => (
+            <li key={`${svc}/${port}/${op}`}><button onClick={() => choose(svc, port, op)}><code>{op}</code><span className="muted" style={{ fontSize: 11 }}>{svc} / {port}</span></button></li>
+          ))))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function StepSettings({ node, updateNode, breakpoints, toggleBreakpoint }: Props & { node: FlowNode }) {
+  const s = node.settings || {};
+  const set = (k: string, v: any) => updateNode(node.id, n => ({ ...n, settings: { ...(n.settings || {}), [k]: v } }));
+  return (
+    <>
+      <p className="muted" style={{ marginTop: 0 }}>How the engine runs this activity.</p>
+      <div className="fld"><label htmlFor="rt">Retries on failure</label><input id="rt" type="number" min={0} max={20} value={s.retries ?? 0} onChange={e => set('retries', Number(e.target.value))} /><div className="hint">Each retry waits twice as long as the one before.</div></div>
+      <div className="fld"><label htmlFor="rd">First retry delay (ms)</label><input id="rd" type="number" min={0} value={s.retryDelayMs ?? 1000} onChange={e => set('retryDelayMs', Number(e.target.value))} /></div>
+      <div className="fld"><label htmlFor="to">Timeout (ms)</label><input id="to" type="number" min={0} value={s.timeoutMs ?? 120000} onChange={e => set('timeoutMs', Number(e.target.value))} /></div>
+      <div className="fld"><label className="check"><input type="checkbox" checked={!!s.disabled} onChange={e => set('disabled', e.target.checked)} /> Skip this activity (pass input through)</label></div>
+      <div className="fld"><label htmlFor="lp">Loop</label>
+        <select id="lp" value={s.loop || ''} onChange={e => set('loop', e.target.value)}>
+          <option value="">Run once</option><option value="for each item">For each item of a list</option><option value="repeat while">Repeat while a condition holds</option>
+        </select>
+        <div className="hint">{s.loop === 'for each item' ? 'Runs once per item: map {iteration.value} (or {item}) and {iteration.index}. The output is every result, as iterations.' : s.loop === 'repeat while' ? 'Runs, then again while the condition is true; {iteration.output} is the last result and {iteration.index} the count so far.' : 'Run the activity more than once.'}</div></div>
+      {s.loop === 'for each item' && <div className="fld"><label htmlFor="lo">Loop over</label><input id="lo" value={s.loopOver ?? '{{input.items}}'} onChange={e => set('loopOver', e.target.value)} spellCheck={false} /><div className="hint">A list, such as {'{{input.rows}}'} or =&#123;input.rows&#125;[Amount &gt; 0].</div></div>}
+      {s.loop === 'repeat while' && <div className="fld"><label htmlFor="lw">Repeat while</label><input id="lw" value={s.loopWhile ?? "={iteration.output.status} != 'DONE'"} onChange={e => set('loopWhile', e.target.value)} spellCheck={false} /><div className="hint">A formula, checked after each run.</div></div>}
+      {s.loop && <div className="row2">
+        <div className="fld"><label htmlFor="ld">Delay between runs (ms)</label><input id="ld" type="number" min={0} value={s.loopDelayMs ?? 0} onChange={e => set('loopDelayMs', Number(e.target.value))} /></div>
+        <div className="fld"><label htmlFor="lm">Maximum runs</label><input id="lm" type="number" min={1} max={10000} value={s.loopMax ?? 1000} onChange={e => set('loopMax', Number(e.target.value))} /></div>
+      </div>}
+      <div className="fld"><label className="check"><input type="checkbox" checked={breakpoints.includes(node.id)} onChange={() => toggleBreakpoint(node.id)} /> Breakpoint: pause here when debugging</label></div>
+    </>
+  );
+}
+
+/** Output fields of an activity: shape before a run, values after; "not run" when the last run skipped it. */
+function OutputTree({ shape, value, ran }: { shape: SNode | null; value: any; ran: boolean }) {
+  const s = shape ?? (value !== undefined ? inferShape(value, 'output') : null);
+  if (!s) return <p className="muted">No output fields.</p>;
+  const Node = ({ n, v, depth }: { n: SNode; v: any; depth: number }) => {
+    const shown = Array.isArray(v) ? v[0] : v;
+    const leaf = !n.children?.length;
+    const text = !ran ? '' : leaf ? (shown === undefined ? '(empty)' : typeof shown === 'object' ? JSON.stringify(shown) : String(shown)) : Array.isArray(v) ? `${v.length} item${v.length === 1 ? '' : 's'}` : '';
+    return (
+      <>
+        <div className="orow" style={{ paddingLeft: depth * 14 }}>
+          <span className="nm">{n.name}{n.repeats ? <span className="rep">*</span> : null}</span>
+          <span className="muted mono">{n.type}</span>
+          {text && <span className="val">{text.length > 80 ? text.slice(0, 80) + '…' : text}</span>}
+        </div>
+        {n.children?.map(c => <Node key={c.name} n={c} v={shown && typeof shown === 'object' ? shown[c.name] : undefined} depth={depth + 1} />)}
+      </>
+    );
+  };
+  return <div className="otree">{s.children?.length ? s.children.map(c => <Node key={c.name} n={c} v={value && typeof value === 'object' ? (Array.isArray(value) ? value[0] : value)[c.name] : undefined} depth={0} />) : <Node n={s} v={value} depth={0} />}</div>;
+}
+
+function StepOutput(p: Props & { node: FlowNode }) {
+  const { node, run, doc, onDecided, design } = p;
+  const { meta } = useCatalog();
+  const toast = useToast();
+  const [raw, setRaw] = useState(false);
+  const tasks = (run?.tasks || []).filter(t => t.node_id === node.id);
+  const t = tasks[tasks.length - 1];
+  const shape = design[node.id]?.out ?? null;
+  const ports = portsOf(meta.activities.find(a => a.type === node.type), node.config);
+  const decide = (approved: boolean) => t && post(`/api/approvals/${t.id}`, { approved, comment: '' }).then(onDecided).catch(e => toast(e.message, true));
+  const ran = !!t && t.output !== null;
+  return (
+    <>
+      <div className="phead"><div><h2>{node.name}</h2>
+        <p>{!run ? 'Output fields. Run a test to see values.' : !t ? 'Not run in the last run (its branch was not taken). Showing the output fields.' : <><span className={`badge ${t.status}`}>{t.status}</span> {t.ms != null && `${t.ms} ms`}{t.attempt ? ` · ${t.attempt} retr${t.attempt > 1 ? 'ies' : 'y'}` : ''}{tasks.length > 1 ? ` · ran ${tasks.length} times (showing the last)` : ''}</>}</p>
+      </div></div>
+      {t?.status === 'paused' && <div className="warnbox"><b>Paused here by the debugger.</b> This is the input it will receive. Use Step or Continue in the toolbar.</div>}
+      {t?.status === 'waiting' && t.wait?.kind === 'approval' && (
+        <div className="warnbox"><b>Waiting for approval</b><br />{t.wait.message}<div className="row" style={{ marginTop: 8 }}><button className="btn go" onClick={() => decide(true)}>Approve</button><button className="btn danger" onClick={() => decide(false)}>Reject</button></div></div>
+      )}
+      {t?.error && <div className="errbox">{t.error}</div>}
+      {t?.port && ports.length > 1 && <p className="muted" style={{ marginTop: 0 }}>Took output <code>{t.port}</code></p>}
+      <div className="row" style={{ justifyContent: 'space-between' }}><p className="sub">Output</p>{ran && <button className="btn link" onClick={() => setRaw(r => !r)}>{raw ? 'Show fields' : 'Show JSON'}</button>}</div>
+      {raw && ran ? <Json value={t.output} /> : <OutputTree shape={shape} value={ran ? t.output : undefined} ran={ran} />}
+      {t && <><p className="sub" style={{ marginTop: 12 }}>Received</p><Json value={t.input} /></>}
+      {run && <p className="muted" style={{ fontSize: 12 }}>Run {run.id.slice(0, 8)} of {doc.name}</p>}
+    </>
+  );
+}

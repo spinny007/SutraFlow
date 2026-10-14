@@ -1,0 +1,39 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import http from 'node:http';
+import crypto from 'node:crypto';
+
+/** Each test file gets its own data directory, master key and gateway ports. Call before importing server modules. */
+export function testEnv(basePort: number) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-test-'));
+  process.env.SUTRA_DATA_DIR = dir;
+  process.env.SUTRA_MASTER_KEY = crypto.randomBytes(32).toString('base64');
+  process.env.SUTRA_GATEWAY_HTTP_PORT = String(basePort);
+  process.env.SUTRA_GATEWAY_HTTPS_PORT = String(basePort + 1);
+  process.env.SUTRA_REPLY_TIMEOUT_MS = '15000';
+  return { dir, http: `http://127.0.0.1:${basePort}`, https: `https://127.0.0.1:${basePort + 1}` };
+}
+
+/** A local HTTP server that records requests and answers with a handler. */
+export async function captureServer(handler: (req: http.IncomingMessage, body: string) => { status?: number; headers?: Record<string, string>; body: string }) {
+  const seen: { method: string; url: string; headers: http.IncomingHttpHeaders; body: string }[] = [];
+  const srv = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', c => (body += c));
+    req.on('end', () => {
+      seen.push({ method: req.method!, url: req.url!, headers: req.headers, body });
+      const r = handler(req, body);
+      res.writeHead(r.status || 200, r.headers || { 'content-type': 'application/json' });
+      res.end(r.body);
+    });
+  });
+  await new Promise<void>(r => srv.listen(0, '127.0.0.1', () => r()));
+  const port = (srv.address() as any).port;
+  return { url: `http://127.0.0.1:${port}`, seen, close: () => new Promise<void>(r => srv.close(() => r())) };
+}
+
+let n = 0;
+export const node = (type: string, name: string, config: Record<string, any> = {}, settings?: any) =>
+  ({ id: `n${++n}`, type, name, x: 0, y: 0, config, settings });
+export const edge = (from: { id: string }, to: { id: string }, port = 'out') => ({ id: `e${++n}`, from: from.id, port, to: to.id });

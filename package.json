@@ -1,0 +1,66 @@
+{
+  "name": "sutraflow",
+  "version": "1.0.0",
+  "description": "SutraFlow: visual integration designer and engine (palettes, mapping, SOAP/WS-Security, REST, exposed secured APIs, TLS/Let's Encrypt).",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n server,web \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "tsx watch server/src/main.ts",
+    "dev:web": "vite --config web/vite.config.ts",
+    "build": "vite build --config web/vite.config.ts && tsc -p server/tsconfig.json",
+    "start": "node --disable-warning=ExperimentalWarning dist/server/main.js",
+    "typecheck": "tsc -p server/tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
+    "test": "node --disable-warning=ExperimentalWarning --import tsx --test test/*.test.ts",
+    "guide": "tsx tools/build-user-guide.ts",
+    "guide:shots": "node tools/capture-guide-shots.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "@fastify/static": "^10.1.6",
+    "acme-client": "^5.4.0",
+    "amqplib": "^2.2.0",
+    "croner": "^10.0.1",
+    "fast-xml-parser": "^5.11.2",
+    "fastify": "^5.12.7",
+    "imapflow": "^2.4.0",
+    "jose": "^6.2.12",
+    "jsonata": "^2.2.2",
+    "kafkajs": "^2.2.4",
+    "mailparser": "^3.9.38",
+    "mssql": "^12.7.6",
+    "mysql2": "^3.24.6",
+    "nodemailer": "^10.1.0",
+    "oracledb": "^26.0.0",
+    "pg": "^8.23.1",
+    "rhea": "^3.0.5",
+    "selfsigned": "^5.5.0",
+    "soap": "^1.14.0",
+    "undici": "^8.11.2"
+  },
+  "devDependencies": {
+    "@types/amqplib": "^0.10.8",
+    "@types/mailparser": "^3.9.0",
+    "@types/node": "^26.6.5",
+    "@types/nodemailer": "^8.0.2",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/smtp-server": "^3.5.13",
+    "@vitejs/plugin-react": "^6.1.2",
+    "@xyflow/react": "^12.12.0",
+    "concurrently": "^10.0.6",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "smtp-server": "^3.19.21",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}
