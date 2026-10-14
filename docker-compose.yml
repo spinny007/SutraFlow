@@ -1,0 +1,33 @@
+# A studio for designing and a headless engine for running, each with its own data.
+#
+#   SUTRA_ADMIN_TOKEN=change-me docker compose up -d
+#   studio:  http://localhost:4800        engine APIs: http://localhost:9080
+#
+# Release to the engine: put .sutra packages in ./deploy (deployed on start), or
+#   sutra deploy orders-1.4.0.sutra --server http://localhost:4801 --token change-me
+services:
+  studio:
+    build: .
+    image: sutraflow:1.0.0
+    environment:
+      SUTRA_MODE: studio
+      SUTRA_ADMIN_TOKEN: ${SUTRA_ADMIN_TOKEN:?set SUTRA_ADMIN_TOKEN}
+    ports: ["4800:4800", "8080:8080"]
+    volumes: ["studio-data:/data"]
+    restart: unless-stopped
+
+  engine:
+    image: sutraflow:1.0.0
+    depends_on: [studio]
+    environment:
+      SUTRA_MODE: engine
+      SUTRA_ADMIN_TOKEN: ${SUTRA_ADMIN_TOKEN:?set SUTRA_ADMIN_TOKEN}
+      SUTRA_MASTER_KEY: ${SUTRA_MASTER_KEY:-}
+    ports: ["4801:4800", "9080:8080", "9443:8443"]
+    volumes: ["engine-data:/data", "./deploy:/deploy:ro"]
+    stop_grace_period: 45s
+    restart: unless-stopped
+
+volumes:
+  studio-data:
+  engine-data:

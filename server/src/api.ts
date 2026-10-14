@@ -98,15 +98,15 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.addHook('onRequest', async (req: FastifyRequest & { user?: any }, reply: FastifyReply) => {
     if (!req.url.startsWith('/api/')) return;
     const p = req.url.split('?')[0];
-    if (req.method !== 'GET' && req.method !== 'HEAD' && req.headers['x-sutra'] !== '1' && !/^Bearer\s/i.test(String(req.headers.authorization || ''))) {
-      return reply.code(403).send({ error: 'Missing X-Sutra header' });
-    }
     // A headless engine has no studio: only automation with the token, for packages, runs, secrets and engine control.
     if (config.mode === 'engine') {
       const tok = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ''))?.[1];
       const okTok = !!tok && !!config.adminToken && tok.length === config.adminToken.length && crypto.timingSafeEqual(Buffer.from(tok), Buffer.from(config.adminToken));
       if (!okTok) return reply.code(401).send({ error: config.adminToken ? 'A headless engine accepts only the admin token (Authorization: Bearer ...)' : 'This headless engine has no SUTRA_ADMIN_TOKEN, so its API is closed' });
       if (!ENGINE_API.some(r => r.test(p))) return reply.code(404).send({ error: 'Not available on a headless engine' });
+    }
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.headers['x-sutra'] !== '1' && !/^Bearer\s/i.test(String(req.headers.authorization || ''))) {
+      return reply.code(403).send({ error: 'Missing X-Sutra header' });
     }
     if (OPEN.has(p)) return;
     // Automation (command-line tool, CI, headless engines): Authorization: Bearer <SUTRA_ADMIN_TOKEN>.

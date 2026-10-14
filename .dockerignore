@@ -1,0 +1,12 @@
+# Keep the build context small and free of local state and secrets.
+node_modules
+dist
+data
+.git
+*.sutra
+*.log
+docs/guide-images
+test
+.claude
+.env
+.env.*
