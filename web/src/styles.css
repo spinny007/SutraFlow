@@ -304,3 +304,8 @@ table.t tr.click:hover td { background: var(--paper); }
 .okbox { border: 1px solid color-mix(in srgb, #34c759 45%, transparent); background: color-mix(in srgb, #34c759 12%, transparent); border-radius: 8px; padding: 8px 10px; margin: 8px 0; font-size: 13px; }
 .canvas .react-flow__edge.cond-edge .react-flow__edge-path { stroke: var(--focus); stroke-width: 2; }
 .canvas .react-flow__edge.else-edge .react-flow__edge-path { stroke-dasharray: 2 5; }
+.aimodels { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 10px 0; display: grid; gap: 8px; }
+.aimodels .h { margin: 6px 0 0; font-weight: 700; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 999px; padding: 3px 10px; font-family: var(--mono); font-size: 12px; }
+.chip.on, .chip:hover { border-color: var(--focus); color: var(--focus); }

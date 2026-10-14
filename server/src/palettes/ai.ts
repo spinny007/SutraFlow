@@ -1,7 +1,7 @@
 import type { Activity, ExecCtx } from '../engine/types.js';
 import { requireResource } from '../resources.js';
-import { aiCall } from '../ai/providers.js';
-import { F, listOf } from './common.js';
+import { aiCall, ollamaCall, OLLAMA_OPS, engineOf } from '../ai/providers.js';
+import { F, listOf, when } from './common.js';
 
 const routeNames = (rows: any) => (Array.isArray(rows) ? rows : []).map((r: any) => String(r?.k ?? '').trim()).filter(Boolean);
 
@@ -25,6 +25,62 @@ function jsonFrom(text: string) {
 
 const provider = F('provider', 'AI provider', 'resource', '', { resourceKind: 'aiProvider', help: 'The AI engine and model: Claude, Gemini, OpenAI, Ollama or a CLI. Set up under Resources.' });
 const effort = F('effort', 'Effort', 'select', 'medium', { options: ['low', 'medium', 'high'] });
+
+
+const OLLAMA_OUT: Record<string, any> = {
+  generate: { text: '', response: '', model: '', done: true, ...AI },
+  chat: { text: '', message: { role: 'assistant', content: '' }, model: '', done: true, ...AI },
+  embed: { model: '', embeddings: [[0]], ...AI },
+  'list models': { models: [{ name: '', model: '', size: 0, modified_at: '', details: { family: '', parameter_size: '', quantization_level: '' } }] },
+  'running models': { models: [{ name: '', model: '', size: 0, size_vram: 0, expires_at: '' }] },
+  'show model': { modelfile: '', parameters: '', template: '', details: { family: '', parameter_size: '', quantization_level: '' }, capabilities: [''] },
+  'pull model': { status: '' },
+  'copy model': { copied: true, source: '', destination: '' },
+  'delete model': { deleted: true, model: '' },
+  version: { version: '' },
+};
+
+/** The Ollama API, endpoint by endpoint, through an AI provider connection whose engine is Ollama. */
+const ollamaActivity: Activity = {
+  type: 'ollama', palette: 'ai', name: 'Ollama', glyph: '◉', ports: ['out'],
+  desc: 'Calls an Ollama endpoint: generate, chat, embed (vectors for search), list or show models, running models, pull, copy or delete a model, version. Works offline against a local Ollama.',
+  fields: [
+    F('provider', 'AI provider (Ollama)', 'resource', '', { resourceKind: 'aiProvider', help: 'An AI provider connection with engine Ollama; its address and model are used.' }),
+    F('op', 'Endpoint', 'select', 'generate', { options: [...OLLAMA_OPS] }),
+    F('model', 'Model', 'text', '', { help: 'Empty = the connection\'s model.', ...when('op', 'generate', 'chat', 'embed', 'show model', 'pull model', 'copy model', 'delete model') }),
+    F('to', 'New name', 'text', '', when('op', 'copy model')),
+    F('system', 'System', 'textarea', '', { tpl: true, ...when('op', 'generate', 'chat') }),
+    F('prompt', 'Prompt', 'textarea', '{{input}}', { tpl: true, ...when('op', 'generate', 'chat') }),
+    F('messages', 'Messages (optional)', 'text', '', { tpl: true, help: 'A list of { role, content } for a whole conversation; replaces System and Prompt.', ...when('op', 'chat') }),
+    F('input', 'Text to embed', 'text', '{{input.text}}', { tpl: true, help: 'One text or a list of texts.', ...when('op', 'embed') }),
+    F('images', 'Images (base64)', 'text', '', { tpl: true, help: 'For vision models: a list of base64 images, e.g. {{nodes.Read file.base64}}.', ...when('op', 'generate', 'chat') }),
+    F('format', 'Reply format', 'text', '', { help: 'Empty, json, or a JSON schema the reply must follow.', ...when('op', 'generate', 'chat') }),
+    F('options', 'Options', 'kv', [], { help: 'Model options such as temperature 0.2, num_ctx 8192, num_predict 512, seed 42.', ...when('op', 'generate', 'chat', 'embed') }),
+    F('keepAlive', 'Keep loaded for', 'text', '', { help: 'e.g. 5m or 1h; 0 unloads at once.', ...when('op', 'generate', 'chat', 'embed') }),
+    F('think', 'Thinking (models that support it)', 'bool', false, when('op', 'generate', 'chat')),
+  ],
+  outputSchema: (cfg, h) => h.infer(OLLAMA_OUT[cfg.op || 'generate'] || {}),
+  execute: async c => {
+    const r = requireResource(c.raw('provider'), 'aiProvider', 'AI provider');
+    if (engineOf(r) !== 'Ollama') throw new Error(`${r.name} uses ${engineOf(r)}; choose an AI provider whose engine is Ollama`);
+    const op = c.raw('op') || 'generate';
+    const options: Record<string, any> = {};
+    for (const row of (c.raw('options') as any[]) || []) if (row?.k) { const v = c.resolve(row.v); const n = Number(v); options[row.k] = typeof v === 'string' && v.trim() !== '' && Number.isFinite(n) ? n : v === 'true' ? true : v === 'false' ? false : v; }
+    const list = (v: any) => (Array.isArray(v) ? v : v ? [v] : []);
+    const t0 = Date.now();
+    const out: any = await ollamaCall(r, op, {
+      model: c.raw('model'), to: c.raw('to'), system: c.v('system') || undefined, prompt: asPrompt(c.v('prompt') ?? ''),
+      messages: c.raw('messages') ? c.v('messages') : undefined, input: c.v('input'), images: list(c.v('images')).map(String),
+      format: c.raw('format') || undefined, options, keepAlive: c.raw('keepAlive') || undefined, think: !!c.raw('think'),
+    }, c.signal);
+    if (op === 'generate' || op === 'chat' || op === 'embed') {
+      const inT = out.prompt_eval_count ?? null, outT = out.eval_count ?? null;
+      out.ai = { provider: r.name, engine: 'Ollama', model: out.model || c.raw('model') || r.config.model, inputTokens: inT, outputTokens: outT, totalTokens: inT != null && outT != null ? inT + outT : inT, ms: out.total_duration ? Math.round(out.total_duration / 1e6) : Date.now() - t0 };
+      if (op !== 'embed') out.text = out.response ?? out.message?.content ?? '';
+    }
+    return { out };
+  },
+};
 
 export const aiActivities: Activity[] = [
   {
@@ -157,6 +213,7 @@ export const aiActivities: Activity[] = [
       return { port: sentiment, out: { sentiment, score, emotions: Array.isArray(j.emotions) ? j.emotions.map(String) : [], aspects: j.aspects && typeof j.aspects === 'object' ? j.aspects : {}, reason: String(j.reason || ''), input: c.input, ai: r.ai } };
     },
   },
+  ollamaActivity,
 ];
 
 const asPrompt = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v, null, 2));

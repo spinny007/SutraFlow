@@ -1,9 +1,11 @@
 import { listFlows, saveFlow } from './flows.js';
+import { listResources, saveResource } from './resources.js';
 import type { FlowNode } from './engine/types.js';
 
 /**
  * Sample Sutras added to a project from "New Sutra": For-Each mapping, loops on an activity,
- * a Sutra that calls another (sub-Sutra with Return), and try / catch with logs.
+ * a Sutra that calls another (sub-Sutra with Return), try / catch with logs, and two MCP skills
+ * (Write CSV file, Post to Facebook page) on a sample MCP server.
  */
 const N = (id: string, type: string, name: string, x: number, y: number, config: Record<string, any> = {}, settings?: FlowNode['settings']): FlowNode =>
   ({ id, type, name, x, y, config, ...(settings ? { settings } : {}) });
@@ -119,5 +121,41 @@ export function addSamples(projectId: string) {
     edges: [E('s', 'l0'), E('l0', 't1'), E('t1', 'l1', 'error'), E('l0', 'i'), E('i', 'ok', 'true'), E('i', 't2', 'false'), E('h', 'l2'), E('l2', 'end')],
   });
 
-  return [forEach, loops, tax, invoice, tryCatch].map(f => ({ id: f.id, name: f.name }));
+  // 6 + 7. MCP skills: Sutras that AI assistants call as tools, on one MCP server.
+  const server = listResources('mcpServer', projectId).find(r => r.name === 'Sample skills')
+    || saveResource({ kind: 'mcpServer', name: 'Sample skills', project_id: projectId, config: { path: '/mcp/samples', title: 'Sample skills', instructions: 'Skills that write files and post to the company Facebook page. Confirm with the user before posting.', policy: '' } });
+  const csvSkill = save({
+    name: 'Skill: Write CSV file',
+    description: 'An MCP skill: an AI assistant gives a file name and rows; the Sutra writes them as a CSV file and returns the file details. Pick an API security policy on the MCP server before deploying.',
+    nodes: [
+      N('t', 'mcpTool', 'Write CSV skill', 60, 200, {
+        server: server.id, toolName: 'write_csv_file', title: 'Write CSV file', changesData: true,
+        description: 'Writes rows to a CSV file in the outbox folder and returns its path, size and row count. Use it when the user asks to export, save or download data as CSV. Each row is an object; its fields become the columns.',
+        inputs: [{ k: 'fileName', v: 'The file name, for example orders-today.csv' }, { k: 'rows', v: 'array: the rows to write, each an object with the same fields' }],
+        testArguments: JSON.stringify({ fileName: 'skill-test.csv', rows: [{ sku: 'TEA-250', qty: 4 }, { sku: 'CUP-12', qty: 2 }] }, null, 2),
+      }),
+      N('w', 'fileWrite', 'Write the file', 400, 200, { folder: 'C:/sutra/outbox', path: '{{input.arguments.fileName}}', format: 'CSV from rows', rows: '{{input.arguments.rows}}', delimiter: ',', header: true, encoding: 'utf-8', lineEnding: 'LF', append: false, overwrite: true }),
+      N('ok', 'mcpReply', 'Reply with the file', 740, 140, { source: 'value', result: "=object('path', {input.path}, 'rows', {input.rowsWritten}, 'size', format-bytes({input.size}))" }),
+      N('bad', 'mcpReply', 'Reply with the problem', 740, 320, { source: 'value', result: 'The file could not be written: {{input.error.message}}', isError: true }),
+    ],
+    edges: [E('t', 'w'), E('w', 'ok'), E('w', 'bad', 'error')],
+  });
+  const fbSkill = save({
+    name: 'Skill: Post to Facebook page',
+    description: 'An MCP skill: an AI assistant gives the text (and an optional link); the Sutra posts it on the Facebook page and returns the post id. Choose a Facebook OAuth connection and the page id before deploying.',
+    nodes: [
+      N('t', 'mcpTool', 'Facebook post skill', 60, 200, {
+        server: server.id, toolName: 'post_to_facebook_page', title: 'Post to Facebook page', changesData: true,
+        description: 'Publishes a post on the company Facebook page and returns the new post id. Use it only after the user has approved the exact text.',
+        inputs: [{ k: 'message', v: 'The text of the post' }, { k: 'link', v: 'optional: a link to attach' }],
+        testArguments: JSON.stringify({ message: 'New arrivals this week', link: '' }, null, 2),
+      }),
+      N('p', 'facebookPage', 'Post it', 400, 200, { connection: '', op: 'post', pageId: '', message: '{{input.arguments.message}}', link: '{{input.arguments.link}}' }),
+      N('ok', 'mcpReply', 'Reply with the post', 740, 140, { source: 'value', result: "=object('posted', true, 'postId', {input.id})" }),
+      N('bad', 'mcpReply', 'Reply with the problem', 740, 320, { source: 'value', result: 'The post was not published: {{input.error.message}}', isError: true }),
+    ],
+    edges: [E('t', 'p'), E('p', 'ok'), E('p', 'bad', 'error')],
+  });
+
+  return [forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill].map(f => ({ id: f.id, name: f.name }));
 }

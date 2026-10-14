@@ -37,7 +37,7 @@ async function runDoc(doc: any, input?: any) {
 
 test('sample Sutras: For-Each mapping, activity loops, sub-Sutra, try and catch', async () => {
   const added = addSamples(pid);
-  assert.equal(added.length, 5);
+  assert.equal(added.length, 7);
   const doc = (n: string) => flows.getFlow(added.find(a => a.name.startsWith(n))!.id)!.doc;
 
   let r = await runDoc(doc('Sample: For-Each'));
@@ -66,6 +66,15 @@ test('sample Sutras: For-Each mapping, activity loops, sub-Sutra, try and catch'
   const logs = r.state.logs.map((l: any) => `${l.level} ${l.msg}`).join('\n');
   assert.match(logs, /warn Handled here: TEA-250 is out of stock/);
   assert.match(logs, /error Reject failed: Amount -5 is not valid/);
+
+  // The CSV skill, run as a test with its test arguments, writes the file and replies with its details.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-skill-'));
+  const skill = doc('Skill: Write CSV');
+  skill.nodes.find((n: any) => n.type === 'fileWrite')!.config.folder = dir;
+  r = await runDoc(skill);
+  assert.equal(r.status, 'done', r.error);
+  assert.equal(r.state.outputs['Reply with the file'].result.rows, 2);
+  assert.match(fs.readFileSync(path.join(dir, 'skill-test.csv'), 'utf8'), /sku,qty\r?\nTEA-250,4/);
 
   assert.equal(addSamples(pid)[0].name, 'Sample: For-Each mapping 2', 'adding again keeps names unique');
 });

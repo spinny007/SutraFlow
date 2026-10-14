@@ -8,7 +8,7 @@ interface ServerInfo {
   tls: { mode: string; domains: string[]; email: string; staging: boolean; agreeTos: boolean; clientCaPem: string };
   cert: null | { source: string; subject?: string; issuer?: string; altNames?: string; validTo?: string; daysLeft?: number; fingerprint256?: string; error?: string };
   acme: { state: string; message: string; at?: string };
-  routes: { kind: string; method: string; path: string; flow: string; version: number; step: string; policy: string | null; urls: string[]; wsdl?: string }[];
+  routes: { kind: string; method: string; path: string; flow: string; version: number; step: string; policy: string | null; urls: string[]; wsdl?: string; flowId?: string; tool?: string }[];
   schedulerErrors: string[];
   listeners: { flow: string; step: string; type: string; state: string; message: string; at: string }[];
   engine: Record<string, number>;
@@ -40,7 +40,7 @@ export function Server() {
   return (
     <div className="page"><div className="page-inner">
       <h1>Server & APIs</h1>
-      <p className="lead">Deployed REST and SOAP services run on the gateway listeners below, separate from this studio ({info.admin.host}:{info.admin.port}).</p>
+      <p className="lead">Deployed REST and SOAP services and MCP skills run on the gateway listeners below, separate from this studio ({info.admin.host}:{info.admin.port}).</p>
 
       <div className="card">
         <h2>Exposed services</h2>
@@ -48,15 +48,16 @@ export function Server() {
           <div style={{ overflowX: 'auto' }}><table className="t">
             <thead><tr><th>Type</th><th>Endpoint</th><th>Sutra</th><th>Security policy</th></tr></thead>
             <tbody>{info.routes.map(r => (
-              <tr key={r.kind + r.method + r.path}>
-                <td><span className="badge">{r.kind === 'soap' ? 'SOAP' : r.method}</span></td>
-                <td>{r.urls.map(u => <div key={u}><code>{u}</code></div>)}{r.wsdl && <div className="muted" style={{ fontSize: 12 }}>WSDL: <code>{r.urls[r.urls.length - 1]}?wsdl</code></div>}</td>
+              <tr key={r.kind + r.method + r.path + r.flowId + r.step}>
+                <td><span className="badge">{r.kind === 'soap' ? 'SOAP' : r.kind === 'mcp' ? 'MCP skill' : r.method}</span></td>
+                <td>{r.urls.map(u => <div key={u}><code>{u}</code></div>)}{r.wsdl && <div className="muted" style={{ fontSize: 12 }}>WSDL: <code>{r.urls[r.urls.length - 1]}?wsdl</code></div>}
+                  {r.kind === 'mcp' && <div className="muted" style={{ fontSize: 12 }}>Tool <code>{r.tool}</code>. Connect Claude Code: <code>{`claude mcp add --transport http ${(r.path.split('/').pop() || 'sutraflow')} ${r.urls[r.urls.length - 1]}${r.policy ? ' --header "X-API-Key: <key>"' : ''}`}</code></div>}</td>
                 <td>{r.flow} <span className="muted">v{r.version} · {r.step}</span></td>
                 <td>{r.policy ?? <span className="badge failed">none: open to anyone</span>}</td>
               </tr>
             ))}</tbody>
           </table></div>
-        ) : <p className="muted">Nothing deployed yet. Add a REST service or SOAP service trigger to a Sutra and deploy it.</p>}
+        ) : <p className="muted">Nothing deployed yet. Add a REST service, SOAP service or MCP skill trigger to a Sutra and deploy it.</p>}
         {info.schedulerErrors.length > 0 && <div className="errbox">{info.schedulerErrors.join('\n')}</div>}
         {info.listeners?.length > 0 && (
           <>

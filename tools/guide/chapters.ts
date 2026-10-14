@@ -368,12 +368,43 @@ export const CHAPTERS: Chapter[] = [
 <tr><td>Claude API</td><td>An Anthropic API key in the vault.</td><td><code>claude-opus-5-5</code>; also <code>claude-sonnet-5-5</code>, <code>claude-haiku-5-5</code></td></tr>
 <tr><td>Gemini API</td><td>A Google AI Studio or Vertex API key.</td><td><code>gemini-3-pro-preview</code>; also other Gemini 3 models</td></tr>
 <tr><td>OpenAI API</td><td>An OpenAI API key. Any compatible server works with its own API base URL.</td><td><code>gpt-5</code></td></tr>
-<tr><td>Ollama</td><td>An Ollama server; on this machine by default (<code>http://127.0.0.1:11434</code>). No key, no data leaves your network.</td><td><code>llama3.3</code>, or any model you have pulled</td></tr>
+<tr><td>Ollama</td><td>An Ollama server; on this machine by default (<code>http://127.0.0.1:11434</code>). A full endpoint such as <code>http://localhost:11434/api/generate</code> also works, and the <em>Ollama API</em> setting chooses chat or generate. No key; nothing leaves your network, so it works offline.</td><td>The first model installed, or the one you pick</td></tr>
+<tr><td>LM Studio</td><td>LM Studio's local server (<code>http://127.0.0.1:1234/v1</code>).</td><td>The model loaded in LM Studio</td></tr>
+<tr><td>Hugging Face</td><td>A Hugging Face token; uses Hugging Face Inference Providers.</td><td>A model id such as <code>Qwen/Qwen3-8B</code></td></tr>
+<tr><td>Hugging Face TGI (local)</td><td>Text Generation Inference running on your machine (default <code>http://127.0.0.1:8090/v1</code>; SutraFlow's gateway uses 8080).</td><td>The model TGI serves</td></tr>
+<tr><td>OpenAI-compatible server</td><td>Any server with the OpenAI chat API: llama.cpp, vLLM, LocalAI, Jan. Key only when the server asks for one.</td><td>The server's first model, or the one you pick</td></tr>
 <tr><td>Claude CLI, Gemini CLI, OpenAI Codex CLI</td><td>The command-line tool installed and signed in on the server (<code>claude</code>, <code>gemini</code>, <code>codex</code>). Uses that tool's own account.</td><td>The tool's default, or the one you set</td></tr>
 </tbody></table>
-<p>Model names change often; check the provider's list and type the one you want. Click <strong>Test connection</strong> to see which model answered.</p>
+<p>Click <strong>List models</strong> to see the models the engine offers and pick one; <strong>Test connection</strong> shows which model answered, with tokens and time.</p>
+<p class="h">Adding models to Ollama, online or offline</p>
+<ul>
+<li><strong>Pull</strong> a model by name, such as <code>qwen3</code>, when the Ollama machine has internet.</li>
+<li><strong>Import from a path on this server</strong> when it does not. Copy the files over (USB drive, share), then give their path: a <code>.gguf</code> file; a Modelfile (FROM file.gguf, with TEMPLATE, SYSTEM and PARAMETER); a Safetensors model folder; or an Ollama models folder copied from another machine (it holds <code>manifests</code> and <code>blobs</code>), with the model to take from it. SutraFlow sends the files to Ollama through its API and registers them under the name you choose.</li>
+</ul>
+<p class="h">One setting per environment</p>
+<p>The deployment config overrides any connection setting, the engine included. Test with a local Ollama and run production on another engine without changing a Sutra:</p>
+<pre>"resources": { "AI provider": { "engine": "Claude API", "model": "claude-sonnet-5-5", "apiKeySecret": "ANTHROPIC_KEY" } }</pre>
 [[tip:Command-line tools|The prompt is sent to the tool on standard input, never on the command line, and the tool runs in an empty folder as the SutraFlow server user. Keep the tool's own permissions for running commands and editing files switched off: a message from outside could otherwise ask it to act on the server.]]
 [[tip:Guidelines|Route AI decisions that matter (money, customers) through [[approval]] until you trust them.]]`,
+  },
+  {
+    id: 'mcp', title: 'AI skills over MCP',
+    html: `
+<p>A Sutra that starts with an [[mcpTool]] trigger is a <strong>skill</strong>: AI assistants such as Claude connect to SutraFlow over the Model Context Protocol (MCP), see the skills, and call them. Each call runs the Sutra with the arguments the AI chose, and [[mcpReply]] sends the outcome back. Skills can do anything a Sutra does: write a CSV file, post to a Facebook page, look up an order in a database, start an approval.</p>
+<p class="h">Build a skill</p>
+<ol>
+<li>Under Resources, add an <strong>MCP server</strong>: its address on the gateway (for example <code>/mcp/orders</code>), a title, instructions for the AI, and an API security policy. One server holds many skills.</li>
+<li>Create a Sutra that starts with <strong>MCP skill</strong>, choose the server, and describe the tool: name, title, what it does and when to use it, and its inputs.</li>
+<li>Build the work, and end every branch with <strong>Reply to AI</strong>; on error branches tick <em>Is an error</em>.</li>
+<li>Test it in the studio with the trigger's test arguments, then Deploy. Server &amp; APIs lists each skill with its address.</li>
+</ol>
+<p class="h">Connect an assistant</p>
+<p>Give the assistant the server's address and, when a policy is set, the key or token as a header. With Claude Code:</p>
+<pre>claude mcp add --transport http orders https://your-server:8443/mcp/orders --header "X-API-Key: your-key"</pre>
+<p>Other assistants that support MCP over HTTP take the same address and header. Skills without a server are at <code>/mcp</code>.</p>
+<p class="h">Sample skills</p>
+<p><strong>Add sample Sutras</strong> also adds an MCP server named <em>Sample skills</em> (<code>/mcp/samples</code>) with two skills: <em>Skill: Write CSV file</em> and <em>Skill: Post to Facebook page</em>. Choose a security policy on the server, a Facebook connection and page on the second skill, and deploy them.</p>
+[[tip:Guidelines|Protect every MCP server with an API security policy: a skill acts with the server's rights.<br>Tick <em>Changes data</em> on skills that create, change or delete something, so the assistant asks the user first.<br>Write descriptions for someone who has never seen the Sutra: the AI chooses skills by them.]]`,
   },
   {
     id: 'secrets', title: 'Secrets and studio security',

@@ -11,6 +11,9 @@ import { xmlParser } from '../security/outbound.js';
 import { NS } from '../security/wss.js';
 import { listOf } from '../palettes/common.js';
 import { acmeChallenge, getCert, getTls } from './tls.js';
+import crypto from 'node:crypto';
+import { MCP_PROTOCOLS, toolDefinition, toolResult } from '../mcp.js';
+import { version as sutraVersion } from '../config.js';
 
 /**
  * The gateway serves deployed REST and SOAP services on its own HTTP and HTTPS
@@ -39,6 +42,10 @@ interface Route {
 }
 
 let routes: Route[] = [];
+/** AI tools by MCP address: '/mcp' for tools without an MCP server, else the server's address. */
+interface McpTool { endpoint: string; serverId: string; flowId: string; projectId: string; version: number; doc: FlowDoc; node: FlowNode }
+let mcpTools: McpTool[] = [];
+export const mcpPath = (p: unknown) => '/' + String(p || 'mcp').trim().replace(/^\/+|\/+$/g, '').toLowerCase();
 
 export function rebuildRoutes() {
   const out: Route[] = [];
@@ -53,6 +60,10 @@ export function rebuildRoutes() {
   }
   // Literal paths before parameterised ones.
   routes = out.sort((a, b) => a.keys.length - b.keys.length);
+  mcpTools = deployedFlows().flatMap(d => d.doc.nodes.filter(n => n.type === 'mcpTool').map(node => {
+    const srv = node.config.server ? effectiveResource(node.config.server) : undefined;
+    return { endpoint: srv ? mcpPath(srv.config.path) : '/mcp', serverId: srv?.id || '', flowId: d.flowId, projectId: d.projectId, version: d.version, doc: d.doc, node };
+  }));
 }
 
 export function listRoutes() {
@@ -66,6 +77,14 @@ export function listRoutes() {
       ...(tls.mode !== 'off' && getCert() ? [`https://${tls.domains[0] || 'localhost'}:${s.httpsPort}${r.path}`] : []),
     ],
     wsdl: r.kind === 'soap' ? `${r.path}?wsdl` : undefined,
+  })).concat(mcpTools.map(t => {
+    const pol = t.node.config.policy || (t.serverId ? effectiveResource(t.serverId)?.config.policy : '');
+    return {
+      kind: 'mcp' as any, method: 'MCP', path: t.endpoint, flowId: t.flowId, flow: t.doc.name, version: t.version, step: t.node.name,
+      policy: pol ? getResource(pol)?.name ?? '(missing)' : null,
+      urls: [`http://${tls.domains[0] || 'localhost'}:${s.httpPort}${t.endpoint}`, ...(tls.mode !== 'off' && getCert() ? [`https://${tls.domains[0] || 'localhost'}:${s.httpsPort}${t.endpoint}`] : [])],
+      wsdl: undefined, tool: String(t.node.config.toolName || ''),
+    };
   }));
 }
 
@@ -167,6 +186,8 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
     return ka ? reply.type('text/plain').send(ka) : reply.code(404).send('Not found');
   }
   if (path === '/health') return reply.send({ ok: true });
+  const mcpAt = mcpPath(path);
+  if (mcpAt === '/mcp' || mcpTools.some(t => t.endpoint === mcpAt)) return handleMcp(req, reply, secure, mcpAt);
 
   const method = req.method.toUpperCase();
   const candidates = routes.filter(r => r.re.test(path));
@@ -257,6 +278,93 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
     if (e.runId) reply.header('x-sutra-run', e.runId);
     return reply.code(e.runId !== undefined ? 504 : 500).send({ error: e.message });
   }
+}
+
+// ---------- MCP: Sutras as skills for AI assistants (Streamable HTTP, JSON-RPC 2.0) ----------
+
+async function handleMcp(req: FastifyRequest, reply: FastifyReply, secure: boolean, endpoint: string) {
+  const method = req.method.toUpperCase();
+  if (method === 'GET') return reply.code(405).header('allow', 'POST, DELETE').send({ error: 'This MCP server answers POST requests; it does not open an event stream' });
+  if (method === 'DELETE' || method === 'OPTIONS') return reply.code(204).send();
+  if (method !== 'POST') return reply.code(405).header('allow', 'POST, DELETE').send();
+  let msg: any;
+  try { msg = JSON.parse(typeof req.body === 'string' ? req.body : String(req.body ?? '')); } catch {
+    return reply.code(400).send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Request is not valid JSON' } });
+  }
+  const tools = mcpTools.filter(t => t.endpoint === endpoint);
+  const server = tools.find(t => t.serverId)?.serverId;
+  const srv = server ? effectiveResource(server) : undefined;
+  const batch = Array.isArray(msg) ? msg : [msg];
+  const ctx = { headers: req.headers, ip: req.ip, secure, socket: req.raw.socket };
+  const allowed = async (t: McpTool) => {
+    const ref = t.node.config.policy || (t.serverId ? effectiveResource(t.serverId)?.config.policy : '');
+    const policy = ref ? effectiveResource(ref) : undefined;
+    if (ref && !policy) throw new PolicyError(503, "The tool's security policy is missing; refusing to serve it unprotected");
+    return authorize(policy, ctx);
+  };
+  const out: any[] = [];
+  for (const m of batch) {
+    if (!m || m.jsonrpc !== '2.0' || typeof m.method !== 'string') { out.push({ jsonrpc: '2.0', id: m?.id ?? null, error: { code: -32600, message: 'Invalid request' } }); continue; }
+    if (m.id === undefined || m.id === null) continue; // notification
+    const ok = (result: any) => out.push({ jsonrpc: '2.0', id: m.id, result });
+    const err = (code: number, message: string) => out.push({ jsonrpc: '2.0', id: m.id, error: { code, message } });
+    if (m.method === 'initialize') {
+      const asked = String(m.params?.protocolVersion || '');
+      reply.header('mcp-session-id', crypto.randomUUID());
+      ok({
+        protocolVersion: MCP_PROTOCOLS.includes(asked) ? asked : MCP_PROTOCOLS[0],
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: { name: 'SutraFlow', title: srv?.config.title || 'SutraFlow skills', version: sutraVersion },
+        instructions: srv?.config.instructions || 'Each tool runs a SutraFlow Sutra (an integration process) and returns its outcome. Read each tool description to choose one.',
+      });
+    } else if (m.method === 'ping') {
+      ok({});
+    } else if (m.method === 'tools/list') {
+      const list: any[] = [];
+      let denied: PolicyError | undefined;
+      for (const t of tools) {
+        try { await allowed(t); list.push(toolDefinition(t.node)); } catch (e: any) { denied ||= e; }
+      }
+      if (!list.length && denied) {
+        if (denied.headers) reply.headers(denied.headers);
+        return reply.code(denied.status || 401).send({ jsonrpc: '2.0', id: m.id, error: { code: -32001, message: denied.message } });
+      }
+      ok({ tools: list });
+    } else if (m.method === 'tools/call') {
+      const name = String(m.params?.name || '');
+      const t = tools.find(x => x.node.config.toolName === name);
+      if (!t) { err(-32602, `Unknown tool: ${name}`); continue; }
+      let caller;
+      try { caller = await allowed(t); } catch (e: any) {
+        const pe = e as PolicyError;
+        if (pe.headers) reply.headers(pe.headers);
+        return reply.code(pe.status || 401).send({ jsonrpc: '2.0', id: m.id, error: { code: -32001, message: pe.message } });
+      }
+      const args = m.params?.arguments && typeof m.params.arguments === 'object' ? m.params.arguments : {};
+      const def = toolDefinition(t.node);
+      const missing = ((def.inputSchema.required || []) as string[]).filter(k => args[k] === undefined || args[k] === null || args[k] === '');
+      if (missing.length) { ok(toolResult(`Missing argument${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}`, true)); continue; }
+      const input = { arguments: args, tool: name, auth: caller, client: { ip: req.ip, secure, name: String(req.headers['user-agent'] || ''), version: '' } };
+      try {
+        const { runId, reply: r } = await waitReply(onReply => engine.startRun({ doc: t.doc, flowId: t.flowId, projectId: t.projectId, version: t.version, triggerNodeId: t.node.id, input, source: 'mcp', onReply }), config.replyTimeoutMs);
+        reply.header('x-sutra-run', runId);
+        if (r.failed) { ok(toolResult(`The Sutra failed: ${r.error || 'unknown error'}`, true)); continue; }
+        const b = r.body;
+        const fromReply = b && typeof b === 'object' && 'result' in b && 'isError' in b;
+        ok(toolResult(fromReply ? b.result : b, fromReply ? !!b.isError : false));
+      } catch (e: any) {
+        ok(toolResult(e.runId !== undefined ? 'The Sutra did not reply in time' : e.message, true));
+      }
+    } else if (m.method === 'resources/list') {
+      ok({ resources: [] });
+    } else if (m.method === 'prompts/list') {
+      ok({ prompts: [] });
+    } else {
+      err(-32601, `Method not found: ${m.method}`);
+    }
+  }
+  if (!out.length) return reply.code(202).send();
+  return reply.code(200).type('application/json').send(JSON.stringify(Array.isArray(msg) ? out : out[0]));
 }
 
 // ---------- listeners ----------

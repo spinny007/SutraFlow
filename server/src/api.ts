@@ -23,7 +23,8 @@ import { evalExpression, functionCatalog, refsOf, ExprError } from './expr.js';
 import { tailLog } from './logger.js';
 import * as oauth from './connectors/oauth.js';
 import { listenerStatus } from './listeners.js';
-import { testResource } from './resourceTest.js';
+import { testResource, prepare } from './resourceTest.js';
+import { listModels, ollamaPull, ollamaImport } from './ai/providers.js';
 import { addSamples } from './samples.js';
 
 const COOKIE = 'sutra_session';
@@ -293,6 +294,21 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.post('/api/resources/test', async (req: any) => {
     if (!req.body?.kind) throw bad('kind is required');
     return testResource(req.body);
+  });
+  /** AI provider: the models the engine offers (Ollama, LM Studio, OpenAI-compatible, Gemini, Claude). */
+  app.post('/api/resources/models', async (req: any) => {
+    const { r, secret } = prepare(req.body || {});
+    try { return { models: await listModels(r, secret) }; } catch (e: any) { throw bad(e.message); }
+  });
+  /** Ollama: pull a model (online), or import a .gguf file that is on this server (offline). Administrators only. */
+  app.post('/api/resources/ollama/:action', async (req: any) => {
+    if ((req as any).user?.r !== 'admin') throw new HttpError(403, 'Only administrators can install models');
+    const { r } = prepare(req.body || {});
+    try {
+      if (req.params.action === 'pull') return { message: await ollamaPull(r, String(req.body?.model || '').trim()) };
+      if (req.params.action === 'import') return { message: await ollamaImport(r, String(req.body?.file || '').trim(), String(req.body?.model || '').trim(), String(req.body?.take || '').trim()) };
+    } catch (e: any) { throw bad(e.message); }
+    throw bad('Unknown action');
   });
   app.post('/api/resources', async (req: any) => {
     if (!req.body?.project_id) throw bad('project_id is required');

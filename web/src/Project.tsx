@@ -148,6 +148,7 @@ function ResourceEditor({ sel, setSel }: { sel: Extract<ExplorerSel, { kind: 're
         {k.kind !== 'inboundPolicy' && <button className="btn" onClick={runTest} disabled={test === 'running'}>{test === 'running' ? 'Testing' : 'Test connection'}</button>}
         {r.id && <button className="btn danger" onClick={remove}>Delete</button>}
       </div>
+      {r.kind === 'aiProvider' && <AiModels r={r} projectId={projectId} setModel={m => { setR({ ...r, config: { ...r.config, model: m } }); setTest(null); }} />}
       {r.kind === 'oauthApp' && r.id && <OAuthPanel id={r.id} />}
     </>
   );
@@ -388,4 +389,44 @@ function uniqueName(base: string, taken: string[]) {
   const t = new Set(taken.map(x => x.toLowerCase()));
   if (!t.has(base.toLowerCase())) return base;
   for (let i = 2; ; i++) if (!t.has(`${base} ${i}`.toLowerCase())) return `${base} ${i}`;
+}
+
+/** AI provider: list the engine's models; for Ollama, pull one (online) or import model files from this server (offline). */
+function AiModels({ r, projectId, setModel }: { r: Resource; projectId: string; setModel(m: string): void }) {
+  const [models, setModels] = useState<string[] | null>(null);
+  const [busy, setBusy] = useState('');
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [pull, setPull] = useState('qwen3');
+  const [file, setFile] = useState('');
+  const [name, setName] = useState('');
+  const [take, setTake] = useState('');
+  const engine = r.config.engine || 'Claude API';
+  if (/CLI$/.test(engine)) return null;
+  const body = { ...r, project_id: projectId };
+  const run = async (what: string, fn: () => Promise<string>) => {
+    setBusy(what); setMsg(null);
+    try { setMsg({ ok: true, text: await fn() }); } catch (e: any) { setMsg({ ok: false, text: e.message }); } finally { setBusy(''); }
+  };
+  const list = () => run('list', async () => { const res = await post<{ models: string[] }>('/api/resources/models', body); setModels(res.models); return res.models.length ? `${res.models.length} model${res.models.length === 1 ? '' : 's'}: click one to use it.` : 'No models yet.'; });
+  return (
+    <div className="aimodels">
+      <div className="row"><button className="btn small" onClick={list} disabled={!!busy}>{busy === 'list' ? 'Listing' : 'List models'}</button><span className="muted xs">Models this {engine} offers.</span></div>
+      {models && models.length > 0 && <div className="chips">{models.map(m => <button key={m} className={`chip${r.config.model === m ? ' on' : ''}`} onClick={() => setModel(m)}>{m}</button>)}</div>}
+      {engine === 'Ollama' && <>
+        <p className="h">Add a model to Ollama</p>
+        <div className="fld"><label htmlFor="opull">Pull from the Ollama library (needs internet)</label>
+          <div className="row"><input id="opull" type="text" className="code" value={pull} onChange={e => setPull(e.target.value)} placeholder="qwen3, phi4-mini, llama3.3" />
+            <button className="btn small" disabled={!!busy || !pull.trim()} onClick={() => run('pull', async () => { const m = await post<{ message: string }>('/api/resources/ollama/pull', { ...body, model: pull.trim() }); await list(); return m.message; })}>{busy === 'pull' ? 'Pulling (can take minutes)' : 'Pull'}</button></div></div>
+        <div className="fld"><label htmlFor="ofile">Import from a path on this server (offline)</label>
+          <input id="ofile" type="text" className="code" value={file} onChange={e => setFile(e.target.value)} placeholder="D:\models\qwen3-8b.gguf" />
+          <div className="hint">A .gguf file; a Modelfile (FROM file.gguf, TEMPLATE, SYSTEM, PARAMETER); a Safetensors model folder; or an Ollama models folder copied from another machine (it has manifests and blobs). The files go to Ollama through its API at the address above.</div></div>
+        <div className="row2">
+          <div className="fld"><label htmlFor="oname">Name in Ollama</label><input id="oname" type="text" className="code" value={name} onChange={e => setName(e.target.value)} placeholder="qwen3-offline" /></div>
+          <div className="fld"><label htmlFor="otake">Model in the folder</label><input id="otake" type="text" className="code" value={take} onChange={e => setTake(e.target.value)} placeholder="only for Ollama folders, e.g. qwen3:8b" /></div>
+        </div>
+        <button className="btn small" disabled={!!busy || !file.trim() || !name.trim()} onClick={() => run('import', async () => { const m = await post<{ message: string }>('/api/resources/ollama/import', { ...body, file: file.trim(), model: name.trim(), take: take.trim() }); await list(); setModel(name.trim()); return m.message; })}>{busy === 'import' ? 'Importing (large files take a while)' : 'Import'}</button>
+      </>}
+      {msg && <div className={msg.ok ? 'okbox' : 'errbox'} role="status">{msg.text}</div>}
+    </div>
+  );
 }

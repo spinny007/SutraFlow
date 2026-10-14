@@ -3,6 +3,7 @@ import { httpActivities } from './http.js';
 import { soapActivities } from './soap.js';
 import { aiActivities } from './ai.js';
 import { processActivities } from './process.js';
+import { mcpActivities } from './mcp.js';
 import { fileActivities } from './file.js';
 import { codeActivities } from './code.js';
 import { transformActivities } from './transform.js';
@@ -32,5 +33,5 @@ export const PALETTES = [
 
 export const allActivities = [
   ...coreActivities, ...processActivities, ...transformActivities, ...httpActivities, ...soapActivities, ...fileActivities, ...dbActivities, ...busActivities,
-  ...emailActivities, ...firebaseActivities, ...saasActivities, ...codeActivities, ...aiActivities,
+  ...emailActivities, ...firebaseActivities, ...saasActivities, ...codeActivities, ...aiActivities, ...mcpActivities,
 ];

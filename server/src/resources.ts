@@ -3,7 +3,7 @@ import { q, now } from './db.js';
 import { applyResourceOverrides, effectiveVariables, engineVariableValues } from './projects.js';
 import { resolveResourceConfig } from './settings.js';
 import { CONNECTOR_KINDS } from './connectors/kinds.js';
-import { AI_ENGINES } from './ai/providers.js';
+import { AI_ENGINES } from './ai/engines.js';
 import type { Field, ResourceKind } from './engine/types.js';
 
 /**
@@ -94,16 +94,28 @@ export const RESOURCE_KINDS: ResourceKind[] = [
   {
     kind: 'aiProvider',
     name: 'AI provider',
-    desc: 'The AI engine used by AI activities: the Claude, Gemini or OpenAI API, a local Ollama server, or the Claude Code, Gemini or Codex command-line tool installed on this server.',
+    desc: 'The AI engine used by AI activities: the Claude, Gemini, OpenAI or Hugging Face API; a local server (Ollama, LM Studio, Hugging Face TGI, or any OpenAI-compatible server such as llama.cpp or vLLM), which works offline; or the Claude Code, Gemini or Codex command-line tool installed on this server.',
     fields: [
       F('engine', 'Engine', 'select', 'Claude API', { options: [...AI_ENGINES] }),
-      F('apiKeySecret', 'API key', 'secret', '', { help: 'Vault secret holding the key.', ...when('engine', 'Claude API', 'Gemini API', 'OpenAI API') }),
-      F('model', 'Model', 'text', '', { help: 'Empty = the default: claude-opus-5-5 (Claude API), gemini-3-pro-preview (Gemini API), gpt-5 (OpenAI API), llama3.3 (Ollama); the CLI tools use their own default. Examples: claude-sonnet-5-5, claude-haiku-5-5, gemini-3-flash-preview, qwen3.' }),
-      F('maxTokens', 'Max output tokens', 'number', 16000, when('engine', 'Claude API', 'Gemini API', 'OpenAI API', 'Ollama')),
-      F('baseUrl', 'API base URL', 'text', '', { help: 'Empty = the provider address (Ollama: http://127.0.0.1:11434). Set it for a proxy, a gateway or a remote Ollama.', ...when('engine', 'Claude API', 'Gemini API', 'OpenAI API', 'Ollama') }),
+      F('apiKeySecret', 'API key', 'secret', '', { help: 'Vault secret holding the key or token. Needed for the Claude, Gemini, OpenAI and Hugging Face APIs; optional for local servers.', ...when('engine', 'Claude API', 'Gemini API', 'OpenAI API', 'Hugging Face', 'LM Studio', 'Hugging Face TGI (local)', 'OpenAI-compatible server') }),
+      F('model', 'Model', 'text', '', { help: 'Use List models to pick one. Empty: claude-opus-5-5 (Claude API), gemini-3-pro-preview (Gemini API), gpt-5 (OpenAI API); local servers use their first model; the CLI tools use their own default. Hugging Face needs a model id such as Qwen/Qwen3-8B.' }),
+      F('maxTokens', 'Max output tokens', 'number', 16000, { showIf: { k: 'engine', in: ['Claude API', 'Gemini API', 'OpenAI API', 'Ollama', 'LM Studio', 'Hugging Face', 'Hugging Face TGI (local)', 'OpenAI-compatible server'] } }),
+      F('baseUrl', 'API base URL', 'text', '', { help: 'Empty = the usual address: Ollama http://127.0.0.1:11434 (a full endpoint such as http://localhost:11434/api/generate also works), LM Studio http://127.0.0.1:1234/v1, Hugging Face https://router.huggingface.co/v1, TGI http://127.0.0.1:8090/v1 (SutraFlow uses 8080), OpenAI-compatible (llama.cpp, vLLM, LocalAI, Jan) http://127.0.0.1:8000/v1. Set it for another machine, port or a proxy.', showIf: { k: 'engine', in: ['Claude API', 'Gemini API', 'OpenAI API', 'Ollama', 'LM Studio', 'Hugging Face', 'Hugging Face TGI (local)', 'OpenAI-compatible server'] } }),
+      F('ollamaApi', 'Ollama API', 'select', 'chat', { options: ['chat', 'generate'], help: 'chat: /api/chat with instructions and prompt as messages. generate: /api/generate with prompt and system. An address ending in /api/generate always uses generate.', ...when('engine', 'Ollama') }),
       F('command', 'Command', 'text', '', { help: 'Empty = claude, gemini or codex from the server PATH; or the full path to the tool.', ...when('engine', 'Claude CLI', 'Gemini CLI', 'OpenAI Codex CLI') }),
       F('args', 'Arguments', 'text', '', { help: 'Empty = -p --output-format json (Claude), --output-format json (Gemini), exec - (Codex). The prompt is sent on standard input.', ...when('engine', 'Claude CLI', 'Gemini CLI', 'OpenAI Codex CLI') }),
       F('workDir', 'Working folder', 'text', '', { help: 'Empty = an empty temporary folder. The tool runs as the SutraFlow server user: keep its own tool permissions off.', ...when('engine', 'Claude CLI', 'Gemini CLI', 'OpenAI Codex CLI') }),
+    ],
+  },
+  {
+    kind: 'mcpServer',
+    name: 'MCP server (AI skills)',
+    desc: 'An address on the gateway where AI assistants find a set of skills: every deployed Sutra whose MCP skill trigger names this server is one of its tools.',
+    fields: [
+      F('path', 'Address on the gateway', 'text', '/mcp/skills', { help: 'For example /mcp/orders. Assistants connect to https://<server>:8443 followed by this address.' }),
+      F('title', 'Title', 'text', 'Order skills'),
+      F('instructions', 'Instructions for the AI', 'textarea', 'Tools for looking up and changing orders. Ask for the order number when it is not given.', { help: 'Told to the assistant when it connects: what this set of skills is for and how to use it.' }),
+      F('policy', 'API security policy', 'resource', '', { resourceKind: 'inboundPolicy', help: 'Who may use these skills. A tool can set its own policy instead.' }),
     ],
   },
   ...CONNECTOR_KINDS,
@@ -112,7 +124,7 @@ export const RESOURCE_KINDS: ResourceKind[] = [
 /** Explorer symbols, in the same plain style as the activity symbols. */
 const ICONS: Record<string, string> = {
   httpConnection: '⇄', outboundAuth: '⚿', inboundPolicy: '⛨', aiProvider: '✦', smtp: '✉', imap: '⇩',
-  database: '⛁', kafka: '≋', rabbitmq: '⇶', amqp1: '⇉', firebase: '◭', oauthApp: '⚇',
+  database: '⛁', kafka: '≋', rabbitmq: '⇶', amqp1: '⇉', firebase: '◭', oauthApp: '⚇', mcpServer: '✧',
 };
 for (const k of RESOURCE_KINDS) k.icon ||= ICONS[k.kind] || '⚙';
 

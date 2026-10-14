@@ -14,7 +14,10 @@ import { connectionStatus } from './connectors/oauth.js';
  * "Test connection" in the resource editor: tries the settings as they are on screen (saved or not),
  * with project and Sengine variables resolved, and reports what happened in one sentence.
  */
-export async function testResource(input: { id?: string; kind: string; name?: string; project_id?: string | null; config: Record<string, any> }) {
+export interface ResourceInput { id?: string; kind: string; name?: string; project_id?: string | null; config: Record<string, any> }
+
+/** The settings as they are on screen, with project and Sengine variables filled in, and a secret reader. */
+export function prepare(input: ResourceInput) {
   const t0 = Date.now();
   const config = resolveResourceConfig(input.config || {}, { gv: effectiveVariables(input.project_id ?? null).values, ev: engineVariableValues() });
   const r: Resource = { id: input.id || `test-${t0}`, kind: input.kind, name: input.name || input.kind, project_id: input.project_id ?? null, config, rev: `test-${t0}` } as Resource;
@@ -24,6 +27,12 @@ export async function testResource(input: { id?: string; kind: string; name?: st
     if (v === undefined) throw new Error(`${what}: secret "${name}" does not exist. Add it under Resources > Secrets.`);
     return v;
   };
+  return { r, secret };
+}
+
+export async function testResource(input: ResourceInput) {
+  const t0 = Date.now();
+  const { r, secret } = prepare(input);
   try {
     const message = await run(r, secret);
     return { ok: true, message, ms: Date.now() - t0 };

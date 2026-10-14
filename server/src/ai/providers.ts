@@ -1,18 +1,19 @@
 import Anthropic from '@anthropic-ai/sdk';
+import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { Resource } from '../resources.js';
 import { httpCall } from '../security/outbound.js';
+import { AI_ENGINES, type AiEngine } from './engines.js';
 
 /**
  * AI engines behind the "AI provider" connection: the Claude, Gemini and OpenAI APIs, a local
  * Ollama server, and the Claude Code, Gemini and Codex command-line tools installed on this server.
  * Every call returns the text plus the same details: provider, model, tokens and time.
  */
-export const AI_ENGINES = ['Claude API', 'Claude CLI', 'Gemini API', 'Gemini CLI', 'OpenAI API', 'OpenAI Codex CLI', 'Ollama'] as const;
-export type AiEngine = (typeof AI_ENGINES)[number];
+export { AI_ENGINES, type AiEngine };
 
 const DEFAULTS: Record<AiEngine, { model: string; base?: string; command?: string; args?: string }> = {
   'Claude API': { model: 'claude-opus-5-5', base: 'https://api.anthropic.com' },
@@ -21,8 +22,29 @@ const DEFAULTS: Record<AiEngine, { model: string; base?: string; command?: strin
   'Gemini CLI': { model: '', command: 'gemini', args: '--output-format json' },
   'OpenAI API': { model: 'gpt-5', base: 'https://api.openai.com/v1' },
   'OpenAI Codex CLI': { model: '', command: 'codex', args: 'exec -' },
-  Ollama: { model: 'llama3.3', base: 'http://127.0.0.1:11434' },
+  // Local servers: an empty model means the first model the server has.
+  Ollama: { model: '', base: 'http://127.0.0.1:11434' },
+  'LM Studio': { model: '', base: 'http://127.0.0.1:1234/v1' },
+  'Hugging Face': { model: '', base: 'https://router.huggingface.co/v1' },
+  'Hugging Face TGI (local)': { model: '', base: 'http://127.0.0.1:8090/v1' },
+  'OpenAI-compatible server': { model: '', base: 'http://127.0.0.1:8000/v1' },
 };
+/** Engines that speak the OpenAI chat completions API. */
+const OPENAI_LIKE: AiEngine[] = ['OpenAI API', 'LM Studio', 'Hugging Face', 'Hugging Face TGI (local)', 'OpenAI-compatible server'];
+/** Engines that need an API key; the others take one only when it is set. */
+export const NEEDS_KEY: AiEngine[] = ['Claude API', 'Gemini API', 'OpenAI API', 'Hugging Face'];
+const LOCAL: AiEngine[] = ['Ollama', 'LM Studio', 'Hugging Face TGI (local)', 'OpenAI-compatible server'];
+/**
+ * The server root from the API base URL. A full endpoint may be pasted: http://localhost:11434/api/generate,
+ * .../api/chat, .../v1/chat/completions or .../models all work.
+ */
+export function rootOf(r: Resource) {
+  const e = engineOf(r);
+  const raw = String(r.config.baseUrl || DEFAULTS[e].base || '').trim().replace(/\/+$/, '');
+  return raw.replace(/\/api\/(generate|chat|tags)$/i, '').replace(/\/(chat\/completions|completions|models)$/i, '');
+}
+/** Ollama: the chat API, or the generate API when chosen or when the address ends in /api/generate. */
+export const ollamaApiOf = (r: Resource) => (/\/api\/generate\/?$/i.test(String(r.config.baseUrl || '')) ? 'generate' : r.config.ollamaApi === 'generate' ? 'generate' : 'chat');
 export const engineOf = (r: Resource): AiEngine => (AI_ENGINES.includes(r.config.engine) ? r.config.engine : 'Claude API');
 export const isCli = (e: AiEngine) => e.endsWith('CLI');
 export const defaultsFor = (e: AiEngine) => DEFAULTS[e];
@@ -39,9 +61,15 @@ type Secret = (name: string, what?: string) => string;
 export async function aiCall(r: Resource, secret: Secret, q: AiRequest): Promise<AiResult> {
   const engine = engineOf(r);
   const d = DEFAULTS[engine];
-  const model = String(r.config.model || d.model || '').trim();
+  let model = String(r.config.model || d.model || '').trim();
+  if (!model && LOCAL.includes(engine)) {
+    const list = await listModels(r, secret).catch(() => []);
+    if (!list.length) throw new Error(`${engine} at ${String(r.config.baseUrl || d.base)} has no models. ${engine === 'Ollama' ? 'Pull one, for example: ollama pull qwen3' : 'Load a model in it first.'}`);
+    model = list[0];
+  }
+  if (!model && !isCli(engine)) throw new Error(`Set the model for ${engine}`);
   const maxTokens = Number(r.config.maxTokens) || 16000;
-  const base = String(r.config.baseUrl || d.base || '').replace(/\/+$/, '');
+  const base = rootOf(r);
   const t0 = Date.now();
   const done = (text: string, m: string, inT: number | null | undefined, outT: number | null | undefined, extra: Partial<AiResult['ai']> = {}): AiResult => ({
     text,
@@ -77,8 +105,13 @@ export async function aiCall(r: Resource, secret: Secret, q: AiRequest): Promise
       const text = (res.content as any[]).filter(b => b.type === 'text').map(b => b.text).join('');
       return done(text, res.model, res.usage?.input_tokens, res.usage?.output_tokens);
     }
-    case 'OpenAI API': {
-      const body = await http(`${base}/chat/completions`, { authorization: `Bearer ${key('OpenAI')}` }, {
+    case 'OpenAI API':
+    case 'LM Studio':
+    case 'Hugging Face':
+    case 'Hugging Face TGI (local)':
+    case 'OpenAI-compatible server': {
+      const auth: Record<string, string> = NEEDS_KEY.includes(engine) || r.config.apiKeySecret ? { authorization: `Bearer ${key(engine)}` } : {};
+      const body = await http(`${base}/chat/completions`, auth, {
         model, max_completion_tokens: maxTokens,
         messages: [...(q.system ? [{ role: 'system', content: q.system }] : []), { role: 'user', content: q.prompt }],
       });
@@ -98,15 +131,48 @@ export async function aiCall(r: Resource, secret: Secret, q: AiRequest): Promise
       return done(text, body?.modelVersion || model, u.promptTokenCount, u.candidatesTokenCount ?? (u.totalTokenCount != null && u.promptTokenCount != null ? u.totalTokenCount - u.promptTokenCount : undefined));
     }
     case 'Ollama': {
-      const body = await http(`${base}/api/chat`, {}, {
-        model, stream: false, options: { num_predict: maxTokens },
-        messages: [...(q.system ? [{ role: 'system', content: q.system }] : []), { role: 'user', content: q.prompt }],
-      });
-      return done(body?.message?.content ?? '', body?.model, body?.prompt_eval_count, body?.eval_count);
+      let body: any;
+      try {
+        body = ollamaApiOf(r) === 'generate'
+          ? await http(`${base}/api/generate`, {}, { model, stream: false, options: { num_predict: maxTokens }, prompt: q.prompt, ...(q.system ? { system: q.system } : {}) })
+          : await http(`${base}/api/chat`, {}, {
+            model, stream: false, options: { num_predict: maxTokens },
+            messages: [...(q.system ? [{ role: 'system', content: q.system }] : []), { role: 'user', content: q.prompt }],
+          });
+      } catch (e: any) {
+        if (!/404/.test(e.message)) throw e;
+        const have = await listModels(r, secret).catch(() => []);
+        throw new Error(`Ollama does not have the model "${model}". ${have.length ? `Installed: ${have.join(', ')}. Pick one, or leave Model empty to use the first.` : 'No models are installed.'} To add it: ollama pull ${model}`);
+      }
+      return done(body?.message?.content ?? body?.response ?? '', body?.model, body?.prompt_eval_count, body?.eval_count);
     }
     default:
       return cliCall(r, engine, model, q, done);
   }
+}
+
+/** The models a provider offers, for the model picker and for local servers with no model set. */
+export async function listModels(r: Resource, secret: Secret): Promise<string[]> {
+  const engine = engineOf(r);
+  const d = DEFAULTS[engine];
+  const base = rootOf(r);
+  const get = async (url: string, headers: Record<string, string> = {}) => {
+    const res = await httpCall({ method: 'GET', url, headers, timeoutMs: 15000, parse: 'json' });
+    if (res.status >= 400) throw new Error(`${engine} answered ${res.status} when listing models`);
+    return res.body;
+  };
+  if (isCli(engine)) return [];
+  if (engine === 'Ollama') return ((await get(`${base}/api/tags`))?.models || []).map((m: any) => String(m.name)).filter(Boolean);
+  if (engine === 'Gemini API') {
+    const b = await get(`${base}/v1beta/models?pageSize=200`, { 'x-goog-api-key': secret(r.config.apiKeySecret, 'Gemini API key') });
+    return (b?.models || []).filter((m: any) => (m.supportedGenerationMethods || ['generateContent']).includes('generateContent')).map((m: any) => String(m.name).replace(/^models\//, ''));
+  }
+  if (engine === 'Claude API') {
+    const b = await get(`${base}/v1/models?limit=100`, { 'x-api-key': secret(r.config.apiKeySecret, 'Anthropic API key'), 'anthropic-version': '2023-06-01' });
+    return (b?.data || []).map((m: any) => String(m.id));
+  }
+  const auth: Record<string, string> = NEEDS_KEY.includes(engine) || r.config.apiKeySecret ? { authorization: `Bearer ${secret(r.config.apiKeySecret, `${engine} API key`)}` } : {};
+  return ((await get(`${base}/models`, auth))?.data || []).map((m: any) => String(m.id)).filter(Boolean);
 }
 
 const anthropicClients = new Map<string, Anthropic>();
@@ -184,3 +250,139 @@ export function splitArgs(s: string): string[] {
   while ((m = re.exec(s))) out.push(m[1] ?? m[2]);
   return out;
 }
+
+// ---------- Ollama model management (online pull, offline import) ----------
+
+const ollamaBase = (r: Resource) => rootOf(r);
+
+/** Downloads a model into Ollama from its library (needs internet on the Ollama machine). */
+export async function ollamaPull(r: Resource, model: string) {
+  if (!/^[\w.:/@-]+$/.test(model)) throw new Error('Model names may contain only letters, digits and . : / @ - _');
+  const res = await httpCall({ method: 'POST', url: `${ollamaBase(r)}/api/pull`, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model, stream: false }), timeoutMs: 6 * 3600 * 1000, parse: 'json' });
+  if (res.status >= 400 || res.body?.error) throw new Error(`Ollama could not pull ${model}: ${res.body?.error || res.status}${/dial|lookup|connect/i.test(String(res.body?.error)) ? '. This machine seems to be offline: import a model file instead.' : ''}`);
+  return `Pulled ${model}`;
+}
+
+/**
+ * Offline install from a path on this server, through the Ollama API (no download):
+ *  - a .gguf file;
+ *  - a Modelfile (FROM <file.gguf>, with TEMPLATE, SYSTEM and PARAMETER lines);
+ *  - a Safetensors model folder (config.json, *.safetensors, tokenizer files);
+ *  - an Ollama models folder copied from another machine (manifests/ and blobs/): give the model name to take.
+ * Files are sent to Ollama as blobs, then registered with /api/create under the name you choose.
+ */
+export async function ollamaImport(r: Resource, source: string, name: string, take = '') {
+  const full = path.resolve(source);
+  if (!/^[\w.:/@-]+$/.test(name)) throw new Error('Model names may contain only letters, digits and . : / @ - _');
+  if (!fs.existsSync(full)) throw new Error(`Not found on the server: ${full}`);
+  const base = ollamaBase(r);
+  const upload = async (file: string) => {
+    const digest = await new Promise<string>((res, rej) => {
+      const h = crypto.createHash('sha256');
+      fs.createReadStream(file).on('data', d => h.update(d)).on('end', () => res(h.digest('hex'))).on('error', rej);
+    });
+    const url = `${base}/api/blobs/sha256:${digest}`;
+    const head = await fetch(url, { method: 'HEAD' }).catch(() => null);
+    if (!head || head.status !== 200) {
+      const up = await fetch(url, { method: 'POST', body: fs.createReadStream(file) as any, headers: { 'content-length': String(fs.statSync(file).size) }, duplex: 'half' } as any)
+        .catch((e: any) => { throw new Error(`Ollama is not reachable at ${base}: ${e.message}`); });
+      if (up.status >= 400) throw new Error(`Ollama refused ${path.basename(file)} (${up.status}): ${(await up.text()).slice(0, 200)}`);
+    }
+    return `sha256:${digest}`;
+  };
+  const body: Record<string, any> = { model: name, stream: false };
+  let what = '';
+  const st = fs.statSync(full);
+  if (st.isFile() && /\.gguf$/i.test(full)) {
+    body.files = { [path.basename(full)]: await upload(full) };
+    what = path.basename(full);
+  } else if (st.isFile()) {
+    // A Modelfile.
+    const text = fs.readFileSync(full, 'utf8');
+    const from = /^\s*FROM\s+(.+?)\s*$/im.exec(text)?.[1]?.replace(/^["']|["']$/g, '');
+    if (!from) throw new Error('This file is not a .gguf model and has no FROM line, so it is not a Modelfile');
+    const ggufPath = path.resolve(path.dirname(full), from);
+    if (fs.existsSync(ggufPath) && fs.statSync(ggufPath).isFile()) body.files = { [path.basename(ggufPath)]: await upload(ggufPath) };
+    else body.from = from; // FROM another installed model
+    const block = (k: string) => { const m = new RegExp(`^\s*${k}\s+("""([\s\S]*?)"""|(.+))\s*$`, 'im').exec(text); return m ? (m[2] ?? m[3]).trim() : undefined; };
+    if (block('TEMPLATE')) body.template = block('TEMPLATE');
+    if (block('SYSTEM')) body.system = block('SYSTEM');
+    const params: Record<string, any> = {};
+    for (const m of text.matchAll(/^\s*PARAMETER\s+(\S+)\s+(.+?)\s*$/gim)) {
+      const v = m[2].replace(/^"|"$/g, ''); const n = Number(v);
+      if (m[1] === 'stop') (params.stop ||= []).push(v); else params[m[1]] = Number.isFinite(n) && v !== '' ? n : v;
+    }
+    if (Object.keys(params).length) body.parameters = params;
+    what = `Modelfile ${path.basename(full)}`;
+  } else if (fs.existsSync(path.join(full, 'manifests')) && fs.existsSync(path.join(full, 'blobs'))) {
+    // An Ollama models folder from another machine.
+    const manifests: string[] = [];
+    const walk = (d: string) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else manifests.push(p); } };
+    walk(path.join(full, 'manifests'));
+    const label = (m: string) => { const parts = path.relative(path.join(full, 'manifests'), m).split(path.sep); return `${parts.slice(2, -1).join('/').replace(/^library\//, '')}:${parts[parts.length - 1]}`; };
+    const want = (take || name).replace(/:latest$/, '');
+    const pick = manifests.find(m => label(m) === take || label(m).replace(/:latest$/, '') === want) || (manifests.length === 1 ? manifests[0] : undefined);
+    if (!pick) throw new Error(`Choose which model to take from this folder. It has: ${manifests.map(label).join(', ') || 'no models'}`);
+    const man = JSON.parse(fs.readFileSync(pick, 'utf8'));
+    const blob = (digest: string) => path.join(full, 'blobs', digest.replace(':', '-'));
+    for (const layer of man.layers || []) {
+      const file = blob(layer.digest);
+      if (!fs.existsSync(file)) throw new Error(`The folder is missing ${layer.digest} for ${label(pick)}`);
+      const type = String(layer.mediaType || '');
+      if (type.endsWith('.model')) body.files = { 'model.gguf': await upload(file) };
+      else if (type.endsWith('.projector')) body.files = { ...(body.files || {}), 'projector.gguf': await upload(file) };
+      else if (type.endsWith('.adapter')) body.adapters = { 'adapter.gguf': await upload(file) };
+      else if (type.endsWith('.template')) body.template = fs.readFileSync(file, 'utf8');
+      else if (type.endsWith('.system')) body.system = fs.readFileSync(file, 'utf8');
+      else if (type.endsWith('.params')) body.parameters = JSON.parse(fs.readFileSync(file, 'utf8'));
+      else if (type.endsWith('.license')) body.license = fs.readFileSync(file, 'utf8');
+    }
+    if (!body.files) throw new Error(`${label(pick)} has no model layer`);
+    what = `${label(pick)} from the Ollama models folder`;
+  } else {
+    // A Safetensors model folder.
+    const files = fs.readdirSync(full).filter(f => /\.(safetensors|json|model|txt|tiktoken)$/i.test(f) && fs.statSync(path.join(full, f)).isFile());
+    if (!files.some(f => /\.safetensors$/i.test(f))) throw new Error('This folder has no .gguf, Modelfile, Safetensors files or Ollama manifests');
+    body.files = {};
+    for (const f of files) body.files[f] = await upload(path.join(full, f));
+    what = `Safetensors folder ${path.basename(full)} (${files.length} files)`;
+  }
+  const res = await httpCall({ method: 'POST', url: `${base}/api/create`, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), timeoutMs: 3600 * 1000, parse: 'json' });
+  if (res.status >= 400 || res.body?.error) throw new Error(`Ollama could not create ${name}: ${res.body?.error || res.status}`);
+  return `Imported ${what} as ${name}`;
+}
+
+// ---------- Ollama API endpoints (the Ollama activity) ----------
+
+export const OLLAMA_OPS = ['generate', 'chat', 'embed', 'list models', 'running models', 'show model', 'pull model', 'copy model', 'delete model', 'version'] as const;
+
+/** Calls one Ollama endpoint and returns its answer as Ollama gives it. */
+export async function ollamaCall(r: Resource, op: string, a: { model?: string; prompt?: string; system?: string; messages?: any; input?: any; format?: string; options?: any; keepAlive?: string; images?: string[]; to?: string; think?: boolean }, signal?: AbortSignal) {
+  const base = rootOf(r);
+  const model = String(a.model || r.config.model || '').trim();
+  const call = async (method: string, p: string, body?: unknown) => {
+    const res = await httpCall({ method, url: `${base}${p}`, headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined, timeoutMs: 6 * 3600 * 1000, signal, parse: 'json' })
+      .catch((e: any) => { throw new Error(`Ollama is not reachable at ${base}: ${e.message}`); });
+    if (res.status >= 400) throw new Error(`Ollama ${p} answered ${res.status}: ${String(res.body?.error ?? JSON.stringify(res.body)).slice(0, 300)}`);
+    return res.body ?? {};
+  };
+  const need = () => { if (!model) throw new Error('Set the model'); return model; };
+  const common = { ...(a.options && Object.keys(a.options).length ? { options: a.options } : {}), ...(a.keepAlive ? { keep_alive: a.keepAlive } : {}), ...(a.format ? { format: a.format === 'json' ? 'json' : safeParse(a.format) } : {}), ...(a.think ? { think: true } : {}) };
+  switch (op) {
+    case 'generate': return call('POST', '/api/generate', { model: need(), prompt: a.prompt ?? '', ...(a.system ? { system: a.system } : {}), ...(a.images?.length ? { images: a.images } : {}), stream: false, ...common });
+    case 'chat': {
+      const messages = Array.isArray(a.messages) ? a.messages : [...(a.system ? [{ role: 'system', content: a.system }] : []), { role: 'user', content: a.prompt ?? '', ...(a.images?.length ? { images: a.images } : {}) }];
+      return call('POST', '/api/chat', { model: need(), messages, stream: false, ...common });
+    }
+    case 'embed': return call('POST', '/api/embed', { model: need(), input: a.input ?? a.prompt ?? '', ...(a.keepAlive ? { keep_alive: a.keepAlive } : {}) });
+    case 'list models': return call('GET', '/api/tags');
+    case 'running models': return call('GET', '/api/ps');
+    case 'show model': return call('POST', '/api/show', { model: need() });
+    case 'pull model': return call('POST', '/api/pull', { model: need(), stream: false });
+    case 'copy model': if (!a.to) throw new Error('Set the new name'); await call('POST', '/api/copy', { source: need(), destination: a.to }); return { copied: true, source: model, destination: a.to };
+    case 'delete model': await call('DELETE', '/api/delete', { model: need() }); return { deleted: true, model };
+    case 'version': return call('GET', '/api/version');
+  }
+  throw new Error(`Unknown Ollama operation ${op}`);
+}
+const safeParse = (t: string) => { try { return JSON.parse(t); } catch { throw new Error('Format must be "json" or a JSON schema'); } };

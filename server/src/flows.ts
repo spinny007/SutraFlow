@@ -82,6 +82,11 @@ export function validateDoc(doc: FlowDoc) {
   for (const t of triggers) {
     if (t.type === 'restService' && !doc.nodes.some(n => n.type === 'httpResponse')) warnings.push(`${t.name}: no Send HTTP response step; callers get the last step's output as JSON`);
     if (t.type === 'soapService' && !doc.nodes.some(n => n.type === 'soapReply')) warnings.push(`${t.name}: no SOAP reply step; callers get the last step's output`);
+    if (t.type === 'mcpTool') {
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(String(t.config.toolName || ''))) errors.push(`${t.name}: the tool name may use only letters, digits, _ and - (up to 64)`);
+      if (String(t.config.description || '').trim().length < 20) warnings.push(`${t.name}: describe what the tool does and when to use it; the AI chooses tools by their description`);
+      if (!doc.nodes.some(n => n.type === 'mcpReply')) warnings.push(`${t.name}: no Reply to AI step; the AI receives the last step's output`);
+    }
     if ((t.type === 'restService' || t.type === 'soapService') && !t.config.policy) warnings.push(`${t.name}: no API security policy, anyone who can reach the gateway can call it`);
   }
   if (doc.nodes.filter(n => engine.activity(n.type)?.noInput).length > 1) errors.push('A Sutra can have only one Error handler');
@@ -164,6 +169,13 @@ const routeKey = (n: any) => n.type === 'restService'
 export const normPath = (p: unknown) => '/' + String(p || '').trim().replace(/^\/+|\/+$/g, '').replace(/:[^/]+/g, ':p');
 
 function assertNoRouteClash(flowId: string, doc: FlowDoc) {
+  // AI tool names must be unique on their MCP address.
+  const toolKey = (n: any) => `${n.config.server || ''}::${String(n.config.toolName || '')}`;
+  const myTools = doc.nodes.filter(n => n.type === 'mcpTool').map(toolKey);
+  for (const d of deployedFlows()) {
+    if (d.flowId === flowId) continue;
+    for (const n of d.doc.nodes) if (n.type === 'mcpTool' && myTools.includes(toolKey(n))) throw new Error(`AI tool name "${n.config.toolName}" is already used on this MCP server by deployed Sutra "${d.doc.name}"`);
+  }
   const mine = doc.nodes.map(routeKey).filter(Boolean) as string[];
   for (const d of deployedFlows()) {
     if (d.flowId === flowId) continue;
