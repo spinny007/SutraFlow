@@ -1,3 +1,4 @@
+import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +26,27 @@ export const config = {
   /** Default time a REST/SOAP caller waits for the flow to reply. */
   replyTimeoutMs: Number(process.env.SUTRA_REPLY_TIMEOUT_MS || 60000),
   webDir: process.env.SUTRA_WEB_DIR || '',
+  /** studio: studio, engine and gateway in one process. engine: headless, no studio and no editing API. */
+  mode: (process.env.SUTRA_MODE === 'engine' ? 'engine' : 'studio') as 'studio' | 'engine',
+  /** Bearer token for the command-line tool and automation (Authorization: Bearer ...); acts as an administrator. */
+  adminToken: process.env.SUTRA_ADMIN_TOKEN || '',
+  /** Folder of .sutra packages deployed when the server starts (headless engines, container images). */
+  deployDir: process.env.SUTRA_DEPLOY_DIR || '',
+  /** Storage: empty = SQLite in the data folder; postgres://... for PostgreSQL (several engines); pglite: for tests. */
+  dbUrl: process.env.SUTRA_DB || '',
+  /** This engine's name in a cluster. */
+  engineId: process.env.SUTRA_ENGINE_ID || `${os.hostname()}-${process.pid}`,
+  /** On shutdown, how long running steps may finish before they are handed back for another engine. */
+  drainMs: Number(process.env.SUTRA_DRAIN_MS || 30000),
+  /** Engines renew their heartbeat this often; one silent for three beats is presumed dead. */
+  heartbeatMs: Number(process.env.SUTRA_HEARTBEAT_MS || 5000),
+  /** Finished runs older than this are deleted (0 = keep forever). */
+  runRetentionDays: Number(process.env.SUTRA_RUN_RETENTION_DAYS ?? 30),
+  /** text (default) or json: engine events on standard output as JSON lines. */
+  logFormat: (process.env.SUTRA_LOG_FORMAT === 'json' ? 'json' : 'text') as 'text' | 'json',
+  /** OpenTelemetry: traces of runs and steps are sent to this OTLP/HTTP endpoint when set. */
+  otlpEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || '',
+  serviceName: process.env.OTEL_SERVICE_NAME || 'sutraflow',
 };
 
 export function ensureDataDir() {

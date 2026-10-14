@@ -42,6 +42,9 @@ create table if not exists schemas(
   root text, text text not null, updated_at text not null);
 create table if not exists counters(
   project_id text not null, name text not null, value real not null, updated_at text not null, primary key(project_id, name));
+create table if not exists package_deployments(
+  id text primary key, seq integer not null, project_id text not null, name text not null, version text not null,
+  checksum text not null, deployed_at text not null, deployed_by text, report text not null, package text not null);
 create table if not exists users(
   username text primary key, hash text not null, role text not null, created_at text not null);
 `;

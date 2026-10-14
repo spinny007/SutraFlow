@@ -180,7 +180,7 @@ export function saveResource(r: Partial<Resource> & { kind: string; name: string
   const prev = r.id ? getResource(r.id) : undefined;
   const projectId = r.project_id ?? prev?.project_id ?? null;
   const name = r.name.trim() || k.name;
-  if (q.get('select 1 from resources where project_id is ? and lower(name) = lower(?) and id != ?', projectId, name, id)) {
+  if (q.get('select 1 from resources where project_id is not distinct from ? and lower(name) = lower(?) and id != ?', projectId, name, id)) {
     throw new Error(`This project already has a resource named "${name}"`);
   }
   q.run(

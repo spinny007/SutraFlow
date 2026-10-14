@@ -12,7 +12,8 @@ export type ExplorerSel =
   | { kind: 'newSchema'; schemaKind: 'json' | 'xsd' | 'wsdl' }
   | { kind: 'variables' }
   | { kind: 'ops' }
-  | { kind: 'logging' };
+  | { kind: 'logging' }
+  | { kind: 'releases' };
 
 export function ProjectExplorer({ flows, flowId, openFlow, newFlow, sel, setSel }: {
   flows: FlowSummary[]; flowId: string | null; openFlow(id: string): void; newFlow(): void;
@@ -79,10 +80,11 @@ export function ProjectExplorer({ flows, flowId, openFlow, newFlow, sel, setSel 
         schemas.filter(s => s.kind !== 'wsdl').map(s => <div key={s.id}>{item(s.name, isSel({ kind: 'schema', id: s.id }), () => setSel({ kind: 'schema', id: s.id }), 'S', s.kind.toUpperCase())}</div>))}
       {sec('wsdl', 'Service descriptors', schemas.filter(s => s.kind === 'wsdl').length, () => setSel({ kind: 'newSchema', schemaKind: 'wsdl' }),
         schemas.filter(s => s.kind === 'wsdl').map(s => <div key={s.id}>{item(s.name, isSel({ kind: 'schema', id: s.id }), () => setSel({ kind: 'schema', id: s.id }), 'W', 'WSDL')}</div>))}
-      {sec('cfg', 'Configuration', 3, undefined, <>
+      {sec('cfg', 'Configuration', 4, undefined, <>
         {item(`Project variables (${project?.config.variables.length ?? 0})`, isSel({ kind: 'variables' }), () => setSel({ kind: 'variables' }), '$')}
         {item('Deployment config (ops)', isSel({ kind: 'ops' }), () => setSel({ kind: 'ops' }), '⇅')}
         {item('Logging', isSel({ kind: 'logging' }), () => setSel({ kind: 'logging' }), '≡')}
+        {item('Releases (packages)', isSel({ kind: 'releases' }), () => setSel({ kind: 'releases' }), '⬢')}
       </>)}
       {creating && (
         <Modal title="New project" onClose={() => setCreating(false)} actions={<><button className="btn" onClick={() => setCreating(false)}>Cancel</button><button className="btn primary" disabled={!name.trim()} onClick={createProject}>Create project</button></>}>
@@ -103,6 +105,7 @@ export function ExplorerEditor({ sel, setSel }: { sel: ExplorerSel; setSel(s: Ex
       {sel.kind === 'variables' && <VariablesEditor />}
       {sel.kind === 'ops' && <OpsEditor />}
       {sel.kind === 'logging' && <LoggingEditor />}
+      {sel.kind === 'releases' && <ReleasesPanel />}
     </div></aside>
   );
 }
@@ -428,5 +431,82 @@ function AiModels({ r, projectId, setModel }: { r: Resource; projectId: string; 
       </>}
       {msg && <div className={msg.ok ? 'okbox' : 'errbox'} role="status">{msg.text}</div>}
     </div>
+  );
+}
+
+/** Releases: build a package of this project, deploy a package here, see the history and roll back. */
+function ReleasesPanel() {
+  const { projectId, project, reload } = useCatalog();
+  const toast = useToast();
+  const [version, setVersion] = useState('1.0.0');
+  const [note, setNote] = useState('');
+  const [hist, setHist] = useState<any[]>([]);
+  const [pending, setPending] = useState<{ pkg: any; check: any } | null>(null);
+  const [keepOthers, setKeepOthers] = useState(false);
+  const [busy, setBusy] = useState('');
+  const load = () => get<any[]>(`/api/projects/${projectId}/packages`).then(setHist).catch(() => setHist([]));
+  useEffect(() => { load(); }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const build = async () => {
+    setBusy('build');
+    try {
+      const p = await get<any>(`/api/projects/${projectId}/package?version=${encodeURIComponent(version)}&note=${encodeURIComponent(note)}`);
+      const url = URL.createObjectURL(new Blob([JSON.stringify(p, null, 2)], { type: 'application/json' }));
+      const a = document.createElement('a'); a.href = url; a.download = `${p.name.replace(/[^\w.-]+/g, '-')}-${p.version}.sutra`; a.click(); URL.revokeObjectURL(url);
+      toast(`Package ${p.version}: ${p.sutras.length} Sutras, ${p.manifest.secrets.length} secrets needed`);
+    } catch (e: any) { toast(e.message, true); } finally { setBusy(''); }
+  };
+  const pick = async (f: File | undefined) => {
+    if (!f) return;
+    try {
+      const pkg = JSON.parse(await f.text());
+      const check = await post('/api/packages/check', { package: pkg, project: project?.name });
+      setPending({ pkg, check });
+    } catch (e: any) { toast(`Not a package: ${e.message}`, true); }
+  };
+  const deploy = async () => {
+    if (!pending) return;
+    setBusy('deploy');
+    try {
+      const r = await post<any>('/api/packages/deploy', { package: pending.pkg, project: project?.name, keepOthers });
+      toast(`Deployed ${r.package.name} ${r.package.version}${r.unchanged ? ': nothing changed' : ''}`);
+      setPending(null); await load(); await reload();
+    } catch (e: any) { toast(e.message, true); } finally { setBusy(''); }
+  };
+  const rollback = async (to?: string) => {
+    if (!confirm(to ? 'Deploy this earlier package again?' : 'Deploy the package before the current one again?')) return;
+    try { const r = await post<any>(`/api/projects/${projectId}/rollback`, { to }); toast(`Rolled back to ${r.package.version}`); await load(); await reload(); } catch (e: any) { toast(e.message, true); }
+  };
+  return (
+    <>
+      <div className="phead"><div><h2>Releases</h2><p>A package holds the whole project: every deployed Sutra at its version, connections (secret names, never values), schemas and variables. Promote the same file from test to production; each environment keeps its own deployment config. The command-line tool does the same: <code>sutra package</code>, <code>sutra deploy</code>.</p></div></div>
+      <p className="h">Build a package</p>
+      <div className="row2">
+        <div className="fld"><label htmlFor="rv">Version</label><input id="rv" className="code" value={version} onChange={e => setVersion(e.target.value)} placeholder="1.4.0" /></div>
+        <div className="fld"><label htmlFor="rn">Note</label><input id="rn" value={note} onChange={e => setNote(e.target.value)} placeholder="What changed" /></div>
+      </div>
+      <button className="btn primary" disabled={busy === 'build'} onClick={build}>{busy === 'build' ? 'Building' : 'Build and download'}</button>
+      <p className="h" style={{ marginTop: 18 }}>Deploy a package here</p>
+      <input type="file" accept=".sutra,.json" aria-label="Package file" onChange={e => pick(e.target.files?.[0])} />
+      {pending && (
+        <div className={pending.check.ok ? 'okbox' : 'errbox'} role="status">
+          <b>{pending.pkg.name} {pending.pkg.version}</b>: {pending.pkg.sutras.length} Sutras. {pending.check.ok ? 'Ready to deploy.' : 'Cannot be deployed:'}
+          <ul>{[...pending.check.errors, ...pending.check.warnings].map((x: string) => <li key={x}>{x}</li>)}</ul>
+          {pending.check.ok && <>
+            <label className="check"><input type="checkbox" checked={keepOthers} onChange={e => setKeepOthers(e.target.checked)} /> Keep Sutras that are not in the package deployed</label>
+            <div className="row"><button className="btn primary" disabled={busy === 'deploy'} onClick={deploy}>Deploy to {project?.name}</button><button className="btn" onClick={() => setPending(null)}>Cancel</button></div>
+          </>}
+        </div>
+      )}
+      <p className="h" style={{ marginTop: 18 }}>History</p>
+      {!hist.length ? <p className="muted">No package deployed to this project yet.</p> : (
+        <table className="t"><thead><tr><th>Deployed</th><th>Package</th><th>By</th><th /></tr></thead><tbody>
+          {hist.map((h, i) => (
+            <tr key={h.id}><td>{new Date(h.deployed_at).toLocaleString()}</td><td>{h.name} <b>{h.version}</b> <span className="muted xs">{h.checksum.slice(7, 19)}</span>{i === 0 && <span className="pill ok" style={{ marginLeft: 6 }}>current</span>}</td><td>{h.deployed_by}</td>
+              <td>{i > 0 && <button className="btn small" onClick={() => rollback(h.id)}>Deploy again</button>}</td></tr>
+          ))}
+        </tbody></table>
+      )}
+      {hist.length > 1 && <button className="btn" style={{ marginTop: 8 }} onClick={() => rollback()}>Roll back to the previous package</button>}
+    </>
   );
 }

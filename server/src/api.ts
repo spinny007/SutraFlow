@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fs from 'node:fs';
@@ -26,6 +27,8 @@ import { listenerStatus } from './listeners.js';
 import { testResource, prepare } from './resourceTest.js';
 import { listModels, ollamaPull, ollamaImport } from './ai/providers.js';
 import { addSamples, SAMPLES } from './samples.js';
+import { health, readiness } from './lifecycle.js';
+import { buildPackage, checkPackage, deployPackage, packageHistory, readPackage, rollbackPackage, testPackage } from './packages.js';
 
 const COOKIE = 'sutra_session';
 
@@ -81,19 +84,37 @@ export async function buildAdmin(): Promise<FastifyInstance> {
 
   app.setErrorHandler((err: any, _req, reply) => {
     const status = err instanceof HttpError ? err.status : err.statusCode && err.statusCode < 500 ? err.statusCode : 500;
-    reply.code(status).send({ error: err.message || String(err) });
+    reply.code(status).send({ error: err.message || String(err), ...(err.check ? { check: err.check } : {}) });
   });
+
+  // ---------- health and readiness (no sign-in: probes) ----------
+  app.get('/health', async () => health());
+  app.get('/ready', async (_req, reply) => { const r = readiness(); return reply.code(r.ready ? 200 : 503).send(r); });
 
   // ---------- auth guard ----------
   // The OAuth callback is reached by a cross-site redirect (no SameSite=Strict cookie); its signed state protects it.
   const OPEN = new Set(['/api/auth/status', '/api/auth/setup', '/api/auth/login', '/api/oauth/callback']);
+  const ENGINE_API = [/^\/api\/packages\//, /^\/api\/projects\/?$/, /^\/api\/projects\/[^/]+\/(packages|rollback)$/, /^\/api\/engine\//, /^\/api\/runs/, /^\/api\/secrets/, /^\/api\/meta$/];
   app.addHook('onRequest', async (req: FastifyRequest & { user?: any }, reply: FastifyReply) => {
     if (!req.url.startsWith('/api/')) return;
     const p = req.url.split('?')[0];
-    if (req.method !== 'GET' && req.method !== 'HEAD' && req.headers['x-sutra'] !== '1') {
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.headers['x-sutra'] !== '1' && !/^Bearer\s/i.test(String(req.headers.authorization || ''))) {
       return reply.code(403).send({ error: 'Missing X-Sutra header' });
     }
+    // A headless engine has no studio: only automation with the token, for packages, runs, secrets and engine control.
+    if (config.mode === 'engine') {
+      const tok = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ''))?.[1];
+      const okTok = !!tok && !!config.adminToken && tok.length === config.adminToken.length && crypto.timingSafeEqual(Buffer.from(tok), Buffer.from(config.adminToken));
+      if (!okTok) return reply.code(401).send({ error: config.adminToken ? 'A headless engine accepts only the admin token (Authorization: Bearer ...)' : 'This headless engine has no SUTRA_ADMIN_TOKEN, so its API is closed' });
+      if (!ENGINE_API.some(r => r.test(p))) return reply.code(404).send({ error: 'Not available on a headless engine' });
+    }
     if (OPEN.has(p)) return;
+    // Automation (command-line tool, CI, headless engines): Authorization: Bearer <SUTRA_ADMIN_TOKEN>.
+    const bearer = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ''))?.[1];
+    if (bearer && config.adminToken && bearer.length === config.adminToken.length && crypto.timingSafeEqual(Buffer.from(bearer), Buffer.from(config.adminToken))) {
+      req.user = { u: 'token', r: 'admin' };
+      return;
+    }
     const s = auth.verifySession(cookie(req, COOKIE));
     if (!s) return reply.code(401).send({ error: 'Sign in required' });
     req.user = s;
@@ -157,6 +178,34 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     projects.requireProject(req.params.id);
     return addSamples(req.params.id, Array.isArray(req.body?.ids) ? req.body.ids.map(String) : undefined);
   });
+  // ---------- project packages (releases) ----------
+  const admin = (req: any) => { if (req.user?.r !== 'admin') throw new HttpError(403, 'Only administrators can deploy packages'); };
+  const packErr = (e: any) => Object.assign(bad(e.message), e.check ? { check: e.check } : {});
+  app.get('/api/projects/:id/package', async (req: any, reply) => {
+    projects.requireProject(req.params.id);
+    try {
+      const p = buildPackage(req.params.id, { version: req.query?.version, note: req.query?.note, sutras: req.query?.sutras ? String(req.query.sutras).split(',').map((x: string) => x.trim()).filter(Boolean) : undefined });
+      reply.header('content-disposition', `attachment; filename="${p.name.replace(/[^\w.-]+/g, '-')}-${p.version}.sutra"`);
+      return p;
+    } catch (e: any) { throw bad(e.message); }
+  });
+  app.post('/api/packages/check', async (req: any) => {
+    try { return checkPackage(readPackage(req.body?.package), { project: req.body?.project }); } catch (e: any) { throw bad(e.message); }
+  });
+  app.post('/api/packages/deploy', async (req: any) => {
+    admin(req);
+    try { return deployPackage(req.body?.package, { project: req.body?.project, ops: req.body?.ops, keepOthers: !!req.body?.keepOthers, by: req.user?.u }); } catch (e: any) { throw packErr(e); }
+  });
+  app.post('/api/packages/test', async (req: any) => {
+    admin(req);
+    try { return await testPackage(req.body?.package, { skip: req.body?.skip }); } catch (e: any) { throw bad(e.message); }
+  });
+  app.get('/api/projects/:id/packages', async (req: any) => packageHistory(req.params.id));
+  app.post('/api/projects/:id/rollback', async (req: any) => {
+    admin(req);
+    try { return rollbackPackage(req.params.id, { to: req.body?.to, by: req.user?.u }); } catch (e: any) { throw packErr(e); }
+  });
+
   app.get('/api/scripts/policy', async () => ({ allowed: projects.scriptsAllowed() }));
   app.put('/api/scripts/policy', async (req: any) => {
     if ((req as any).user?.r !== 'admin') throw new HttpError(403, 'Only administrators can allow scripts');
@@ -396,7 +445,7 @@ export async function buildAdmin(): Promise<FastifyInstance> {
 
   // ---------- studio (built web app) ----------
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const webDir = [config.webDir, path.resolve(here, '../web'), path.resolve(here, '../../dist/web')].find(d => d && fs.existsSync(path.join(d, 'index.html')));
+  const webDir = config.mode === 'engine' ? undefined : [config.webDir, path.resolve(here, '../web'), path.resolve(here, '../../dist/web')].find(d => d && fs.existsSync(path.join(d, 'index.html')));
   if (webDir) {
     await app.register(fastifyStatic, { root: webDir, prefix: '/' });
     app.setNotFoundHandler((req, reply) => {
