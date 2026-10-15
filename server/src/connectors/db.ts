@@ -83,7 +83,14 @@ async function open(r: Resource, secret: (n: string, w?: string) => string): Pro
       const pool = mysql.createPool({ host: c.host, port: Number(c.port) || 3306, database: c.database, user: c.user, password: pass(), ssl, connectionLimit: max, dateStrings: true });
       const run = async (cl: any, sql: string, p: Record<string, any>): Promise<DbResult> => {
         const b = bindFor(driver, sql, p);
-        const [res, fields] = await cl.execute(b.sql, b.values);
+        // Prepared statements first; some statements (CREATE or DROP PROCEDURE, ...) are not allowed in
+        // them (MySQL error 1295), so those run as text with every value escaped by the driver.
+        const [res, fields] = await cl.execute(b.sql, b.values).catch((e: any) => {
+          if (e?.errno !== 1295) throw e;
+          return cl.query(b.sql, b.values);
+        });
+        // CALL returns several result sets (the procedure's rows, then a status); the first holds the rows.
+        if (Array.isArray(res) && Array.isArray(res[0])) return toRows(res[0], Array.isArray((fields as any)?.[0]) ? (fields as any)[0] : undefined);
         return Array.isArray(res) ? toRows(res as any[], fields) : { rows: [], rowCount: (res as any).affectedRows ?? 0, columns: [], ...(res as any).insertId ? { insertId: (res as any).insertId } : {} } as any;
       };
       return {

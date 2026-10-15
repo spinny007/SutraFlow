@@ -1,0 +1,82 @@
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { testEnv, node, edge } from './helpers.js';
+
+/**
+ * DB Ops against a real MySQL server. Runs when SUTRA_TEST_MYSQL_URL is set, for example
+ *   SUTRA_TEST_MYSQL_URL=mysql://root@127.0.0.1:3306/sutraflow_test   (Laragon's MySQL)
+ * The database is created when missing; the test tables are dropped at the end.
+ */
+const URL_ = process.env.SUTRA_TEST_MYSQL_URL;
+const skip = !URL_ && 'set SUTRA_TEST_MYSQL_URL to test against a real MySQL server';
+
+testEnv(19770);
+const require = createRequire(import.meta.url);
+let srv: any, run: (nodes: any[], edges: any[]) => Promise<any>, conn = '';
+const u = URL_ ? new URL(URL_) : null;
+const dbName = u ? u.pathname.slice(1) || 'sutraflow_test' : '';
+
+before(async () => {
+  if (skip) return;
+  const mysql = require('mysql2/promise');
+  const admin = await mysql.createConnection({ host: u!.hostname, port: Number(u!.port) || 3306, user: decodeURIComponent(u!.username), password: decodeURIComponent(u!.password) });
+  await admin.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``);
+  await admin.end();
+  const { boot } = await import('../server/src/index.js');
+  const { engine } = await import('../server/src/engine/engine.js');
+  const { q } = await import('../server/src/db.js');
+  const { saveResource } = await import('../server/src/resources.js');
+  const { setSecret } = await import('../server/src/secrets.js');
+  srv = await boot({ listenAdmin: false, gateway: false });
+  if (u!.password) setSecret('MYSQL_TEST_PW', decodeURIComponent(u!.password));
+  conn = saveResource({ kind: 'database', name: 'Laragon MySQL', config: { driver: 'mysql', host: u!.hostname, port: Number(u!.port) || 3306, database: dbName, user: decodeURIComponent(u!.username), passwordSecret: u!.password ? 'MYSQL_TEST_PW' : '', poolMax: 4 } }).id;
+  run = async (nodes, edges) => {
+    const id = engine.startRun({ doc: { name: 'MySQL test', nodes, edges } });
+    await engine.waitFor(id, 30000);
+    const r: any = q.get('select status, error, state from runs where id = ?', id);
+    return { status: r.status, error: r.error, out: JSON.parse(r.state).outputs };
+  };
+});
+after(async () => { if (srv) await srv.stop(); });
+
+test('MySQL: create, insert with bound parameters (injection stays data), query, update', { skip }, async () => {
+  const s = node('start', 'Start', { payload: '{"id":"A-1\'; DROP TABLE sf_orders; --","amount":120.5}' });
+  const create = node('dbUpdate', 'Create', { connection: conn, sql: 'CREATE TABLE IF NOT EXISTS sf_orders(id VARCHAR(80) PRIMARY KEY, amount DECIMAL(10,2), status VARCHAR(20))', params: [] });
+  const clean = node('dbUpdate', 'Clean', { connection: conn, sql: 'DELETE FROM sf_orders', params: [] });
+  const ins = node('dbUpdate', 'Insert', { connection: conn, sql: "INSERT INTO sf_orders(id, amount, status) VALUES (:id, :amount, 'open')", params: [{ k: 'id', v: '{{trigger.id}}' }, { k: 'amount', v: '{{trigger.amount}}' }] });
+  const upd = node('dbUpdate', 'Ship', { connection: conn, sql: "UPDATE sf_orders SET status = 'shipped' WHERE id = :id", params: [{ k: 'id', v: '{{trigger.id}}' }] });
+  const sel = node('dbQuery', 'Find', { connection: conn, sql: 'SELECT id, amount, status FROM sf_orders WHERE id = :id', params: [{ k: 'id', v: '{{trigger.id}}' }], maxRows: 10 });
+  const r = await run([s, create, clean, ins, upd, sel], [edge(s, create), edge(create, clean), edge(clean, ins), edge(ins, upd), edge(upd, sel)]);
+  assert.equal(r.status, 'done', r.error);
+  assert.equal(r.out.Insert.rowCount, 1);
+  assert.equal(r.out.Ship.rowCount, 1);
+  assert.equal(r.out.Find.first.id, "A-1'; DROP TABLE sf_orders; --", 'injection text stored as data');
+  assert.equal(Number(r.out.Find.first.amount), 120.5);
+  assert.equal(r.out.Find.first.status, 'shipped');
+});
+
+test('MySQL: a transaction rolls back every statement when one fails', { skip }, async () => {
+  const s = node('start', 'Start');
+  const tx = node('dbTransaction', 'Tx', { connection: conn, params: [{ k: 'id', v: 'B-2' }], sql: "INSERT INTO sf_orders(id, amount, status) VALUES (:id, 1, 'x')\n;\nINSERT INTO sf_orders(id, amount, status) VALUES (:id, 2, 'duplicate key')" });
+  const r = await run([s, tx], [edge(s, tx)]);
+  assert.equal(r.status, 'failed');
+  assert.match(r.error, /Duplicate entry/);
+  const chk = node('dbQuery', 'Check', { connection: conn, sql: "SELECT count(*) AS n FROM sf_orders WHERE id = 'B-2'", params: [] });
+  const r2 = await run([s, chk], [edge(s, chk)]);
+  assert.equal(Number(r2.out.Check.first.n), 0, 'the first insert was rolled back');
+});
+
+test('MySQL: stored procedure with parameters; tables dropped afterwards', { skip }, async () => {
+  const s = node('start', 'Start');
+  const drop = node('dbUpdate', 'Drop proc', { connection: conn, sql: 'DROP PROCEDURE IF EXISTS sf_open_orders', params: [] });
+  const mk = node('dbUpdate', 'Make proc', { connection: conn, sql: 'CREATE PROCEDURE sf_open_orders(IN min_amount DECIMAL(10,2)) SELECT id, amount FROM sf_orders WHERE amount >= min_amount ORDER BY id', params: [] });
+  const call = node('dbProcedure', 'Call', { connection: conn, procedure: 'sf_open_orders', params: [{ k: 'min_amount', v: '100' }] });
+  const r = await run([s, drop, mk, call], [edge(s, drop), edge(drop, mk), edge(mk, call)]);
+  assert.equal(r.status, 'done', r.error);
+  assert.equal(r.out.Call.rows.length, 1);
+  assert.equal(Number(r.out.Call.rows[0].amount), 120.5);
+  const tidy = node('dbUpdate', 'Tidy', { connection: conn, sql: 'DROP TABLE IF EXISTS sf_orders', params: [] });
+  const tidy2 = node('dbUpdate', 'Tidy proc', { connection: conn, sql: 'DROP PROCEDURE IF EXISTS sf_open_orders', params: [] });
+  assert.equal((await run([s, tidy, tidy2], [edge(s, tidy), edge(tidy, tidy2)])).status, 'done');
+});

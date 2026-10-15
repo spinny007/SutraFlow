@@ -1,0 +1,3 @@
+# SutraFlow is a Node.js server, reached at http://sutra.test through Apache's proxy
+# (C:\laragon\etc\apache2\sites-enabled\01-sutra.conf). Nothing in this folder is served directly.
+Require all denied

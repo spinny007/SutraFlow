@@ -214,6 +214,9 @@ const FILES: Group[] = [
       ['.dockerignore', 'Keeps data, node_modules and builds out of the image context.'],
       ['docker-compose.yml', 'One container: studio, engine and gateway.'],
       ['docker-compose.cluster.yml', 'PostgreSQL, a studio without workers and two headless engines sharing the database.'],
+      ['deploy/laragon/start-sutra.cmd', 'Windows with Laragon: starts SutraFlow with its data outside the web folder, on ports 4810 and 8090.'],
+      ['deploy/laragon/01-sutra.conf', 'Laragon Apache site: forwards http://sutra.test to the Node.js server.'],
+      ['deploy/laragon/.htaccess', 'Denies direct access to the SutraFlow folder under the Laragon www folder.'],
       ['deploy/README.md', 'The deploy folder: drop .sutra packages here for engines that deploy them at start.'],
       ['docs/deployment.md', 'Operations guide: packages, CLI, headless engines, Docker, clusters, monitoring, retention, settings.'],
       ['docs/architecture.md', 'Short text notes on the architecture (this page is the full version).'],
@@ -548,7 +551,7 @@ sec('settings', 'Environment settings', `
 ${tw(['Variable', 'Default', 'Meaning'], SETTINGS.map(([a, b, c]) => `<tr id="env-${slug(a)}"><td><code>${esc(a)}</code></td><td>${esc(b)}</td><td>${c}</td></tr>`).join(''))}`);
 
 sec('testing', 'Tests', `
-<p><code>npm test</code> compiles the server, then runs every suite with Node's test runner. Multi-process suites start real servers (headless engines, clusters on one database, drain and failover). The PostgreSQL suite runs the in-process suites again on PGlite with shifted ports. Two suites run only when their tools exist: the Docker image build, and a real PostgreSQL server through <code>SUTRA_TEST_PG_URL</code>. A guard test fails if names of other products appear in the source or documents.</p>
+<p><code>npm test</code> compiles the server, then runs every suite with Node's test runner. Multi-process suites start real servers (headless engines, clusters on one database, drain and failover). The PostgreSQL suite runs the in-process suites again on PGlite with shifted ports. Three suites run only when their tools exist: the Docker image build, a real PostgreSQL server through <code>SUTRA_TEST_PG_URL</code>, and DB Ops against a real MySQL server through <code>SUTRA_TEST_MYSQL_URL</code> (for example Laragon's). A guard test fails if names of other products appear in the source or documents.</p>
 ${testFiles.map(f => `<h3 id="t-${slug(f)}">${esc(f)}</h3><ul class="tests">${testNames(f).map(n => `<li>${esc(n)}</li>`).join('')}</ul>`).join('')}`);
 
 // ---------------------------------------------------------------------------------------------

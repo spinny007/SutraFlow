@@ -95,6 +95,18 @@ sutra token create ci-orders --name github --expires-days 90
 sutra audit --actor alice --outcome denied [--csv]
 ```
 
+### Windows with Laragon
+
+Templates in `deploy/laragon/`:
+
+1. Build (`npm run build`), then copy `package.json`, `package-lock.json`, `dist/` and `docs/*.html` to `C:\laragon\www\sutra` and run `npm ci --omit=dev` there.
+2. Keep data outside the web folder: `start-sutra.cmd` sets `SUTRA_DATA_DIR=C:\laragon\data\sutraflow`, the admin port 4810 and the gateway 8090/8453 (so a development copy can keep 4800/8080). It runs Node.js 24 from NVM; Laragon's bundled Node.js is older than SutraFlow needs.
+3. `.htaccess` in `www\sutra` denies direct access to the folder.
+4. `01-sutra.conf` goes to `C:\laragon\etcpache2\sites-enabled`: it loads Apache's proxy modules and forwards `http://sutra.test` to the Node.js server.
+5. Add to Laragon's Procfile (Menu > Procfile): `SutraFlow: autorun C:\laragon\www\sutra\start-sutra.cmd PWD=www/sutra`. Laragon starts it when Laragon starts; it is also in Menu > Procfile.
+
+Laragon's MySQL works as a DB Ops connection (driver mysql, host 127.0.0.1, port 3306, user root). `SUTRA_TEST_MYSQL_URL=mysql://root@127.0.0.1:3306/sutraflow_test npm test` also runs the MySQL tests.
+
 ## 4. Docker
 
 One image serves both roles:
