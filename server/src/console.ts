@@ -2,6 +2,7 @@ import { q } from './db.js';
 import { engine } from './engine/engine.js';
 import { clusterStatus } from './cluster.js';
 import { setEnabled } from './flows.js';
+import { sutraTuning } from './tuning.js';
 import { packageHistory } from './packages.js';
 import { visibleProjects, type Caller } from './access.js';
 import { gatewayStatus } from './gateway/gateway.js';
@@ -86,7 +87,8 @@ export function applications(c: Caller) {
     p.sutras.push({
       id: r.flow_id, name: r.name, version: Number(r.version), enabled: Number(r.enabled) === 1, deployedAt: r.deployed_at,
       triggers: triggersOf(JSON.parse(r.doc), names),
-      runs24h: { done: n.done || 0, failed: n.failed || 0, running: (n.running || 0) + (n.waiting || 0) }, lastRun: last.get(r.flow_id) || null,
+      runs24h: { done: n.done || 0, failed: n.failed || 0, running: (n.running || 0) + (n.waiting || 0), queued: n.queued || 0 }, lastRun: last.get(r.flow_id) || null,
+      tuning: sutraTuning(r.flow_id),
     });
   }
   return [...byProject.values()];
@@ -96,6 +98,13 @@ export function applications(c: Caller) {
 export function setSutraEnabled(flowId: string, enabled: boolean) {
   setEnabled(flowId, enabled);
   return { id: flowId, enabled };
+}
+
+/** Restarts a deployed Sutra: stops and starts it, so its address, timers and listeners start fresh. */
+export function restartSutra(flowId: string) {
+  setEnabled(flowId, false);
+  setEnabled(flowId, true);
+  return { id: flowId, enabled: true, restarted: true };
 }
 
 /** Asks an engine to drain and stop; it sees the request on its next heartbeat. */

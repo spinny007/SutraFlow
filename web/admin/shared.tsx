@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { get } from '../src/api';
 import { Modal } from '../src/ui';
+import { CommandBox, type Action } from './log';
 
 /** Who is signed in and what they may do (from /api/access/me). */
 export interface Me {
@@ -65,9 +66,10 @@ export function Empty({ title, children }: { title: string; children?: ReactNode
 }
 
 /** A confirmation step inside the page (the browser's confirm dialog is not used). */
-export function Confirm({ title, text, action, danger, onYes, onClose }: { title: string; text: ReactNode; action: string; danger?: boolean; onYes(): Promise<void> | void; onClose(): void }) {
+export function Confirm({ title, text, action, danger, onYes, onClose, cmd }: { title: string; text: ReactNode; action: string; danger?: boolean; onYes(): Promise<void> | void; onClose(): void; cmd?: Action }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [show, setShow] = useState(false);
   return (
     <Modal title={title} onClose={onClose} actions={<>
       <button className="btn" onClick={onClose}>Cancel</button>
@@ -75,6 +77,10 @@ export function Confirm({ title, text, action, danger, onYes, onClose }: { title
     </>}>
       <Err text={err} />
       <div className="c-confirm">{text}</div>
+      {cmd && <div className="c-confirmcmd">
+        <button type="button" className="btn link" aria-expanded={show} onClick={() => setShow(v => !v)}>{show ? 'Hide the command' : 'Run it from a shell instead'}</button>
+        {show && <CommandBox action={cmd} />}
+      </div>}
     </Modal>
   );
 }

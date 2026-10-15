@@ -47,6 +47,10 @@ export const config = {
   /** OpenTelemetry: traces of runs and steps are sent to this OTLP/HTTP endpoint when set. */
   otlpEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || '',
   serviceName: process.env.OTEL_SERVICE_NAME || 'sutraflow',
+  /** Audit entries older than this are deleted (0 = keep forever). */
+  auditRetentionDays: Number(process.env.SUTRA_AUDIT_RETENTION_DAYS ?? 365),
+  /** Share of runs traced (OpenTelemetry), from 0 to 1. Changed live by tuning. */
+  traceSampling: Math.min(1, Math.max(0, Number(process.env.SUTRA_TRACE_SAMPLING ?? 1))),
   /** When set, GET /metrics needs Authorization: Bearer <this>. */
   metricsToken: process.env.SUTRA_METRICS_TOKEN || '',
 };

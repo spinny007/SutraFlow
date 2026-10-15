@@ -1,12 +1,16 @@
 import { useCallback, useState } from 'react';
-import { post } from '../src/api';
 import { useToast } from '../src/ui';
 import { PageHead, State, Err, Confirm, useLoad, useEvery, ago, when, can, useMe } from './shared';
+import { act, type Action } from './log';
+import { EngineTuning } from './Tuning';
 
 interface EngineRow { id: string; host: string; pid: number; mode: string; version: string; startedAt: string; alive: boolean; heartbeatAgeMs: number; workers: number; running: number; draining: boolean; leader: boolean }
 interface ClusterData { self: string; leader: string | null; engines: EngineRow[]; tasks: { pending: number; running: number; waiting: number; paused: number } }
 
-/** Every engine sharing this database: liveness, leader, load; drain one. */
+const drainCmd = (id: string): Action => ({ label: `Drain ${id}`, method: 'POST', url: `/api/console/engines/${encodeURIComponent(id)}/drain`, cli: ['engines', 'drain', id] });
+const HOUSEKEEPING: Action = { label: 'Delete old runs now', method: 'POST', url: '/api/engine/housekeeping', body: {}, cli: ['engines', 'housekeeping'] };
+
+/** Every engine sharing this database: liveness, leader, load; drain one; tuning. */
 export function Engines() {
   const { me } = useMe();
   const toast = useToast();
@@ -48,12 +52,13 @@ export function Engines() {
           <p className="muted xs">An engine silent for three heartbeats is presumed stopped; the leader gives its unfinished steps to the others.</p>
         </>
       )}
-      {drain && <Confirm title={`Drain ${drain.id}`} danger action="Drain and stop"
+      {data && <EngineTuning engines={data.engines} />}
+      {drain && <Confirm title={`Drain ${drain.id}`} danger action="Drain and stop" cmd={drainCmd(drain.id)}
         text={<>The engine stops taking new work, gives up leadership, lets running steps finish (up to its drain time), hands the rest to other engines, and stops. Your service manager or orchestrator starts it again.{data && data.engines.filter(x => x.alive && !x.draining).length <= 1 && <strong> It is the only engine: nothing runs until it is started again.</strong>}</>}
-        onYes={async () => { await post(`/api/console/engines/${encodeURIComponent(drain.id)}/drain`); toast(`${drain.id} drains on its next heartbeat`); reload(); }} onClose={() => setDrain(null)} />}
-      {cleanup && <Confirm title="Delete old runs now" action="Delete"
+        onYes={async () => { await act(drainCmd(drain.id)); toast(`${drain.id} drains on its next heartbeat`); reload(); }} onClose={() => setDrain(null)} />}
+      {cleanup && <Confirm title="Delete old runs now" action="Delete" cmd={HOUSEKEEPING}
         text="Finished runs older than the retention period are deleted with their steps, and old audit entries too. The leader also does this every minute."
-        onYes={async () => { const r: any = await post('/api/engine/housekeeping', {}); toast(`${r.deletedRuns} runs and ${r.deletedAudit ?? 0} audit entries deleted`); }} onClose={() => setCleanup(false)} />}
+        onYes={async () => { const r: any = await act(HOUSEKEEPING); toast(`${r.deletedRuns} runs and ${r.deletedAudit ?? 0} audit entries deleted`); }} onClose={() => setCleanup(false)} />}
     </>
   );
 }

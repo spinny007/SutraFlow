@@ -1,31 +1,40 @@
-import { useCallback, useState } from 'react';
-import { get, post, put } from '../src/api';
+import { useCallback, useState, type ReactNode } from 'react';
+import { get } from '../src/api';
 import { useToast } from '../src/ui';
 import { PageHead, State, Err, Empty, Confirm, useLoad, useEvery, ago, when, can, useMe, runState } from './shared';
+import { act, type Action } from './log';
+import { TuningForm, type Field } from './Tuning';
 
 interface SutraApp {
   id: string; name: string; version: number; enabled: boolean; deployedAt: string; lastRun: string | null;
   triggers: { step: string; type: string; name: string; what: string }[];
-  runs24h: { done: number; failed: number; running: number };
+  runs24h: { done: number; failed: number; running: number; queued: number };
+  tuning: Record<string, unknown>;
 }
 interface ProjectApp { id: string; name: string; package: { version: string; deployedAt: string; deployedBy: string } | null; sutras: SutraApp[] }
+type Ask = { title: string; text: ReactNode; action: string; danger?: boolean; cmd: Action; done: string; after?(): void };
 
-/** Deployed projects and their Sutras: start, stop, runs, versions, packages. */
+/** Deployed projects and their Sutras: start, stop, restart, runs, versions, tuning, packages. */
 export function Apps() {
   const { me } = useMe();
   const toast = useToast();
   const { data, error, reload } = useLoad<ProjectApp[]>('/api/console/apps');
   useEvery(useCallback(() => { reload(); }, [reload]), 15000);
   const [filter, setFilter] = useState('');
-  const [open, setOpen] = useState<{ project: ProjectApp; sutra: SutraApp } | null>(null);
+  const [open, setOpen] = useState<{ project: ProjectApp; sutra: SutraApp; tab?: Tab } | null>(null);
   const [history, setHistory] = useState<ProjectApp | null>(null);
-  const [confirm, setConfirm] = useState<{ title: string; text: string; action: string; danger?: boolean; run(): Promise<void> } | null>(null);
+  const [ask, setAsk] = useState<Ask | null>(null);
 
-  const toggle = (p: ProjectApp, s: SutraApp) => setConfirm({
-    title: s.enabled ? `Stop ${s.name}` : `Start ${s.name}`,
-    text: s.enabled ? 'Its triggers stop starting runs (requests get 404, timers and listeners pause). Runs in progress finish. It stays deployed at version ' + s.version + '.' : 'Its triggers start runs again on every engine.',
-    action: s.enabled ? 'Stop' : 'Start', danger: s.enabled,
-    run: async () => { await put(`/api/console/sutras/${s.id}/enabled`, { enabled: !s.enabled }); toast(`${s.name} ${s.enabled ? 'stopped' : 'started'}`); reload(); },
+  const lifecycle = (p: ProjectApp, s: SutraApp, what: 'stop' | 'start' | 'restart') => setAsk({
+    title: `${what === 'stop' ? 'Stop' : what === 'start' ? 'Start' : 'Restart'} ${s.name}`,
+    text: what === 'stop' ? `Its triggers stop starting runs: requests get 404, timers and listeners pause. Runs in progress finish. It stays deployed at version ${s.version}.`
+      : what === 'start' ? 'Its triggers start runs again on every engine.'
+        : 'It stops and starts at once: its address, timers and listeners start fresh on every engine, with the current connections and settings. Runs in progress finish.',
+    action: what === 'stop' ? 'Stop' : what === 'start' ? 'Start' : 'Restart', danger: what === 'stop',
+    cmd: what === 'restart'
+      ? { label: `Restart ${s.name}`, method: 'POST', url: `/api/console/sutras/${s.id}/restart`, cli: ['sutras', 'restart', s.name, '--project', p.name] }
+      : { label: `${what === 'stop' ? 'Stop' : 'Start'} ${s.name}`, method: 'PUT', url: `/api/console/sutras/${s.id}/enabled`, body: { enabled: what === 'start' }, cli: ['sutras', what, s.name, '--project', p.name] },
+    done: `${s.name} ${what === 'stop' ? 'stopped' : what === 'start' ? 'started' : 'restarted'}`,
   });
 
   const f = filter.trim().toLowerCase();
@@ -46,36 +55,43 @@ export function Apps() {
               <h2>{p.name}</h2>
               <span className="muted xs">{p.package ? <>Package {p.package.version}, deployed {ago(p.package.deployedAt)} by {p.package.deployedBy || 'unknown'}</> : 'Deployed Sutra by Sutra (no package)'}</span>
             </div>
-            <div className="c-actions">
-              <button className="btn small" onClick={() => setHistory(p)}>Package history</button>
-            </div>
+            <div className="c-actions"><button className="btn small" onClick={() => setHistory(p)}>Package history</button></div>
           </div>
           <div className="c-tablewrap"><table className="t c-table">
             <thead><tr><th>Sutra</th><th>State</th><th>Started by</th><th className="right">Runs, 24 h</th><th>Last run</th><th /></tr></thead>
-            <tbody>{p.sutras.map(s => (
-              <tr key={s.id}>
-                <td><button className="btn link c-name" onClick={() => setOpen({ project: p, sutra: s })}>{s.name}</button><span className="muted xs"> v{s.version}</span></td>
-                <td>{s.enabled ? <State kind="ok">started</State> : <State kind="warn">stopped</State>}</td>
-                <td><div className="c-triggers">{s.triggers.map(t => <span key={t.step} className="c-trig" title={t.step}>{t.name}{t.what && <code>{t.what}</code>}</span>)}</div></td>
-                <td className="right nowrap"><span className="c-ok">{s.runs24h.done}</span>{s.runs24h.failed > 0 && <span className="c-bad"> · {s.runs24h.failed} failed</span>}{s.runs24h.running > 0 && <span className="muted"> · {s.runs24h.running} open</span>}</td>
-                <td className="nowrap muted">{s.lastRun ? ago(s.lastRun) : 'never'}</td>
-                <td className="right nowrap">
-                  <button className="btn small" onClick={() => setOpen({ project: p, sutra: s })}>Runs</button>{' '}
-                  {can(me, 'operate', p.id) && <button className={`btn small${s.enabled ? ' c-danger-soft' : ''}`} onClick={() => toggle(p, s)}>{s.enabled ? 'Stop' : 'Start'}</button>}
-                </td>
-              </tr>
-            ))}</tbody>
+            <tbody>{p.sutras.map(s => {
+              const tuned = Object.keys(s.tuning || {}).length > 0;
+              return (
+                <tr key={s.id}>
+                  <td><button className="btn link c-name" onClick={() => setOpen({ project: p, sutra: s })}>{s.name}</button><span className="muted xs"> v{s.version}</span>{tuned && <button className="c-badge soft c-badgebtn" title="Tuned: open its tuning" onClick={() => setOpen({ project: p, sutra: s, tab: 'tuning' })}>tuned</button>}</td>
+                  <td>{s.enabled ? <State kind="ok">started</State> : <State kind="warn">stopped</State>}</td>
+                  <td><div className="c-triggers">{s.triggers.map(t => <span key={t.step} className="c-trig" title={t.step}>{t.name}{t.what && <code>{t.what}</code>}</span>)}</div></td>
+                  <td className="right nowrap"><span className="c-ok">{s.runs24h.done}</span>{s.runs24h.failed > 0 && <span className="c-bad"> · {s.runs24h.failed} failed</span>}{s.runs24h.running > 0 && <span className="muted"> · {s.runs24h.running} open</span>}{s.runs24h.queued > 0 && <span className="c-warn"> · {s.runs24h.queued} queued</span>}</td>
+                  <td className="nowrap muted">{s.lastRun ? ago(s.lastRun) : 'never'}</td>
+                  <td className="right nowrap">
+                    <span className="c-rowacts">
+                      <button className="btn small" onClick={() => setOpen({ project: p, sutra: s })}>Runs</button>
+                      {can(me, 'operate', p.id) && <>
+                        {s.enabled && <button className="btn small" onClick={() => lifecycle(p, s, 'restart')}>Restart</button>}
+                        <button className={`btn small${s.enabled ? ' c-danger-soft' : ''}`} onClick={() => lifecycle(p, s, s.enabled ? 'stop' : 'start')}>{s.enabled ? 'Stop' : 'Start'}</button>
+                      </>}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}</tbody>
           </table></div>
         </section>
       ))}
-      {open && <SutraDrawer project={open.project} sutra={open.sutra} onClose={() => setOpen(null)} onChanged={reload} />}
+      {open && <SutraDrawer project={open.project} sutra={open.sutra} initialTab={open.tab} onClose={() => setOpen(null)} onChanged={reload} />}
       {history && <PackageDrawer project={history} onClose={() => setHistory(null)} onChanged={reload} />}
-      {confirm && <Confirm title={confirm.title} text={confirm.text} action={confirm.action} danger={confirm.danger} onYes={confirm.run} onClose={() => setConfirm(null)} />}
+      {ask && <Confirm title={ask.title} text={ask.text} action={ask.action} danger={ask.danger} cmd={ask.cmd}
+        onYes={async () => { await act(ask.cmd); toast(ask.done); reload(); ask.after?.(); }} onClose={() => setAsk(null)} />}
     </>
   );
 }
 
-export function Drawer({ title, sub, onClose, children }: { title: string; sub?: React.ReactNode; onClose(): void; children: React.ReactNode }) {
+export function Drawer({ title, sub, onClose, children }: { title: string; sub?: ReactNode; onClose(): void; children: ReactNode }) {
   return (
     <div className="c-scrim" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }} onKeyDown={e => { if (e.key === 'Escape') onClose(); }}>
       <aside className="c-drawer" role="dialog" aria-modal="true" aria-label={title}>
@@ -86,32 +102,40 @@ export function Drawer({ title, sub, onClose, children }: { title: string; sub?:
   );
 }
 
-function SutraDrawer({ project, sutra, onClose, onChanged }: { project: ProjectApp; sutra: SutraApp; onClose(): void; onChanged(): void }) {
+type Tab = 'runs' | 'versions' | 'tuning';
+
+function SutraDrawer({ project, sutra, initialTab, onClose, onChanged }: { project: ProjectApp; sutra: SutraApp; initialTab?: Tab; onClose(): void; onChanged(): void }) {
   const { me } = useMe();
   const toast = useToast();
-  const [tab, setTab] = useState<'runs' | 'versions'>('runs');
+  const [tab, setTab] = useState<Tab>(initialTab || 'runs');
   const [status, setStatus] = useState('');
   const runs = useLoad<any[]>(`/api/runs?flowId=${encodeURIComponent(sutra.id)}&limit=100${status ? '&status=' + status : ''}`, [status]);
   const versions = useLoad<{ version: number; note: string; created_at: string }[]>(tab === 'versions' ? `/api/flows/${sutra.id}/versions` : null, [tab]);
+  const tuning = useLoad<{ fields: Field[]; values: Record<string, unknown> }>(tab === 'tuning' ? `/api/console/sutras/${sutra.id}/tuning` : null, [tab]);
   const [run, setRun] = useState<any | null>(null);
-  const [confirm, setConfirm] = useState<{ title: string; text: string; action: string; run(): Promise<void> } | null>(null);
+  const [ask, setAsk] = useState<Ask | null>(null);
   const openRun = async (id: string) => { try { setRun(await get(`/api/runs/${id}`)); } catch (e: any) { toast(e.message, true); } };
-  const act = async (fn: () => Promise<unknown>, msg: string) => { try { await fn(); toast(msg); runs.reload(); if (run) openRun(run.id); } catch (e: any) { toast(e.message, true); } };
   const mayOperate = can(me, 'operate', project.id), mayDeploy = can(me, 'deploy', project.id);
   const deployed = runs.data ? runs.data.filter(r => r.source !== 'test' && r.source !== 'debug') : [];
+  const runAct = (what: 'resubmit' | 'cancel') => setAsk({
+    title: what === 'resubmit' ? 'Resubmit the run' : 'Cancel the run',
+    text: what === 'resubmit' ? 'The run continues from the steps that failed, with the data it had.' : 'Open steps stop; the run ends as cancelled.',
+    action: what === 'resubmit' ? 'Resubmit' : 'Cancel run', danger: what === 'cancel',
+    cmd: { label: `${what === 'resubmit' ? 'Resubmit' : 'Cancel'} run of ${sutra.name}`, method: 'POST', url: `/api/runs/${run.id}/${what}`, cli: ['runs', what, run.id] },
+    done: what === 'resubmit' ? 'Run resubmitted' : 'Run cancelled', after: () => { runs.reload(); openRun(run.id); },
+  });
 
   return (
     <Drawer title={sutra.name} sub={<>{project.name} · version {sutra.version} deployed {ago(sutra.deployedAt)} · {sutra.enabled ? 'started' : 'stopped'}</>} onClose={onClose}>
       <div className="c-tabs" role="tablist">
-        <button role="tab" aria-selected={tab === 'runs'} className={tab === 'runs' ? 'act' : ''} onClick={() => setTab('runs')}>Runs</button>
-        <button role="tab" aria-selected={tab === 'versions'} className={tab === 'versions' ? 'act' : ''} onClick={() => setTab('versions')}>Versions</button>
+        {(['runs', 'versions', 'tuning'] as Tab[]).map(t => <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'act' : ''} onClick={() => setTab(t)}>{t === 'runs' ? 'Runs' : t === 'versions' ? 'Versions' : 'Tuning'}</button>)}
       </div>
       {tab === 'runs' && !run && (
         <>
           <div className="c-filters">
             <label htmlFor="c-run-status" className="muted xs">Status</label>
             <select id="c-run-status" className="inp" value={status} onChange={e => setStatus(e.target.value)}>
-              <option value="">All</option><option value="failed">Failed</option><option value="running">Running</option><option value="waiting">Waiting</option><option value="done">Done</option><option value="cancelled">Cancelled</option>
+              <option value="">All</option><option value="failed">Failed</option><option value="running">Running</option><option value="waiting">Waiting</option><option value="queued">Queued</option><option value="done">Done</option><option value="cancelled">Cancelled</option>
             </select>
             <button className="btn small" onClick={runs.reload}>Refresh</button>
           </div>
@@ -134,8 +158,8 @@ function SutraDrawer({ project, sutra, onClose, onChanged }: { project: ProjectA
             <button className="btn small" onClick={() => setRun(null)}>Back to runs</button>
             <span>{runState(run.status)} <span className="muted xs">started {when(run.startedAt)}{run.finishedAt ? `, finished ${when(run.finishedAt)}` : ''} · version {run.version} · {run.source}</span></span>
             <span className="c-actions">
-              {mayOperate && run.status === 'failed' && <button className="btn small" onClick={() => act(() => post(`/api/runs/${run.id}/resubmit`), 'Run resubmitted')}>Resubmit</button>}
-              {mayOperate && (run.status === 'running' || run.status === 'waiting') && <button className="btn small c-danger-soft" onClick={() => act(() => post(`/api/runs/${run.id}/cancel`), 'Run cancelled')}>Cancel run</button>}
+              {mayOperate && run.status === 'failed' && <button className="btn small" onClick={() => runAct('resubmit')}>Resubmit</button>}
+              {mayOperate && ['running', 'waiting', 'queued'].includes(run.status) && <button className="btn small c-danger-soft" onClick={() => runAct('cancel')}>Cancel run</button>}
             </span>
           </div>
           {run.error && <div className="errbox">{run.error}</div>}
@@ -162,18 +186,40 @@ function SutraDrawer({ project, sutra, onClose, onChanged }: { project: ProjectA
               <tr key={v.version}>
                 <td><strong>{v.version}</strong>{v.version === sutra.version && <span className="c-badge">deployed</span>}</td>
                 <td className="nowrap">{when(v.created_at)}</td><td>{v.note}</td>
-                <td className="right">{mayDeploy && v.version !== sutra.version && <button className="btn small" onClick={() => setConfirm({
+                <td className="right">{mayDeploy && v.version !== sutra.version && <button className="btn small" onClick={() => setAsk({
                   title: `Deploy version ${v.version}`, text: `${sutra.name} switches from version ${sutra.version} to ${v.version} on every engine. Runs in progress keep their version.`, action: 'Deploy',
-                  run: async () => { await post(`/api/flows/${sutra.id}/deploy`, { version: v.version }); toast(`Version ${v.version} deployed`); onChanged(); onClose(); },
+                  cmd: { label: `Deploy ${sutra.name} version ${v.version}`, method: 'POST', url: `/api/flows/${sutra.id}/deploy`, body: { version: v.version }, cli: ['sutras', 'deploy', sutra.name, '--project', project.name, '--version', String(v.version)] },
+                  done: `Version ${v.version} deployed`, after: () => { onChanged(); onClose(); },
                 })}>Deploy this version</button>}</td>
               </tr>
             ))}</tbody>
           </table></div>
         </>
       )}
-      {confirm && <Confirm title={confirm.title} text={confirm.text} action={confirm.action} onYes={confirm.run} onClose={() => setConfirm(null)} />}
+      {tab === 'tuning' && (
+        <>
+          <p className="muted">Applied by every engine within a heartbeat, without a restart, and kept when a new version is deployed. Empty fields use the engine settings.</p>
+          <Err text={tuning.error} />
+          {tuning.data && <TuningForm fields={tuning.data.fields} values={tuning.data.values} defaults={SUTRA_DEFAULTS} readOnly={!mayOperate}
+            action={values => ({ label: `Tune ${sutra.name}`, method: 'PUT', url: `/api/console/sutras/${sutra.id}/tuning`, body: { values }, cli: ['sutras', 'tune', sutra.name, '--project', project.name, ...sutraFlags(values)] })}
+            onSaved={() => { toast('Tuning saved'); tuning.reload(); onChanged(); }} />}
+        </>
+      )}
+      {ask && <Confirm title={ask.title} text={ask.text} action={ask.action} danger={ask.danger} cmd={ask.cmd}
+        onYes={async () => { await act(ask.cmd); toast(ask.done); ask.after?.(); }} onClose={() => setAsk(null)} />}
     </Drawer>
   );
+}
+
+/** What an empty field means, shown greyed. */
+const SUTRA_DEFAULTS = { maxRuns: '0 (no limit)', priority: '0', runTimeoutMin: '0 (none)', retries: '0', retryDelayMs: '1000', stepData: 'all', retentionDays: 'engine setting' };
+
+const SUTRA_FLAGS: Record<string, string> = { maxRuns: 'max-runs', priority: 'priority', runTimeoutMin: 'run-timeout-min', retries: 'retries', retryDelayMs: 'retry-delay-ms', retentionDays: 'retention-days' };
+function sutraFlags(values: Record<string, unknown>) {
+  const out: string[] = [];
+  for (const [k, flag] of Object.entries(SUTRA_FLAGS)) if (values[k] !== undefined && values[k] !== '') out.push(`--${flag}`, String(values[k]));
+  if (values.stepData) out.push('--step-data', String(values.stepData).replace(' ', '-'));
+  return out;
 }
 
 function PackageDrawer({ project, onClose, onChanged }: { project: ProjectApp; onClose(): void; onChanged(): void }) {
@@ -181,6 +227,7 @@ function PackageDrawer({ project, onClose, onChanged }: { project: ProjectApp; o
   const toast = useToast();
   const h = useLoad<any[]>(`/api/projects/${project.id}/packages`);
   const [confirm, setConfirm] = useState<any | null>(null);
+  const cmd = (d: any): Action => ({ label: `Roll ${project.name} back to ${d.version}`, method: 'POST', url: `/api/projects/${project.id}/rollback`, body: { to: d.id }, cli: ['rollback', '--project', project.name, '--to', d.id] });
   return (
     <Drawer title={`${project.name}: packages`} sub="Every package deployed to this project, newest first." onClose={onClose}>
       <Err text={h.error} />
@@ -198,8 +245,8 @@ function PackageDrawer({ project, onClose, onChanged }: { project: ProjectApp; o
           ))}</tbody>
         </table></div>
       )}
-      {confirm && <Confirm title={`Roll back to ${confirm.version}`} text={`The package ${confirm.name} ${confirm.version} is deployed again to ${project.name}. Sutras not in it are undeployed.`} action="Roll back" danger
-        onYes={async () => { await post(`/api/projects/${project.id}/rollback`, { to: confirm.id }); toast(`Rolled back to ${confirm.version}`); h.reload(); onChanged(); }} onClose={() => setConfirm(null)} />}
+      {confirm && <Confirm title={`Roll back to ${confirm.version}`} text={`The package ${confirm.name} ${confirm.version} is deployed again to ${project.name}. Sutras not in it are undeployed.`} action="Roll back" danger cmd={cmd(confirm)}
+        onYes={async () => { await act(cmd(confirm)); toast(`Rolled back to ${confirm.version}`); h.reload(); onChanged(); }} onClose={() => setConfirm(null)} />}
     </Drawer>
   );
 }

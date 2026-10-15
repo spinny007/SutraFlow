@@ -441,10 +441,36 @@ sutra rollback --project "Orders" --server https://engine:4800 --token $TOKEN</p
 <p class="h">Operate</p>
 <ul>
 <li><strong>Overview</strong>: tiles for engines, deployed Sutras, runs of the last 24 hours, waiting approvals, the work queue and the gateway certificate, and the latest failed runs with <em>Resubmit</em>. Test runs from the designer are not counted.</li>
-<li><strong>Applications</strong>: every deployed project with its package version and its Sutras: version, started or stopped, what starts it (REST path, SOAP path, timer, skill), runs of the last day and the last run. <em>Stop</em> makes the Sutra's triggers start nothing (its address answers 404, timers and listeners pause) while it stays deployed; <em>Start</em> brings it back on every engine. <em>Runs</em> opens its runs with every step's result, <em>Resubmit</em> and <em>Cancel run</em>; <em>Versions</em> deploys an earlier version; <em>Package history</em> rolls the project back to an earlier package.</li>
+<li><strong>Applications</strong>: every deployed project with its package version and its Sutras: version, started or stopped, what starts it (REST path, SOAP path, timer, skill), runs of the last day and the last run. <em>Stop</em> makes the Sutra's triggers start nothing (its address answers 404, timers and listeners pause) while it stays deployed; <em>Start</em> brings it back on every engine; <em>Restart</em> does both at once, so its address, timers and listeners start fresh with the current connections. <em>Runs</em> opens its runs with every step's result, <em>Resubmit</em> and <em>Cancel run</em>; <em>Versions</em> deploys an earlier version; <em>Tuning</em> sets how the Sutra runs (below); <em>Package history</em> rolls the project back to an earlier package.</li>
 <li><strong>Approvals</strong>: running Sutras waiting for a person, with a comment and <em>Approve</em> or <em>Reject</em>.</li>
-<li><strong>Engines</strong>: every engine sharing the database: alive or silent, leader, steps running, heartbeat. <em>Drain and stop</em> asks one engine to finish its steps, hand the rest to the others and stop; your service manager starts it again. <em>Delete old runs now</em> runs housekeeping at once.</li>
+<li><strong>Engines</strong>: every engine sharing the database: alive or silent, leader, steps running, heartbeat. <em>Drain and stop</em> asks one engine to finish its steps, hand the rest to the others and stop; your service manager starts it again. <em>Delete old runs now</em> runs housekeeping at once. <em>Tuning</em> on the same page sets engine values (below).</li>
 </ul>
+<p class="h">The Console panel and commands for every action</p>
+<p><strong>Console</strong> in the top bar opens a panel with every action taken in this browser tab: what was done, whether it worked, how long it took, and the server's answer. Each entry also shows the same action as a command, for <strong>Windows PowerShell</strong> and for <strong>Linux and macOS</strong> shells: the <code>sutra</code> command and the HTTP call (<code>Invoke-RestMethod</code> or <code>curl</code>). Every confirmation has <em>Run it from a shell instead</em> with the same commands, so an action can be scripted, put in a runbook, or tried again from a shell when the console is not at hand. Commands read the server address and token from <code>SUTRA_SERVER</code> and <code>SUTRA_ADMIN_TOKEN</code>; use a system account's API token. Passwords never appear in commands: they read <code>NEW_PASSWORD</code> from the environment.</p>
+<pre>sutra sutras list
+sutra sutras restart "Order lookup API" --project "Orders"
+sutra runs list --status failed
+sutra runs resubmit 3f2c...
+sutra approvals approve 42 --comment "checked"
+sutra engines drain engine-2</pre>
+<p class="h">Tuning</p>
+<p>Tuning changes how deployed Sutras run, while they run. Every engine applies a change within a heartbeat, without a restart. Values set by environment variables stay the defaults, and an empty field returns to them.</p>
+<table class="t s"><thead><tr><th>Engine tuning</th><th>What it does</th></tr></thead><tbody>
+<tr><td>Steps at once</td><td>Steps one engine runs at the same time. Set for all engines, or for one engine (a bigger machine, or 0 for a studio that should not run work).</td></tr>
+<tr><td>Steps per run limit</td><td>Stops runs that take more steps, such as loops that never end.</td></tr>
+<tr><td>Reply wait</td><td>How long REST, SOAP and MCP callers wait for a reply step.</td></tr>
+<tr><td>Keep finished runs, Keep audit entries</td><td>Days before housekeeping deletes them.</td></tr>
+<tr><td>Trace sampling</td><td>Share of runs sent to the OpenTelemetry collector.</td></tr>
+</tbody></table>
+<table class="t s"><thead><tr><th>Sutra tuning</th><th>What it does</th></tr></thead><tbody>
+<tr><td>Runs at once</td><td>More runs wait as <em>queued</em> and start, oldest first, when one ends. Protects a slow partner system or a database.</td></tr>
+<tr><td>Priority</td><td>Steps of higher priority Sutras are taken from the shared work queue first.</td></tr>
+<tr><td>Run time limit</td><td>Runs still open after this many minutes are cancelled with an error.</td></tr>
+<tr><td>Retries, First retry after</td><td>For steps whose own settings have no retries.</td></tr>
+<tr><td>Step data in history</td><td><em>all</em>, <em>errors only</em> (step data is kept only for runs that did not finish well), or <em>none</em> (for personal or bulky data).</td></tr>
+<tr><td>Keep finished runs</td><td>Days for this Sutra, instead of the engine setting.</td></tr>
+</tbody></table>
+<p>Sutra tuning applies to every run of the deployed Sutra, whatever started it: REST or SOAP request, timer, file, mailbox, queue, MCP skill, channel or the Run API. A Sutra with several triggers shares one limit. Test and debug runs from the designer are not tuned, and runs started by Call Sutra always start (they count toward the limit, but never wait behind their own caller). Sutra tuning stays when a new version is deployed. Tuned Sutras show <em>tuned</em> in Applications.</p>
 [[img:console-apps|Applications: deployed projects and Sutras with their triggers, state and runs; Stop and Start per Sutra.]]
 <p class="h">Users, system accounts and roles</p>
 <ul>

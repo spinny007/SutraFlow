@@ -33,6 +33,8 @@ const attr = (k: string, v: string | number | boolean) => ({ key: k, value: type
 
 export function recordSpan(s: SpanIn) {
   if (!config.otlpEndpoint) return;
+  // Sampling by trace id: every span of a sampled run is kept, on every engine alike.
+  if (config.traceSampling < 1 && parseInt(s.traceId.slice(0, 8), 16) / 0xffffffff >= config.traceSampling) return;
   queue.push({
     traceId: s.traceId, spanId: s.spanId, ...(s.parentSpanId ? { parentSpanId: s.parentSpanId } : {}), name: s.name, kind: s.kind,
     startTimeUnixNano: `${Math.round(s.startMs)}000000`, endTimeUnixNano: `${Math.round(Math.max(s.endMs, s.startMs))}000000`,

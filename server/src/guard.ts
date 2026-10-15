@@ -132,6 +132,12 @@ export const RULES: Record<string, Rule> = {
   'GET /api/console/apps': R(null),
   'PUT /api/console/sutras/:id/enabled': R('operate', 'flow'),
   'POST /api/console/engines/:id/drain': R('engines'),
+  'POST /api/console/sutras/:id/restart': R('operate', 'flow'),
+  'GET /api/console/tuning': R(null),
+  'PUT /api/console/tuning/engine': R('engines'),
+  'PUT /api/console/tuning/engines/:id': R('engines'),
+  'GET /api/console/sutras/:id/tuning': R('view', 'flow'),
+  'PUT /api/console/sutras/:id/tuning': R('operate', 'flow'),
   'GET /api/audit': R('audit'),
   'GET /api/audit/export': R('audit'),
 };

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { del, post, put } from '../src/api';
+import { act } from './log';
 import { useToast } from '../src/ui';
 import { PageHead, Err, Confirm, useLoad } from './shared';
 import { Drawer } from './Apps';
@@ -45,7 +45,7 @@ function RoleDrawer({ role, perms, onClose, onSaved }: { role: Role | null; perm
   const ro = !!role?.builtin;
   const toggle = (id: string) => setForm(f => ({ ...f, perms: f.perms.includes(id) ? f.perms.filter(p => p !== id) : [...f.perms, id] }));
   const save = async () => {
-    try { if (role) await put(`/api/access/roles/${role.id}`, form); else await post('/api/access/roles', form); onSaved(role ? 'Role saved' : 'Role added'); } catch (e: any) { setErr(e.message); }
+    try { await act(role ? { label: `Change role ${form.name}`, method: 'PUT', url: `/api/access/roles/${role.id}`, body: form } : { label: `Add role ${form.name}`, method: 'POST', url: '/api/access/roles', body: form }); onSaved(role ? 'Role saved' : 'Role added'); } catch (e: any) { setErr(e.message); }
   };
   return (
     <Drawer title={role ? role.name : 'New role'} sub={ro ? 'Built-in roles cannot change. Make a new role to combine permissions differently.' : undefined} onClose={onClose}>
@@ -67,7 +67,7 @@ function RoleDrawer({ role, perms, onClose, onSaved }: { role: Role | null; perm
         </div>}
       </div>
       {confirm && role && <Confirm title={`Delete ${role.name}`} text={role.holders ? `${role.holders} accounts hold this role. Remove it from them first.` : 'The role is deleted.'} action="Delete" danger
-        onYes={async () => { await del(`/api/access/roles/${role.id}`); onSaved('Role deleted'); }} onClose={() => setConfirm(false)} />}
+        onYes={async () => { await act({ label: `Delete role ${role.name}`, method: 'DELETE', url: `/api/access/roles/${role.id}` }); onSaved('Role deleted'); }} onClose={() => setConfirm(false)} />}
     </Drawer>
   );
 }

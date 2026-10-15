@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { get, post } from '../src/api';
 import { ToastHost } from '../src/ui';
 import { Logo, SignIn, ChangePassword } from '../src/Auth';
@@ -10,6 +10,7 @@ import { Engines } from './Engines';
 import { People } from './People';
 import { Roles } from './Roles';
 import { Audit } from './Audit';
+import { ConsolePanel, useEntries } from './log';
 
 /**
  * Admin Console: manages what is deployed (projects, Sutras, runs, approvals), the engines, people,
@@ -27,6 +28,9 @@ export function Console() {
   const [auth, setAuth] = useState<{ setup: boolean; user: (Me & { mustChange?: boolean }) | null; version: string; mode: Status['mode'] } | null>(null);
   const [page, setPage] = useState<Page>(() => (location.hash.slice(1) as Page) || 'overview');
   const [menu, setMenu] = useState(false);
+  const [panel, setPanel] = useState(() => { try { return localStorage.getItem('sutra.console') === 'open'; } catch { return false; } });
+  const entries = useEntries();
+  const seen = useRef(0);
   const check = () => get('/api/auth/status').then(setAuth).catch(() => setAuth({ setup: false, user: null, version: '', mode: 'studio' }));
   useEffect(() => {
     check();
@@ -37,6 +41,7 @@ export function Console() {
     return () => { window.removeEventListener('sutra:signed-out', out); window.removeEventListener('hashchange', onHash); };
   }, []);
   useEffect(() => { if (location.hash.slice(1) !== page) history.replaceState(null, '', '#' + page); setMenu(false); }, [page]);
+  useEffect(() => { try { localStorage.setItem('sutra.console', panel ? 'open' : 'closed'); } catch { /* ignore */ } if (panel) seen.current = entries.length; }, [panel, entries.length]);
 
   if (!auth) return null;
   const engineSetup = auth.setup && auth.mode === 'engine';
@@ -94,6 +99,9 @@ export function Console() {
           <main className="c-main">
             <header className="c-top">
               <div className="c-who"><strong>{me.displayName || me.username}</strong><span className="muted xs">{me.username}</span></div>
+              <button className={`btn small${panel ? ' c-on' : ''}`} aria-pressed={panel} onClick={() => setPanel(p => !p)} title="Actions taken here, their output, and the same action as a command">
+                Console{!panel && entries.length > seen.current && <span className="c-count">{entries.length - seen.current}</span>}
+              </button>
               <button className="btn small" onClick={toggleTheme} aria-label="Switch light or dark theme">◐</button>
               <button className="btn small" onClick={() => post('/api/auth/logout').then(check)}>Sign out</button>
             </header>
@@ -107,6 +115,7 @@ export function Console() {
               {current === 'roles' && <Roles />}
               {current === 'audit' && <Audit />}
             </div>
+            {panel && <ConsolePanel onClose={() => setPanel(false)} />}
           </main>
         </div>
       </MeCtx.Provider>

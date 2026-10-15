@@ -49,6 +49,9 @@ export function beat() {
   if (!cluster.leader && wasLeader) hooks.lostLeader();
   if (cluster.leader) {
     recoverOrphans(t);
+    // Sutra tuning: run time limits, and queued runs whose turn came on another engine.
+    engine.enforceRunTimeouts(t);
+    engine.promoteQueued();
     // Engines that stopped without saying goodbye (killed, crashed) are forgotten after ten minutes.
     q.run('delete from engines where heartbeat_at < ? and id != ?', t - Math.max(deadAfter() * 2, FORGET_MS), config.engineId);
     if (beats++ % 12 === 0) hooks.housekeeping?.();

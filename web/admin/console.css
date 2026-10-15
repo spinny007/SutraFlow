@@ -23,7 +23,8 @@
 .c-sidefoot { margin-top: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 6px; }
 .c-sidefoot a.btn, .c-actions a.btn { color: var(--ink); text-decoration: none; }
 
-.c-main { min-width: 0; min-height: 0; overflow: auto; background: var(--surface); }
+.c-main { min-width: 0; min-height: 0; overflow: auto; background: var(--surface); display: flex; flex-direction: column; }
+.c-body { flex: 1 0 auto; }
 .c-top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 10px 24px; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
 .c-who { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.15; margin-right: 4px; }
 .c-body { padding: 20px 24px 48px; max-width: 1320px; }
@@ -123,7 +124,34 @@ button.c-tile:not(:disabled):hover { border-color: var(--edge); }
 .c-message { margin: 10px 0; white-space: pre-wrap; }
 .c-code { font-family: var(--mono); font-size: 12px; background: var(--paper); border-radius: 8px; padding: 10px; overflow: auto; max-height: 320px; margin: 6px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 
+/* Console panel: docked at the bottom of the work area. */
+.c-console { position: sticky; bottom: 0; z-index: 6; max-height: 46vh; display: flex; flex-direction: column; background: var(--paper); border-top: 2px solid var(--c-auto); box-shadow: 0 -12px 30px -18px rgba(0, 0, 0, .5); }
+.c-consolehead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 24px; border-bottom: 1px solid var(--line); }
+.c-consolebody { overflow: auto; padding: 8px 24px 14px; min-height: 0; }
+.c-consoleempty { margin: 6px 0; }
+.c-entry { border: 1px solid var(--line); border-radius: 10px; background: var(--card); margin-bottom: 6px; }
+.c-entry.failed { border-color: color-mix(in srgb, var(--err) 45%, var(--line)); }
+.c-entryhead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: 100%; text-align: left; border: 0; background: none; padding: 7px 10px; }
+.c-entryurl { margin-left: auto; overflow-wrap: anywhere; }
+.c-entrybody { padding: 0 10px 10px; display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.c-cmdbox { min-width: 0; }
+.c-cmd { min-width: 0; }
+.c-cmd .c-code { margin: 4px 0 8px; max-height: 220px; }
+.c-cmdhead { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.c-tabs.small button { padding: 5px 10px; font-size: 12.5px; }
+.c-confirmcmd { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+.btn.c-on { border-color: var(--c-auto); color: var(--c-auto); }
+.c-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; border-radius: 9px; background: var(--c-auto); color: #fff; font-size: 11px; padding: 0 5px; }
+.c-rowacts { display: inline-flex; gap: 6px; }
+.c-badgebtn { cursor: pointer; background: none; font: inherit; font-size: 10.5px; }
+.c-warn { color: var(--warn); font-weight: 600; }
+.c-tuning { max-width: 980px; }
+.c-tuninggrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 18px; }
+.c-tuninggrid .fld input, .c-tuninggrid .fld select { width: 100%; }
+
 @media (max-width: 860px) {
+  .c-entrybody { grid-template-columns: 1fr; }
+  .c-consolehead, .c-consolebody { padding-left: 16px; padding-right: 16px; }
   .c-shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .c-side { border-right: 0; border-bottom: 1px solid var(--line); padding: 10px 16px; gap: 10px; overflow: visible; }
   .c-menu { display: inline-flex; }

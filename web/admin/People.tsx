@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { del, get, post, put } from '../src/api';
+import { get } from '../src/api';
+import { act as run, type Action } from './log';
 import { useToast } from '../src/ui';
 import { PageHead, State, Err, Empty, Confirm, useLoad, ago, when, newPassword, useMe } from './shared';
 import { Drawer } from './Apps';
@@ -86,25 +87,37 @@ function AccountDrawer({ kind, account, roles, projects, onClose, onSaved }: { k
   });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const [confirm, setConfirm] = useState<{ title: string; text: string; action: string; danger?: boolean; run(): Promise<void> } | null>(null);
+  const [confirm, setConfirm] = useState<{ title: string; text: string; action: string; danger?: boolean; cmd: Action; run(): Promise<void> } | null>(null);
   const [pw, setPw] = useState<{ value: string; mustChange: boolean } | null>(null);
+  const projName = (id: string) => projects.find(p => p.id === id)?.name || id;
   const self = account?.username === me.username;
 
   const save = async () => {
     setBusy(true); setErr('');
     try {
       if (account) {
-        const a = await put<Account>(`/api/access/users/${encodeURIComponent(account.username)}`, { displayName: form.displayName, email: form.email, grants: form.grants });
+        const a = await run<Account>({ label: `Change ${account.username}`, method: 'PUT', url: `/api/access/users/${encodeURIComponent(account.username)}`, body: { displayName: form.displayName, email: form.email, grants: form.grants } });
         onSaved(a, 'Saved');
       } else {
-        const a = await post<Account>('/api/access/users', { username: form.username, kind, displayName: form.displayName, email: form.email, password: form.password || undefined, mustChange: form.mustChange, grants: form.grants });
+        // The sutra command takes one role; with several, only the HTTP call is offered.
+        const g = form.grants[0];
+        const cli = form.grants.length <= 1 ? ['user', 'add', form.username, ...(people ? [] : ['--system']), ...(g ? ['--role', g.role, ...(g.project ? ['--project', projName(g.project)] : [])] : []),
+          ...(form.displayName ? ['--display', form.displayName] : []), ...(form.email ? ['--email', form.email] : []), ...(form.password ? ['--password-from-env', 'NEW_PASSWORD'] : []), ...(people && !form.mustChange ? ['--keep-password'] : [])] : undefined;
+        const a = await run<Account>({ label: `Add ${people ? 'user' : 'system account'} ${form.username}`, method: 'POST', url: '/api/access/users', cli,
+          body: { username: form.username, kind, displayName: form.displayName, email: form.email, password: form.password || undefined, mustChange: form.mustChange, grants: form.grants } });
         onSaved(a, people ? `User ${a.username} added` : `System account ${a.username} added`);
       }
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
-  const act = (title: string, text: string, action: string, fn: () => Promise<unknown>, msg: string, danger = false, close = false) =>
-    setConfirm({ title, text, action, danger, run: async () => { await fn(); if (close) onSaved(null, msg); else onSaved(await get<Account>(`/api/access/users/${encodeURIComponent(account!.username)}`), msg); } });
   const u = account ? encodeURIComponent(account.username) : '';
+  /** An account action: its confirmation, its command, and what to show after. */
+  const ask = (title: string, text: string, action: string, sub: 'unlock' | 'sign-out' | 'enable' | 'disable' | 'delete', msg: string, danger = false) => {
+    const cmd: Action = sub === 'enable' || sub === 'disable'
+      ? { label: `${title} ${account!.username}`, method: 'PUT', url: `/api/access/users/${u}`, body: { disabled: sub === 'disable' }, cli: ['user', sub, account!.username] }
+      : sub === 'delete' ? { label: `Delete ${account!.username}`, method: 'DELETE', url: `/api/access/users/${u}`, cli: ['user', 'delete', account!.username] }
+        : { label: `${title}: ${account!.username}`, method: 'POST', url: `/api/access/users/${u}/${sub}`, cli: ['user', sub, account!.username] };
+    setConfirm({ title, text, action, danger, cmd, run: async () => { await run(cmd); if (sub === 'delete') onSaved(null, msg); else onSaved(await get<Account>(`/api/access/users/${u}`), msg); } });
+  };
 
   return (
     <Drawer title={account ? account.displayName || account.username : people ? 'Add user' : 'Add system account'} sub={account ? <>{account.username} · added {when(account.createdAt)}</> : undefined} onClose={onClose}>
@@ -130,12 +143,12 @@ function AccountDrawer({ kind, account, roles, projects, onClose, onSaved }: { k
           <h3>Account</h3>
           <div className="c-actions wrap">
             <button className="btn small" onClick={() => setPw({ value: newPassword(), mustChange: people })}>{people ? 'Set a new password' : account.hasPassword ? 'Change gateway password' : 'Set gateway password'}</button>
-            {account.locked && <button className="btn small" onClick={() => act('Unlock', `${account.username} can sign in again at once.`, 'Unlock', () => post(`/api/access/users/${u}/unlock`), 'Unlocked')}>Unlock</button>}
-            {people && !self && <button className="btn small" onClick={() => act('Sign out everywhere', 'Every session of this user ends now; they sign in again.', 'Sign out', () => post(`/api/access/users/${u}/sign-out`), 'Signed out everywhere')}>Sign out everywhere</button>}
+            {account.locked && <button className="btn small" onClick={() => ask('Unlock', `${account.username} can sign in again at once.`, 'Unlock', 'unlock', 'Unlocked')}>Unlock</button>}
+            {people && !self && <button className="btn small" onClick={() => ask('Sign out everywhere', 'Every session of this user ends now; they sign in again.', 'Sign out', 'sign-out', 'Signed out everywhere')}>Sign out everywhere</button>}
             {!self && (account.disabled
-              ? <button className="btn small" onClick={() => act('Enable', `${account.username} can sign in and use tokens again.`, 'Enable', () => put(`/api/access/users/${u}`, { disabled: false }), 'Enabled')}>Enable</button>
-              : <button className="btn small c-danger-soft" onClick={() => act('Disable', `${account.username} cannot sign in, sessions end now, and tokens stop working. Everything is kept.`, 'Disable', () => put(`/api/access/users/${u}`, { disabled: true }), 'Disabled', true)}>Disable</button>)}
-            {!self && <button className="btn small c-danger-soft" onClick={() => act('Delete', `${account.username} is deleted with its roles and tokens. The audit log keeps what it did.`, 'Delete', () => del(`/api/access/users/${u}`), 'Deleted', true, true)}>Delete</button>}
+              ? <button className="btn small" onClick={() => ask('Enable', `${account.username} can sign in and use tokens again.`, 'Enable', 'enable', 'Enabled')}>Enable</button>
+              : <button className="btn small c-danger-soft" onClick={() => ask('Disable', `${account.username} cannot sign in, sessions end now, and tokens stop working. Everything is kept.`, 'Disable', 'disable', 'Disabled', true)}>Disable</button>)}
+            {!self && <button className="btn small c-danger-soft" onClick={() => ask('Delete', `${account.username} is deleted with its roles and tokens. The audit log keeps what it did.`, 'Delete', 'delete', 'Deleted', true)}>Delete</button>}
           </div>
           {pw && (
             <div className="c-subform">
@@ -144,14 +157,20 @@ function AccountDrawer({ kind, account, roles, projects, onClose, onSaved }: { k
               {people && <label className="c-check"><input type="checkbox" checked={pw.mustChange} onChange={e => setPw({ ...pw, mustChange: e.target.checked })} /> Ask for a new password at the next sign-in</label>}
               <div className="c-actions">
                 <button className="btn" onClick={() => setPw(null)}>Cancel</button>
-                <button className="btn primary" onClick={async () => { try { await post(`/api/access/users/${u}/password`, { password: pw.value, mustChange: pw.mustChange }); setPw(null); toast('Password set; existing sessions ended'); } catch (e: any) { toast(e.message, true); } }}>Set password</button>
+                <button className="btn primary" onClick={async () => {
+                  try {
+                    await run({ label: `Set the password of ${account.username}`, method: 'POST', url: `/api/access/users/${u}/password`, body: { password: pw.value, mustChange: pw.mustChange },
+                      cli: ['user', 'password', account.username, '--password-from-env', 'NEW_PASSWORD', ...(pw.mustChange ? [] : ['--keep-password'])] });
+                    setPw(null); toast('Password set; existing sessions ended');
+                  } catch (e: any) { toast(e.message, true); }
+                }}>Set password</button>
               </div>
             </div>
           )}
         </section>
       )}
       {account && !people && <Tokens username={account.username} />}
-      {confirm && <Confirm title={confirm.title} text={confirm.text} action={confirm.action} danger={confirm.danger} onYes={confirm.run} onClose={() => setConfirm(null)} />}
+      {confirm && <Confirm title={confirm.title} text={confirm.text} action={confirm.action} danger={confirm.danger} cmd={confirm.cmd} onYes={confirm.run} onClose={() => setConfirm(null)} />}
     </Drawer>
   );
 }
@@ -164,8 +183,13 @@ function Tokens({ username }: { username: string }) {
   const [days, setDays] = useState('90');
   const [shown, setShown] = useState<string | null>(null);
   const [revoke, setRevoke] = useState<{ id: string; name: string } | null>(null);
+  const revokeCmd = (t: { id: string; name: string }): Action => ({ label: `Revoke token ${t.name} of ${username}`, method: 'DELETE', url: `/api/access/users/${u}/tokens/${t.id}`, cli: ['token', 'revoke', username, t.id] });
   const create = async () => {
-    try { const r = await post<{ token: string }>(`/api/access/users/${u}/tokens`, { name: name || 'token', expiresDays: Number(days) || 0 }); setShown(r.token); setName(''); list.reload(); } catch (e: any) { toast(e.message, true); }
+    try {
+      const r = await run<{ token: string }>({ label: `Create an API token for ${username}`, method: 'POST', url: `/api/access/users/${u}/tokens`, body: { name: name || 'token', expiresDays: Number(days) || 0 },
+        cli: ['token', 'create', username, '--name', name || 'token', '--expires-days', String(Number(days) || 0)] });
+      setShown(r.token); setName(''); list.reload();
+    } catch (e: any) { toast(e.message, true); }
   };
   const copy = async () => { try { await navigator.clipboard.writeText(shown!); toast('Copied'); } catch { toast('Select the token and copy it', true); } };
   return (
@@ -200,8 +224,8 @@ function Tokens({ username }: { username: string }) {
           ))}</tbody>
         </table></div>
       )}
-      {revoke && <Confirm title={`Revoke ${revoke.name}`} text="Calls with this token are refused from now on." action="Revoke" danger
-        onYes={async () => { await del(`/api/access/users/${u}/tokens/${revoke.id}`); toast('Token revoked'); list.reload(); }} onClose={() => setRevoke(null)} />}
+      {revoke && <Confirm title={`Revoke ${revoke.name}`} text="Calls with this token are refused from now on." action="Revoke" danger cmd={revokeCmd(revoke)}
+        onYes={async () => { await run(revokeCmd(revoke)); toast('Token revoked'); list.reload(); }} onClose={() => setRevoke(null)} />}
     </section>
   );
 }

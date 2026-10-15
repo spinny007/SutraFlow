@@ -78,6 +78,23 @@ sutra deploy orders.sutra --server $PROD_ENGINE --token $PROD_TOKEN
   ```
 - Packages in `SUTRA_DEPLOY_DIR` are deployed at start, in file-name order. A package whose checksum is already deployed is skipped. A package that cannot be deployed stops the start with an error, so a bad release never serves half-deployed.
 
+### Operating from a shell
+
+Everything the Admin Console does can be done with the `sutra` command (and each console action shows its command for PowerShell and bash):
+
+```
+sutra sutras list [--project Orders]
+sutra sutras stop|start|restart "Order lookup API" --project Orders
+sutra sutras deploy "Order lookup API" --project Orders --version 3
+sutra sutras tune "Order lookup API" --project Orders --max-runs 4 --priority 2 --run-timeout-min 30
+sutra runs list --status failed;  sutra runs show|resubmit|cancel <run id>
+sutra approvals list;  sutra approvals approve|reject <id> --comment "checked"
+sutra engines list;  sutra engines drain engine-2;  sutra engines housekeeping
+sutra engines tune --workers 32;  sutra engines tune --engine engine-2 --workers 8
+sutra token create ci-orders --name github --expires-days 90
+sutra audit --actor alice --outcome denied [--csv]
+```
+
 ## 4. Docker
 
 One image serves both roles:

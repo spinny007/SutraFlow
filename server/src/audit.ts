@@ -1,4 +1,5 @@
 import { q, now } from './db.js';
+import { config } from './config.js';
 
 /**
  * Audit log: who changed what, when, from where, and whether it worked. Every changing admin API call
@@ -10,7 +11,7 @@ export interface AuditEntry {
   target?: string; projectId?: string; status?: number; outcome: 'ok' | 'denied' | 'failed'; details?: unknown;
 }
 
-export const auditRetentionDays = () => Number(process.env.SUTRA_AUDIT_RETENTION_DAYS ?? 365);
+export const auditRetentionDays = () => config.auditRetentionDays;
 
 export function audit(e: AuditEntry) {
   try {

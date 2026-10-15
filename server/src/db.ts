@@ -179,6 +179,9 @@ function migrate() {
   add('tasks', 'released', 'released integer not null default 0');
   add('tasks', 'owner', 'owner text');
   // Users, system accounts and their sign-in state.
+  add('deployments', 'tuning', 'tuning text');
+  add('runs', 'priority', 'priority integer not null default 0');
+  add('tasks', 'priority', 'priority integer not null default 0');
   add('engines', 'drain_requested', 'drain_requested integer not null default 0');
   add('users', 'kind', "kind text not null default 'user'");
   add('users', 'display_name', 'display_name text');

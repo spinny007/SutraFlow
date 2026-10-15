@@ -17,7 +17,8 @@ import * as access from './access.js';
 import type { Caller } from './access.js';
 import { RULES, OPEN_ROUTES, check, auditRequest } from './guard.js';
 import { audit, listAudit, auditCsv } from './audit.js';
-import { overview, applications, setSutraEnabled, requestDrain } from './console.js';
+import { overview, applications, setSutraEnabled, requestDrain, restartSutra } from './console.js';
+import { ENGINE_FIELDS, SUTRA_FIELDS, engineTuning, setEngineTuning, setSutraTuning, sutraTuning } from './tuning.js';
 import { gatewayStatus, getGatewaySettings, setGatewaySettings, listRoutes, startGateway, reloadTls } from './gateway/gateway.js';
 import { acmeStatus, certInfo, getTls, setTls, makeSelfSigned, storeCert, requestAcme } from './gateway/tls.js';
 import { schedulerErrors } from './scheduler.js';
@@ -249,6 +250,13 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.get('/api/console/apps', async req => applications(caller(req)));
   app.put('/api/console/sutras/:id/enabled', async (req: any) => { try { return setSutraEnabled(req.params.id, !!req.body?.enabled); } catch (e: any) { throw bad(e.message); } });
   app.post('/api/console/engines/:id/drain', async (req: any) => { try { return requestDrain(req.params.id); } catch (e: any) { throw new HttpError(404, e.message); } });
+  app.post('/api/console/sutras/:id/restart', async (req: any) => { try { return restartSutra(req.params.id); } catch (e: any) { throw bad(e.message); } });
+  // Tuning: engine values for the cluster or one engine, and per deployed Sutra.
+  app.get('/api/console/tuning', async () => ({ fields: { engine: ENGINE_FIELDS, sutra: SUTRA_FIELDS }, ...engineTuning() }));
+  app.put('/api/console/tuning/engine', async (req: any) => { try { setEngineTuning(req.body?.values || {}); return engineTuning(); } catch (e: any) { throw bad(e.message); } });
+  app.put('/api/console/tuning/engines/:id', async (req: any) => { try { setEngineTuning(req.body?.values || {}, req.params.id); return engineTuning(req.params.id); } catch (e: any) { throw bad(e.message); } });
+  app.get('/api/console/sutras/:id/tuning', async (req: any) => ({ fields: SUTRA_FIELDS, values: sutraTuning(req.params.id) }));
+  app.put('/api/console/sutras/:id/tuning', async (req: any) => { try { return { values: setSutraTuning(req.params.id, req.body?.values || {}) }; } catch (e: any) { throw bad(e.message); } });
 
   /** Lists show only the projects the caller may see. */
   const seen = (req: any) => { const v = access.visibleProjects(caller(req)); return (pid: string | null | undefined) => v === 'all' || (!!pid && v.has(pid)); };

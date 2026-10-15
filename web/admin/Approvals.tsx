@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { post } from '../src/api';
+import { act } from './log';
 import { useToast } from '../src/ui';
 import { PageHead, Err, Empty, useLoad, useEvery, ago, when } from './shared';
 
@@ -13,7 +13,8 @@ export function Approvals() {
   const [comments, setComments] = useState<Record<number, string>>({});
   const list = (data || []).filter(a => a.wait?.kind === 'approval');
   const decide = async (a: Approval, approved: boolean) => {
-    try { await post(`/api/approvals/${a.id}`, { approved, comment: comments[a.id] || '' }); toast(approved ? 'Approved' : 'Rejected'); reload(); } catch (e: any) { toast(e.message, true); }
+    const comment = comments[a.id] || '';
+    try { await act({ label: `${approved ? 'Approve' : 'Reject'} ${a.flowName}: ${a.step}`, method: 'POST', url: `/api/approvals/${a.id}`, body: { approved, comment }, cli: ['approvals', approved ? 'approve' : 'reject', String(a.id), ...(comment ? ['--comment', comment] : [])] }); toast(approved ? 'Approved' : 'Rejected'); reload(); } catch (e: any) { toast(e.message, true); }
   };
   return (
     <>

@@ -83,6 +83,7 @@ const FILES: Group[] = [
       ['server/src/access.ts', 'Users and system accounts (provision, disable, lockout, password rules, sign out everywhere), roles made of permissions, grants for all projects or one project, permission checks, API tokens of system accounts (stored as hashes), and Basic sign-in of system accounts at the gateway.'],
       ['server/src/guard.ts', 'The permission of every admin API route and the project it applies to. The server refuses to start when a route has no rule. Also writes each change and each refusal to the audit log, without passwords or secret values.'],
       ['server/src/console.ts', 'Data for the Admin Console: the overview (engines, deployed Sutras, runs of the last day, failures, approvals, gateway), deployed applications with their triggers and run counts, starting and stopping a deployed Sutra, and drain requests for any engine. Always limited to the projects the caller may see.'],
+      ['server/src/tuning.ts', 'Tuning parameters: engine values for the cluster or one engine (steps at once, steps per run, reply wait, retention, trace sampling) and per deployed Sutra (runs at once, priority, run time limit, default retries, step data in history, retention). Stored in settings and deployments, applied by every engine on the next beat.'],
       ['server/src/audit.ts', 'The audit log: record, search, CSV export, and deletion after <code>SUTRA_AUDIT_RETENTION_DAYS</code>.'],
       ['server/src/auth.ts', 'Studio sign-in: the first visit creates the administrator, sessions are signed cookies, and changing requests need the X-Sutra header (a cross-site form cannot send it).'],
       ['server/src/gateway/gateway.ts', 'The gateway: HTTP and HTTPS listeners for deployed REST and SOAP services and MCP endpoints, WSDL publishing, policy checks, run start with the caller\'s traceparent, and waiting for the reply step (also when another engine runs it).'],
@@ -181,6 +182,8 @@ const FILES: Group[] = [
       ['web/admin/shared.tsx', 'What the signed-in account may do, loading and refresh helpers, state labels, in-page confirmation, password generator.'],
       ['web/admin/Overview.tsx', 'Tiles for engines, deployed Sutras, runs of the last day, approvals, work queue and gateway; recent failures with Resubmit.'],
       ['web/admin/Apps.tsx', 'Deployed projects and Sutras: start and stop, runs with step results, resubmit and cancel, deploy an earlier version, package history and roll back. Also the side panel used by other pages.'],
+      ['web/admin/log.tsx', 'Every console action goes through act(): recorded with its output for the Console panel, and turned into the same action as a sutra command and an HTTP call for Windows PowerShell and Linux shells. Passwords and new tokens never appear.'],
+      ['web/admin/Tuning.tsx', 'Tuning forms for a Sutra and for the engines, with the defaults shown and the change confirmed with its command.'],
       ['web/admin/Approvals.tsx', 'Waiting approvals with comment, Approve and Reject.'],
       ['web/admin/Engines.tsx', 'Engines of the cluster: alive, leader, load, heartbeat; drain and stop one; delete old runs now.'],
       ['web/admin/People.tsx', 'Users and system accounts: add, roles per project, disable, unlock, passwords, sign out everywhere, delete; API tokens shown once.'],
@@ -297,6 +300,7 @@ const SETTINGS: [string, string, string][] = [
   ['SUTRA_DRAIN_MS', '30000', 'Time running steps get to finish on a graceful stop.'],
   ['SUTRA_RUN_RETENTION_DAYS', '30', 'Finished runs older than this are deleted; 0 keeps them.'],
   ['SUTRA_AUDIT_RETENTION_DAYS', '365', 'Audit entries older than this are deleted; 0 keeps them.'],
+  ['SUTRA_TRACE_SAMPLING', '1', 'Share of runs traced, 0 to 1. Changed live by tuning.'],
   ['SUTRA_LOG_FORMAT', 'text', '<code>json</code>: engine events as JSON lines on standard output.'],
   ['SUTRA_METRICS_TOKEN', '(none)', 'When set, <code>/metrics</code> needs this Bearer token.'],
   ['OTEL_EXPORTER_OTLP_ENDPOINT', '(none)', 'OpenTelemetry collector address (OTLP/HTTP).'],
@@ -363,7 +367,8 @@ sec('lifecycle', 'How a run works', `
 ${DIAGRAMS.lifecycle}
 <ol>
 <li><strong>Start.</strong> A trigger (or a test run, the Run API, a channel, Call Sutra, an MCP call) calls <code>startRun</code>. It inserts the run row, which keeps a copy of the Sutra document it started with, and one pending task for the trigger step. Redeploying never changes a run in flight.</li>
-<li><strong>Claim.</strong> A free worker slot claims the next due task with one atomic statement: <code>update tasks set status='running', owner=? where id = (select ... where status='pending' and not_before &lt;= now limit 1) and status='pending' returning *</code>. Two engines can never claim the same task.</li>
+<li><strong>Queue.</strong> A deployed Sutra tuned with <em>Runs at once</em> starts extra runs as <code>queued</code>; they move to running, oldest first, when one of its runs ends (and the leader checks on each beat).</li>
+<li><strong>Claim.</strong> A free worker slot claims the next due task, highest Sutra priority first, with one atomic statement: <code>update tasks set status='running', owner=? where id = (select ... where status='pending' and not_before &lt;= now order by priority desc, id limit 1) and status='pending' returning *</code>. Two engines can never claim the same task.</li>
 <li><strong>Run the activity.</strong> The engine resolves the step's settings (templates, formulas, Project and Sengine variables, secrets) and its Input mapping, then calls the activity's <code>execute</code> with a context (logging, secrets, abort signal, time limit). Loop settings run it once per item of a list, or again while a condition holds, and collect the results.</li>
 <li><strong>Checkpoint.</strong> In one transaction the engine stores the step's output, marks the task done, and inserts tasks for the next steps. A crash before the commit leaves the task as it was; after the commit the next steps exist. Nothing is kept in memory between steps.</li>
 <li><strong>Route.</strong> The step's result names a port (out, error, ok, problems, approved, rejected...). Each connection from that port carries a live token or a skip token according to its condition. A merge waits for a token on every incoming connection.</li>

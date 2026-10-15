@@ -11,6 +11,7 @@ import { resolveSetting } from '../settings.js';
 import { truthy } from '../expr.js';
 import { metrics } from '../metrics.js';
 import { recordSpan, parseTraceparent, traceIdFor, runSpanId, stepSpanId, traceparent as tp } from '../tracing.js';
+import { sutraTuning, tunedSutras } from '../tuning.js';
 import type { Activity, FlowDoc, FlowEdge, FlowNode, ReplyPayload, StepResult } from './types.js';
 
 /**
@@ -174,14 +175,21 @@ export class Engine {
     const id = o.id || crypto.randomUUID();
     const trace = parseTraceparent(o.traceparent);
     const state: RunState = { outputs: {}, vars: initialVars(o.doc), live: { [trig.id]: true }, skips: {}, skipped: {}, joins: {}, logs: [], depth: o.depth || 0, ...(trace ? { trace } : {}) };
+    // Tuning of the deployed Sutra (test and debug runs of drafts are not tuned).
+    const tuning = o.flowId && o.source !== 'test' && o.source !== 'debug' ? sutraTuning(o.flowId) : {};
+    const maxRuns = Number(tuning.maxRuns) || 0;
     tx(() => {
+      // Over its "Runs at once" limit, the run waits in a queue and starts when another one ends.
+      // Runs started by Call Sutra always start (they count): their caller already holds a place and
+      // waits for them, so queuing them could wait forever.
+      const queued = maxRuns > 0 && o.source !== 'sutra' && o.source !== 'process' && Number(q.get<any>(`select count(*) n from runs where flow_id = ? and status in ('running', 'waiting', 'paused') and source not in ('test', 'debug')`, o.flowId)?.n || 0) >= maxRuns;
       q.run(
-        `insert into runs(id, flow_id, project_id, flow_name, version, doc, status, source, trigger_node, input, state, debug, started_at)
-         values(?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?)`,
-        id, o.flowId ?? null, o.projectId ?? null, o.doc.name, o.version ?? 0, JSON.stringify(o.doc), o.source || 'manual', trig.id,
-        o.input === undefined ? null : JSON.stringify(o.input), JSON.stringify(state), o.debug ? JSON.stringify(o.debug) : null, now(),
+        `insert into runs(id, flow_id, project_id, flow_name, version, doc, status, source, trigger_node, input, state, debug, started_at, priority)
+         values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, o.flowId ?? null, o.projectId ?? null, o.doc.name, o.version ?? 0, JSON.stringify(o.doc), queued ? 'queued' : 'running', o.source || 'manual', trig.id,
+        o.input === undefined ? null : JSON.stringify(o.input), JSON.stringify(state), o.debug ? JSON.stringify(o.debug) : null, now(), Number(tuning.priority) || 0,
       );
-      this.insertTask(id, trig.id, o.input === undefined ? null : o.input);
+      this.insertTask(id, trig.id, o.input === undefined ? null : o.input, 0, queued ? 'queued' : 'pending');
     });
     this.docs.set(id, o.doc);
     if (o.onReply) this.replies.set(id, { resolve: o.onReply, done: false });
@@ -193,9 +201,9 @@ export class Engine {
     return id;
   }
 
-  private insertTask(runId: string, nodeId: string, input: any, notBefore = 0) {
-    q.run(`insert into tasks(run_id, node_id, input, status, not_before) values(?, ?, ?, 'pending', ?)`,
-      runId, nodeId, input === undefined ? null : JSON.stringify(input), notBefore);
+  private insertTask(runId: string, nodeId: string, input: any, notBefore = 0, status = 'pending') {
+    q.run(`insert into tasks(run_id, node_id, input, status, not_before, priority) values(?, ?, ?, ?, ?, coalesce((select priority from runs where id = ?), 0))`,
+      runId, nodeId, input === undefined ? null : JSON.stringify(input), status, notBefore, runId);
   }
 
   // ---------- worker loop ----------
@@ -209,7 +217,7 @@ export class Engine {
         // of them changes the row from pending to running, and it records itself as the owner.
         const t = q.get<TaskRow>(
           `update tasks set status = 'running', started_at = ?, owner = ?
-           where id = (select id from tasks where status = 'pending' and not_before <= ? order by id limit 1) and status = 'pending'
+           where id = (select id from tasks where status = 'pending' and not_before <= ? order by priority desc, id limit 1) and status = 'pending'
            returning *`, now(), this.id, Date.now());
         if (!t) {
           if (q.get(`select 1 from tasks where status = 'pending' and not_before <= ? limit 1`, Date.now())) continue; // another engine won; try the next
@@ -570,9 +578,12 @@ export class Engine {
 
   private fail(t: TaskRow, doc: FlowDoc, node: FlowNode | undefined, err: Error, extra: { ms?: number; logs?: RunState['logs'] } = {}) {
     const s = node?.settings || {};
-    const retries = Math.max(0, Math.min(20, Number(s.retries) || 0));
+    // A step's own retry settings win; otherwise the Sutra's tuning, if any.
+    const unset = (v: unknown) => v === undefined || v === null || v === '';
+    const tuned = unset(s.retries) || unset(s.retryDelayMs) ? sutraTuning(q.get<any>('select flow_id, source from runs where id = ?', t.run_id)?.flow_id) : {};
+    const retries = Math.max(0, Math.min(20, Number(unset(s.retries) ? tuned.retries : s.retries) || 0));
     if (node && t.attempt < retries) {
-      const delay = Math.max(0, Number(s.retryDelayMs ?? 1000)) * 2 ** t.attempt;
+      const delay = Math.max(0, Number(unset(s.retryDelayMs) ? (tuned.retryDelayMs ?? 1000) : s.retryDelayMs)) * 2 ** t.attempt;
       metrics.retries.inc({ activity: node.type });
       tx(() => {
         q.run(`update tasks set status = 'pending', attempt = attempt + 1, not_before = ?, error = ? where id = ?`, Date.now() + delay, err.message, t.id);
@@ -616,7 +627,7 @@ export class Engine {
   }
 
   private cancelOpen(runId: string) {
-    q.run(`update tasks set status = 'cancelled', finished_at = ? where run_id = ? and status in ('pending', 'waiting', 'paused')`, now(), runId);
+    q.run(`update tasks set status = 'cancelled', finished_at = ? where run_id = ? and status in ('pending', 'waiting', 'paused', 'queued')`, now(), runId);
     for (const r of q.all<{ id: number }>(`select id from tasks where run_id = ? and status = 'running'`, runId)) {
       q.run(`update tasks set status = 'cancelled', finished_at = ? where id = ?`, now(), r.id);
       this.controllers.get(r.id)?.abort();
@@ -729,6 +740,7 @@ export class Engine {
       projectLog(run.row.project_id, { level: status === 'failed' ? 'error' : 'info', msg: status === 'failed' ? `Run failed: ${err}` : 'Run finished', flow: run.doc.name, run: runId });
       this.observeRun(runId, run.doc.name, status, run.row.started_at, run.row.source, run.state.trace, status === 'failed' ? err : undefined);
       this.finish(runId, status);
+      this.runEnded(runId, run.row.flow_id, run.row.source, status);
       if (run.row.source === 'sutra' || run.row.source === 'process') queueMicrotask(() => this.resumeCaller(runId, status));
     }
     this.notify(runId);
@@ -768,6 +780,50 @@ export class Engine {
     }
   }
 
+  /** After a run of a deployed Sutra ends: trim its step data as tuned, and start queued runs. */
+  private runEnded(runId: string, flowId: string | null, source: string, status: string) {
+    if (!flowId || source === 'test' || source === 'debug') return;
+    const t = sutraTuning(flowId);
+    if (t.stepData === 'none' || (t.stepData === 'errors only' && status === 'done')) q.run('update tasks set input = null, output = null where run_id = ?', runId);
+    this.promoteQueued(flowId);
+  }
+
+  /** Starts queued runs while their Sutra is under its "Runs at once" limit (all Sutras when flowId is empty). */
+  promoteQueued(flowId?: string) {
+    const flows = flowId ? [flowId] : q.all<any>(`select distinct flow_id from runs where status = 'queued'`).map(r => r.flow_id as string);
+    let started = 0;
+    for (const f of flows) {
+      const max = Number(sutraTuning(f).maxRuns) || 0;
+      tx(() => {
+        let active = Number(q.get<any>(`select count(*) n from runs where flow_id = ? and status in ('running', 'waiting', 'paused') and source not in ('test', 'debug')`, f)?.n || 0);
+        while (max === 0 || active < max) {
+          const next = q.get<{ id: string }>(`select id from runs where flow_id = ? and status = 'queued' order by started_at, id limit 1`, f);
+          if (!next) break;
+          q.run(`update runs set status = 'running' where id = ? and status = 'queued'`, next.id);
+          q.run(`update tasks set status = 'pending' where run_id = ? and status = 'queued'`, next.id);
+          active++; started++;
+          queueMicrotask(() => this.notify(next.id));
+        }
+      });
+    }
+    if (started) queueMicrotask(() => this.pump());
+    return started;
+  }
+
+  /** Cancels runs of tuned Sutras that are open longer than their run time limit (the leader calls this). */
+  enforceRunTimeouts(nowMs = Date.now()) {
+    let n = 0;
+    for (const [flowId, t] of tunedSutras()) {
+      const min = Number(t.runTimeoutMin) || 0;
+      if (!min) continue;
+      const cutoff = new Date(nowMs - min * 60000).toISOString();
+      for (const r of q.all<{ id: string }>(`select id from runs where flow_id = ? and status in ('running', 'waiting', 'paused') and source not in ('test', 'debug') and started_at < ?`, flowId, cutoff)) {
+        if (this.cancel(r.id, `Run time limit of ${min} min reached`)) n++;
+      }
+    }
+    return n;
+  }
+
   private finish(runId: string, status: string) {
     const f = this.finishers.get(runId);
     this.finishers.delete(runId);
@@ -797,20 +853,21 @@ export class Engine {
     this.pump();
   }
 
-  cancel(runId: string) {
+  cancel(runId: string, reason?: string) {
     const run = this.loadRun(runId);
-    if (!run || !['running', 'waiting', 'paused'].includes(run.row.status)) return false;
+    if (!run || !['running', 'waiting', 'paused', 'queued'].includes(run.row.status)) return false;
     tx(() => {
       this.cancelOpen(runId);
-      run.state.logs.push({ t: now(), level: 'warn', msg: 'Run cancelled' });
+      run.state.logs.push({ t: now(), level: 'warn', msg: reason ? `Run cancelled: ${reason}` : 'Run cancelled' });
       this.saveState(runId, run.state);
-      q.run(`update runs set status = 'cancelled', finished_at = ? where id = ?`, now(), runId);
+      q.run(`update runs set status = 'cancelled', finished_at = ?${reason ? ', error = ?' : ''} where id = ?`, now(), ...(reason ? [reason] : []), runId);
     });
     const h = this.replies.get(runId);
     if (h && !h.done) h.resolve({ runId, failed: true, error: 'Run cancelled', status: 503, body: { error: 'Run cancelled' } });
     this.replies.delete(runId);
     this.docs.delete(runId);
     this.finish(runId, 'cancelled');
+    this.runEnded(runId, run.row.flow_id, run.row.source, 'cancelled');
     if (run.row.source === 'sutra' || run.row.source === 'process') queueMicrotask(() => this.resumeCaller(runId, 'cancelled'));
     this.observeRun(runId, run.doc.name, 'cancelled', run.row.started_at, run.row.source, run.state.trace, 'Run cancelled');
     // A step waiting for a called process: cancel that process too.
@@ -849,7 +906,7 @@ export class Engine {
     return new Promise((res, rej) => {
       const check = () => {
         const r = q.get<any>('select status from runs where id = ?', runId);
-        if (r && (!['running', 'waiting', 'paused'].includes(r.status) || (untilWaiting && (r.status === 'waiting' || r.status === 'paused')))) {
+        if (r && (!['running', 'waiting', 'paused', 'queued'].includes(r.status) || (untilWaiting && (r.status === 'waiting' || r.status === 'paused')))) {
           this.listeners.delete(fn); clearTimeout(to); res(r.status); return true;
         }
         return false;

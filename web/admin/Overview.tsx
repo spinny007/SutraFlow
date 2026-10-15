@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { post } from '../src/api';
+import { act } from './log';
 import { useToast } from '../src/ui';
 import { PageHead, State, Err, Empty, useLoad, useEvery, ago, can, useMe } from './shared';
 
@@ -23,7 +23,7 @@ export function Overview({ go }: { go(p: any): void }) {
   const alive = data.cluster.engines.filter(e => e.alive).length;
   const certDays = data.gateway.certExpires ? Math.round((new Date(data.gateway.certExpires).getTime() - Date.now()) / 86400000) : null;
   const resubmit = async (id: string) => {
-    try { await post(`/api/runs/${id}/resubmit`); toast('Run resubmitted'); reload(); } catch (e: any) { toast(e.message, true); }
+    try { await act({ label: 'Resubmit a failed run', method: 'POST', url: `/api/runs/${id}/resubmit`, cli: ['runs', 'resubmit', id] }); toast('Run resubmitted'); reload(); } catch (e: any) { toast(e.message, true); }
   };
   const tiles = [
     { label: 'Engines', value: `${alive} of ${data.cluster.engines.length}`, note: data.cluster.leader ? `leader ${data.cluster.leader}` : 'no leader', state: alive === data.cluster.engines.length && alive > 0 ? 'ok' : 'err', to: 'engines' },

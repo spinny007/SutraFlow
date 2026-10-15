@@ -17,6 +17,7 @@ import { lifecycle } from './lifecycle.js';
 import { startCluster, stopCluster, bumpDeployGen, leaveLeadership, cluster } from './cluster.js';
 import { housekeeping } from './housekeeping.js';
 import { ensureBuiltins } from './access.js';
+import { applyTuning, onTuningChange, onWorkersChange } from './tuning.js';
 import { flushTracing } from './tracing.js';
 import { deployPackage, readPackage, packageHistory } from './packages.js';
 import { listProjects } from './projects.js';
@@ -83,6 +84,10 @@ export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gatew
   loadOpsFiles(m => console.log(m));
   await deployFolder(config.deployDir);
   lifecycle.packagesDeployed = true;
+  // Tuning from the Admin Console: applied now and whenever any engine changes it.
+  onWorkersChange(n => { engine.concurrency = n; engine.pump(); });
+  onTuningChange(bumpDeployGen);
+  applyTuning();
   engine.start();
   // Timers and polling listeners run once per cluster, on the leader; routes are served by every engine.
   const relisten = () => { if (cluster.leader) rebuildListeners().catch(e => console.error('Listeners:', e)); };
@@ -93,7 +98,7 @@ export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gatew
   startCluster({
     becameLeader: () => { rebuildSchedules(); rebuildListeners().catch(e => console.error('Listeners:', e)); },
     lostLeader: () => { stopSchedules(); stopListeners().catch(() => {}); },
-    deploymentsChanged: () => { rebuildRoutes(); reschedule(); relisten(); },
+    deploymentsChanged: () => { applyTuning(); rebuildRoutes(); reschedule(); relisten(); },
     housekeeping: () => { try { housekeeping(); } catch (e) { console.error('Housekeeping:', e); } },
     drainRequested: () => { console.log('Drain requested from the Admin Console'); lifecycle.shutdown?.().finally(() => { if (opts.exitOnDrain) process.exit(0); }); },
   });
