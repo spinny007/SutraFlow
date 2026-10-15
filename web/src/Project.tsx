@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { del, get, post, put } from './api';
 import { FieldList } from './Fields';
 import { Modal, useCatalog, useToast } from './ui';
+import { NewProjectDialog } from './NewProject';
 import type { FlowSummary, LoggingConfig, ProjectVariable, Resource, SchemaInfo, SNode } from './types';
 
 /** What the right-hand panel shows when a project item (not an activity) is selected. */
@@ -25,7 +26,6 @@ export function ProjectExplorer({ flows, flowId, openFlow, newFlow, sel, setSel 
   const [creating, setCreating] = useState(false);
   const [kindMenu, setKindMenu] = useState(false);
   const kindOrder = (kind: string) => meta.resourceKinds.findIndex(k => k.kind === kind);
-  const [name, setName] = useState('');
   const sec = (key: string, title: string, count: number, add?: () => void, children?: React.ReactNode) => (
     <div className="xsec">
       <div className="xhead">
@@ -41,14 +41,6 @@ export function ProjectExplorer({ flows, flowId, openFlow, newFlow, sel, setSel 
   );
   const isSel = (s: Partial<ExplorerSel>) => !!sel && Object.entries(s).every(([k, v]) => (sel as any)[k] === v);
 
-  const createProject = async () => {
-    try {
-      const p = await post('/api/projects', { name });
-      setCreating(false); setName('');
-      setProjectId(p.id);
-      await reload();
-    } catch (e: any) { toast(e.message, true); }
-  };
 
   return (
     <div className="explorer">
@@ -56,7 +48,7 @@ export function ProjectExplorer({ flows, flowId, openFlow, newFlow, sel, setSel 
         <select className="search" style={{ flex: 1 }} aria-label="Project" value={projectId} onChange={e => { setProjectId(e.target.value); setSel(null); }}>
           {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
-        <button className="btn small" title="New project" onClick={() => setCreating(true)}>+</button>
+        <button className="btn small" title="New project: empty, with samples, from a package file, or a copy" aria-label="New project" onClick={() => setCreating(true)}>+</button>
       </div>
       {project?.description && <p className="muted xs" style={{ margin: '0 2px 6px' }}>{project.description}</p>}
       {sec('proc', 'Sutras', flows.length, newFlow, flows.map(f => item(f.name, f.id === flowId && !sel, () => { setSel(null); openFlow(f.id); }, '⧉', f.deployed ? `v${f.deployed.version}` : undefined)))}
@@ -86,12 +78,7 @@ export function ProjectExplorer({ flows, flowId, openFlow, newFlow, sel, setSel 
         {item('Logging', isSel({ kind: 'logging' }), () => setSel({ kind: 'logging' }), '≡')}
         {item('Releases (packages)', isSel({ kind: 'releases' }), () => setSel({ kind: 'releases' }), '⬢')}
       </>)}
-      {creating && (
-        <Modal title="New project" onClose={() => setCreating(false)} actions={<><button className="btn" onClick={() => setCreating(false)}>Cancel</button><button className="btn primary" disabled={!name.trim()} onClick={createProject}>Create project</button></>}>
-          <p className="muted">A project holds Sutras, shared resources, schemas, variables and its deployment config.</p>
-          <div className="fld"><label htmlFor="pn">Name</label><input id="pn" type="text" value={name} autoFocus onChange={e => setName(e.target.value)} /></div>
-        </Modal>
-      )}
+      {creating && <NewProjectDialog onClose={() => setCreating(false)} onCreated={async id => { setCreating(false); setProjectId(id); setSel(null); await reload(); }} />}
     </div>
   );
 }

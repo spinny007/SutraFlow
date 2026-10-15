@@ -311,3 +311,14 @@ table.t tr.click:hover td { background: var(--paper); }
 .chip.on, .chip:hover { border-color: var(--focus); color: var(--focus); }
 .slist { list-style: none; padding: 0; margin: 10px 0 0; max-height: 46vh; overflow: auto; display: grid; gap: 8px; }
 .slist label.check { align-items: flex-start; gap: 8px; }
+
+/* Pick lists (samples, Sutras of a package or project): searchable, grouped, nothing chosen at first. */
+.choices { margin-top: 6px; }
+.choicebar { gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 6px; }
+.choicebar .search { flex: 1 1 180px; min-width: 0; }
+.choicelist { max-height: 300px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 4px 8px; background: var(--card); }
+.choicegroup { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 10px 0 2px; }
+.choice { display: flex; gap: 8px; align-items: flex-start; padding: 5px 2px; border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent); cursor: pointer; }
+.choice:last-child { border-bottom: 0; }
+.choice input { margin-top: 3px; }
+.choicenote { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.35; }

@@ -155,6 +155,7 @@ const FILES: Group[] = [
       ['web/vite.config.ts', 'Vite build of two pages (designer and Admin Console) and the development proxy to the admin API.'],
       ['web/src/main.tsx', 'Mounts the React application.'],
       ['web/src/App.tsx', 'Top bar, sign-in, and the switch between Designer, Runs, Resources and Server.'],
+      ['web/src/NewProject.tsx', 'New project: empty, with chosen samples, from chosen Sutras of a package file, or a copy of chosen Sutras of a project; the searchable pick list also used for samples in New Sutra.'],
       ['web/src/Auth.tsx', 'Sign-in, first administrator and password change, shared by the designer and the Admin Console.'],
       ['web/src/api.ts', 'Thin client for the admin API; changing calls carry the X-Sutra header.'],
       ['web/src/types.ts', 'Studio-side types of Sutras, activities, fields and runs.'],
@@ -452,6 +453,7 @@ ${DIAGRAMS.release}
 <li><strong>Deploy</strong>: Sutras are matched by name and created or updated as new versions (unchanged documents are left alone); Sutras not in the package are undeployed unless kept. Each deployment is stored in <code>package_deployments</code> with its report.</li>
 <li><strong>Roll back</strong>: deploys the package before the latest one, or a chosen one from history.</li>
 <li><strong>Test</strong>: deploys into a throw-away server and runs the package's Sutras.</li>
+<li><strong>Import</strong>: a new project from chosen Sutras of a package, as drafts by default (no address clashes, missing secrets only warn), not recorded as a deployment. <strong>Copy</strong> builds a package of chosen Sutras of a project on the same server and imports it the same way.</li>
 </ul>
 <h3 id="cli">The sutra command</h3>
 ${tw(['Command', 'Does'], [

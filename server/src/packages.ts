@@ -172,7 +172,7 @@ export interface DeployReport {
  * a new version and are deployed. Sutras of the project that are not in the package are undeployed
  * (kept, not deleted) unless keepOthers is set. Every deployment is recorded for history and rollback.
  */
-export function deployPackage(input: unknown, o: { project?: string; ops?: unknown; keepOthers?: boolean; skipCheck?: boolean; by?: string } = {}): DeployReport {
+export function deployPackage(input: unknown, o: { project?: string; ops?: unknown; keepOthers?: boolean; skipCheck?: boolean; by?: string; record?: boolean } = {}): DeployReport {
   const p = readPackage(input);
   if (!o.skipCheck) {
     const c = checkPackage(p, { project: o.project });
@@ -234,10 +234,41 @@ export function deployPackage(input: unknown, o: { project?: string; ops?: unkno
     for (const f of listFlows(pid)) if (!keep.has(f.id) && f.deployed) { undeploy(f.id); report.undeployed.push(f.name); report.unchanged = false; }
   }
   if (o.ops !== undefined && o.ops !== null) importOpsFile(pid, typeof o.ops === 'string' ? JSON.parse(o.ops) : o.ops);
+  if (o.record === false) return report;
   q.run(`insert into package_deployments(id, seq, project_id, name, version, checksum, deployed_at, deployed_by, report, package)
     values(?, (select coalesce(max(seq), 0) + 1 from package_deployments), ?, ?, ?, ?, ?, ?, ?, ?)`,
     crypto.randomUUID(), pid, p.name, p.version, p.checksum, now(), o.by || 'cli', JSON.stringify(report), JSON.stringify(p));
   return report;
+}
+
+/**
+ * Imports chosen Sutras of a package into a new project, for study, a proof of concept or a fresh
+ * start. As drafts (the default) nothing is deployed, so addresses never clash with the original and
+ * missing secrets only warn. The project's connections, schemas and variables come along. Not
+ * recorded as a package deployment.
+ */
+export function importPackage(input: unknown, o: { project: string; sutras?: string[]; asDrafts?: boolean; by?: string }) {
+  const p = readPackage(input);
+  const name = String(o.project || '').trim();
+  if (!name) throw new Error('Give the new project a name');
+  if (listProjects().some(x => x.name.toLowerCase() === name.toLowerCase())) throw new Error(`A project named "${name}" exists; choose another name`);
+  const pick = o.sutras?.length ? new Set(o.sutras.map(s => s.toLowerCase())) : null;
+  const drafts = o.asDrafts !== false;
+  const sutras = p.sutras.filter(s => !pick || pick.has(s.name.toLowerCase())).map(s => (drafts ? { ...s, deployed: false } : s));
+  if (!sutras.length) throw new Error('Choose at least one Sutra');
+  const chosen: Package = { ...p, sutras, manifest: { ...p.manifest, sutras: p.manifest.sutras.filter((m: any) => sutras.some(s => s.name === m.name)) } };
+  chosen.checksum = checksumOf(chosen);
+  const c = checkPackage(chosen, { project: name });
+  const errors = drafts ? c.errors.filter(e => !e.startsWith('Missing secrets')) : c.errors;
+  if (errors.length) throw Object.assign(new Error(`The Sutras cannot be imported:\n- ${errors.join('\n- ')}`), { check: c });
+  const report = deployPackage(chosen, { project: name, keepOthers: true, skipCheck: true, by: o.by, record: false });
+  return { ...report, missingSecrets: c.secrets.filter(s => !s.present).map(s => s.name), asDrafts: drafts };
+}
+
+/** Copies chosen Sutras of a project (with its connections, schemas and variables) into a new project, as drafts. */
+export function copyProject(sourceId: string, o: { project: string; sutras?: string[]; by?: string }) {
+  const pkg = buildPackage(sourceId, { version: '0.0.0', note: 'Project copy', sutras: o.sutras?.length ? o.sutras : undefined });
+  return importPackage(pkg, { project: o.project, sutras: o.sutras, asDrafts: true, by: o.by });
 }
 
 /** Deployments of packages to a project, newest first. */

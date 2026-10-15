@@ -38,7 +38,7 @@ import { clusterStatus } from './cluster.js';
 import { prometheusText } from './metrics.js';
 import { tracingStats } from './tracing.js';
 import { housekeeping } from './housekeeping.js';
-import { buildPackage, checkPackage, deployPackage, packageHistory, readPackage, rollbackPackage, testPackage } from './packages.js';
+import { buildPackage, checkPackage, deployPackage, packageHistory, readPackage, rollbackPackage, testPackage, importPackage, copyProject } from './packages.js';
 
 const COOKIE = 'sutra_session';
 
@@ -314,6 +314,18 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     try { return await testPackage(req.body?.package, { skip: req.body?.skip }); } catch (e: any) { throw bad(e.message); }
   });
   app.get('/api/projects/:id/packages', async (req: any) => packageHistory(req.params.id));
+  /** New project from chosen Sutras of a package file: as drafts, or deployed as in the package. */
+  app.post('/api/projects/import', async (req: any) => {
+    const asDrafts = req.body?.asDrafts !== false;
+    if (!asDrafts && !access.can(caller(req), 'deploy', '')) throw new HttpError(403, 'Deploying while importing needs the Deploy permission on all projects; import as drafts instead');
+    try { return importPackage(req.body?.package, { project: req.body?.project, sutras: req.body?.sutras, asDrafts, by: caller(req).u }); } catch (e: any) { throw packErr(e); }
+  });
+  /** New project from chosen Sutras of an existing project, as drafts. */
+  app.post('/api/projects/:id/copy', async (req: any) => {
+    projects.requireProject(req.params.id);
+    if (!access.can(caller(req), 'view', req.params.id)) throw new HttpError(403, 'You need the View permission on the project you copy');
+    try { return copyProject(req.params.id, { project: req.body?.project, sutras: req.body?.sutras, by: caller(req).u }); } catch (e: any) { throw packErr(e); }
+  });
   app.post('/api/projects/:id/rollback', async (req: any) => {
     try { return rollbackPackage(req.params.id, { to: req.body?.to, by: req.user?.u }); } catch (e: any) { throw packErr(e); }
   });

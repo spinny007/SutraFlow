@@ -70,7 +70,14 @@ export const CHAPTERS: Chapter[] = [
   {
     id: 'projects', title: 'Projects and the explorer',
     html: `
-<p>Open the <strong>Project</strong> tab on the left of the Designer. The project list at the top switches projects; <strong>+</strong> creates one. Each project holds:</p>
+<p>Open the <strong>Project</strong> tab on the left of the Designer. The project list at the top switches projects; <strong>+</strong> creates one, starting from:</p>
+<ul>
+<li><strong>Empty</strong>: a name, nothing else.</li>
+<li><strong>Samples</strong>: the sample Sutras you choose. Type in the search box (each word must start a word of the sample, so <em>AI</em> finds the AI samples) and use <em>Select shown</em>; nothing is chosen until you choose.</li>
+<li><strong>Package file</strong>: chosen Sutras of a <code>.sutra</code> package from any SutraFlow server, with the project's connections, schemas and variables. They come in as drafts, so nothing starts and no address clashes with the original; tick <em>Deploy the Sutras that are deployed in the package</em> to deploy them as well. Secret values never travel: the import tells you which secrets to add.</li>
+<li><strong>Copy a project</strong>: chosen Sutras of a project on this server, as drafts in a new project. The original is not changed. Good for a proof of concept or a study copy.</li>
+</ul>
+<p>Each project holds:</p>
 <table class="t"><thead><tr><th>Section</th><th>What it holds</th></tr></thead><tbody>
 <tr><td><strong>Sutras</strong></td><td>The Sutras, with their deployed version. Each Sutra also has <em>Sutra variables</em>, read as <code>{vars.name}</code>.</td></tr>
 <tr><td><strong>Resources</strong></td><td>The project's connections and security, each listed under the name you gave it with a symbol for its kind. <strong>+</strong> opens the list of kinds: HTTP connection, Outbound security, API security policy, AI provider, Email (SMTP and IMAP), Database, Kafka, RabbitMQ, ActiveMQ, Firebase, OAuth connection. The name is its key in the deployment config, so you can rename it safely.</td></tr>

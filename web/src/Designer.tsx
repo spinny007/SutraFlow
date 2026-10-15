@@ -9,6 +9,7 @@ import { ACTIVE, portsOf, type ActivityMeta, type FlowDoc, type FlowNode, type F
 import { TEMPLATES } from './templates';
 import { Inspector, type InspectorTab } from './Inspector';
 import { ExplorerEditor, ProjectExplorer, type ExplorerSel } from './Project';
+import { ChoiceList, sampleChoices } from './NewProject';
 
 const ACT_MIME = 'application/x-sutra-activity';
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -522,25 +523,14 @@ function SamplePicker({ onAdd }: { onAdd(ids: string[]): void }) {
   const [list, setList] = useState<{ id: string; name: string; desc: string; palettes: string; needs?: string }[]>([]);
   const [pick, setPick] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState(false);
-  useEffect(() => { get<typeof list>('/api/samples').then(l => { setList(l); setPick(new Set(l.map(x => x.id))); }).catch(() => {}); }, []);
+  useEffect(() => { get<typeof list>('/api/samples').then(setList).catch(() => {}); }, []);
   if (!list.length) return null;
-  const toggle = (id: string) => setPick(p => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   return (
     <div className="samples">
-      <p className="muted" style={{ marginTop: 14 }}>Or learn from working examples: {list.length} sample Sutras across the palettes.</p>
+      <p className="muted" style={{ marginTop: 14 }}>Or learn from working examples: {list.length} sample Sutras across the palettes. Choose the ones you want.</p>
       <div className="row"><button className="btn" onClick={() => setOpen(o => !o)} aria-expanded={open}>{open ? 'Hide samples' : 'Choose samples'}</button>
-        <button className="btn primary" disabled={!pick.size} onClick={() => onAdd([...pick])}>Add {pick.size === list.length ? 'all' : pick.size} sample{pick.size === 1 ? '' : 's'}</button></div>
-      {open && (
-        <ul className="slist">
-          <li className="row" style={{ gap: 10 }}><button className="btn small" onClick={() => setPick(new Set(list.map(x => x.id)))}>All</button><button className="btn small" onClick={() => setPick(new Set())}>None</button></li>
-          {list.map(x => (
-            <li key={x.id}><label className="check">
-              <input type="checkbox" checked={pick.has(x.id)} onChange={() => toggle(x.id)} />
-              <span><b>{x.name}</b> <span className="muted xs">{x.palettes}</span><br /><span className="muted xs">{x.desc}{x.needs ? ` Needs ${x.needs}.` : ''}</span></span>
-            </label></li>
-          ))}
-        </ul>
-      )}
+        <button className="btn primary" disabled={!pick.size} onClick={() => onAdd([...pick])}>Add {pick.size || ''} sample{pick.size === 1 ? '' : 's'}</button></div>
+      {open && <ChoiceList label="samples" items={sampleChoices(list)} chosen={pick} onChange={setPick} />}
     </div>
   );
 }

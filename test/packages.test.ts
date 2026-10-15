@@ -250,3 +250,44 @@ test('command line against a running server with the token', async () => {
   }));
   assert.equal(bad, 1);
 });
+
+test('new project from chosen Sutras of a package: drafts by default (no address clash), name must be new, secrets only warn', async () => {
+  const H = { authorization: `Bearer ${process.env.SUTRA_ADMIN_TOKEN}` };
+  // Shop serves the Order API address (earlier tests moved it to other projects).
+  for (const d of flows.deployedFlows()) if (d.projectId !== shop && d.doc.nodes.some((n: any) => n.type === 'restService' && n.config.path === '/shop/orders/:id')) flows.undeploy(d.flowId);
+  flows.deploy(shopFlow('Order API').id);
+  const p = pk.buildPackage(shop, { version: '7.0.0' });
+  let r = await srv.admin.inject({ method: 'POST', url: '/api/projects/import', headers: H, payload: { package: p, project: 'Study', sutras: ['Order API', 'Double'] } });
+  assert.equal(r.statusCode, 200, r.body);
+  const study = projects.listProjects().find(x => x.name === 'Study')!.id;
+  assert.deepEqual(flows.listFlows(study).map(f => [f.name, !!f.deployed]).sort(), [['Double', false], ['Order API', false]], 'only the chosen Sutras, as drafts');
+  assert.equal(listResources(undefined, study).length, 2, 'connections come along');
+  assert.equal(pk.packageHistory(study).length, 0, 'an import is not a package deployment');
+  const api = flows.getFlow(shopFlow('Order API', study).id)!;
+  const call = api.doc.nodes.find((n: any) => n.type === 'callProcess')!;
+  assert.equal(call.config.process, shopFlow('Double', study).id, 'references point to the copies');
+  assert.match((await srv.admin.inject({ method: 'POST', url: '/api/projects/import', headers: H, payload: { package: p, project: 'study' } })).json().error, /A project named "study" exists/);
+  assert.match((await srv.admin.inject({ method: 'POST', url: '/api/projects/import', headers: H, payload: { package: p, project: 'Empty pick', sutras: ['Nope'] } })).json().error, /Choose at least one Sutra/);
+  // Deployed as in the package: refused because the original serves the same address.
+  r = await srv.admin.inject({ method: 'POST', url: '/api/projects/import', headers: H, payload: { package: p, project: 'Live copy', sutras: ['Order API'], asDrafts: false } });
+  assert.equal(r.statusCode, 400);
+  assert.match(r.json().error, /already served by/);
+  // Secrets: as drafts they only warn.
+  deleteSecret('SHOP_KEY');
+  r = await srv.admin.inject({ method: 'POST', url: '/api/projects/import', headers: H, payload: { package: p, project: 'No secrets yet', sutras: ['Draft only'] } });
+  assert.equal(r.statusCode, 200, r.body);
+  assert.deepEqual(r.json().missingSecrets, ['SHOP_KEY']);
+  setSecret('SHOP_KEY', 'super-secret-value-123');
+});
+
+test('copy chosen Sutras of a project into a new project, as drafts; the original keeps running', async () => {
+  const H = { authorization: `Bearer ${process.env.SUTRA_ADMIN_TOKEN}` };
+  const before = shopFlow('Order API').deployed;
+  const r = await srv.admin.inject({ method: 'POST', url: `/api/projects/${shop}/copy`, headers: H, payload: { project: 'Shop sandbox', sutras: ['Order API', 'Double'] } });
+  assert.equal(r.statusCode, 200, r.body);
+  const sandbox = projects.listProjects().find(x => x.name === 'Shop sandbox')!.id;
+  assert.deepEqual(flows.listFlows(sandbox).map(f => f.name).sort(), ['Double', 'Order API']);
+  assert.ok(flows.listFlows(sandbox).every(f => !f.deployed));
+  assert.deepEqual(shopFlow('Order API').deployed, before, 'the original is not changed');
+  assert.equal(projects.getProject(sandbox)!.config.variables.find((v: any) => v.name === 'GREETING')?.value, 'hello', 'variables come along');
+});

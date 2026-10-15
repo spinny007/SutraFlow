@@ -47,6 +47,8 @@ export const RULES: Record<string, Rule> = {
   'POST /api/packages/test': R('deploy', undefined, true),
   'GET /api/projects/:id/packages': R('view', 'project'),
   'POST /api/projects/:id/rollback': R('deploy', 'project'),
+  'POST /api/projects/import': R('design', 'all'),
+  'POST /api/projects/:id/copy': R('design', 'all'),
 
   'GET /api/engine/status': R(null),
   'POST /api/engine/drain': R('engines'),
