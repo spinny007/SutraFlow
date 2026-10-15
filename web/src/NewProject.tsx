@@ -54,7 +54,16 @@ export function NewProjectDialog({ onClose, onCreated }: { onClose(): void; onCr
   const { projects } = useCatalog();
   const toast = useToast();
   const [source, setSource] = useState<Source>('empty');
-  const [name, setName] = useState('');
+  const [name, setNameRaw] = useState('');
+  // A suggested name follows the choice until the person types their own.
+  const [auto, setAuto] = useState(true);
+  const setName = (v: string) => { setNameRaw(v); setAuto(false); };
+  const suggest = (base: string) => {
+    if (!auto && name.trim()) return;
+    let n = base, i = 2;
+    while (projects.some(p => p.name.toLowerCase() === n.toLowerCase())) n = `${base} ${i++}`;
+    setNameRaw(n); setAuto(true);
+  };
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [samples, setSamples] = useState<Sample[]>([]);
   const [pkg, setPkg] = useState<any | null>(null);
@@ -65,13 +74,17 @@ export function NewProjectDialog({ onClose, onCreated }: { onClose(): void; onCr
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
-  useEffect(() => { setChosen(new Set()); setErr(''); }, [source]);
+  useEffect(() => {
+    setChosen(new Set()); setErr('');
+    if (source === 'samples') suggest('Samples');
+    if (source === 'empty' && auto) setNameRaw('');
+  }, [source]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (source === 'samples' && !samples.length) get<Sample[]>('/api/samples').then(setSamples).catch(e => setErr(e.message)); }, [source, samples.length]);
   useEffect(() => {
     if (source !== 'copy' || !from) { setFromFlows([]); return; }
     get<any[]>(`/api/flows?projectId=${encodeURIComponent(from)}`).then(setFromFlows).catch(e => setErr(e.message));
     const p = projects.find(x => x.id === from);
-    if (p && !name) setName(`${p.name} copy`);
+    if (p) suggest(`${p.name} copy`);
     setChosen(new Set());
   }, [source, from]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -82,7 +95,7 @@ export function NewProjectDialog({ onClose, onCreated }: { onClose(): void; onCr
       const p = JSON.parse(await file.text());
       if (p?.format !== 'sutraflow-package') throw new Error('This is not a SutraFlow package (.sutra file)');
       setPkg(p);
-      if (!name) setName(projects.some(x => x.name.toLowerCase() === String(p.project?.name).toLowerCase()) ? `${p.project.name} copy` : p.project?.name || '');
+      suggest(String(p.project?.name || 'Imported'));
     } catch (e: any) { setPkgErr(e.message.includes('JSON') ? 'This file is not a SutraFlow package' : e.message); }
   };
 
@@ -99,6 +112,9 @@ export function NewProjectDialog({ onClose, onCreated }: { onClose(): void; onCr
   const exists = projects.some(p => p.name.toLowerCase() === name.trim().toLowerCase());
   const n = chosen.size;
   const ready = !!name.trim() && !exists && (source === 'empty' || n > 0);
+  const why = !name.trim() ? 'Enter a name for the project.' : exists ? 'Choose a name no other project has.'
+    : source === 'package' && !pkg ? 'Choose a package file.' : source === 'copy' && !from ? 'Choose the project to copy.'
+      : source !== 'empty' && !n ? `Tick at least one ${source === 'samples' ? 'sample' : 'Sutra'}.` : '';
   const action = source === 'empty' ? 'Create project' : source === 'samples' ? `Create with ${n} sample${n === 1 ? '' : 's'}` : source === 'package' ? `Import ${n} Sutra${n === 1 ? '' : 's'}` : `Copy ${n} Sutra${n === 1 ? '' : 's'}`;
 
   const create = async () => {
@@ -122,6 +138,7 @@ export function NewProjectDialog({ onClose, onCreated }: { onClose(): void; onCr
 
   return (
     <Modal title="New project" onClose={onClose} actions={<>
+      {why && <span className="muted xs" role="status" style={{ marginRight: 'auto', alignSelf: 'center' }}>{why}</span>}
       <button className="btn" onClick={onClose}>Cancel</button>
       <button className="btn primary" disabled={!ready || busy} onClick={create}>{busy ? 'Working' : action}</button>
     </>}>
