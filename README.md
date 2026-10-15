@@ -61,6 +61,8 @@ claude mcp add --transport http orders https://your-server:8443/mcp/orders --hea
 
 The full user guide is [docs/sutraflow-user-guide.html](docs/sutraflow-user-guide.html), also served by the studio at http://127.0.0.1:4800/guide (the **Guide** button in the top bar). It covers every screen, chapter by chapter, and every activity, connection type, function and pipe with its settings.
 
+The **Admin Console** at http://127.0.0.1:4800/admin (also on headless engines) manages what is deployed: applications and their Sutras (start, stop, restart, runs, versions, tuning, packages), engines, approvals, the gateway (apps and keys, plans, firewall, traffic, APIs and OpenAPI), users, system accounts, roles and the audit log. Every action also shows its `sutra` command and HTTP call for PowerShell and bash.
+
 How SutraFlow works inside, what every file does, deployment and features, with diagrams and a search box: [docs/sutraflow-architecture.html](docs/sutraflow-architecture.html), served at http://127.0.0.1:4800/architecture.
 
 ```bash

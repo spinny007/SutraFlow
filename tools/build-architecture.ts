@@ -547,6 +547,15 @@ ${tw(['Palette', 'Activities'], pals.map(p => `<tr id="pal-${p.id}"><td><strong>
 <li>Resources with a + menu by kind, own names and icons, Test connection; AI model lists and Ollama management.</li>
 <li>${SAMPLES.length} samples that together use every activity.</li>
 <li>Runs with step data, approvals, cancel and resubmit; Releases with packages and history; Server &amp; APIs with gateway, TLS, policies and MCP endpoints.</li>
+<li>New project: empty, with chosen samples, from chosen Sutras of a package file, or a copy of chosen Sutras of a project, as drafts.</li>
+</ul>
+<h3 id="console-features">Admin Console</h3>
+<ul>
+<li>Overview of engines, deployed Sutras, runs of the last day, failures, approvals, work queue and gateway certificate.</li>
+<li>Applications: start, stop and restart deployed Sutras; runs with step results, resubmit and cancel; earlier versions; package history and roll back; per-Sutra tuning.</li>
+<li>Engines of the cluster with drain and engine tuning; approvals; users, system accounts with API tokens, roles; audit log with CSV export.</li>
+<li>Gateway: apps with keys, scopes and OAuth2 client credentials; plans with limits and quotas; firewall; traffic statistics and request log; APIs with OpenAPI.</li>
+<li>A Console panel with every action's output, and each action as a sutra command and an HTTP call for Windows PowerShell and Linux shells.</li>
 </ul>`);
 
 sec('files', 'What each file does', `

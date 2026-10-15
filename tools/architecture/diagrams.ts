@@ -159,16 +159,17 @@ export const DIAGRAMS = {
     + arrow([[275, 116], [275, 188]]) + arrow([[275, 150], [565, 150], [565, 188]])
     + arrow([[995, 116], [995, 160], [855, 160], [855, 188]], 'if needed', '', [925, 153])),
 
-  gateway: figure('gateway', 1010, 200, 'A request to a deployed service. The caller waits until the Sutra\'s reply step answers, on any engine.',
-    row(20, 30, 140, 74, 26, [
-      ['Caller', ['REST, SOAP or MCP'], 'ext'],
-      ['TLS', ['certificate, ACME,', 'client certificates']],
+  gateway: figure('gateway', 1060, 178, 'A request to a deployed service. The caller waits until the Sutra\'s reply step answers, on any engine; every request is written to the request log.',
+    row(20, 30, 128, 80, 20, [
+      ['Caller', ['REST, SOAP', 'or MCP'], 'ext'],
+      ['TLS', ['certificate,', 'client certificates']],
+      ['Firewall', ['deny wins,', 'allow list']],
       ['Route match', ['method and path,', 'SOAP action, /mcp']],
-      ['API policy', ['API key, Basic, JWT,', 'mTLS, WS-Security'], 'acc'],
+      ['API policy', ['app key or token,', 'scopes, plan limit'], 'acc'],
       ['Start run', ['deployed version,', 'traceparent kept']],
       ['Reply step', ['or a timeout', 'and a 504']],
     ])
-    + arrow([[920, 104], [920, 150], [90, 150], [90, 106]], 'response, or a SOAP fault', '', [505, 144])),
+    + arrow([[972, 110], [972, 160], [84, 160], [84, 112]], 'response, 403, 401, 429, or a SOAP fault', '', [528, 154])),
 
   stop: figure('stop', 1010, 130, 'A graceful stop (SIGTERM, docker stop, or POST /api/engine/drain).',
     row(20, 30, 140, 74, 26, [

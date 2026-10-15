@@ -8,6 +8,17 @@ including headless engines, so one console can manage a production engine that h
 Every phase ships with automated tests in the regression suite and updates to the user guide and the
 architecture page.
 
+| Phase | State |
+|---|---|
+| 1. Users, roles, access and audit | Done |
+| 2. The console | Done |
+| 3. Tuning parameters | Done (with Sutra restart, the Console panel and shell commands for every action) |
+| 4. Gateway management | Done |
+| 5. Alerts and dashboard | Next |
+| 6. SFTP / FTP palette | Planned |
+| 7. Git projects from the designer | Planned |
+| 8. Cluster throughput | Planned |
+
 ## Phase 1: Users, roles, access and audit (server)
 
 - **Users**: provisioned by an administrator (display name, email), enable / disable, reset password,

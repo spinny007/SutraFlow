@@ -48,7 +48,7 @@ export const CHAPTERS: Chapter[] = [
   {
     id: 'tour', title: 'The studio, screen by screen',
     html: `
-<p>The top bar holds the four screens, the version in the middle, the light/dark switch and Sign out.</p>
+<p>The top bar holds the four screens, the version in the middle, <strong>Admin Console</strong> (deployed projects, engines, gateway, users and audit, in its own page), <strong>Guide</strong> (this guide in a new tab), the light/dark switch and Sign out.</p>
 <table class="t"><thead><tr><th>Screen</th><th>What it is for</th></tr></thead><tbody>
 <tr><td><strong>Designer</strong></td><td>Building, testing, debugging and deploying Sutras. Left: the <em>Project</em> explorer and the <em>Palettes</em>. Middle: the canvas and its toolbar. Right: the selected activity's General, Input, Output and Settings tabs.</td></tr>
 <tr><td><strong>Runs</strong></td><td>Every run with its status, steps, inputs and outputs, logs; approvals waiting for a person.</td></tr>
@@ -77,6 +77,7 @@ export const CHAPTERS: Chapter[] = [
 <li><strong>Package file</strong>: chosen Sutras of a <code>.sutra</code> package from any SutraFlow server, with the project's connections, schemas and variables. They come in as drafts, so nothing starts and no address clashes with the original; tick <em>Deploy the Sutras that are deployed in the package</em> to deploy them as well. Secret values never travel: the import tells you which secrets to add.</li>
 <li><strong>Copy a project</strong>: chosen Sutras of a project on this server, as drafts in a new project. The original is not changed. Good for a proof of concept or a study copy.</li>
 </ul>
+[[img:new-project|New project from samples: the search "AI" and Select shown chose the five AI samples; nothing is chosen until you choose.]]
 <p>Each project holds:</p>
 <table class="t"><thead><tr><th>Section</th><th>What it holds</th></tr></thead><tbody>
 <tr><td><strong>Sutras</strong></td><td>The Sutras, with their deployed version. Each Sutra also has <em>Sutra variables</em>, read as <code>{vars.name}</code>.</td></tr>
@@ -452,6 +453,7 @@ sutra rollback --project "Orders" --server https://engine:4800 --token $TOKEN</p
 <li><strong>Approvals</strong>: running Sutras waiting for a person, with a comment and <em>Approve</em> or <em>Reject</em>.</li>
 <li><strong>Engines</strong>: every engine sharing the database: alive or silent, leader, steps running, heartbeat. <em>Drain and stop</em> asks one engine to finish its steps, hand the rest to the others and stop; your service manager starts it again. <em>Delete old runs now</em> runs housekeeping at once. <em>Tuning</em> on the same page sets engine values (below).</li>
 </ul>
+[[img:console-command|Every confirmation offers the same action from a shell: the sutra command and the HTTP call, for Windows PowerShell or Linux and macOS.]]
 <p class="h">The Console panel and commands for every action</p>
 <p><strong>Console</strong> in the top bar opens a panel with every action taken in this browser tab: what was done, whether it worked, how long it took, and the server's answer. Each entry also shows the same action as a command, for <strong>Windows PowerShell</strong> and for <strong>Linux and macOS</strong> shells: the <code>sutra</code> command and the HTTP call (<code>Invoke-RestMethod</code> or <code>curl</code>). Every confirmation has <em>Run it from a shell instead</em> with the same commands, so an action can be scripted, put in a runbook, or tried again from a shell when the console is not at hand. Commands read the server address and token from <code>SUTRA_SERVER</code> and <code>SUTRA_ADMIN_TOKEN</code>; use a system account's API token. Passwords never appear in commands: they read <code>NEW_PASSWORD</code> from the environment.</p>
 <pre>sutra sutras list
@@ -460,6 +462,7 @@ sutra runs list --status failed
 sutra runs resubmit 3f2c...
 sutra approvals approve 42 --comment "checked"
 sutra engines drain engine-2</pre>
+[[img:console-panel|The Console panel: what was done, its output, and the same action as commands to copy.]]
 <p class="h">Tuning</p>
 <p>Tuning changes how deployed Sutras run, while they run. Every engine applies a change within a heartbeat, without a restart. Values set by environment variables stay the defaults, and an empty field returns to them.</p>
 <table class="t s"><thead><tr><th>Engine tuning</th><th>What it does</th></tr></thead><tbody>
@@ -477,6 +480,8 @@ sutra engines drain engine-2</pre>
 <tr><td>Step data in history</td><td><em>all</em>, <em>errors only</em> (step data is kept only for runs that did not finish well), or <em>none</em> (for personal or bulky data).</td></tr>
 <tr><td>Keep finished runs</td><td>Days for this Sutra, instead of the engine setting.</td></tr>
 </tbody></table>
+[[img:console-tuning|Tuning of one deployed Sutra. Empty fields show what they mean when left empty.]]
+[[img:console-engines|Engines with their tuning for every engine, and Steps at once for one engine.]]
 <p>Sutra tuning applies to every run of the deployed Sutra, whatever started it: REST or SOAP request, timer, file, mailbox, queue, MCP skill, channel or the Run API. A Sutra with several triggers shares one limit. Test and debug runs from the designer are not tuned, and runs started by Call Sutra always start (they count toward the limit, but never wait behind their own caller). Sutra tuning stays when a new version is deployed. Tuned Sutras show <em>tuned</em> in Applications.</p>
 [[img:console-apps|Applications: deployed projects and Sutras with their triggers, state and runs; Stop and Start per Sutra.]]
 <p class="h">Gateway: apps, keys, plans, firewall, traffic</p>
@@ -488,6 +493,8 @@ sutra engines drain engine-2</pre>
 <li><strong>Traffic</strong>: requests over time (answered, refused, errors), latency p50/p95/p99, the busiest and slowest services, apps, status codes, and the request log with every request's caller, time and error.</li>
 <li><strong>APIs</strong>: what is served, with its policy; OpenAPI for the REST services, and the options to publish it at <code>/openapi.json</code> and to keep the request log.</li>
 </ul>
+[[img:gateway-traffic|Traffic: requests over time split into answered, refused and errors, latency percentiles, busiest and slowest services, apps and status codes; the request log follows below.]]
+[[img:gateway-apis|APIs: what the gateway serves with its policy, OpenAPI, and the gateway options.]]
 <pre>sutra gateway plan set Partner --per-minute 120 --per-day 50000
 sutra gateway app add "Acme shop" --scopes "orders:read" --plan Partner
 sutra gateway key create "Acme shop" --name production --expires-days 365
