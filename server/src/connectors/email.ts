@@ -137,6 +137,12 @@ registerListener('emailTrigger', async c => {
   return () => { stopped = true; clearInterval(t); };
 });
 
+/** Sends a mail through an SMTP connection (alerts and other server messages). */
+export async function sendMail(connectionId: string, m: { to: string; subject: string; text: string; html?: string }) {
+  const { t, from } = transportFor(connectionId, (n, what) => requireSecret(n, what));
+  return t.sendMail({ from, to: m.to, subject: m.subject, text: m.text, ...(m.html ? { html: m.html } : {}) });
+}
+
 /** Test connection: SMTP login check, or IMAP login and logout. */
 export async function testMail(r: { kind: string; config: Record<string, any> }, secret: (n: string, w?: string) => string): Promise<string> {
   const c = r.config;

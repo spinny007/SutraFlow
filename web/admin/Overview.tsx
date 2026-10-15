@@ -2,6 +2,8 @@ import { useCallback } from 'react';
 import { act } from './log';
 import { useToast } from '../src/ui';
 import { PageHead, State, Err, Empty, useLoad, useEvery, ago, can, useMe } from './shared';
+import { StackChart } from './Chart';
+import { sevState, type AlertRow } from './Alerts';
 
 interface OverviewData {
   version: string; mode: string; self: string;
@@ -12,6 +14,9 @@ interface OverviewData {
   approvals: number;
   failures: { id: string; flowName: string; error: string; startedAt: string; source: string; projectId: string }[];
   gateway: { http: string; https: string; error: string; certExpires: string | null };
+  alerts: { open: number; firing: number; critical: number; warning: number; acknowledged: number; latest: AlertRow[] };
+  runsTimeline: { at: string; done: number; failed: number; other: number }[];
+  trafficTimeline: { at: string; requests: number; errors: number; refused: number }[];
 }
 
 export function Overview({ go }: { go(p: any): void }) {
@@ -26,6 +31,7 @@ export function Overview({ go }: { go(p: any): void }) {
     try { await act({ label: 'Resubmit a failed run', method: 'POST', url: `/api/runs/${id}/resubmit`, cli: ['runs', 'resubmit', id] }); toast('Run resubmitted'); reload(); } catch (e: any) { toast(e.message, true); }
   };
   const tiles = [
+    { label: 'Open alerts', value: String(data.alerts.open), note: data.alerts.open ? `${data.alerts.critical} critical, ${data.alerts.acknowledged} acknowledged` : 'nothing is open', state: data.alerts.critical ? 'err' : data.alerts.open ? 'warn' : 'ok', to: 'alerts' },
     { label: 'Engines', value: `${alive} of ${data.cluster.engines.length}`, note: data.cluster.leader ? `leader ${data.cluster.leader}` : 'no leader', state: alive === data.cluster.engines.length && alive > 0 ? 'ok' : 'err', to: 'engines' },
     { label: 'Deployed Sutras', value: String(data.sutras.running), note: data.sutras.stopped ? `${data.sutras.stopped} stopped` : 'all started', state: data.sutras.stopped ? 'warn' : 'ok', to: 'apps' },
     { label: 'Runs, last 24 h', value: String(data.runs24h.done + data.runs24h.failed + data.runs24h.running + data.runs24h.cancelled), note: `${data.runs24h.failed} failed, ${data.runs24h.running} in progress`, state: data.runs24h.failed ? 'err' : 'ok', to: 'apps' },
@@ -47,6 +53,28 @@ export function Overview({ go }: { go(p: any): void }) {
             <span className="c-tile-note">{t.note}</span>
           </button>
         ))}
+      </div>
+      {data.alerts.latest.length > 0 && (
+        <section className="c-section">
+          <h2>Open alerts</h2>
+          <div className="c-alertlist">
+            {data.alerts.latest.map(a => (
+              <button key={a.id} className={`c-alert compact ${a.severity}`} onClick={() => go('alerts')}>
+                {sevState(a)}<strong>{a.ruleName}</strong><span className="c-alertmsg">{a.message}</span><span className="muted xs">{ago(a.startedAt)}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+      <div className="c-halves">
+        <section className="c-section c-project c-half">
+          <h2>Runs, last 24 h</h2>
+          <StackChart label="Runs of deployed Sutras" bucketMs={3600e3} data={data.runsTimeline} series={[{ k: 'done', label: 'done', cls: 'ok' }, { k: 'other', label: 'open or cancelled', cls: 'idle' }, { k: 'failed', label: 'failed', cls: 'err' }]} />
+        </section>
+        <section className="c-section c-project c-half">
+          <h2>Gateway, last 24 h</h2>
+          <StackChart label="Gateway requests" bucketMs={3600e3} data={data.trafficTimeline.map(b => ({ at: b.at, ok: b.requests - b.errors - b.refused, refused: b.refused, errors: b.errors }))} series={[{ k: 'ok', label: 'answered', cls: 'ok' }, { k: 'refused', label: 'refused (4xx)', cls: 'warn' }, { k: 'errors', label: 'errors (5xx)', cls: 'err' }]} />
+        </section>
       </div>
       <section className="c-section">
         <h2>Recent failures</h2>

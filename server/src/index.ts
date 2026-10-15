@@ -17,6 +17,7 @@ import { lifecycle } from './lifecycle.js';
 import { startCluster, stopCluster, bumpDeployGen, leaveLeadership, cluster } from './cluster.js';
 import { housekeeping } from './housekeeping.js';
 import { ensureBuiltins } from './access.js';
+import { evaluate as evaluateAlerts } from './alerts.js';
 import { applyTuning, onTuningChange, onWorkersChange } from './tuning.js';
 import { flushTracing } from './tracing.js';
 import { deployPackage, readPackage, packageHistory } from './packages.js';
@@ -100,6 +101,7 @@ export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gatew
     lostLeader: () => { stopSchedules(); stopListeners().catch(() => {}); },
     deploymentsChanged: () => { applyTuning(); rebuildRoutes(); reschedule(); relisten(); },
     housekeeping: () => { try { housekeeping(); } catch (e) { console.error('Housekeeping:', e); } },
+    alerts: () => { evaluateAlerts().catch(e => console.error('Alerts:', e)); },
     drainRequested: () => { console.log('Drain requested from the Admin Console'); lifecycle.shutdown?.().finally(() => { if (opts.exitOnDrain) process.exit(0); }); },
   });
   rebuildRoutes();

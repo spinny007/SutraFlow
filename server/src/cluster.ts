@@ -14,8 +14,9 @@ import { engine } from './engine/engine.js';
  *  Deploys    a deploy, connection or project change bumps a generation number; every engine
  *             compares it on each beat and reloads its routes (and the leader its listeners).
  *  Drain      the Admin Console marks an engine; that engine drains and stops on its next beat.
+ *  Alerts     the leader checks the alert rules every six beats (30 seconds by default).
  */
-export interface ClusterHooks { becameLeader(): void; lostLeader(): void; deploymentsChanged(): void; housekeeping?(): void; drainRequested?(): void }
+export interface ClusterHooks { becameLeader(): void; lostLeader(): void; deploymentsChanged(): void; housekeeping?(): void; drainRequested?(): void; alerts?(): void }
 
 export const cluster = { leader: false, started: false, draining: false, gen: -1 };
 let timer: NodeJS.Timeout | null = null;
@@ -54,6 +55,7 @@ export function beat() {
     engine.promoteQueued();
     // Engines that stopped without saying goodbye (killed, crashed) are forgotten after ten minutes.
     q.run('delete from engines where heartbeat_at < ? and id != ?', t - Math.max(deadAfter() * 2, FORGET_MS), config.engineId);
+    if (beats % 6 === 0) hooks.alerts?.();
     if (beats++ % 12 === 0) hooks.housekeeping?.();
   }
   const gen = getSetting<number>('deployGen', 0);

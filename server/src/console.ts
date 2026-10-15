@@ -9,6 +9,8 @@ import { gatewayStatus } from './gateway/gateway.js';
 import { certInfo } from './gateway/tls.js';
 import { readiness } from './lifecycle.js';
 import { version, config } from './config.js';
+import { summary as alertSummary, runsTimeline, listAlerts } from './alerts.js';
+import { stats as gatewayStats } from './gateway/apps.js';
 
 /**
  * Data for the Admin Console: what is deployed and how it runs. Every list is limited to the projects
@@ -57,6 +59,9 @@ export function overview(c: Caller) {
     runs24h: { done: runs.done || 0, failed: runs.failed || 0, running: (runs.running || 0) + (runs.waiting || 0), cancelled: runs.cancelled || 0 },
     approvals, failures,
     gateway: { http: gatewayStatus.http, https: gatewayStatus.https, error: gatewayStatus.error || '', certExpires: cert?.validTo || null },
+    alerts: { ...alertSummary(), latest: listAlerts({ state: 'open', limit: 5 }) },
+    runsTimeline: runsTimeline(visibleProjects(c)),
+    trafficTimeline: gatewayStats('24h', visibleProjects(c)).timeline,
   };
 }
 

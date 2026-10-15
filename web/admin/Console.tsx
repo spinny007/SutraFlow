@@ -11,16 +11,18 @@ import { People } from './People';
 import { Roles } from './Roles';
 import { Audit } from './Audit';
 import { Traffic, GwApps, Plans, Firewall, Apis } from './Gateway';
+import { AlertsPage, RulesPage, ChannelsPage } from './Alerts';
 import { ConsolePanel, useEntries } from './log';
 
 /**
  * Admin Console: manages what is deployed (projects, Sutras, runs, approvals), the engines, people,
  * system accounts, roles and the audit log. Design work stays in the designer.
  */
-type Page = 'overview' | 'apps' | 'approvals' | 'engines' | 'traffic' | 'gwapps' | 'plans' | 'firewall' | 'apis' | 'people' | 'systems' | 'roles' | 'audit';
+type Page = 'overview' | 'apps' | 'approvals' | 'engines' | 'alerts' | 'rules' | 'channels' | 'traffic' | 'gwapps' | 'plans' | 'firewall' | 'apis' | 'people' | 'systems' | 'roles' | 'audit';
 
 const NAV: { group: string; items: { id: Page; label: string; perm?: string }[] }[] = [
   { group: 'Operate', items: [{ id: 'overview', label: 'Overview' }, { id: 'apps', label: 'Applications' }, { id: 'approvals', label: 'Approvals' }, { id: 'engines', label: 'Engines' }] },
+  { group: 'Alerts', items: [{ id: 'alerts', label: 'Alerts', perm: 'view' }, { id: 'rules', label: 'Alert rules', perm: 'view' }, { id: 'channels', label: 'Channels', perm: 'alerts' }] },
   { group: 'Gateway', items: [{ id: 'traffic', label: 'Traffic', perm: 'gateway' }, { id: 'gwapps', label: 'Apps and keys', perm: 'gateway' }, { id: 'plans', label: 'Plans', perm: 'gateway' }, { id: 'firewall', label: 'Firewall', perm: 'gateway' }, { id: 'apis', label: 'APIs', perm: 'gateway' }] },
   { group: 'Access', items: [{ id: 'people', label: 'Users', perm: 'users' }, { id: 'systems', label: 'System accounts', perm: 'users' }, { id: 'roles', label: 'Roles', perm: 'users' }] },
   { group: 'Records', items: [{ id: 'audit', label: 'Audit log', perm: 'audit' }] },
@@ -32,6 +34,16 @@ export function Console() {
   const [menu, setMenu] = useState(false);
   const [panel, setPanel] = useState(() => { try { return localStorage.getItem('sutra.console') === 'open'; } catch { return false; } });
   const entries = useEntries();
+  // Open alerts, shown beside Alerts in the navigation.
+  const [openAlerts, setOpenAlerts] = useState(0);
+  const [critical, setCritical] = useState(0);
+  useEffect(() => {
+    if (!auth?.user) return;
+    const load = () => get<any>('/api/alerts/summary').then(s => { setOpenAlerts(s.open); setCritical(s.critical); }).catch(() => {});
+    load();
+    const t = setInterval(() => { if (document.visibilityState === 'visible') load(); }, 15000);
+    return () => clearInterval(t);
+  }, [auth?.user?.username]);
   const seen = useRef(0);
   const check = () => get('/api/auth/status').then(setAuth).catch(() => setAuth({ setup: false, user: null, version: '', mode: 'studio' }));
   useEffect(() => {
@@ -87,7 +99,7 @@ export function Console() {
                 return items.length ? (
                   <div key={g.group} className="c-navgroup">
                     <div className="c-navlabel">{g.group}</div>
-                    {items.map(i => <a key={i.id} href={'#' + i.id} className={current === i.id ? 'act' : ''} aria-current={current === i.id ? 'page' : undefined} onClick={() => setPage(i.id)}>{i.label}</a>)}
+                    {items.map(i => <a key={i.id} href={'#' + i.id} className={current === i.id ? 'act' : ''} aria-current={current === i.id ? 'page' : undefined} onClick={() => setPage(i.id)}>{i.label}{i.id === 'alerts' && openAlerts > 0 && <span className={`c-navcount${critical ? ' crit' : ''}`} aria-label={`${openAlerts} open`}>{openAlerts}</span>}</a>)}
                   </div>
                 ) : null;
               })}
@@ -112,6 +124,9 @@ export function Console() {
               {current === 'apps' && <Apps />}
               {current === 'approvals' && <Approvals />}
               {current === 'engines' && <Engines />}
+              {current === 'alerts' && <AlertsPage />}
+              {current === 'rules' && <RulesPage />}
+              {current === 'channels' && <ChannelsPage />}
               {current === 'traffic' && <Traffic />}
               {current === 'gwapps' && <GwApps />}
               {current === 'plans' && <Plans />}

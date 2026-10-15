@@ -159,15 +159,28 @@ button.c-tile:not(:disabled):hover { border-color: var(--edge); }
 .c-chart { display: block; width: 100%; min-width: 560px; height: auto; }
 .c-grid { stroke: var(--line); stroke-width: 1; }
 .c-axis { fill: var(--muted); font-size: 11px; font-family: var(--sans); }
-.c-bar.ok { fill: var(--c-auto); } .c-bar.warn { fill: var(--warn); } .c-bar.err { fill: var(--err); }
+.c-bar.ok { fill: var(--c-auto); } .c-bar.warn { fill: var(--warn); } .c-bar.err { fill: var(--err); } .c-bar.idle { fill: var(--edge); }
 .c-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
 .c-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
-.c-legend i.ok { background: var(--c-auto); } .c-legend i.warn { background: var(--warn); } .c-legend i.err { background: var(--err); }
+.c-legend i.ok { background: var(--c-auto); } .c-legend i.warn { background: var(--warn); } .c-legend i.err { background: var(--err); } .c-legend i.idle { background: var(--edge); }
 .c-halves { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 0 18px; }
 .c-half { min-width: 0; }
 .c-iplist { width: 100%; min-height: 170px; resize: vertical; }
 .c-inline select.inp { width: auto; flex: 0 1 auto; }
 .c-wrap { overflow-wrap: anywhere; }
+
+/* Alerts. */
+.c-navcount { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 8px; border-radius: 9px; background: var(--warn); color: #fff; font-size: 11px; padding: 0 5px; vertical-align: 1px; }
+.c-navcount.crit { background: var(--err); }
+.c-alertlist { display: flex; flex-direction: column; gap: 8px; }
+.c-alert { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--warn); border-radius: 12px; padding: 10px 14px; text-align: left; }
+.c-alert.critical { border-left-color: var(--err); }
+.c-alert.resolved { border-left-color: var(--line); opacity: .85; }
+.c-alert.compact { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: 100%; }
+.c-alert.compact .c-alertmsg { flex: 1 1 260px; margin: 0; color: var(--muted); }
+.c-alerthead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.c-alertmsg { margin: 6px 0 2px; overflow-wrap: anywhere; }
+.c-alertmore h3 { font-size: 13px; margin: 10px 0 4px; }
 
 @media (max-width: 860px) {
   .c-entrybody { grid-template-columns: 1fr; }

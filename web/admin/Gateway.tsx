@@ -30,7 +30,7 @@ function TrafficChart({ s }: { s: Stats }) {
   const y = (v: number) => T + (H - T - B) * (1 - v / nice);
   const bw = (W - L - 8) / s.timeline.length;
   const label = (iso: string) => { const d = new Date(iso); return s.bucketMs >= 86400e3 ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : s.bucketMs >= 3600e3 && s.period !== '24h' ? d.toLocaleString(undefined, { weekday: 'short', hour: '2-digit' }) : d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }); };
-  const ticks = [0, nice / 2, nice];
+  const ticks = Number.isInteger(nice / 2) ? [0, nice / 2, nice] : [0, nice];
   const every = Math.max(1, Math.ceil(s.timeline.length / 8));
   return (
     <div className="c-chartwrap">

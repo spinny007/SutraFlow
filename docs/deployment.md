@@ -93,6 +93,8 @@ sutra engines list;  sutra engines drain engine-2;  sutra engines housekeeping
 sutra engines tune --workers 32;  sutra engines tune --engine engine-2 --workers 8
 sutra token create ci-orders --name github --expires-days 90
 sutra audit --actor alice --outcome denied [--csv]
+sutra alerts [history]  (exit code 1 while a critical alert is firing);  sutra alerts ack|resolve <id>
+sutra alerts check;  sutra alerts rules;  sutra alerts channels;  sutra alerts test "Operations team"
 sutra gateway apps|plans|stats|log
 sutra gateway app add "Acme shop" --scopes "orders:read" --plan Partner
 sutra gateway key create "Acme shop" --name production --expires-days 365

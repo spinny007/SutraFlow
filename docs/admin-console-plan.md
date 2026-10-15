@@ -14,8 +14,8 @@ architecture page.
 | 2. The console | Done |
 | 3. Tuning parameters | Done (with Sutra restart, the Console panel and shell commands for every action) |
 | 4. Gateway management | Done |
-| 5. Alerts and dashboard | Next |
-| 6. SFTP / FTP palette | Planned |
+| 5. Alerts and dashboard | Done |
+| 6. SFTP / FTP palette | Next |
 | 7. Git projects from the designer | Planned |
 | 8. Cluster throughput | Planned |
 

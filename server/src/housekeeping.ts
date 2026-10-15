@@ -3,6 +3,7 @@ import { config } from './config.js';
 import { pruneAudit } from './audit.js';
 import { tunedSutras } from './tuning.js';
 import { pruneGateway } from './gateway/apps.js';
+import { pruneAlerts } from './alerts.js';
 
 /**
  * Run housekeeping, done by the cluster leader about once a minute: finished runs (done, failed,
@@ -13,6 +14,7 @@ import { pruneGateway } from './gateway/apps.js';
 export function housekeeping(o: { retentionDays?: number; now?: number } = {}) {
   const deletedAudit = pruneAudit();
   pruneGateway(o.now ?? Date.now());
+  pruneAlerts(o.now ?? Date.now());
   let deletedRuns = 0;
   // Sutras tuned to keep their runs for a different time.
   for (const [flowId, t] of tunedSutras()) {

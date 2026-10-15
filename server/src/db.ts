@@ -144,6 +144,15 @@ create table if not exists audit(
   id integer primary key autoincrement, at text not null, actor text not null, actor_kind text, ip text, action text not null,
   method text, path text, target text, project_id text, status integer, outcome text not null, details text);
 create index if not exists audit_at on audit(at);
+create table if not exists alert_channels(
+  id text primary key, name text not null, kind text not null, config text not null, enabled integer not null default 1, updated_at text not null);
+create table if not exists alert_rules(
+  id text primary key, name text not null, kind text not null, params text not null, severity text not null, channels text not null default '[]',
+  enabled integer not null default 1, notify_resolved integer not null default 1, repeat_min integer not null default 0, updated_at text not null);
+create table if not exists alerts(
+  id text primary key, rule_id text not null, rule_name text not null, severity text not null, state text not null, message text,
+  details text, started_at text not null, last_seen_at text not null, last_notified_at text, resolved_at text, ack_by text, ack_at text, notified text not null default '[]');
+create index if not exists alerts_state on alerts(state, started_at);
 create table if not exists gw_plans(
   id text primary key, name text not null, description text, per_minute integer not null default 0, per_hour integer not null default 0,
   per_day integer not null default 0, per_month integer not null default 0, updated_at text not null);

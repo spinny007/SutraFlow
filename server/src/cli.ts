@@ -50,6 +50,9 @@ const HELP = `sutra <command> [options]
   token     create <system account> [--name text] [--expires-days n] | list <account> | revoke <account> <id>
   audit     [--actor name] [--outcome ok|failed|denied] [--from 2026-10-01] [--csv]
 
+  Alerts (need --server):
+  alerts    [list | history] | ack <id> | resolve <id> | check | rules | channels | test <channel>
+
   Gateway (apps, keys, plans, firewall, traffic; need --server):
   gateway   apps | plans | stats [--period 1h|24h|7d|30d] | log [--status errors|refused|ok] [--limit n]
   gateway   app add <name> [--scopes "orders:read orders:write"] [--plan <name>] [--contact text]
@@ -256,7 +259,7 @@ async function main(argv: string[]) {
       out(`${system ? 'System account' : 'User'} ${name} added with role ${body.grants[0].role}${project ? ' on ' + str(a, 'project') : ' on all projects'}`);
       return 0;
     }
-    case 'sutras': case 'runs': case 'approvals': case 'engines': case 'token': case 'audit': case 'gateway':
+    case 'sutras': case 'runs': case 'approvals': case 'engines': case 'token': case 'audit': case 'gateway': case 'alerts':
       if (!call) throw new Usage(`${cmd} needs --server and --token`);
       return operate(cmd, a, call);
     case 'status': {
@@ -376,6 +379,43 @@ async function operate(cmd: string, a: Args, call: Call): Promise<number> {
     case 'token revoke': { const id = a._[3]; if (!arg || !id) throw new Usage('Use: sutra token revoke <account> <id>'); await call('DELETE', `/api/access/users/${encodeURIComponent(arg)}/tokens/${id}`); out('Token revoked'); return 0; }
   }
   if (cmd === 'gateway') return gateway(a, call);
+  if (cmd === 'alerts') {
+    const id = a._[2];
+    switch (sub || 'list') {
+      case 'list': case 'history': {
+        const rows: any[] = await call('GET', `/api/alerts?state=${sub === 'history' ? '' : 'open'}&limit=100`);
+        if (!rows.length) { out(sub === 'history' ? 'No alerts' : 'Nothing is open'); return 0; }
+        table([['ID', 'STATE', 'SEVERITY', 'RULE', 'OPENED', 'MESSAGE'], ...rows.map(r => [r.id, r.state, r.severity, r.ruleName, r.startedAt, String(r.message).slice(0, 80)])]);
+        return sub === 'history' ? 0 : rows.some(r => r.state === 'firing' && r.severity === 'critical') ? 1 : 0;
+      }
+      case 'ack': case 'resolve': {
+        if (!id) throw new Usage(`Use: sutra alerts ${sub} <alert id>`);
+        const r = await call('POST', `/api/alerts/${id}/${sub === 'ack' ? 'acknowledge' : 'resolve'}`);
+        out(`${r.ruleName}: ${r.state}`);
+        return 0;
+      }
+      case 'check': { const r = await call('POST', '/api/alerts/check'); out(`${r.opened} opened, ${r.resolved} resolved, ${r.reminded} reminded`); return 0; }
+      case 'rules': {
+        const rows: any[] = await call('GET', '/api/alerts/rules');
+        table([['RULE', 'WATCHES', 'SEVERITY', 'STATE', 'PARAMETERS'], ...rows.map(r => [r.name, r.kind, r.severity, r.enabled ? 'on' : 'off', JSON.stringify(r.params)])]);
+        return 0;
+      }
+      case 'channels': {
+        const rows: any[] = await call('GET', '/api/alerts/channels');
+        table([['CHANNEL', 'KIND', 'TO', 'STATE'], ...rows.map(c => [c.name, c.kind, c.config.to || c.config.url || 'a Sutra', c.enabled ? 'on' : 'off'])]);
+        return 0;
+      }
+      case 'test': {
+        if (!id) throw new Usage('Use: sutra alerts test <channel name>');
+        const ch = (await call('GET', '/api/alerts/channels') as any[]).find(c => c.name.toLowerCase() === id.toLowerCase() || c.id === id);
+        if (!ch) throw new Error(`No channel named "${id}"`);
+        const r = await call('POST', `/api/alerts/channels/${ch.id}/test`);
+        out(`Sent: ${r.result}`);
+        return 0;
+      }
+    }
+    throw new Usage('Use: sutra alerts [list | history | ack <id> | resolve <id> | check | rules | channels | test <channel>]');
+  }
   if (cmd === 'audit') {
     const p = new URLSearchParams();
     for (const k of ['actor', 'outcome', 'from', 'to']) if (str(a, k)) p.set(k, str(a, k)!);

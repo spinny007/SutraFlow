@@ -1,0 +1,204 @@
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { testEnv, node, edge, captureServer, port } from './helpers.js';
+import { root } from './proc.js';
+
+testEnv(19810);
+process.env.SUTRA_ADMIN_TOKEN = 'alerts-admin-token-0123456789';
+const { boot } = await import('../server/src/index.js');
+const { engine } = await import('../server/src/engine/engine.js');
+const { q } = await import('../server/src/db.js');
+const flows = await import('../server/src/flows.js');
+const projects = await import('../server/src/projects.js');
+const { saveResource } = await import('../server/src/resources.js');
+const { setSecret } = await import('../server/src/secrets.js');
+const { logRequest } = await import('../server/src/gateway/apps.js');
+const alerts = await import('../server/src/alerts.js');
+const require = createRequire(import.meta.url);
+
+let srv: Awaited<ReturnType<typeof boot>>;
+let hook: Awaited<ReturnType<typeof captureServer>>;
+const mails: string[] = [];
+let smtp: any;
+before(async () => {
+  srv = await boot({ listenAdmin: false, gateway: false });
+  await srv.admin.listen({ host: '127.0.0.1', port: port(19819) });
+  hook = await captureServer(() => ({ status: 200, body: '{"ok":true}' }));
+  const { SMTPServer } = require('smtp-server');
+  smtp = new SMTPServer({ authOptional: true, disabledCommands: ['STARTTLS'], onData(stream: any, _s: any, cb: any) { let d = ''; stream.on('data', (c: Buffer) => (d += c)); stream.on('end', () => { mails.push(d); cb(); }); } });
+  await new Promise<void>(r => smtp.listen(0, '127.0.0.1', r));
+});
+after(async () => { await srv.stop(); await hook.close(); await new Promise(r => smtp.close(r)); });
+
+const H = { authorization: `Bearer ${process.env.SUTRA_ADMIN_TOKEN}` };
+const api = (method: string, url: string, payload?: any, headers: Record<string, string> = H) => srv.admin.inject({ method: method as any, url, payload, headers });
+let webhookId = '', emailId = '', sutraChId = '', failing = '', receiver = '', ruleId = '';
+const later = (min: number) => Date.now() + min * 60e3;
+
+test('channels: webhook (signed), email (SMTP), a Sutra; tested; wrong settings refused', async () => {
+  setSecret('HOOK_KEY', 'hook-signing-key');
+  const shop = projects.saveProject({ name: 'Alerts shop', config: { variables: [] } }).id;
+  const smtpConn = saveResource({ kind: 'smtp', name: 'Local mail', project_id: shop, config: { host: '127.0.0.1', port: smtp.server.address().port, security: 'none', from: 'SutraFlow <alerts@sutra.test>', verifyTls: false } });
+  assert.match((await api('POST', '/api/alerts/channels', { name: 'Bad', kind: 'webhook', config: { url: 'ftp://x' } })).json().error, /must start with http/);
+  assert.match((await api('POST', '/api/alerts/channels', { name: 'Bad mail', kind: 'email', config: { connection: smtpConn.id } })).json().error, /at least one address/);
+  webhookId = (await api('POST', '/api/alerts/channels', { name: 'Ops webhook', kind: 'webhook', config: { url: hook.url + '/alerts', secret: 'HOOK_KEY' } })).json().id;
+  emailId = (await api('POST', '/api/alerts/channels', { name: 'Ops mail', kind: 'email', config: { connection: smtpConn.id, to: 'ops@example.test' } })).json().id;
+  const s = node('start', 'Start'), l = node('log', 'Note', { message: 'alert {{input.alert.rule}}: {{input.alert.message}}' });
+  receiver = flows.saveFlow(undefined, { name: 'Alert receiver', nodes: [s, l], edges: [edge(s, l)] }, shop).id;
+  flows.deploy(receiver);
+  sutraChId = (await api('POST', '/api/alerts/channels', { name: 'Alert Sutra', kind: 'sutra', config: { flowId: receiver } })).json().id;
+
+  const t = await api('POST', `/api/alerts/channels/${webhookId}/test`);
+  assert.equal(t.statusCode, 200, t.body);
+  const got = hook.seen.at(-1)!;
+  assert.equal(JSON.parse(got.body).event, 'test');
+  assert.equal(got.headers['x-sutra-signature'], 'sha256=' + crypto.createHmac('sha256', 'hook-signing-key').update(got.body).digest('hex'), 'signed with the vault secret');
+  assert.equal((await api('POST', `/api/alerts/channels/${emailId}/test`)).statusCode, 200);
+  assert.match(mails.at(-1)!, /Subject: \[SutraFlow\] Test: Test from the Admin Console/);
+
+  const f1 = node('start', 'Start'), boom = node('throw', 'Boom', { message: 'card declined' });
+  failing = flows.saveFlow(undefined, { name: 'Payments', nodes: [f1, boom], edges: [edge(f1, boom)] }, shop).id;
+  flows.deploy(failing);
+});
+
+const failRun = async () => {
+  const d = flows.deployedFlows().find(x => x.flowId === failing)!;
+  const id = engine.startRun({ doc: d.doc, flowId: failing, projectId: d.projectId, version: d.version, source: 'api' });
+  await engine.waitFor(id, 10000);
+};
+
+test('failed runs open one alert, notify every channel, remind, and resolve with a message when they clear', async () => {
+  const r = (await api('POST', '/api/alerts/rules', { name: 'Payments failing', kind: 'runFailures', params: { count: 2, minutes: 15, flowId: failing }, severity: 'critical', channels: [webhookId, emailId, sutraChId], repeatMin: 5 })).json();
+  ruleId = r.id;
+  assert.deepEqual(r.params, { count: 2, minutes: 15, flowId: failing });
+  await failRun();
+  assert.equal((await alerts.evaluate()).opened, 0, 'one failure is below the rule');
+  await failRun();
+  const seen = hook.seen.length;
+  assert.equal((await alerts.evaluate()).opened, 1);
+  const open = alerts.listAlerts({ state: 'open' });
+  assert.equal(open.length, 1);
+  assert.equal(open[0].severity, 'critical');
+  assert.match(open[0].message, /2 failed runs of Payments in 15 min/);
+  assert.equal(open[0].details.runs[0].error, 'Boom: card declined');
+  assert.deepEqual(open[0].notified.map((n: any) => [n.channel, n.ok]), [['Ops webhook', true], ['Ops mail', true], ['Alert Sutra', true]]);
+  const body = JSON.parse(hook.seen[seen].body);
+  assert.equal(body.event, 'firing');
+  assert.match(body.text, /\[SutraFlow\] Critical: Payments failing\. 2 failed runs/);
+  assert.match(mails.at(-1)!, /Critical: Payments failing/);
+  const fromSutra = q.get<any>(`select state from runs where flow_id = ? and source = 'alert'`, receiver);
+  assert.ok(fromSutra, 'the alert Sutra ran');
+  assert.equal(JSON.parse(fromSutra.state).outputs.Start.alert.rule, 'Payments failing');
+
+  assert.equal((await alerts.evaluate()).opened, 0, 'still open: no second alert');
+  assert.equal((await alerts.evaluate(later(6))).reminded, 1, 'reminder after repeatMin');
+  assert.equal(hook.seen.length, seen + 2);
+  assert.equal(JSON.parse(hook.seen.at(-1)!.body).event, 'reminder');
+  const sum = (await api('GET', '/api/alerts/summary')).json();
+  assert.deepEqual([sum.open, sum.critical, sum.firing], [1, 1, 1]);
+
+  const ack = await api('POST', `/api/alerts/${open[0].id}/acknowledge`);
+  assert.equal(ack.json().state, 'acknowledged');
+  assert.equal(ack.json().ackBy, 'token');
+  assert.equal((await alerts.evaluate(later(12))).reminded, 0, 'acknowledged alerts do not remind');
+  const res = await alerts.evaluate(later(20));
+  assert.equal(res.resolved, 1, 'the failures left the window');
+  const done = alerts.getAlert(open[0].id)!;
+  assert.equal(done.state, 'resolved');
+  assert.match(done.message, /cleared: 0 failed runs/);
+  assert.equal(JSON.parse(hook.seen.at(-1)!.body).event, 'resolved');
+});
+
+test('engines, work waiting, gateway errors and latency, certificate and listeners', async () => {
+  const mk = async (name: string, kind: string, params: Record<string, unknown>) => (await api('POST', '/api/alerts/rules', { name, kind, params, channels: [] })).json();
+  const eng = await mk('Two engines', 'engines', { minAlive: 2 });
+  assert.equal(alerts.check(eng).firing, true);
+  assert.match(alerts.check(eng).message, /1 engine alive/);
+  const cert = await mk('Certificate', 'certificate', { days: 14 });
+  assert.deepEqual(alerts.check(cert), { firing: false, message: 'No gateway certificate' });
+  const lis = await mk('Listeners', 'listeners', {});
+  assert.equal(alerts.check(lis).firing, false);
+
+  const wait = await mk('Queue', 'workWaiting', { minutes: 5, count: 1 });
+  engine.concurrency = 0;
+  const d = flows.deployedFlows().find(x => x.flowId === receiver)!;
+  const id = engine.startRun({ doc: d.doc, flowId: receiver, projectId: d.projectId, version: d.version, source: 'api' });
+  assert.equal(alerts.check(wait).firing, false, 'just queued');
+  assert.equal(alerts.check(wait, later(6)).firing, true);
+  engine.concurrency = 16; engine.pump();
+  await engine.waitFor(id, 10000);
+
+  const errs = await mk('Gateway errors', 'gatewayErrors', { percent: 10, minutes: 10, minRequests: 10 });
+  const lat = await mk('Gateway slow', 'gatewayLatency', { ms: 500, minutes: 10, minRequests: 10 });
+  for (let i = 0; i < 8; i++) logRequest({ kind: 'rest', method: 'GET', path: '/x', route: 'Orders', status: 200, ms: 40, bytesIn: 0, bytesOut: 0, ip: '127.0.0.1' });
+  assert.match(alerts.check(errs).message, /fewer than 10/);
+  for (let i = 0; i < 4; i++) logRequest({ kind: 'rest', method: 'GET', path: '/x', route: 'Orders', status: 502, ms: 900, bytesIn: 0, bytesOut: 0, ip: '127.0.0.1' });
+  assert.equal(alerts.check(errs).firing, true);
+  assert.match(alerts.check(errs).message, /33\.3% of 12 requests to the gateway failed/);
+  assert.equal(alerts.check(lat).firing, true);
+  const svc = await mk('Other service', 'gatewayErrors', { percent: 10, minutes: 10, minRequests: 1, service: 'Billing' });
+  assert.equal(alerts.check(svc).firing, false, 'only the named service counts');
+});
+
+test('rules and channels: validation, a channel in use cannot go, rule check now; permissions; overview dashboard', async () => {
+  assert.match((await api('POST', '/api/alerts/rules', { name: 'Odd', kind: 'weather' })).json().error, /Unknown kind/);
+  assert.match((await api('POST', '/api/alerts/rules', { name: 'Neg', kind: 'runFailures', params: { count: -1 } })).json().error, /0 or more/);
+  assert.match((await api('POST', '/api/alerts/rules', { name: 'Ghost', kind: 'runFailures', channels: ['nope'] })).json().error, /Unknown channel/);
+  assert.match((await api('DELETE', `/api/alerts/channels/${webhookId}`)).json().error, /Rules still send to this channel: Payments failing/);
+  const chk = await api('POST', `/api/alerts/rules/${ruleId}/check`);
+  assert.equal(chk.statusCode, 200);
+  assert.equal(typeof chk.json().firing, 'boolean');
+  const kinds = (await api('GET', '/api/alerts/kinds')).json();
+  assert.equal(kinds.length, 9);
+
+  await api('POST', '/api/access/users', { username: 'val', password: 'Viewer-pass-55', mustChange: false, grants: [{ role: 'viewer', project: '' }] });
+  const cookie = String((await srv.admin.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'val', password: 'Viewer-pass-55' }, headers: { 'x-sutra': '1' } })).headers['set-cookie']).split(';')[0];
+  const V = { cookie, 'x-sutra': '1' };
+  assert.equal((await api('GET', '/api/alerts', undefined, V)).statusCode, 200, 'viewers see alerts');
+  const any = alerts.listAlerts({})[0];
+  assert.equal((await api('POST', `/api/alerts/${any.id}/resolve`, undefined, V)).statusCode, 403, 'but do not handle them');
+  assert.equal((await api('GET', '/api/alerts/channels', undefined, V)).statusCode, 403);
+
+  await failRun(); await failRun();
+  await alerts.evaluate();
+  const o = (await api('GET', '/api/console/overview')).json();
+  assert.ok(o.alerts.open >= 1);
+  assert.equal(o.alerts.latest[0].ruleName.length > 0, true);
+  assert.ok(o.runsTimeline.length >= 24 && o.runsTimeline.some((b: any) => b.failed > 0));
+  assert.ok(Array.isArray(o.trafficTimeline));
+  const deleted = await api('DELETE', `/api/alerts/rules/${ruleId}`);
+  assert.equal(deleted.statusCode, 200);
+  assert.equal(alerts.listAlerts({ state: 'open' }).filter(a => a.ruleId === ruleId).length, 0, 'deleting a rule resolves its alerts');
+});
+
+const cli = (...args: string[]) => new Promise<{ status: number | null; out: string; err: string }>(res => {
+  const c = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', '--import', 'tsx', path.join(root, 'server/src/cli.ts'), ...args, '--server', `http://127.0.0.1:${port(19819)}`], { cwd: root, env: process.env });
+  let out = '', err = '';
+  c.stdout.on('data', d => (out += d)); c.stderr.on('data', d => (err += d));
+  c.on('close', status => res({ status, out, err }));
+});
+
+test('alerts from the sutra command: rules, channels, test, check, list (exit 1 while a critical alert fires), ack', async () => {
+  await api('POST', '/api/alerts/rules', { name: 'Payments again', kind: 'runFailures', params: { count: 1, minutes: 15, flowId: failing }, severity: 'critical', channels: [] });
+  let r = await cli('alerts', 'rules');
+  assert.equal(r.status, 0, r.err);
+  assert.match(r.out, /Payments again\s+runFailures\s+critical\s+on/);
+  r = await cli('alerts', 'channels');
+  assert.match(r.out, /Ops webhook\s+webhook/);
+  r = await cli('alerts', 'test', 'Ops webhook');
+  assert.equal(r.status, 0, r.err);
+  assert.match(r.out, /Sent: .* answered 200/);
+  r = await cli('alerts', 'check');
+  assert.equal(r.status, 0, r.err);
+  r = await cli('alerts', 'list');
+  assert.equal(r.status, 1, 'a critical alert is firing');
+  const id = (r.out.match(/^\s+([0-9a-f-]{36})\s+firing\s+critical\s+Payments again/m) || [])[1];
+  assert.ok(id, r.out);
+  r = await cli('alerts', 'ack', id);
+  assert.match(r.out, /Payments again: acknowledged/);
+  assert.equal((await cli('alerts', 'list')).status, 0, 'acknowledged: nothing critical firing');
+});

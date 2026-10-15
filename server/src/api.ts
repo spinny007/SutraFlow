@@ -19,6 +19,7 @@ import { RULES, OPEN_ROUTES, check, auditRequest } from './guard.js';
 import { audit, listAudit, auditCsv } from './audit.js';
 import { overview, applications, setSutraEnabled, requestDrain, restartSutra } from './console.js';
 import * as gwa from './gateway/apps.js';
+import * as alerts from './alerts.js';
 import { apiRoutes as gatewayRoutes, refreshFirewall } from './gateway/gateway.js';
 import { ENGINE_FIELDS, SUTRA_FIELDS, engineTuning, setEngineTuning, setSutraTuning, sutraTuning } from './tuning.js';
 import { gatewayStatus, getGatewaySettings, setGatewaySettings, listRoutes, startGateway, reloadTls } from './gateway/gateway.js';
@@ -131,7 +132,7 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   // Headless engines: what the Admin Console and automation need (packages, deployed Sutras, runs,
   // approvals, secrets, engines, access, audit); no designer API.
   const ENGINE_API = [/^\/api\/packages\//, /^\/api\/projects\/?$/, /^\/api\/projects\/[^/]+\/(packages|rollback)$/, /^\/api\/engine\//, /^\/api\/runs/, /^\/api\/secrets/, /^\/api\/meta$/,
-    /^\/api\/access\//, /^\/api\/audit/, /^\/api\/auth\//, /^\/api\/console\//, /^\/api\/gateway\//, /^\/api\/approvals/, /^\/api\/flows\/[^/]+\/(versions|deploy)$/];
+    /^\/api\/access\//, /^\/api\/audit/, /^\/api\/auth\//, /^\/api\/console\//, /^\/api\/gateway\//, /^\/api\/alerts/, /^\/api\/approvals/, /^\/api\/flows\/[^/]+\/(versions|deploy)$/];
   const sameToken = (a: string, b: string) => !!a && !!b && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
   /** The caller: the admin token (everything), a system account token, or a signed-in person. */
   const identify = (req: FastifyRequest): Caller | null => {
@@ -289,6 +290,24 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     const s = getGatewaySettings();
     return gwa.openApi(gatewayRoutes(), `http://${getTls().domains[0] || 'localhost'}:${s.httpPort}`, access.visibleProjects(caller(req)));
   });
+
+  // ---------- alerts: rules, channels, open alerts ----------
+  app.get('/api/alerts', async (req: any) => alerts.listAlerts({ state: req.query?.state, limit: Number(req.query?.limit) || undefined }));
+  app.get('/api/alerts/summary', async () => alerts.summary());
+  app.post('/api/alerts/check', async () => alerts.evaluate());
+  app.post('/api/alerts/:id/acknowledge', async (req: any) => wrap(() => alerts.acknowledge(req.params.id, caller(req).u)));
+  app.post('/api/alerts/:id/resolve', async (req: any) => wrap(() => alerts.resolveAlert(req.params.id, caller(req).u)));
+  app.get('/api/alerts/kinds', async () => alerts.RULE_KINDS);
+  app.get('/api/alerts/rules', async () => alerts.listRules());
+  app.post('/api/alerts/rules', async (req: any) => wrap(() => alerts.saveRule({ ...req.body, id: undefined })));
+  app.put('/api/alerts/rules/:id', async (req: any) => wrap(() => { if (!alerts.getRule(req.params.id)) throw new Error('Rule not found'); return alerts.saveRule({ ...req.body, id: req.params.id }); }));
+  app.delete('/api/alerts/rules/:id', async (req: any) => { alerts.deleteRule(req.params.id); return { ok: true }; });
+  app.post('/api/alerts/rules/:id/check', async (req: any) => wrap(() => { const r = alerts.getRule(req.params.id); if (!r) throw new Error('Rule not found'); return alerts.check(r); }));
+  app.get('/api/alerts/channels', async () => alerts.listChannels());
+  app.post('/api/alerts/channels', async (req: any) => wrap(() => alerts.saveChannel({ ...req.body, id: undefined })));
+  app.put('/api/alerts/channels/:id', async (req: any) => wrap(() => { if (!alerts.getChannel(req.params.id)) throw new Error('Channel not found'); return alerts.saveChannel({ ...req.body, id: req.params.id }); }));
+  app.delete('/api/alerts/channels/:id', async (req: any) => wrap(() => { alerts.deleteChannel(req.params.id); return { ok: true }; }));
+  app.post('/api/alerts/channels/:id/test', async (req: any) => { try { return { ok: true, result: await alerts.testChannel(req.params.id) }; } catch (e: any) { throw bad(e.message); } });
 
   /** Lists show only the projects the caller may see. */
   const seen = (req: any) => { const v = access.visibleProjects(caller(req)); return (pid: string | null | undefined) => v === 'all' || (!!pid && v.has(pid)); };

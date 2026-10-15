@@ -84,6 +84,7 @@ const FILES: Group[] = [
       ['server/src/guard.ts', 'The permission of every admin API route and the project it applies to. The server refuses to start when a route has no rule. Also writes each change and each refusal to the audit log, without passwords or secret values.'],
       ['server/src/console.ts', 'Data for the Admin Console: the overview (engines, deployed Sutras, runs of the last day, failures, approvals, gateway), deployed applications with their triggers and run counts, starting and stopping a deployed Sutra, and drain requests for any engine. Always limited to the projects the caller may see.'],
       ['server/src/tuning.ts', 'Tuning parameters: engine values for the cluster or one engine (steps at once, steps per run, reply wait, retention, trace sampling) and per deployed Sutra (runs at once, priority, run time limit, default retries, step data in history, retention). Stored in settings and deployments, applied by every engine on the next beat.'],
+      ['server/src/alerts.ts', 'Alerts: channels (email, signed webhook, a Sutra), rules of nine kinds checked by the cluster leader every 30 seconds, alerts that open, remind, are acknowledged and resolve, delivery records, and the runs timeline of the Overview.'],
       ['server/src/audit.ts', 'The audit log: record, search, CSV export, and deletion after <code>SUTRA_AUDIT_RETENTION_DAYS</code>.'],
       ['server/src/auth.ts', 'Studio sign-in: the first visit creates the administrator, sessions are signed cookies, and changing requests need the X-Sutra header (a cross-site form cannot send it).'],
       ['server/src/gateway/gateway.ts', 'The gateway: HTTP and HTTPS listeners for deployed REST and SOAP services and MCP endpoints, WSDL publishing, policy checks, run start with the caller\'s traceparent, and waiting for the reply step (also when another engine runs it).'],
@@ -187,6 +188,8 @@ const FILES: Group[] = [
       ['web/admin/log.tsx', 'Every console action goes through act(): recorded with its output for the Console panel, and turned into the same action as a sutra command and an HTTP call for Windows PowerShell and Linux shells. Passwords and new tokens never appear.'],
       ['web/admin/Tuning.tsx', 'Tuning forms for a Sutra and for the engines, with the defaults shown and the change confirmed with its command.'],
       ['web/admin/Gateway.tsx', 'Gateway pages: Traffic (chart, percentiles, busiest and slowest services, apps, request log), Apps and keys, Plans, Firewall, APIs with OpenAPI and gateway options.'],
+      ['web/admin/Alerts.tsx', 'Alerts pages: open alerts and history with acknowledge and resolve, alert rules with Check now, channels with Send a test.'],
+      ['web/admin/Chart.tsx', 'Stacked bar chart over time drawn to one scale from the theme colours (Overview runs and gateway traffic).'],
       ['web/admin/Approvals.tsx', 'Waiting approvals with comment, Approve and Reject.'],
       ['web/admin/Engines.tsx', 'Engines of the cluster: alive, leader, load, heartbeat; drain and stop one; delete old runs now.'],
       ['web/admin/People.tsx', 'Users and system accounts: add, roles per project, disable, unlock, passwords, sign out everywhere, delete; API tokens shown once.'],
@@ -284,6 +287,9 @@ const TABLE_TEXT: Record<string, string> = {
   package_deployments: 'Package history per project: version, checksum, who deployed it, the report and the package itself (for rollback).',
   engines: 'Engines of the cluster: host, process, mode, version, heartbeat, workers, active steps, draining.',
   leases: 'Cluster-wide locks with an expiry: the leader lease and the deploy-folder lock.',
+  alert_channels: 'Where alerts go: email (an SMTP connection and addresses), webhook (address and signing secret name), or a Sutra.',
+  alert_rules: 'What to watch: kind, settings, severity, channels, on or off, tell when resolved, reminder minutes.',
+  alerts: 'Alerts: rule, severity, state (firing, acknowledged, resolved), message and details, times, who acknowledged, what was sent where.',
   gw_plans: 'Gateway plans: requests per minute, hour and day, and a monthly quota.',
   gw_apps: 'Gateway apps: name, contact, scopes, plan, disabled.',
   gw_keys: 'API keys of gateway apps: hash, name, expiry and last use. Key values are never stored.',
@@ -526,6 +532,9 @@ ${tw(['Signal', 'Where', 'Details'], [
   ['Run history', 'Studio Runs, <code>/api/runs</code>', 'Every step\'s input, output, error and duration; resubmit; retention by <code>SUTRA_RUN_RETENTION_DAYS</code>'],
 ].map(([a, b, c]) => `<tr><td><strong>${a}</strong></td><td>${b}</td><td>${c}</td></tr>`).join(''))}`);
 
+sec('alerts', 'Alerts', `
+<p>The cluster leader checks every enabled rule every six heartbeats (30 seconds by default), so a cluster alerts once however many engines it has. A check reads the database: failed or slow runs in a window, the gateway request log for error rate and p95 latency, engine heartbeats, pending steps older than a limit, waiting approvals, the gateway certificate, and the listeners of the leader. When a rule's condition holds and it has no open alert, an alert opens and every channel of the rule is told; while it holds, the alert is updated and, unless acknowledged, a reminder goes out every chosen number of minutes; when it clears, the alert resolves and the channels are told if the rule says so. Deliveries are recorded on the alert with their result. Channels: email through an SMTP connection; a webhook with a JSON body (<code>event</code>, <code>text</code>, <code>alert</code>) signed with an HMAC of a vault secret in <code>X-Sutra-Signature</code>; or a deployed Sutra started with the alert as its input. Resolved alerts are deleted after <code>SUTRA_AUDIT_RETENTION_DAYS</code>. <code>sutra alerts</code> exits with 1 while a critical alert is firing, for scripts and monitors.</p>`);
+
 sec('security', 'Security', `
 <ul>
 <li><strong>Studio</strong>: the first visit creates the administrator; signed session cookies that end when the account is disabled or signed out everywhere; changing requests need the X-Sutra header; the admin port listens on 127.0.0.1 unless set otherwise.</li>
@@ -565,6 +574,7 @@ ${tw(['Palette', 'Activities'], pals.map(p => `<tr id="pal-${p.id}"><td><strong>
 <li>Engines of the cluster with drain and engine tuning; approvals; users, system accounts with API tokens, roles; audit log with CSV export.</li>
 <li>Gateway: apps with keys, scopes and OAuth2 client credentials; plans with limits and quotas; firewall; traffic statistics and request log; APIs with OpenAPI.</li>
 <li>A Console panel with every action's output, and each action as a sutra command and an HTTP call for Windows PowerShell and Linux shells.</li>
+<li>Alerts: rules of nine kinds, channels (email, webhook, Sutra), open alerts with acknowledge and resolve, reminders; the Overview with open alerts and charts of runs and gateway traffic.</li>
 </ul>`);
 
 sec('files', 'What each file does', `

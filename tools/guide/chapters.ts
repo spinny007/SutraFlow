@@ -484,6 +484,18 @@ sutra engines drain engine-2</pre>
 [[img:console-engines|Engines with their tuning for every engine, and Steps at once for one engine.]]
 <p>Sutra tuning applies to every run of the deployed Sutra, whatever started it: REST or SOAP request, timer, file, mailbox, queue, MCP skill, channel or the Run API. A Sutra with several triggers shares one limit. Test and debug runs from the designer are not tuned, and runs started by Call Sutra always start (they count toward the limit, but never wait behind their own caller). Sutra tuning stays when a new version is deployed. Tuned Sutras show <em>tuned</em> in Applications.</p>
 [[img:console-apps|Applications: deployed projects and Sutras with their triggers, state and runs; Stop and Start per Sutra.]]
+<p class="h">Alerts</p>
+<p>The <strong>Overview</strong> shows open alerts, runs of the last day and gateway traffic as charts. Under <strong>Alerts</strong>:</p>
+<ul>
+<li><strong>Channels</strong> say where alerts go: <em>email</em> through any project's SMTP connection, a <em>webhook</em> (a JSON POST with <code>event</code>, <code>text</code> and <code>alert</code>; chat tools that read a text field show the message; optionally signed with <code>X-Sutra-Signature</code> from a vault secret), or a deployed <em>Sutra</em> that starts with the alert as its input, to open a ticket or call someone. <em>Send a test</em> tries a channel.</li>
+<li><strong>Alert rules</strong> say what to watch: failed runs (of one Sutra or any), slow runs, gateway error rate, gateway latency (p95), engines (one stopped beating, or fewer alive than needed), work waiting in the queue too long, approvals waiting too long, the gateway certificate ending soon, listeners in error. Each rule has a severity (warning or critical), channels, whether to tell when it resolves, and reminders every few minutes while nobody acknowledged it. <em>Check now</em> shows what the rule finds at this moment.</li>
+<li><strong>Alerts</strong> lists what is open, newest first, and the history. The cluster leader checks every rule every 30 seconds, so a cluster alerts once; one alert per rule stays open until its condition clears. <em>Acknowledge</em> says someone is on it and stops reminders; <em>Resolve</em> closes it by hand. Each alert shows what was sent where, and whether it arrived.</li>
+</ul>
+[[img:alerts-open|Alerts: an open critical alert with what was found, Acknowledge and Resolve; Details shows what was sent where.]]
+[[img:alerts-rule|An alert rule: what to watch, its settings, severity, channels and reminders; Check now shows what it finds at this moment.]]
+<pre>sutra alerts                 (open alerts; exit code 1 while a critical alert is firing)
+sutra alerts ack &lt;id&gt;
+sutra alerts test "Operations team"</pre>
 <p class="h">Gateway: apps, keys, plans, firewall, traffic</p>
 <ul>
 <li><strong>Apps and keys</strong>: an app is a consumer of your APIs (a partner, a mobile app, a team) with <em>scopes</em> such as <code>orders:read</code> and a plan. Create keys for it; each is shown once. Callers send a key in <code>X-API-Key</code>, or exchange it for an access token at <code>POST /oauth/token</code> on the gateway (client credentials: the app id and a key). Disabling an app or revoking a key refuses its calls at once.</li>
@@ -513,7 +525,7 @@ sutra gateway stats --period 24h</pre>
 <tr><td>Operate</td><td>Start, stop, cancel and resubmit; clear runtime variable values.</td></tr>
 <tr><td>Approve</td><td>Decide approvals.</td></tr>
 <tr><td>Call services</td><td>System accounts: call the project's gateway services with Basic sign-in.</td></tr>
-<tr><td>Secrets, Engines, Gateway, Server settings, Users and roles, Audit, Alerts</td><td>Server permissions: they only come with a grant on all projects.</td></tr>
+<tr><td>Secrets, Engines, Gateway, Server settings, Users and roles, Audit, Alerts (channels, rules, acknowledging)</td><td>Server permissions: they only come with a grant on all projects.</td></tr>
 </tbody></table>
 [[note:Always one administrator|Nobody can disable or delete their own account, and the last active administrator cannot lose the role.]]
 <p class="h">Audit log</p>
