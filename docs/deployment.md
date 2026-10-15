@@ -103,13 +103,25 @@ sutra gateway openapi > openapi.json
 
 ### Windows with Laragon
 
-Templates in `deploy/laragon/`:
+Templates in `deploy/laragon/` (copy them into `C:\laragon\www\sutra`; set the Node.js path in `_env.cmd`):
 
 1. Build (`npm run build`), then copy `package.json`, `package-lock.json`, `dist/` and `docs/*.html` to `C:\laragon\www\sutra` and run `npm ci --omit=dev` there.
-2. Keep data outside the web folder: `start-sutra.cmd` sets `SUTRA_DATA_DIR=C:\laragon\data\sutraflow`, the admin port 4810 and the gateway 8090/8453 (so a development copy can keep 4800/8080). It runs Node.js 24 from NVM; Laragon's bundled Node.js is older than SutraFlow needs.
+2. Scripts in that folder:
+
+   | Script | Does |
+   |---|---|
+   | `start-sutra.cmd` | Studio: designer, Admin Console and engine, http://127.0.0.1:4810 (gateway 8090) |
+   | `start-engine.cmd` | A headless engine on the same database, http://127.0.0.1:4811/admin (gateway 8091) |
+   | `stop.cmd`, `stop.cmd engine` | Graceful stop: running steps finish first |
+   | `status.cmd` | Ready or not, and every engine of the cluster |
+   | `open-designer.cmd`, `open-admin.cmd`, `open-guide.cmd` | Open the pages |
+   | `sutra.cmd ...` | The sutra command against this server, such as `sutra.cmd sutras list` |
+   | `_env.cmd` | Shared settings: data folder, Node.js 24, ports, and a local admin token made once |
+
+   Data stays outside the web folder in `C:\laragon\data\sutraflow`, with `admin-token.txt`, which acts as an administrator; keep it private.
 3. `.htaccess` in `www\sutra` denies direct access to the folder.
-4. `01-sutra.conf` goes to `C:\laragon\etcpache2\sites-enabled`: it loads Apache's proxy modules and forwards `http://sutra.test` to the Node.js server.
-5. Add to Laragon's Procfile (Menu > Procfile): `SutraFlow: autorun C:\laragon\www\sutra\start-sutra.cmd PWD=www/sutra`. Laragon starts it when Laragon starts; it is also in Menu > Procfile.
+4. `01-sutra.conf` goes to `C:\laragon\etcpache2\sites-enabled`: it loads Apache's proxy modules and forwards `http://sutra.test` to the studio.
+5. Add to Laragon's Procfile (Menu > Procfile): `SutraFlow: autorun C:\laragon\www\sutra\start-sutra.cmd PWD=www/sutra`.
 
 Laragon's MySQL works as a DB Ops connection (driver mysql, host 127.0.0.1, port 3306, user root). `SUTRA_TEST_MYSQL_URL=mysql://root@127.0.0.1:3306/sutraflow_test npm test` also runs the MySQL tests.
 
