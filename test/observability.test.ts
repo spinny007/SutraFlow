@@ -143,7 +143,7 @@ test('retention: finished runs older than the limit are deleted with their steps
   const long = new Date(Date.now() - 40 * 86400000).toISOString();
   q.run('update runs set started_at = ?, finished_at = ? where id = ?', long, long, old1.id);
   q.run('update runs set started_at = ? where id = ?', long, waiting);
-  assert.deepEqual(housekeeping({ retentionDays: 0 }), { deletedRuns: 0 }, '0 keeps everything');
+  assert.equal(housekeeping({ retentionDays: 0 }).deletedRuns, 0, '0 keeps everything');
   const r = await srv.admin.inject({ method: 'POST', url: '/api/engine/housekeeping', headers: ADMIN, payload: { retentionDays: 30 } });
   assert.equal(r.statusCode, 200, r.body);
   assert.ok(r.json().deletedRuns >= 1);

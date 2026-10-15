@@ -53,8 +53,36 @@ function SignIn({ setup, onDone }: { setup: boolean; onDone(): void }) {
   );
 }
 
+/** Shown after an administrator set the password: the person chooses their own before anything else. */
+function ChangePassword({ onDone }: { onDone(): void }) {
+  const [current, setCurrent] = useState('');
+  const [password, setPw] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [err, setErr] = useState('');
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setErr('');
+    if (password !== confirm) return setErr('The passwords do not match');
+    try { await post('/api/auth/password', { current, password }); onDone(); } catch (x: any) { setErr(x.message); }
+  };
+  return (
+    <div className="auth">
+      <form className="card" onSubmit={submit}>
+        <div className="brand" style={{ marginBottom: 12 }}><Logo /> SutraFlow</div>
+        <h2>Choose your password</h2>
+        <p className="muted" style={{ marginTop: 0 }}>An administrator set your current password. Replace it with one only you know.</p>
+        {err && <div className="errbox">{err}</div>}
+        <div className="fld"><label htmlFor="cp-cur">Current password</label><input id="cp-cur" type="password" value={current} onChange={e => setCurrent(e.target.value)} autoComplete="current-password" /></div>
+        <div className="fld"><label htmlFor="cp-new">New password</label><input id="cp-new" type="password" value={password} onChange={e => setPw(e.target.value)} autoComplete="new-password" /><div className="hint">At least 10 characters, with letters and a digit or symbol, not containing your username.</div></div>
+        <div className="fld"><label htmlFor="cp-conf">Confirm new password</label><input id="cp-conf" type="password" value={confirm} onChange={e => setConfirm(e.target.value)} autoComplete="new-password" /></div>
+        <button className="btn primary" type="submit">Save password</button>
+      </form>
+    </div>
+  );
+}
+
 export function App() {
-  const [auth, setAuth] = useState<{ setup: boolean; user: { username: string } | null } | null>(null);
+  const [auth, setAuth] = useState<{ setup: boolean; user: { username: string; mustChange?: boolean } | null } | null>(null);
   const [page, setPage] = useState<Page>(() => (location.hash.slice(1) as Page) || 'designer');
   const check = () => get('/api/auth/status').then(setAuth).catch(() => setAuth({ setup: false, user: null }));
   useEffect(() => {
@@ -73,6 +101,7 @@ export function App() {
 
   if (!auth) return null;
   if (!auth.user) return <ToastHost><SignIn setup={auth.setup} onDone={check} /></ToastHost>;
+  if (auth.user.mustChange) return <ToastHost><ChangePassword onDone={check} /></ToastHost>;
 
   const toggleTheme = () => {
     const r = document.documentElement;

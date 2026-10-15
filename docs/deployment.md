@@ -156,13 +156,14 @@ Give the orchestrator more grace time than `SUTRA_DRAIN_MS` (compose: `stop_grac
 | `SUTRA_DATA_DIR` | `./data` | SQLite database, vault key, logs |
 | `SUTRA_DB` | (SQLite) | `postgres://...` for clusters |
 | `SUTRA_MASTER_KEY` | key file | Vault key, base64 32 bytes; the same on every engine |
-| `SUTRA_ADMIN_TOKEN` | (none) | Bearer token for the command-line tool and automation |
+| `SUTRA_ADMIN_TOKEN` | (none) | Bearer token for the command-line tool and automation; acts as an administrator. Prefer system account tokens, limited by their roles |
 | `SUTRA_DEPLOY_DIR` | (none) | Folder of `.sutra` packages deployed at start |
 | `SUTRA_ENGINE_ID` | host-pid | This engine's name in a cluster |
 | `SUTRA_WORKERS` | 16 | Steps run at once; 0 = serve only |
 | `SUTRA_HEARTBEAT_MS` | 5000 | Heartbeat; dead after three missed |
 | `SUTRA_DRAIN_MS` | 30000 | Time running steps get on shutdown |
 | `SUTRA_RUN_RETENTION_DAYS` | 30 | Delete finished runs after this many days; 0 = keep |
+| `SUTRA_AUDIT_RETENTION_DAYS` | 365 | Delete audit entries after this many days; 0 = keep |
 | `SUTRA_LOG_FORMAT` | `text` | `json`: log lines on standard output |
 | `SUTRA_METRICS_TOKEN` | (none) | Bearer token for `/metrics` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | (none) | OpenTelemetry collector (OTLP/HTTP) |

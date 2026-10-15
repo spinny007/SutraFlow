@@ -133,6 +133,18 @@ create table if not exists engines(
 create table if not exists leases(name text primary key, holder text not null, expires_at integer not null);
 create table if not exists users(
   username text primary key, hash text not null, role text not null, created_at text not null);
+create table if not exists roles(
+  id text primary key, name text not null, description text, perms text not null, builtin integer not null default 0, updated_at text not null);
+create table if not exists grants(
+  username text not null, role_id text not null, project_id text not null default '', primary key(username, role_id, project_id));
+create table if not exists api_tokens(
+  id text primary key, username text not null, name text not null, hash text not null, created_at text not null,
+  expires_at integer not null default 0, last_used text);
+create table if not exists audit(
+  id integer primary key autoincrement, at text not null, actor text not null, actor_kind text, ip text, action text not null,
+  method text, path text, target text, project_id text, status integer, outcome text not null, details text);
+create index if not exists audit_at on audit(at);
+create index if not exists audit_actor on audit(actor, at);
 `;
 
 export function openDb(file?: string) {
@@ -166,6 +178,17 @@ function migrate() {
   add('runs', 'debug', 'debug text');
   add('tasks', 'released', 'released integer not null default 0');
   add('tasks', 'owner', 'owner text');
+  // Users, system accounts and their sign-in state.
+  add('users', 'kind', "kind text not null default 'user'");
+  add('users', 'display_name', 'display_name text');
+  add('users', 'email', 'email text');
+  add('users', 'disabled', 'disabled integer not null default 0');
+  add('users', 'must_change', 'must_change integer not null default 0');
+  add('users', 'failed', 'failed integer not null default 0');
+  add('users', 'locked_until', 'locked_until integer not null default 0');
+  add('users', 'sessions_after', 'sessions_after integer not null default 0');
+  add('users', 'last_login', 'last_login text');
+  add('users', 'updated_at', 'updated_at text');
   d.exec('create index if not exists flows_project on flows(project_id)');
   d.exec('create index if not exists resources_project on resources(project_id)');
   d.exec('create index if not exists tasks_owner on tasks(owner, status)');

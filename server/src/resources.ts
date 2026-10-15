@@ -74,7 +74,8 @@ export const RESOURCE_KINDS: ResourceKind[] = [
     desc: 'Protects a REST or SOAP service this server exposes: who may call it, from where, how often, and over which transport.',
     fields: [
       F('auth', 'Caller authentication', 'select', 'apiKey', { options: ['none', 'basic', 'apiKey', 'jwt', 'wssUsernameToken', 'mtls'] }),
-      F('users', 'Users', 'kv', [], { help: 'Username = name of the vault secret holding that user\'s password.', ...when('auth', 'basic', 'wssUsernameToken') }),
+      F('basicAccounts', 'Accounts', 'select', 'listed users', { options: ['listed users', 'system accounts'], help: 'System accounts: those with a password and the Call services permission on this project (Admin Console).', ...when('auth', 'basic') }),
+      F('users', 'Users', 'kv', [], { help: 'Username = name of the vault secret holding that user\'s password. Not used with system accounts.', ...when('auth', 'basic', 'wssUsernameToken') }),
       F('apiKeyHeader', 'Key header', 'text', 'X-API-Key', when('auth', 'apiKey')),
       F('apiKeySecrets', 'Accepted keys', 'list', [], { help: 'Names of vault secrets; each holds one accepted key.', ...when('auth', 'apiKey') }),
       F('jwtMode', 'Token signature', 'select', 'jwks', { options: ['jwks', 'publicKey', 'sharedSecret'], ...when('auth', 'jwt') }),

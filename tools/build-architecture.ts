@@ -80,6 +80,9 @@ const FILES: Group[] = [
     id: 'services', title: 'Admin API, gateway and triggers', intro: 'The two network faces of the server and the long-running starters.',
     files: [
       ['server/src/api.ts', 'Admin API on port 4800 (Fastify): sign-in, projects, Sutras, runs, approvals, resources, secrets, packages, engine control, server settings, <code>/health</code>, <code>/ready</code>, <code>/metrics</code>, <code>/guide</code>, <code>/architecture</code> and the studio files. Bearer tokens for automation; a headless engine allows only a short list of routes.'],
+      ['server/src/access.ts', 'Users and system accounts (provision, disable, lockout, password rules, sign out everywhere), roles made of permissions, grants for all projects or one project, permission checks, API tokens of system accounts (stored as hashes), and Basic sign-in of system accounts at the gateway.'],
+      ['server/src/guard.ts', 'The permission of every admin API route and the project it applies to. The server refuses to start when a route has no rule. Also writes each change and each refusal to the audit log, without passwords or secret values.'],
+      ['server/src/audit.ts', 'The audit log: record, search, CSV export, and deletion after <code>SUTRA_AUDIT_RETENTION_DAYS</code>.'],
       ['server/src/auth.ts', 'Studio sign-in: the first visit creates the administrator, sessions are signed cookies, and changing requests need the X-Sutra header (a cross-site form cannot send it).'],
       ['server/src/gateway/gateway.ts', 'The gateway: HTTP and HTTPS listeners for deployed REST and SOAP services and MCP endpoints, WSDL publishing, policy checks, run start with the caller\'s traceparent, and waiting for the reply step (also when another engine runs it).'],
       ['server/src/gateway/tls.ts', 'Gateway certificates: off, self-signed, uploaded, or Let\'s Encrypt (ACME HTTP-01) with renewal 30 days before expiry, and client CA for mutual TLS.'],
@@ -244,7 +247,11 @@ const TABLE_TEXT: Record<string, string> = {
   package_deployments: 'Package history per project: version, checksum, who deployed it, the report and the package itself (for rollback).',
   engines: 'Engines of the cluster: host, process, mode, version, heartbeat, workers, active steps, draining.',
   leases: 'Cluster-wide locks with an expiry: the leader lease and the deploy-folder lock.',
-  users: 'Studio users with password hashes and roles.',
+  users: 'People and system accounts: password hash, name, email, disabled, must change password, failed sign-ins, lock, sessions valid after, last sign-in.',
+  roles: 'Built-in and custom roles with their permissions.',
+  grants: 'Which role each account holds, for all projects (empty project) or one project.',
+  api_tokens: 'API tokens of system accounts: hash, name, expiry and last use. Token values are never stored.',
+  audit: 'Audit log: time, actor, address, action, target, project, status, outcome and safe details.',
 };
 
 function apiRoutes() {
@@ -270,6 +277,7 @@ const SETTINGS: [string, string, string][] = [
   ['SUTRA_HEARTBEAT_MS', '5000', 'Heartbeat interval; an engine silent for three beats is dead.'],
   ['SUTRA_DRAIN_MS', '30000', 'Time running steps get to finish on a graceful stop.'],
   ['SUTRA_RUN_RETENTION_DAYS', '30', 'Finished runs older than this are deleted; 0 keeps them.'],
+  ['SUTRA_AUDIT_RETENTION_DAYS', '365', 'Audit entries older than this are deleted; 0 keeps them.'],
   ['SUTRA_LOG_FORMAT', 'text', '<code>json</code>: engine events as JSON lines on standard output.'],
   ['SUTRA_METRICS_TOKEN', '(none)', 'When set, <code>/metrics</code> needs this Bearer token.'],
   ['OTEL_EXPORTER_OTLP_ENDPOINT', '(none)', 'OpenTelemetry collector address (OTLP/HTTP).'],
@@ -470,10 +478,12 @@ ${tw(['Signal', 'Where', 'Details'], [
 
 sec('security', 'Security', `
 <ul>
-<li><strong>Studio</strong>: the first visit creates the administrator; signed session cookies; changing requests need the X-Sutra header; the admin port listens on 127.0.0.1 unless set otherwise.</li>
-<li><strong>Automation</strong>: <code>SUTRA_ADMIN_TOKEN</code> compared in constant time; headless engines accept nothing else.</li>
+<li><strong>Studio</strong>: the first visit creates the administrator; signed session cookies that end when the account is disabled or signed out everywhere; changing requests need the X-Sutra header; the admin port listens on 127.0.0.1 unless set otherwise.</li>
+<li><strong>Accounts and roles</strong>: people and system accounts hold roles (Administrator, Developer, Deployer, Operator, Approver, Viewer, API caller, or custom ones) for all projects or one project. Every admin API route checks a permission for its project (<code>guard.ts</code>); lists show only the caller's projects. Five wrong passwords lock an account for 15 minutes; an administrator-set password must be changed at the next sign-in; at least one active administrator always remains.</li>
+<li><strong>Automation</strong>: <code>SUTRA_ADMIN_TOKEN</code> acts as an administrator, compared in constant time. System accounts get their own API tokens (stored as hashes, with expiry) limited to their roles; headless engines accept only tokens.</li>
+<li><strong>Audit</strong>: every change, sign-in and refused request is recorded with who, when, from where and the result, searchable and exportable as CSV.</li>
 <li><strong>Vault</strong>: AES-256-GCM; values never leave the server through the API; masked in run history and logs.</li>
-<li><strong>Gateway</strong>: per-service API policies (API key, Basic, JWT, mutual TLS, WS-Security); TLS with uploaded or Let's Encrypt certificates.</li>
+<li><strong>Gateway</strong>: per-service API policies (API key, Basic with listed users or system accounts holding Call services on the project, JWT, mutual TLS, WS-Security); TLS with uploaded or Let's Encrypt certificates.</li>
 <li><strong>Outbound</strong>: security profiles, client certificates, OAuth tokens stored encrypted, circuit breakers on HTTP connections.</li>
 <li><strong>Data never becomes code</strong>: SQL parameters are bound; formulas and templates are parsed, not evaluated; scripts receive values as environment variables and a JSON file; programs get arguments without a shell; file activities stay inside their folder; custom JavaScript runs in a sandboxed worker with limits.</li>
 <li><strong>Policies off by default</strong>: scripts, release activities and Sutras changing Sengine variables each need an administrator's switch in Server &amp; APIs.</li>

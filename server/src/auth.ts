@@ -1,10 +1,11 @@
 import crypto from 'node:crypto';
-import { q, now, getSetting, setSetting } from './db.js';
+import { q, getSetting, setSetting } from './db.js';
 
 /**
- * Studio sign-in. The first visit creates the administrator account. Sessions
- * are signed cookies (HMAC with a server key kept in settings); mutating
- * requests also need the X-Sutra header, which a cross-site form cannot send.
+ * Sign-in sessions for the designer and the Admin Console. The first visit creates the administrator
+ * account. Sessions are signed cookies (HMAC with a server key kept in settings) that carry when they
+ * were issued, so disabling an account or "sign out everywhere" ends them. Changing requests also need
+ * the X-Sutra header, which a cross-site form cannot send. Accounts and roles: access.ts.
  */
 const SESSION_HOURS = 12;
 
@@ -27,27 +28,16 @@ export function verifyPassword(pw: string, stored: string) {
   return h.length === e.length && crypto.timingSafeEqual(h, e);
 }
 
-export const hasUsers = () => !!q.get('select 1 from users limit 1');
+export const hasUsers = () => !!q.get(`select 1 from users where coalesce(kind, 'user') = 'user' limit 1`);
 
-export function createUser(username: string, password: string, role = 'admin') {
-  if (!/^[\w.@-]{2,64}$/.test(username)) throw new Error('Username: 2 to 64 letters, digits, . _ @ -');
-  if (password.length < 10) throw new Error('Password must have at least 10 characters');
-  q.run('insert into users(username, hash, role, created_at) values(?, ?, ?, ?)', username, hashPassword(password), role, now());
-}
-
-export function login(username: string, password: string) {
-  const u = q.get<{ username: string; hash: string; role: string }>('select * from users where username = ?', username);
-  if (!u || !verifyPassword(password, u.hash)) return null;
-  return issue(u.username, u.role);
-}
-
-export function issue(user: string, role: string) {
-  const payload = Buffer.from(JSON.stringify({ u: user, r: role, exp: Date.now() + SESSION_HOURS * 3600e3 })).toString('base64url');
+export function issue(user: string) {
+  const t = Date.now();
+  const payload = Buffer.from(JSON.stringify({ u: user, iat: t, exp: t + SESSION_HOURS * 3600e3 })).toString('base64url');
   const sig = crypto.createHmac('sha256', serverKey()).update(payload).digest('base64url');
   return `${payload}.${sig}`;
 }
 
-export function verifySession(token: string | undefined): { u: string; r: string } | null {
+export function verifySession(token: string | undefined): { u: string; iat: number } | null {
   if (!token) return null;
   const [payload, sig] = token.split('.');
   if (!payload || !sig) return null;
@@ -55,7 +45,7 @@ export function verifySession(token: string | undefined): { u: string; r: string
   if (sig.length !== expect.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expect))) return null;
   try {
     const p = JSON.parse(Buffer.from(payload, 'base64url').toString());
-    return p.exp > Date.now() ? { u: p.u, r: p.r } : null;
+    return p.exp > Date.now() ? { u: p.u, iat: Number(p.iat) || 0 } : null;
   } catch {
     return null;
   }

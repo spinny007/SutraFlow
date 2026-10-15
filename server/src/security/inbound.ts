@@ -5,6 +5,7 @@ import { jwtVerify, createRemoteJWKSet, type JWTVerifyGetKey } from 'jose';
 import { getSecret } from '../secrets.js';
 import { kvToObject, type Resource } from '../resources.js';
 import { verifyUsernameToken, safeEqual } from './wss.js';
+import { systemAccountMayCall } from '../access.js';
 
 /** Thrown for a request the policy refuses; the gateway turns it into an HTTP (or SOAP fault) reply. */
 export class PolicyError extends Error {
@@ -84,6 +85,12 @@ export async function authorize(policy: Resource | undefined, req: InboundReques
       const dec = Buffer.from(a.slice(6), 'base64').toString('utf8');
       const i = dec.indexOf(':');
       const user = dec.slice(0, i), pw = dec.slice(i + 1);
+      // System accounts: active, right password, and the Call services permission on this project.
+      if (c.basicAccounts === 'system accounts') {
+        if (i < 0 || !systemAccountMayCall(user, pw, policy.project_id || undefined)) throw new PolicyError(401, 'Invalid username or password', challenge);
+        caller = { method: 'basic', subject: user };
+        break;
+      }
       const secretName = kvToObject(c.users)[user];
       const expected = secretName ? getSecret(secretName) : undefined;
       if (i < 0 || expected === undefined || !safeEqual(expected, pw)) throw new PolicyError(401, 'Invalid username or password', challenge);
