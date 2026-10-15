@@ -61,9 +61,12 @@ claude mcp add --transport http orders https://your-server:8443/mcp/orders --hea
 
 The full user guide is [docs/sutraflow-user-guide.html](docs/sutraflow-user-guide.html), also served by the studio at http://127.0.0.1:4800/guide (the **Guide** button in the top bar). It covers every screen, chapter by chapter, and every activity, connection type, function and pipe with its settings.
 
+How SutraFlow works inside, what every file does, deployment and features, with diagrams and a search box: [docs/sutraflow-architecture.html](docs/sutraflow-architecture.html), served at http://127.0.0.1:4800/architecture.
+
 ```bash
 npm run guide          # rebuild the guide from the code (tools/build-user-guide.ts)
 npm run guide:shots    # retake its screenshots from a running server (headless Edge or Chrome)
+npm run architecture   # rebuild the architecture page (tools/build-architecture.ts)
 ```
 
 ## Projects

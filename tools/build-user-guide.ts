@@ -17,6 +17,7 @@ import type { Activity, Field } from '../server/src/engine/types.js';
 import { CHAPTERS } from './guide/chapters.js';
 import { ACTIVITY_TEXT } from './guide/activities.js';
 import { SAMPLES } from '../server/src/samples.js';
+import { LOGO_URI } from './guide/logo.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const IMG = path.join(root, 'docs', 'guide-images');
@@ -130,8 +131,6 @@ function pipesChapter() {
   return `<p>Pipes change a value inside <code>{{ }}</code>: <code>{{input.name | upper}}</code>, <code>{{input.total | number:2}}</code>, <code>{{input.note | default:"none"}}</code>. Several pipes run left to right.</p><table class="t s"><thead><tr><th>Pipe</th><th>What it does</th></tr></thead><tbody>${Object.entries(PIPES).map(([n, p]) => `<tr><td><code>${esc(n)}</code></td><td>${esc(p.help)}</td></tr>`).join('')}</tbody></table>`;
 }
 
-const LOGO = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M5 22c4-10 8-10 11-4s7 6 11-4" fill="none" stroke="#0E7A62" stroke-width="3" stroke-linecap="round"/><circle cx="5" cy="22" r="2.6" fill="#3E6A86"/><circle cx="16" cy="17" r="2.6" fill="#C88A00"/><circle cx="27" cy="14" r="2.6" fill="#B0435F"/></svg>`;
-const LOGO_URI = `data:image/svg+xml;base64,${Buffer.from(LOGO).toString('base64')}`;
 
 function build() {
   const pals = PALETTES.map(p => ({ ...p, acts: allActivities.filter(a => a.palette === p.id) })).filter(p => p.acts.length);

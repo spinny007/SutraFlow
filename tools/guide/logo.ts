@@ -1,0 +1,3 @@
+/** The SutraFlow mark, shared by the user guide and the architecture page. */
+export const LOGO = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M5 22c4-10 8-10 11-4s7 6 11-4" fill="none" stroke="#0E7A62" stroke-width="3" stroke-linecap="round"/><circle cx="5" cy="22" r="2.6" fill="#3E6A86"/><circle cx="16" cy="17" r="2.6" fill="#C88A00"/><circle cx="27" cy="14" r="2.6" fill="#B0435F"/></svg>`;
+export const LOGO_URI = `data:image/svg+xml;base64,${Buffer.from(LOGO).toString('base64')}`;

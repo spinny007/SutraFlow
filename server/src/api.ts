@@ -490,6 +490,13 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     return reply.type('text/html; charset=utf-8').header('cache-control', 'no-cache').send(fs.createReadStream(f));
   });
 
+  // ---------- architecture page (docs/sutraflow-architecture.html, built by npm run architecture) ----------
+  app.get('/architecture', async (_req, reply) => {
+    const f = path.join(rootDir, 'docs', 'sutraflow-architecture.html');
+    if (!fs.existsSync(f)) return reply.code(404).type('text/plain').send('The architecture page has not been built. Run: npm run architecture');
+    return reply.type('text/html; charset=utf-8').header('cache-control', 'no-cache').send(fs.createReadStream(f));
+  });
+
   // ---------- studio (built web app) ----------
   const here = path.dirname(fileURLToPath(import.meta.url));
   const webDir = config.mode === 'engine' ? undefined : [config.webDir, path.resolve(here, '../web'), path.resolve(here, '../../dist/web')].find(d => d && fs.existsSync(path.join(d, 'index.html')));
