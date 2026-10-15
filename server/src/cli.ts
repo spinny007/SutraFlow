@@ -50,6 +50,15 @@ const HELP = `sutra <command> [options]
   token     create <system account> [--name text] [--expires-days n] | list <account> | revoke <account> <id>
   audit     [--actor name] [--outcome ok|failed|denied] [--from 2026-10-01] [--csv]
 
+  Gateway (apps, keys, plans, firewall, traffic; need --server):
+  gateway   apps | plans | stats [--period 1h|24h|7d|30d] | log [--status errors|refused|ok] [--limit n]
+  gateway   app add <name> [--scopes "orders:read orders:write"] [--plan <name>] [--contact text]
+  gateway   app disable | enable | delete <name>
+  gateway   key create <app> [--name text] [--expires-days n] | key revoke <app> <key id>
+  gateway   plan set <name> [--per-minute n] [--per-hour n] [--per-day n] [--per-month n] | plan delete <name>
+  gateway   firewall [--allow "10.0.0.0/8,192.168.1.5"] [--deny "203.0.113.9"]   (no options: show)
+  gateway   openapi                       OpenAPI of the deployed services (JSON)
+
   Remote: --server <url> --token <token>  (or SUTRA_SERVER, SUTRA_ADMIN_TOKEN). The token is a system
           account's API token (limited to its roles) or the server's SUTRA_ADMIN_TOKEN.
   Exit code 0 = success, 1 = failure, 2 = wrong usage.`;
@@ -61,7 +70,7 @@ function parse(argv: string[]): Args {
     const t = argv[i];
     if (t.startsWith('--')) {
       const [k, inline] = t.slice(2).split(/=(.*)/s);
-      const v = inline !== undefined ? inline : argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[++i] : true;
+      const v = inline !== undefined ? inline : argv[i + 1] !== undefined && !argv[i + 1].startsWith('--') ? argv[++i] : true;
       if (k === 'secret') a.secret = [...((a.secret as string[]) || []), String(v)];
       else a[k] = v;
     } else a._.push(t);
@@ -247,7 +256,7 @@ async function main(argv: string[]) {
       out(`${system ? 'System account' : 'User'} ${name} added with role ${body.grants[0].role}${project ? ' on ' + str(a, 'project') : ' on all projects'}`);
       return 0;
     }
-    case 'sutras': case 'runs': case 'approvals': case 'engines': case 'token': case 'audit':
+    case 'sutras': case 'runs': case 'approvals': case 'engines': case 'token': case 'audit': case 'gateway':
       if (!call) throw new Usage(`${cmd} needs --server and --token`);
       return operate(cmd, a, call);
     case 'status': {
@@ -311,7 +320,7 @@ async function operate(cmd: string, a: Args, call: Call): Promise<number> {
       const { sutra } = await findSutra(call, a, arg);
       const values: Record<string, unknown> = { ...sutra.tuning };
       const map: Record<string, string> = { 'max-runs': 'maxRuns', priority: 'priority', 'run-timeout-min': 'runTimeoutMin', retries: 'retries', 'retry-delay-ms': 'retryDelayMs', 'retention-days': 'retentionDays' };
-      for (const [flag, k] of Object.entries(map)) if (str(a, flag) !== undefined) values[k] = num(a, flag);
+      for (const [flag, k] of Object.entries(map)) if (str(a, flag) === '') delete values[k]; else if (str(a, flag) !== undefined) values[k] = num(a, flag);
       if (str(a, 'step-data')) values.stepData = str(a, 'step-data')!.replace('errors-only', 'errors only');
       const r = await call('PUT', `/api/console/sutras/${sutra.id}/tuning`, { values });
       out(`${sutra.name} tuning: ${JSON.stringify(r.values)}`);
@@ -351,7 +360,7 @@ async function operate(cmd: string, a: Args, call: Call): Promise<number> {
       const engineId = str(a, 'engine');
       const values: Record<string, unknown> = { ...(engineId ? cur.perEngine[engineId] || {} : cur.cluster) };
       const map: Record<string, string> = { workers: 'workers', 'max-steps': 'maxStepsPerRun', 'reply-timeout-ms': 'replyTimeoutMs', 'retention-days': 'runRetentionDays', 'audit-retention-days': 'auditRetentionDays', 'trace-sampling': 'traceSampling' };
-      for (const [flag, k] of Object.entries(map)) if (str(a, flag) !== undefined) values[k] = num(a, flag);
+      for (const [flag, k] of Object.entries(map)) if (str(a, flag) === '') delete values[k]; else if (str(a, flag) !== undefined) values[k] = num(a, flag);
       const r = await call('PUT', engineId ? `/api/console/tuning/engines/${encodeURIComponent(engineId)}` : '/api/console/tuning/engine', { values });
       out(`${engineId || 'All engines'}: ${JSON.stringify(engineId ? r.perEngine[engineId] || {} : r.cluster)}`);
       return 0;
@@ -366,6 +375,7 @@ async function operate(cmd: string, a: Args, call: Call): Promise<number> {
     case 'token list': { if (!arg) throw new Usage('Give the system account'); const l: any[] = await call('GET', `/api/access/users/${encodeURIComponent(arg)}/tokens`); table([['ID', 'NAME', 'EXPIRES', 'LAST USED'], ...l.map(t => [t.id, t.name, t.expiresAt || 'never', t.lastUsed || 'never'])]); return 0; }
     case 'token revoke': { const id = a._[3]; if (!arg || !id) throw new Usage('Use: sutra token revoke <account> <id>'); await call('DELETE', `/api/access/users/${encodeURIComponent(arg)}/tokens/${id}`); out('Token revoked'); return 0; }
   }
+  if (cmd === 'gateway') return gateway(a, call);
   if (cmd === 'audit') {
     const p = new URLSearchParams();
     for (const k of ['actor', 'outcome', 'from', 'to']) if (str(a, k)) p.set(k, str(a, k)!);
@@ -375,6 +385,88 @@ async function operate(cmd: string, a: Args, call: Call): Promise<number> {
     return 0;
   }
   throw new Usage(`Unknown command: ${cmd} ${sub || ''}`.trim());
+}
+
+/** Gateway management from a shell. */
+async function gateway(a: Args, call: Call): Promise<number> {
+  const [, sub, act, name, extra] = a._;
+  const appBy = async (n: string | undefined) => {
+    if (!n) throw new Usage('Give the app name');
+    const app = (await call('GET', '/api/gateway/apps') as any[]).find(x => x.name.toLowerCase() === n.toLowerCase() || x.id === n);
+    if (!app) throw new Error(`No gateway app named "${n}"`);
+    return app;
+  };
+  const planBy = async (n: string) => (await call('GET', '/api/gateway/plans') as any[]).find(x => x.name.toLowerCase() === n.toLowerCase());
+  const list = (v: string | undefined) => (v || '').split(/[,\s]+/).map(x => x.trim()).filter(Boolean);
+  switch (sub) {
+    case 'apps': {
+      const apps: any[] = await call('GET', '/api/gateway/apps');
+      const plans = new Map((await call('GET', '/api/gateway/plans') as any[]).map(p => [p.id, p.name]));
+      table([['APP', 'STATE', 'PLAN', 'SCOPES', 'KEYS', 'TODAY'], ...apps.map(x => [x.name, x.disabled ? 'disabled' : 'active', plans.get(x.planId) || '', x.scopes.join(' '), String(x.keys), String(x.usage?.day ?? 0)])]);
+      return 0;
+    }
+    case 'plans': {
+      const plans: any[] = await call('GET', '/api/gateway/plans');
+      table([['PLAN', 'PER MINUTE', 'PER HOUR', 'PER DAY', 'PER MONTH', 'APPS'], ...plans.map(p => [p.name, String(p.perMinute || '-'), String(p.perHour || '-'), String(p.perDay || '-'), String(p.perMonth || '-'), String(p.apps)])]);
+      return 0;
+    }
+    case 'app': {
+      if (act === 'add') {
+        if (!name) throw new Usage('Give the app name');
+        const plan = str(a, 'plan') ? await planBy(str(a, 'plan')!) : null;
+        if (str(a, 'plan') && !plan) throw new Error(`No plan named "${str(a, 'plan')}"`);
+        const r = await call('POST', '/api/gateway/apps', { name, scopes: list(str(a, 'scopes')), planId: plan?.id || '', contact: str(a, 'contact') || '' });
+        out(`App ${r.name} added (id ${r.id})`);
+        return 0;
+      }
+      if (act === 'disable' || act === 'enable') { const app = await appBy(name); await call('PUT', `/api/gateway/apps/${app.id}`, { ...app, disabled: act === 'disable' }); out(`${app.name}: ${act}d`); return 0; }
+      if (act === 'delete') { const app = await appBy(name); await call('DELETE', `/api/gateway/apps/${app.id}`); out(`${app.name}: deleted`); return 0; }
+      break;
+    }
+    case 'key': {
+      const app = await appBy(name);
+      if (act === 'create') {
+        const r = await call('POST', `/api/gateway/apps/${app.id}/keys`, { name: str(a, 'name') || 'key', expiresDays: num(a, 'expires-days') || 0 });
+        out(r.key);
+        process.stderr.write(`Key for ${app.name} (client id ${app.id})${r.expiresAt ? `, expires ${r.expiresAt}` : ', never expires'}. It is not shown again.\n`);
+        return 0;
+      }
+      if (act === 'revoke') { if (!extra) throw new Usage('Use: sutra gateway key revoke <app> <key id>'); await call('DELETE', `/api/gateway/apps/${app.id}/keys/${extra}`); out('Key revoked'); return 0; }
+      break;
+    }
+    case 'plan': {
+      if (!name) throw new Usage('Give the plan name');
+      const cur = await planBy(name);
+      if (act === 'delete') { if (!cur) throw new Error(`No plan named "${name}"`); await call('DELETE', `/api/gateway/plans/${cur.id}`); out(`Plan ${name} deleted`); return 0; }
+      if (act === 'set') {
+        const body = { name, perMinute: num(a, 'per-minute') ?? cur?.perMinute ?? 0, perHour: num(a, 'per-hour') ?? cur?.perHour ?? 0, perDay: num(a, 'per-day') ?? cur?.perDay ?? 0, perMonth: num(a, 'per-month') ?? cur?.perMonth ?? 0 };
+        const r = cur ? await call('PUT', `/api/gateway/plans/${cur.id}`, body) : await call('POST', '/api/gateway/plans', body);
+        out(`Plan ${r.name}: ${r.perMinute || '-'}/min, ${r.perHour || '-'}/hour, ${r.perDay || '-'}/day, ${r.perMonth || '-'}/month`);
+        return 0;
+      }
+      break;
+    }
+    case 'firewall': {
+      let f = await call('GET', '/api/gateway/firewall');
+      if (str(a, 'allow') !== undefined || str(a, 'deny') !== undefined) f = await call('PUT', '/api/gateway/firewall', { allow: str(a, 'allow') !== undefined ? list(str(a, 'allow')) : f.allow, deny: str(a, 'deny') !== undefined ? list(str(a, 'deny')) : f.deny });
+      out(`Allow: ${f.allow.join(', ') || 'every address'}\nDeny:  ${f.deny.join(', ') || 'none'}`);
+      return 0;
+    }
+    case 'stats': {
+      const s = await call('GET', `/api/gateway/stats?period=${encodeURIComponent(str(a, 'period') || '24h')}`);
+      out(`${s.totals.requests} requests, ${s.totals.errors} errors (5xx), ${s.totals.refused} refused (4xx); p50 ${s.totals.p50Ms} ms, p95 ${s.totals.p95Ms} ms, p99 ${s.totals.p99Ms} ms`);
+      table([['SERVICE', 'REQUESTS', 'ERRORS', 'AVG MS', 'P95 MS'], ...s.topServices.map((x: any) => [x.name, String(x.requests), String(x.errors), String(x.avgMs), String(x.p95Ms)])]);
+      return 0;
+    }
+    case 'log': {
+      const qs = new URLSearchParams({ limit: String(num(a, 'limit') || 50), ...(str(a, 'status') ? { status: str(a, 'status')! } : {}) });
+      const rows: any[] = await call('GET', `/api/gateway/requests?${qs}`);
+      table([['WHEN', 'STATUS', 'MS', 'METHOD', 'PATH', 'SERVICE', 'APP', 'ERROR'], ...rows.map(r => [r.at, String(r.status), String(r.ms), r.method, r.path, r.route, r.app, String(r.error || '').slice(0, 50)])]);
+      return 0;
+    }
+    case 'openapi': out(await call('GET', '/api/gateway/openapi')); return 0;
+  }
+  throw new Usage('Use: sutra gateway apps | plans | stats | log | app ... | key ... | plan ... | firewall | openapi');
 }
 
 /** Plain-text answers (CSV) from the admin API. */

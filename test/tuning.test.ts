@@ -148,6 +148,8 @@ test('the console actions from the sutra command: list, stop, start, restart, tu
   r = await cli('engines', 'tune', '--workers', '7');
   assert.equal(r.status, 0, r.err);
   assert.equal(engine.concurrency, 7);
+  await cli('engines', 'tune', '--workers', '');
+  assert.equal(engine.concurrency, config.workerConcurrency, 'an empty value returns to the default');
   r = await cli('runs', 'list', '--sutra', 'Flaky', '--project', 'Tuning shop', '--status', 'failed');
   assert.match(r.out, /Flaky\s+failed/);
   r = await cli('engines', 'list');

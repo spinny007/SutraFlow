@@ -73,10 +73,11 @@ export const RESOURCE_KINDS: ResourceKind[] = [
     name: 'API security policy',
     desc: 'Protects a REST or SOAP service this server exposes: who may call it, from where, how often, and over which transport.',
     fields: [
-      F('auth', 'Caller authentication', 'select', 'apiKey', { options: ['none', 'basic', 'apiKey', 'jwt', 'wssUsernameToken', 'mtls'] }),
+      F('auth', 'Caller authentication', 'select', 'apiKey', { options: ['none', 'basic', 'apiKey', 'apps', 'jwt', 'wssUsernameToken', 'mtls'], help: 'apps: gateway apps from the Admin Console (Gateway > Apps), with keys, scopes and plans.' }),
+      F('appScopes', 'Required scopes', 'text', '', { help: 'Space separated, such as orders:read. The app must hold every one.', ...when('auth', 'apps') }),
       F('basicAccounts', 'Accounts', 'select', 'listed users', { options: ['listed users', 'system accounts'], help: 'System accounts: those with a password and the Call services permission on this project (Admin Console).', ...when('auth', 'basic') }),
       F('users', 'Users', 'kv', [], { help: 'Username = name of the vault secret holding that user\'s password. Not used with system accounts.', ...when('auth', 'basic', 'wssUsernameToken') }),
-      F('apiKeyHeader', 'Key header', 'text', 'X-API-Key', when('auth', 'apiKey')),
+      F('apiKeyHeader', 'Key header', 'text', 'X-API-Key', when('auth', 'apiKey', 'apps')),
       F('apiKeySecrets', 'Accepted keys', 'list', [], { help: 'Names of vault secrets; each holds one accepted key.', ...when('auth', 'apiKey') }),
       F('jwtMode', 'Token signature', 'select', 'jwks', { options: ['jwks', 'publicKey', 'sharedSecret'], ...when('auth', 'jwt') }),
       F('jwksUrl', 'JWKS URL', 'text', '', { placeholder: 'https://idp.example.com/.well-known/jwks.json', ...when('jwtMode', 'jwks') }),

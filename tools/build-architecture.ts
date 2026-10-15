@@ -87,6 +87,7 @@ const FILES: Group[] = [
       ['server/src/audit.ts', 'The audit log: record, search, CSV export, and deletion after <code>SUTRA_AUDIT_RETENTION_DAYS</code>.'],
       ['server/src/auth.ts', 'Studio sign-in: the first visit creates the administrator, sessions are signed cookies, and changing requests need the X-Sutra header (a cross-site form cannot send it).'],
       ['server/src/gateway/gateway.ts', 'The gateway: HTTP and HTTPS listeners for deployed REST and SOAP services and MCP endpoints, WSDL publishing, policy checks, run start with the caller\'s traceparent, and waiting for the reply step (also when another engine runs it).'],
+      ['server/src/gateway/apps.ts', 'Gateway management: apps with scopes and plans, API keys (stored as hashes), OAuth2 client credentials tokens, plan limits counted in the database for the whole cluster, the firewall, the request log, traffic statistics and OpenAPI for the deployed services.'],
       ['server/src/gateway/tls.ts', 'Gateway certificates: off, self-signed, uploaded, or Let\'s Encrypt (ACME HTTP-01) with renewal 30 days before expiry, and client CA for mutual TLS.'],
       ['server/src/mcp.ts', 'Model Context Protocol over Streamable HTTP: tools/list from deployed MCP skill triggers, tools/call starts the Sutra and returns what Reply to AI sends. JSON Schema from shared schemas or simple input rows.'],
       ['server/src/scheduler.ts', 'Timer triggers (cron or interval) of deployed Sutras, on the leader.'],
@@ -185,6 +186,7 @@ const FILES: Group[] = [
       ['web/admin/Apps.tsx', 'Deployed projects and Sutras: start and stop, runs with step results, resubmit and cancel, deploy an earlier version, package history and roll back. Also the side panel used by other pages.'],
       ['web/admin/log.tsx', 'Every console action goes through act(): recorded with its output for the Console panel, and turned into the same action as a sutra command and an HTTP call for Windows PowerShell and Linux shells. Passwords and new tokens never appear.'],
       ['web/admin/Tuning.tsx', 'Tuning forms for a Sutra and for the engines, with the defaults shown and the change confirmed with its command.'],
+      ['web/admin/Gateway.tsx', 'Gateway pages: Traffic (chart, percentiles, busiest and slowest services, apps, request log), Apps and keys, Plans, Firewall, APIs with OpenAPI and gateway options.'],
       ['web/admin/Approvals.tsx', 'Waiting approvals with comment, Approve and Reject.'],
       ['web/admin/Engines.tsx', 'Engines of the cluster: alive, leader, load, heartbeat; drain and stop one; delete old runs now.'],
       ['web/admin/People.tsx', 'Users and system accounts: add, roles per project, disable, unlock, passwords, sign out everywhere, delete; API tokens shown once.'],
@@ -273,6 +275,11 @@ const TABLE_TEXT: Record<string, string> = {
   package_deployments: 'Package history per project: version, checksum, who deployed it, the report and the package itself (for rollback).',
   engines: 'Engines of the cluster: host, process, mode, version, heartbeat, workers, active steps, draining.',
   leases: 'Cluster-wide locks with an expiry: the leader lease and the deploy-folder lock.',
+  gw_plans: 'Gateway plans: requests per minute, hour and day, and a monthly quota.',
+  gw_apps: 'Gateway apps: name, contact, scopes, plan, disabled.',
+  gw_keys: 'API keys of gateway apps: hash, name, expiry and last use. Key values are never stored.',
+  gw_usage: 'Requests per app in the current minute, hour, day and month windows, shared by every engine.',
+  gw_requests: 'The gateway request log: time, engine, method, path, service, app, caller, status, time taken, sizes, address, run and error.',
   users: 'People and system accounts: password hash, name, email, disabled, must change password, failed sign-ins, lock, sessions valid after, last sign-in.',
   roles: 'Built-in and custom roles with their permissions.',
   grants: 'Which role each account holds, for all projects (empty project) or one project.',
@@ -413,7 +420,9 @@ ${DIAGRAMS.gateway}
 <li><strong>SOAP</strong>: the gateway publishes a WSDL for each SOAP service and wraps errors as SOAP faults; WS-Security headers are checked by policy.</li>
 <li><strong>MCP</strong> (<code>mcp.ts</code>): JSON-RPC over Streamable HTTP (protocol versions 2025-06-18, 2025-03-26 and 2024-11-05). <code>tools/list</code> returns every deployed MCP skill of that endpoint with its input schema; <code>tools/call</code> starts the Sutra and returns the Reply to AI content. An MCP server connection groups skills under their own path, such as <code>/mcp/orders</code>.</li>
 <li><strong>Tracing</strong>: a caller's W3C <code>traceparent</code> continues into the run's trace.</li>
-</ul>`);
+</ul>
+<h3 id="gateway-apps">Apps, plans, firewall and the request log</h3>
+<p>Before routing, the gateway checks its firewall (deny wins; an allow list admits only its addresses). An API security policy with <em>Gateway apps</em> accepts an app's key (<code>X-API-Key</code>, or <code>Authorization: Bearer sfk_...</code>) or an access token from <code>POST /oauth/token</code> (OAuth2 client credentials, an hour, signed with a key kept in settings). The app must hold the scopes the policy requires; its plan is then counted in <code>gw_usage</code> in one transaction, so every engine of a cluster shares the count, and a full window answers 429 with <code>Retry-After</code>; answers carry <code>X-RateLimit-*</code> headers. Every request is written to <code>gw_requests</code> when it ends, for the Traffic page (timeline, p50/p95/p99, busiest and slowest services, apps) and the request log; housekeeping deletes entries after the chosen number of days. OpenAPI 3.1 is generated from the deployed REST services, their path parameters, body schemas and security, for the console and, when chosen, at <code>/openapi.json</code> on the gateway.</p>`);
 
 sec('triggers', 'Timers, listeners and channels', `
 <p>Triggers that are not requests are started by the leader engine:</p>

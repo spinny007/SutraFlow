@@ -18,6 +18,8 @@ import type { Caller } from './access.js';
 import { RULES, OPEN_ROUTES, check, auditRequest } from './guard.js';
 import { audit, listAudit, auditCsv } from './audit.js';
 import { overview, applications, setSutraEnabled, requestDrain, restartSutra } from './console.js';
+import * as gwa from './gateway/apps.js';
+import { apiRoutes as gatewayRoutes, refreshFirewall } from './gateway/gateway.js';
 import { ENGINE_FIELDS, SUTRA_FIELDS, engineTuning, setEngineTuning, setSutraTuning, sutraTuning } from './tuning.js';
 import { gatewayStatus, getGatewaySettings, setGatewaySettings, listRoutes, startGateway, reloadTls } from './gateway/gateway.js';
 import { acmeStatus, certInfo, getTls, setTls, makeSelfSigned, storeCert, requestAcme } from './gateway/tls.js';
@@ -129,7 +131,7 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   // Headless engines: what the Admin Console and automation need (packages, deployed Sutras, runs,
   // approvals, secrets, engines, access, audit); no designer API.
   const ENGINE_API = [/^\/api\/packages\//, /^\/api\/projects\/?$/, /^\/api\/projects\/[^/]+\/(packages|rollback)$/, /^\/api\/engine\//, /^\/api\/runs/, /^\/api\/secrets/, /^\/api\/meta$/,
-    /^\/api\/access\//, /^\/api\/audit/, /^\/api\/auth\//, /^\/api\/console\//, /^\/api\/approvals/, /^\/api\/flows\/[^/]+\/(versions|deploy)$/];
+    /^\/api\/access\//, /^\/api\/audit/, /^\/api\/auth\//, /^\/api\/console\//, /^\/api\/gateway\//, /^\/api\/approvals/, /^\/api\/flows\/[^/]+\/(versions|deploy)$/];
   const sameToken = (a: string, b: string) => !!a && !!b && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
   /** The caller: the admin token (everything), a system account token, or a signed-in person. */
   const identify = (req: FastifyRequest): Caller | null => {
@@ -257,6 +259,36 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.put('/api/console/tuning/engines/:id', async (req: any) => { try { setEngineTuning(req.body?.values || {}, req.params.id); return engineTuning(req.params.id); } catch (e: any) { throw bad(e.message); } });
   app.get('/api/console/sutras/:id/tuning', async (req: any) => ({ fields: SUTRA_FIELDS, values: sutraTuning(req.params.id) }));
   app.put('/api/console/sutras/:id/tuning', async (req: any) => { try { return { values: setSutraTuning(req.params.id, req.body?.values || {}) }; } catch (e: any) { throw bad(e.message); } });
+
+  // ---------- gateway management: apps, keys, plans, firewall, traffic, APIs ----------
+  const gwErr = (e: any): never => { throw /not found/i.test(e.message) ? new HttpError(404, e.message) : bad(e.message); };
+  const wrap = <T>(fn: () => T) => { try { return fn(); } catch (e) { return gwErr(e); } };
+  app.get('/api/gateway/apps', async () => gwa.listApps().map(a => ({ ...a, usage: gwa.usageOf(a.id) })));
+  app.post('/api/gateway/apps', async (req: any) => wrap(() => gwa.saveApp({ ...req.body, id: undefined })));
+  app.put('/api/gateway/apps/:id', async (req: any) => wrap(() => { if (!gwa.getApp(req.params.id)) throw new Error('App not found'); return gwa.saveApp({ ...req.body, id: req.params.id }); }));
+  app.delete('/api/gateway/apps/:id', async (req: any) => { gwa.deleteApp(req.params.id); return { ok: true }; });
+  app.get('/api/gateway/apps/:id/keys', async (req: any) => gwa.listKeys(req.params.id));
+  app.post('/api/gateway/apps/:id/keys', async (req: any) => wrap(() => gwa.createKey(req.params.id, String(req.body?.name || ''), Number(req.body?.expiresDays) || 0)));
+  app.delete('/api/gateway/apps/:id/keys/:keyId', async (req: any) => { gwa.deleteKey(req.params.id, req.params.keyId); return { ok: true }; });
+  app.get('/api/gateway/plans', async () => gwa.listPlans());
+  app.post('/api/gateway/plans', async (req: any) => wrap(() => gwa.savePlan({ ...req.body, id: undefined })));
+  app.put('/api/gateway/plans/:id', async (req: any) => wrap(() => { if (!gwa.getPlan(req.params.id)) throw new Error('Plan not found'); return gwa.savePlan({ ...req.body, id: req.params.id }); }));
+  app.delete('/api/gateway/plans/:id', async (req: any) => wrap(() => { gwa.deletePlan(req.params.id); return { ok: true }; }));
+  app.get('/api/gateway/firewall', async () => gwa.getFirewall());
+  app.put('/api/gateway/firewall', async (req: any) => wrap(() => { const f = gwa.setFirewall(req.body || {}); refreshFirewall(); return f; }));
+  app.get('/api/gateway/options', async () => gwa.getGatewayOptions());
+  app.put('/api/gateway/options', async (req: any) => wrap(() => gwa.setGatewayOptions(req.body || {})));
+  app.get('/api/gateway/stats', async (req: any) => gwa.stats(String(req.query?.period || '24h'), access.visibleProjects(caller(req))));
+  app.get('/api/gateway/requests', async (req: any) => gwa.requestLog({ route: req.query?.route, appId: req.query?.appId, status: req.query?.status, text: req.query?.q, before: Number(req.query?.before) || undefined, limit: Number(req.query?.limit) || undefined }, access.visibleProjects(caller(req))));
+  app.get('/api/gateway/apis', async req => {
+    const v = access.visibleProjects(caller(req));
+    const flows = new Set(gatewayRoutes().filter(r => v === 'all' || v.has(r.projectId)).map(r => r.flowId));
+    return { routes: listRoutes().filter(r => flows.has(r.flowId)), options: gwa.getGatewayOptions(), gateway: getGatewaySettings() };
+  });
+  app.get('/api/gateway/openapi', async req => {
+    const s = getGatewaySettings();
+    return gwa.openApi(gatewayRoutes(), `http://${getTls().domains[0] || 'localhost'}:${s.httpPort}`, access.visibleProjects(caller(req)));
+  });
 
   /** Lists show only the projects the caller may see. */
   const seen = (req: any) => { const v = access.visibleProjects(caller(req)); return (pid: string | null | undefined) => v === 'all' || (!!pid && v.has(pid)); };

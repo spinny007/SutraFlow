@@ -144,6 +144,21 @@ create table if not exists audit(
   id integer primary key autoincrement, at text not null, actor text not null, actor_kind text, ip text, action text not null,
   method text, path text, target text, project_id text, status integer, outcome text not null, details text);
 create index if not exists audit_at on audit(at);
+create table if not exists gw_plans(
+  id text primary key, name text not null, description text, per_minute integer not null default 0, per_hour integer not null default 0,
+  per_day integer not null default 0, per_month integer not null default 0, updated_at text not null);
+create table if not exists gw_apps(
+  id text primary key, name text not null, description text, contact text, plan_id text, scopes text not null default '[]',
+  disabled integer not null default 0, created_at text not null, updated_at text not null);
+create table if not exists gw_keys(
+  id text primary key, app_id text not null, name text not null, hash text not null, created_at text not null,
+  expires_at integer not null default 0, last_used text);
+create table if not exists gw_usage(app_id text not null, win text not null, n integer not null default 0, expires integer not null, primary key(app_id, win));
+create table if not exists gw_requests(
+  id integer primary key autoincrement, at text not null, engine text, kind text, method text, path text, route text, flow_id text,
+  project_id text, app_id text, caller text, status integer, ms integer, bytes_in integer, bytes_out integer, ip text, run_id text, error text);
+create index if not exists gw_requests_at on gw_requests(at);
+create index if not exists gw_requests_route on gw_requests(route, at);
 create index if not exists audit_actor on audit(actor, at);
 `;
 

@@ -93,6 +93,12 @@ sutra engines list;  sutra engines drain engine-2;  sutra engines housekeeping
 sutra engines tune --workers 32;  sutra engines tune --engine engine-2 --workers 8
 sutra token create ci-orders --name github --expires-days 90
 sutra audit --actor alice --outcome denied [--csv]
+sutra gateway apps|plans|stats|log
+sutra gateway app add "Acme shop" --scopes "orders:read" --plan Partner
+sutra gateway key create "Acme shop" --name production --expires-days 365
+sutra gateway plan set Partner --per-minute 120 --per-day 50000
+sutra gateway firewall --allow "10.0.0.0/8" --deny "203.0.113.9"
+sutra gateway openapi > openapi.json
 ```
 
 ### Windows with Laragon

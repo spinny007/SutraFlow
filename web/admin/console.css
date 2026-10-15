@@ -149,6 +149,26 @@ button.c-tile:not(:disabled):hover { border-color: var(--edge); }
 .c-tuninggrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 18px; }
 .c-tuninggrid .fld input, .c-tuninggrid .fld select { width: 100%; }
 
+/* Gateway pages. */
+.c-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.c-seg button { border: 0; background: var(--card); padding: 5px 11px; font-size: 12.5px; color: var(--muted); }
+.c-seg button + button { border-left: 1px solid var(--line); }
+.c-seg button.act { background: var(--ink); color: var(--surface); }
+.c-tile-value small { font-size: 13px; font-weight: 500; color: var(--muted); }
+.c-chartwrap { overflow-x: auto; }
+.c-chart { display: block; width: 100%; min-width: 560px; height: auto; }
+.c-grid { stroke: var(--line); stroke-width: 1; }
+.c-axis { fill: var(--muted); font-size: 11px; font-family: var(--sans); }
+.c-bar.ok { fill: var(--c-auto); } .c-bar.warn { fill: var(--warn); } .c-bar.err { fill: var(--err); }
+.c-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.c-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.c-legend i.ok { background: var(--c-auto); } .c-legend i.warn { background: var(--warn); } .c-legend i.err { background: var(--err); }
+.c-halves { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 0 18px; }
+.c-half { min-width: 0; }
+.c-iplist { width: 100%; min-height: 170px; resize: vertical; }
+.c-inline select.inp { width: auto; flex: 0 1 auto; }
+.c-wrap { overflow-wrap: anywhere; }
+
 @media (max-width: 860px) {
   .c-entrybody { grid-template-columns: 1fr; }
   .c-consolehead, .c-consolebody { padding-left: 16px; padding-right: 16px; }
@@ -159,5 +179,6 @@ button.c-tile:not(:disabled):hover { border-color: var(--edge); }
   .c-top { padding: 8px 16px; }
   .c-body { padding: 16px 16px 40px; }
   .c-cards { grid-template-columns: 1fr; }
+  .c-halves { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { .c-drawer, .c-state.busy::before { animation: none; } }

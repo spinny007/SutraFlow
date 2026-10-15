@@ -6,7 +6,7 @@ import { engine } from '../engine/engine.js';
 import type { FlowDoc, FlowNode, ReplyPayload } from '../engine/types.js';
 import { deployedFlows } from '../flows.js';
 import { effectiveResource, getResource } from '../resources.js';
-import { authorize, corsHeaders, PolicyError } from '../security/inbound.js';
+import { authorize, corsHeaders, PolicyError, type Caller } from '../security/inbound.js';
 import { xmlParser } from '../security/outbound.js';
 import { NS } from '../security/wss.js';
 import { listOf } from '../palettes/common.js';
@@ -15,6 +15,7 @@ import crypto from 'node:crypto';
 import { MCP_PROTOCOLS, toolDefinition, toolResult } from '../mcp.js';
 import { metrics } from '../metrics.js';
 import { version as sutraVersion } from '../config.js';
+import { firewallAllows, getFirewall, getGatewayOptions, issueToken, logRequest, openApi } from './apps.js';
 
 /**
  * The gateway serves deployed REST and SOAP services on its own HTTP and HTTPS
@@ -66,6 +67,9 @@ export function rebuildRoutes() {
     return { endpoint: srv ? mcpPath(srv.config.path) : '/mcp', serverId: srv?.id || '', flowId: d.flowId, projectId: d.projectId, version: d.version, doc: d.doc, node };
   }));
 }
+
+/** Deployed REST and SOAP services, for OpenAPI and the Admin Console. */
+export const apiRoutes = () => routes.map(r => ({ kind: r.kind, method: r.method, path: r.path, flowName: r.doc.name, flowId: r.flowId, projectId: r.projectId, version: r.version, node: r.node }));
 
 export function listRoutes() {
   const s = getGatewaySettings();
@@ -187,15 +191,25 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
     return ka ? reply.type('text/plain').send(ka) : reply.code(404).send('Not found');
   }
   if (path === '/health') return reply.send({ ok: true });
+  const gw: GwInfo = ((req as any).gw = { kind: 'rest' });
+  if (!firewallAllows(req.ip, firewall())) { gw.error = 'Firewall'; return reply.code(403).send({ error: 'Your address is not allowed' }); }
+  if (path === '/oauth/token') { gw.route = 'Access tokens'; return tokenEndpoint(req, reply); }
+  if (path === '/openapi.json' && req.method === 'GET') {
+    gw.route = 'OpenAPI';
+    if (!getGatewayOptions().publishOpenApi) return reply.code(404).send({ error: 'OpenAPI is not published on this gateway' });
+    return reply.send(openApi(routes.map(r => ({ kind: r.kind, method: r.method, path: r.path, flowName: r.doc.name, projectId: r.projectId, version: r.version, node: r.node })), `${secure ? 'https' : 'http'}://${req.headers.host || 'localhost'}`));
+  }
   const mcpAt = mcpPath(path);
-  if (mcpAt === '/mcp' || mcpTools.some(t => t.endpoint === mcpAt)) return handleMcp(req, reply, secure, mcpAt);
+  if (mcpAt === '/mcp' || mcpTools.some(t => t.endpoint === mcpAt)) { gw.kind = 'mcp'; gw.route = `MCP ${mcpAt}`; return handleMcp(req, reply, secure, mcpAt); }
 
   const method = req.method.toUpperCase();
   const candidates = routes.filter(r => r.re.test(path));
   const route = candidates.find(r => r.kind === 'soap' || r.method === 'ANY' || r.method === method || method === 'OPTIONS')
     || (candidates.length ? null : undefined);
+  if (!route) gw.route = 'No service at this path';
   if (route === undefined) return reply.code(404).send({ error: 'No deployed service at this path' });
   if (route === null) return reply.code(405).header('allow', candidates.map(c => c.method).join(', ')).send({ error: 'Method not allowed' });
+  Object.assign(gw, { kind: route.kind, route: route.doc.name, flowId: route.flowId, projectId: route.projectId });
 
   const policy = route.node.config.policy ? effectiveResource(route.node.config.policy) : undefined;
   if (route.node.config.policy && !policy) return reply.code(503).send({ error: 'The service\'s security policy is missing; refusing to serve it unprotected' });
@@ -227,8 +241,10 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
     let caller;
     try {
       caller = await authorize(policy, { headers: req.headers, ip: req.ip, secure, socket: req.raw.socket, wsSecurity: env.Header?.Security });
+      noteCaller(gw, reply, caller);
     } catch (e: any) {
       const pe = e as PolicyError;
+      gw.error = pe.message;
       if (pe.headers) reply.headers(pe.headers);
       return fault(pe.status || 500, 'soap:Client', pe.message, v12);
     }
@@ -259,8 +275,10 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
   let caller;
   try {
     caller = await authorize(policy, { headers: req.headers, ip: req.ip, secure, socket: req.raw.socket });
+    noteCaller(gw, reply, caller);
   } catch (e: any) {
     const pe = e as PolicyError;
+    gw.error = pe.message;
     if (pe.headers) reply.headers(pe.headers);
     return reply.code(pe.status || 500).send({ error: pe.message });
   }
@@ -278,6 +296,43 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
   } catch (e: any) {
     if (e.runId) reply.header('x-sutra-run', e.runId);
     return reply.code(e.runId !== undefined ? 504 : 500).send({ error: e.message });
+  }
+}
+
+/** What the request log records about a gateway request, filled in while it is handled. */
+interface GwInfo { kind: string; route?: string; flowId?: string; projectId?: string; appId?: string; caller?: string; error?: string }
+
+function noteCaller(gw: GwInfo, reply: FastifyReply, caller: Caller) {
+  gw.caller = caller.subject;
+  gw.appId = caller.appId;
+  if (caller.responseHeaders) reply.headers(caller.responseHeaders);
+}
+
+// The firewall is read at most every two seconds; a change applies on every engine within that time.
+let fwCache = { at: 0, f: { allow: [] as string[], deny: [] as string[] } };
+const firewall = () => { if (Date.now() - fwCache.at > 2000) fwCache = { at: Date.now(), f: getFirewall() }; return fwCache.f; };
+export const refreshFirewall = () => { fwCache.at = 0; };
+
+/** OAuth2 client credentials for gateway apps (RFC 6749 section 4.4). */
+async function tokenEndpoint(req: FastifyRequest, reply: FastifyReply) {
+  reply.header('cache-control', 'no-store');
+  if (req.method !== 'POST') return reply.code(405).header('allow', 'POST').send({ error: 'invalid_request', error_description: 'Use POST' });
+  const raw = typeof req.body === 'string' ? req.body : '';
+  const ct = String(req.headers['content-type'] || '');
+  let f: Record<string, string> = {};
+  try { f = ct.includes('json') ? JSON.parse(raw || '{}') : Object.fromEntries(new URLSearchParams(raw)); } catch { return reply.code(400).send({ error: 'invalid_request', error_description: 'The body is not form data or JSON' }); }
+  let id = f.client_id || '', secret = f.client_secret || '';
+  const basic = /^Basic\s+(.+)$/i.exec(String(req.headers.authorization || ''))?.[1];
+  if (basic) { const d = Buffer.from(basic, 'base64').toString('utf8'); const i = d.indexOf(':'); id = decodeURIComponent(d.slice(0, i)); secret = decodeURIComponent(d.slice(i + 1)); }
+  if (f.grant_type !== 'client_credentials') return reply.code(400).send({ error: 'unsupported_grant_type', error_description: 'Only client_credentials is supported' });
+  if (!id || !secret) return reply.code(401).send({ error: 'invalid_client', error_description: 'Send client_id and client_secret (the app id and one of its keys)' });
+  try {
+    const t = await issueToken(id, secret, f.scope);
+    ((req as any).gw as GwInfo).appId = id;
+    return reply.send(t);
+  } catch (e: any) {
+    ((req as any).gw as GwInfo).error = e.message;
+    return reply.code(e.status || 400).send({ error: e.message, ...(e.detail ? { error_description: e.detail } : {}) });
   }
 }
 
@@ -301,7 +356,10 @@ async function handleMcp(req: FastifyRequest, reply: FastifyReply, secure: boole
     const ref = t.node.config.policy || (t.serverId ? effectiveResource(t.serverId)?.config.policy : '');
     const policy = ref ? effectiveResource(ref) : undefined;
     if (ref && !policy) throw new PolicyError(503, "The tool's security policy is missing; refusing to serve it unprotected");
-    return authorize(policy, ctx);
+    const who = await authorize(policy, ctx);
+    const g = (req as any).gw as GwInfo | undefined;
+    if (g) { g.caller = who.subject; g.appId = who.appId; }
+    return who;
   };
   const out: any[] = [];
   for (const m of batch) {
@@ -385,9 +443,17 @@ function build(https?: any): FastifyInstance {
   app.addHook('onResponse', async (req, reply) => {
     const p = req.url.split('?')[0];
     if (p === '/health' || p.startsWith('/.well-known/')) return;
-    const kind = /^\/mcp(\/|$)/.test(p) ? 'mcp' : String(req.headers['content-type'] || '').includes('xml') || req.headers.soapaction ? 'soap' : 'rest';
+    const gw: GwInfo = (req as any).gw || { kind: 'rest' };
+    const kind = gw.kind || 'rest';
     metrics.gatewayRequests.inc({ kind, status: String(reply.statusCode) });
     metrics.gatewaySeconds.observe({ kind }, reply.elapsedTime / 1000);
+    // Request log for the Admin Console (Gateway > Traffic).
+    const raw = req.body;
+    logRequest({
+      kind, method: req.method, path: p, route: gw.route, flowId: gw.flowId, projectId: gw.projectId, appId: gw.appId, caller: gw.caller,
+      status: reply.statusCode, ms: reply.elapsedTime, ip: req.ip, runId: String(reply.getHeader('x-sutra-run') || ''), error: reply.statusCode >= 400 ? gw.error : '',
+      bytesIn: Number(req.headers['content-length']) || (typeof raw === 'string' ? Buffer.byteLength(raw) : 0), bytesOut: Number(reply.getHeader('content-length')) || 0,
+    });
   });
   app.all('/', (req, reply) => handle(req, reply, secure));
   app.all('/*', (req, reply) => handle(req, reply, secure));

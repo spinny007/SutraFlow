@@ -6,6 +6,7 @@ import { getSecret } from '../secrets.js';
 import { kvToObject, type Resource } from '../resources.js';
 import { verifyUsernameToken, safeEqual } from './wss.js';
 import { systemAccountMayCall } from '../access.js';
+import { appOfKey, appOfToken, consume, type App } from '../gateway/apps.js';
 
 /** Thrown for a request the policy refuses; the gateway turns it into an HTTP (or SOAP fault) reply. */
 export class PolicyError extends Error {
@@ -27,6 +28,9 @@ export interface Caller {
   method: string;
   subject: string;
   claims?: Record<string, any>;
+  /** Gateway apps: the app's id, and rate-limit headers for the reply. */
+  appId?: string;
+  responseHeaders?: Record<string, string>;
 }
 
 const h = (r: InboundRequest, name: string) => {
@@ -135,6 +139,25 @@ export async function authorize(policy: Resource | undefined, req: InboundReques
         if (missing.length) throw new PolicyError(403, `Token is missing scope: ${missing.join(' ')}`, { 'www-authenticate': 'Bearer error="insufficient_scope"' });
       }
       caller = { method: 'jwt', subject: String(payload.sub || payload.client_id || 'unknown'), claims: payload };
+      break;
+    }
+    case 'apps': {
+      // A gateway app: its API key (header, or Bearer sfk_...) or an access token from /oauth/token.
+      const keyHeader = h(req, c.apiKeyHeader || 'x-api-key') || '';
+      const auth = h(req, 'authorization') || '';
+      const bearer = /^Bearer\s+/i.test(auth) ? auth.replace(/^Bearer\s+/i, '').trim() : '';
+      const key = keyHeader || (bearer.startsWith('sfk_') ? bearer : '');
+      if (!key && !bearer) throw new PolicyError(401, `Send an app key in ${c.apiKeyHeader || 'X-API-Key'} or an access token as Authorization: Bearer`, { 'www-authenticate': 'Bearer' });
+      let app: App | null = null, scopes: string[] = [];
+      if (key) { app = appOfKey(key); if (app) scopes = app.scopes; }
+      else { const t = await appOfToken(bearer); if (t) { app = t.app; scopes = t.scopes; } }
+      if (!app) throw new PolicyError(401, 'Invalid, expired or revoked app key or token', { 'www-authenticate': 'Bearer error="invalid_token"' });
+      const need = String(c.appScopes || '').split(/\s+/).filter(Boolean);
+      const missing = need.filter(s => !scopes.includes(s));
+      if (missing.length) throw new PolicyError(403, `The app is missing scope: ${missing.join(' ')}`, { 'www-authenticate': 'Bearer error="insufficient_scope"' });
+      const used = consume(app);
+      if (!used.ok) throw new PolicyError(429, `The app's plan allows ${used.limit} requests per ${used.window}`, { 'retry-after': String(used.retryAfter) });
+      caller = { method: 'app', subject: app.name, appId: app.id, claims: { appId: app.id, plan: app.planId, scopes }, responseHeaders: used.headers };
       break;
     }
     case 'wssUsernameToken': {
