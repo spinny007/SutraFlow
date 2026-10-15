@@ -68,8 +68,14 @@ sutra deploy orders.sutra --server $PROD_ENGINE --token $PROD_TOKEN
 
 `SUTRA_MODE=engine` runs the engine, the gateway, timers and listeners without the studio:
 
-- No studio pages, no sign-in, no editing API.
-- The admin port keeps `/health`, `/ready`, `/metrics`, and an automation API that accepts only `Authorization: Bearer <SUTRA_ADMIN_TOKEN>`. It covers packages, runs, secrets and engine control. Without a token the API is closed.
+- No designer pages and no editing API.
+- The admin port keeps `/health`, `/ready`, `/metrics`, the **Admin Console** at `/admin`, and the API the console and automation need: packages, deployed Sutras and their versions, runs, approvals, secrets, engines, users and audit. Callers are signed-in console users, system account tokens (limited to their roles) or `SUTRA_ADMIN_TOKEN`.
+- There is no first-start page, so nobody who reaches a fresh engine can claim it. Add the first administrator on the server:
+
+  ```
+  sutra user add admin --role administrator --password-from-env ADMIN_PASSWORD
+  sutra user add ci-orders --system --role deployer --project "Orders"   # then create its token in the console
+  ```
 - Packages in `SUTRA_DEPLOY_DIR` are deployed at start, in file-name order. A package whose checksum is already deployed is skipped. A package that cannot be deployed stops the start with an error, so a bad release never serves half-deployed.
 
 ## 4. Docker

@@ -67,7 +67,7 @@ function deployFolderLocked(dir: string) {
  * Boots the server: engine workers, timers, gateway listeners and the studio (SUTRA_MODE=studio),
  * or the same without the studio (SUTRA_MODE=engine). Packages in SUTRA_DEPLOY_DIR are deployed first.
  */
-export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gateway?: boolean } = {}) {
+export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gateway?: boolean; exitOnDrain?: boolean } = {}) {
   openDb(opts.dbFile);
   ensureBuiltins();
   engine.register(allActivities);
@@ -95,6 +95,7 @@ export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gatew
     lostLeader: () => { stopSchedules(); stopListeners().catch(() => {}); },
     deploymentsChanged: () => { rebuildRoutes(); reschedule(); relisten(); },
     housekeeping: () => { try { housekeeping(); } catch (e) { console.error('Housekeeping:', e); } },
+    drainRequested: () => { console.log('Drain requested from the Admin Console'); lifecycle.shutdown?.().finally(() => { if (opts.exitOnDrain) process.exit(0); }); },
   });
   rebuildRoutes();
   if (opts.gateway !== false) {

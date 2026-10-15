@@ -61,7 +61,8 @@ export function ensureBuiltins() {
 }
 
 export function listRoles() {
-  return q.all<any>('select * from roles order by builtin desc, name').map(r => ({
+  const order = (id: string) => { const i = BUILTIN_ROLES.findIndex(b => b.id === id); return i < 0 ? 99 : i; };
+  return q.all<any>('select * from roles').sort((a, b) => order(a.id) - order(b.id) || String(a.name).localeCompare(b.name)).map(r => ({
     id: r.id, name: r.name, description: r.description || '', perms: JSON.parse(r.perms), builtin: !!r.builtin,
     holders: Number(q.get<any>('select count(distinct username) n from grants where role_id = ?', r.id)?.n || 0),
   }));

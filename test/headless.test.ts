@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { testEnv, node, edge } from './helpers.js';
-import { startServer, waitFor, type Proc } from './proc.js';
+import { spawn } from 'node:child_process';
+import { startServer, waitFor, root, type Proc } from './proc.js';
 
 // This process builds the packages; the headless engines run as separate processes.
 testEnv(19110);
@@ -66,7 +67,34 @@ test('a headless engine deploys the packages in its folder and serves them, with
   assert.equal((await fetch(`${e.admin}/api/projects`, { headers: { authorization: 'Bearer nope' } })).status, 401);
   assert.equal((await fetch(`${e.admin}/api/projects`, { headers: H })).status, 200);
   assert.equal((await fetch(`${e.admin}/api/flows`, { headers: H })).status, 404, 'no editing API');
-  assert.equal((await fetch(`${e.admin}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 401, 'no sign-in on an engine');
+  const J = { 'content-type': 'application/json', 'x-sutra': '1' };
+  assert.equal((await fetch(`${e.admin}/api/auth/setup`, { method: 'POST', headers: J, body: JSON.stringify({ username: 'grab', password: 'Grab-this-engine-1' }) })).status, 403, 'nobody claims a fresh engine');
+
+  // The Admin Console: the first administrator comes from the sutra command on the server; then sign-in works.
+  // Run without blocking this process, so idle keep-alive connections close cleanly meanwhile.
+  const cli = await new Promise<{ status: number | null; stdout: string; stderr: string }>(res => {
+    const c = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', '--import', 'tsx', path.join(root, 'server/src/cli.ts'), 'user', 'add', 'ops', '--role', 'administrator', '--password-from-env', 'OPS_PW', '--keep-password'],
+      { cwd: root, env: { ...process.env, SUTRA_DATA_DIR: dataDir, SUTRA_MASTER_KEY: KEY, SUTRA_SERVER: '', OPS_PW: 'Night-shift-42' } });
+    let stdout = '', stderr = '';
+    c.stdout.on('data', d => (stdout += d)); c.stderr.on('data', d => (stderr += d));
+    c.on('close', status => res({ status, stdout, stderr }));
+  });
+  assert.equal(cli.status, 0, cli.stderr + cli.stdout);
+  assert.match(cli.stdout, /User ops added with role administrator on all projects/);
+  const login = await fetch(`${e.admin}/api/auth/login`, { method: 'POST', headers: J, body: JSON.stringify({ username: 'ops', password: 'Night-shift-42' }) });
+  assert.equal(login.status, 200, await login.clone().text());
+  const cookie = String(login.headers.get('set-cookie')).split(';')[0];
+  const apps = await fetch(`${e.admin}/api/console/apps`, { headers: { cookie } });
+  assert.equal(apps.status, 200);
+  assert.deepEqual((await apps.json()).map((p: any) => p.name), ['Orders']);
+  assert.equal((await fetch(`${e.admin}/api/flows`, { headers: { cookie } })).status, 404, 'still no designer API');
+  assert.equal((await fetch(`${e.admin}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 403, 'sign-in needs the X-Sutra header');
+  if (fs.existsSync(path.join(root, 'dist/web/admin.html'))) {
+    const page = await fetch(`${e.admin}/admin`);
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /SutraFlow Admin Console/);
+    assert.equal((await fetch(`${e.admin}/index.html`)).status, 404, 'no designer page');
+  }
 });
 
 test('a new package deployed through the API is served at once; restarting does not deploy the folder twice', async () => {

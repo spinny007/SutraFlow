@@ -13,8 +13,9 @@ import { engine } from './engine/engine.js';
  *  Recovery   the leader puts steps that a dead engine was running back in the queue.
  *  Deploys    a deploy, connection or project change bumps a generation number; every engine
  *             compares it on each beat and reloads its routes (and the leader its listeners).
+ *  Drain      the Admin Console marks an engine; that engine drains and stops on its next beat.
  */
-export interface ClusterHooks { becameLeader(): void; lostLeader(): void; deploymentsChanged(): void; housekeeping?(): void }
+export interface ClusterHooks { becameLeader(): void; lostLeader(): void; deploymentsChanged(): void; housekeeping?(): void; drainRequested?(): void }
 
 export const cluster = { leader: false, started: false, draining: false, gen: -1 };
 let timer: NodeJS.Timeout | null = null;
@@ -22,6 +23,7 @@ let hooks: ClusterHooks | null = null;
 let beats = 0;
 
 const deadAfter = () => config.heartbeatMs * 3;
+const FORGET_MS = 10 * 60 * 1000;
 
 export function startCluster(h: ClusterHooks) {
   hooks = h;
@@ -29,7 +31,7 @@ export function startCluster(h: ClusterHooks) {
   cluster.draining = false;
   cluster.gen = getSetting<number>('deployGen', 0);
   q.run(`insert into engines(id, host, pid, mode, version, started_at, heartbeat_at, workers, active, draining) values(?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
-    on conflict(id) do update set host = excluded.host, pid = excluded.pid, mode = excluded.mode, version = excluded.version, started_at = excluded.started_at, heartbeat_at = excluded.heartbeat_at, workers = excluded.workers, active = 0, draining = 0`,
+    on conflict(id) do update set host = excluded.host, pid = excluded.pid, mode = excluded.mode, version = excluded.version, started_at = excluded.started_at, heartbeat_at = excluded.heartbeat_at, workers = excluded.workers, active = 0, draining = 0, drain_requested = 0`,
     config.engineId, os.hostname(), process.pid, config.mode, version, now(), Date.now(), engine.concurrency);
   beat();
   timer = setInterval(beat, config.heartbeatMs);
@@ -47,11 +49,15 @@ export function beat() {
   if (!cluster.leader && wasLeader) hooks.lostLeader();
   if (cluster.leader) {
     recoverOrphans(t);
+    // Engines that stopped without saying goodbye (killed, crashed) are forgotten after ten minutes.
+    q.run('delete from engines where heartbeat_at < ? and id != ?', t - Math.max(deadAfter() * 2, FORGET_MS), config.engineId);
     if (beats++ % 12 === 0) hooks.housekeeping?.();
   }
   const gen = getSetting<number>('deployGen', 0);
   if (gen !== cluster.gen) { cluster.gen = gen; hooks.deploymentsChanged(); }
   engine.abortCancelledHere();
+  // The Admin Console asked this engine to drain and stop.
+  if (!cluster.draining && Number(q.get<any>('select drain_requested from engines where id = ?', config.engineId)?.drain_requested)) hooks.drainRequested?.();
 }
 
 function tryLead(t: number) {

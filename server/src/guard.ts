@@ -128,6 +128,10 @@ export const RULES: Record<string, Rule> = {
   'GET /api/access/users/:name/tokens': R('users'),
   'POST /api/access/users/:name/tokens': R('users'),
   'DELETE /api/access/users/:name/tokens/:id': R('users'),
+  'GET /api/console/overview': R(null),
+  'GET /api/console/apps': R(null),
+  'PUT /api/console/sutras/:id/enabled': R('operate', 'flow'),
+  'POST /api/console/engines/:id/drain': R('engines'),
   'GET /api/audit': R('audit'),
   'GET /api/audit/export': R('audit'),
 };

@@ -154,6 +154,15 @@ export function undeploy(flowId: string) {
   onDeploymentsChange.forEach(fn => fn());
 }
 
+/** Starts or stops a deployed Sutra: stopped, its triggers start no runs; runs in flight finish. */
+export function setEnabled(flowId: string, enabled: boolean) {
+  const d = q.get<{ version: number }>('select version from deployments where flow_id = ?', flowId);
+  if (!d) throw new Error('This Sutra is not deployed');
+  if (enabled) assertNoRouteClash(flowId, versionDoc(flowId, d.version)!);
+  q.run('update deployments set enabled = ? where flow_id = ?', enabled ? 1 : 0, flowId);
+  onDeploymentsChange.forEach(fn => fn());
+}
+
 export function deployedFlows(): { flowId: string; projectId: string; version: number; doc: FlowDoc }[] {
   return q.all<any>(`select d.flow_id, f.project_id, d.version, v.doc from deployments d
     join flow_versions v on v.flow_id = d.flow_id and v.version = d.version

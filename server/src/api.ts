@@ -17,6 +17,7 @@ import * as access from './access.js';
 import type { Caller } from './access.js';
 import { RULES, OPEN_ROUTES, check, auditRequest } from './guard.js';
 import { audit, listAudit, auditCsv } from './audit.js';
+import { overview, applications, setSutraEnabled, requestDrain } from './console.js';
 import { gatewayStatus, getGatewaySettings, setGatewaySettings, listRoutes, startGateway, reloadTls } from './gateway/gateway.js';
 import { acmeStatus, certInfo, getTls, setTls, makeSelfSigned, storeCert, requestAcme } from './gateway/tls.js';
 import { schedulerErrors } from './scheduler.js';
@@ -124,8 +125,10 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     const methods = Array.isArray(r.method) ? r.method : [r.method];
     for (const m of methods) if (r.url.startsWith('/api/') && m !== 'HEAD') apiRoutes.push(`${m} ${r.url}`);
   });
-  // Headless engines: packages, runs, secrets, engine control, access and audit; no designer API.
-  const ENGINE_API = [/^\/api\/packages\//, /^\/api\/projects\/?$/, /^\/api\/projects\/[^/]+\/(packages|rollback)$/, /^\/api\/engine\//, /^\/api\/runs/, /^\/api\/secrets/, /^\/api\/meta$/, /^\/api\/access\//, /^\/api\/audit/];
+  // Headless engines: what the Admin Console and automation need (packages, deployed Sutras, runs,
+  // approvals, secrets, engines, access, audit); no designer API.
+  const ENGINE_API = [/^\/api\/packages\//, /^\/api\/projects\/?$/, /^\/api\/projects\/[^/]+\/(packages|rollback)$/, /^\/api\/engine\//, /^\/api\/runs/, /^\/api\/secrets/, /^\/api\/meta$/,
+    /^\/api\/access\//, /^\/api\/audit/, /^\/api\/auth\//, /^\/api\/console\//, /^\/api\/approvals/, /^\/api\/flows\/[^/]+\/(versions|deploy)$/];
   const sameToken = (a: string, b: string) => !!a && !!b && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
   /** The caller: the admin token (everything), a system account token, or a signed-in person. */
   const identify = (req: FastifyRequest): Caller | null => {
@@ -135,7 +138,6 @@ export async function buildAdmin(): Promise<FastifyInstance> {
       const sys = access.tokenAccount(bearer);
       return sys ? { u: sys, kind: 'system' } : null;
     }
-    if (config.mode === 'engine') return null;
     const s = auth.verifySession(cookie(req, COOKIE));
     return s && access.sessionValid(s.u, s.iat) ? { u: s.u, kind: 'user' } : null;
   };
@@ -143,19 +145,13 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     if (!req.url.startsWith('/api/')) return;
     const p = req.url.split('?')[0];
     const key = `${req.method} ${req.routeOptions?.url || p}`;
-    if (config.mode === 'engine') {
-      const who = identify(req);
-      if (!who) return reply.code(401).send({ error: config.adminToken ? 'A headless engine accepts only API tokens (Authorization: Bearer ...)' : 'This headless engine has no SUTRA_ADMIN_TOKEN, so its API is closed' });
-      if (!ENGINE_API.some(r => r.test(p))) return reply.code(404).send({ error: 'Not available on a headless engine' });
-      req.user = who;
-      return;
-    }
     if (req.method !== 'GET' && req.method !== 'HEAD' && req.headers['x-sutra'] !== '1' && !/^Bearer\s/i.test(String(req.headers.authorization || ''))) {
       return reply.code(403).send({ error: 'Missing X-Sutra header' });
     }
     if (OPEN_ROUTES.has(key)) return;
     const who = identify(req);
-    if (!who) return reply.code(401).send({ error: 'Sign in required' });
+    if (!who) return reply.code(401).send({ error: config.mode === 'engine' && !config.adminToken ? 'Sign in required. This headless engine has no SUTRA_ADMIN_TOKEN; add users with: sutra user add' : 'Sign in required' });
+    if (config.mode === 'engine' && !ENGINE_API.some(r => r.test(p))) return reply.code(404).send({ error: 'Not available on a headless engine' });
     req.user = who;
     // A password an administrator set must be changed before anything else.
     if (who.kind === 'user' && key !== 'POST /api/auth/password' && key !== 'GET /api/access/me' && access.mustChangePassword(who.u)) {
@@ -186,6 +182,8 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   });
   app.post('/api/auth/setup', async (req: any, reply) => {
     if (auth.hasUsers()) throw new HttpError(409, 'Already set up');
+    // Anyone reaching a fresh headless engine could otherwise claim it.
+    if (config.mode === 'engine') throw new HttpError(403, 'Create the first administrator of a headless engine with: sutra user add <name> --role administrator');
     const username = String(req.body?.username || 'admin');
     try { access.createAccount({ username, password: String(req.body?.password || ''), displayName: 'Administrator', mustChange: false, grants: [{ role: 'administrator', project: '' }] }); } catch (e: any) { throw bad(e.message); }
     signInAudit(req, username, 'Set up first administrator', 'ok', 200);
@@ -246,6 +244,12 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     reply.header('content-disposition', `attachment; filename="sutraflow-audit-${new Date().toISOString().slice(0, 10)}.csv"`);
     return reply.type('text/csv; charset=utf-8').send(auditCsv(auditFilter(req.query || {})));
   });
+  // ---------- Admin Console: what is deployed and how it runs ----------
+  app.get('/api/console/overview', async req => overview(caller(req)));
+  app.get('/api/console/apps', async req => applications(caller(req)));
+  app.put('/api/console/sutras/:id/enabled', async (req: any) => { try { return setSutraEnabled(req.params.id, !!req.body?.enabled); } catch (e: any) { throw bad(e.message); } });
+  app.post('/api/console/engines/:id/drain', async (req: any) => { try { return requestDrain(req.params.id); } catch (e: any) { throw new HttpError(404, e.message); } });
+
   /** Lists show only the projects the caller may see. */
   const seen = (req: any) => { const v = access.visibleProjects(caller(req)); return (pid: string | null | undefined) => v === 'all' || (!!pid && v.has(pid)); };
 
@@ -422,7 +426,7 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     if (flowId) { where.push('flow_id = ?'); args.push(flowId); }
     if (status) { where.push('status = ?'); args.push(status); }
     const ok = seen(req);
-    return q.all<any>(`select id, flow_id flowId, flow_name flowName, version, status, source, error, steps, started_at startedAt, finished_at finishedAt, project_id projectId
+    return q.all<any>(`select id, flow_id "flowId", flow_name "flowName", version, status, source, error, steps, started_at "startedAt", finished_at "finishedAt", project_id "projectId"
       from runs ${where.length ? 'where ' + where.join(' and ') : ''} order by started_at desc limit ?`, ...args, limit).filter(r => ok(r.projectId));
   });
   app.get('/api/runs/:id', async (req: any) => runDetail(req.params.id));
@@ -442,7 +446,7 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   });
   app.get('/api/approvals', async req => {
     const ok = seen(req);
-    return q.all<any>(`select t.id, t.run_id runId, t.node_id nodeId, t.wait, t.input, r.flow_name flowName, r.started_at startedAt, r.doc, r.project_id
+    return q.all<any>(`select t.id, t.run_id "runId", t.node_id "nodeId", t.wait, t.input, r.flow_name "flowName", r.started_at "startedAt", r.doc, r.project_id
       from tasks t join runs r on r.id = t.run_id where t.status = 'waiting' order by t.id`).filter(t => ok(t.project_id)).map(t => {
       const doc = JSON.parse(t.doc);
       return { id: t.id, runId: t.runId, flowName: t.flowName, startedAt: t.startedAt, step: doc.nodes.find((n: any) => n.id === t.nodeId)?.name, wait: JSON.parse(t.wait || '{}'), input: t.input ? JSON.parse(t.input) : null };
@@ -571,13 +575,16 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     return reply.type('text/html; charset=utf-8').header('cache-control', 'no-cache').send(fs.createReadStream(f));
   });
 
-  // ---------- studio (built web app) ----------
+  // ---------- studio and Admin Console (built web app) ----------
+  // A headless engine serves only the Admin Console; the designer pages stay off.
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const webDir = config.mode === 'engine' ? undefined : [config.webDir, path.resolve(here, '../web'), path.resolve(here, '../../dist/web')].find(d => d && fs.existsSync(path.join(d, 'index.html')));
+  const webDir = [config.webDir, path.resolve(here, '../web'), path.resolve(here, '../../dist/web')].find(d => d && fs.existsSync(path.join(d, 'admin.html')));
   if (webDir) {
-    await app.register(fastifyStatic, { root: webDir, prefix: '/' });
+    const studio = config.mode !== 'engine';
+    await app.register(fastifyStatic, { root: webDir, prefix: '/', index: studio ? ['index.html'] : false, allowedPath: p => studio || (p !== '/' && !/(^|\/)index\.html$/.test(p)) });
+    app.get('/admin', (_req, reply) => reply.header('cache-control', 'no-cache').type('text/html').sendFile('admin.html'));
     app.setNotFoundHandler((req, reply) => {
-      if (req.url.startsWith('/api/')) return reply.code(404).send({ error: 'Not found' });
+      if (req.url.startsWith('/api/') || !studio) return reply.code(404).send({ error: 'Not found' });
       return reply.type('text/html').sendFile('index.html');
     });
   }

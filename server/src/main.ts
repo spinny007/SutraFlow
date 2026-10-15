@@ -2,7 +2,7 @@ import { config } from './config.js';
 import { boot } from './index.js';
 import { gatewayStatus } from './gateway/gateway.js';
 
-boot().then(({ stop }) => {
+boot({ exitOnDrain: true }).then(({ stop }) => {
   console.log(config.mode === 'engine'
     ? `SutraFlow engine ${config.engineId} (headless): health and automation API on http://${config.adminHost}:${config.adminPort}`
     : `SutraFlow studio:  http://${config.adminHost}:${config.adminPort}`);

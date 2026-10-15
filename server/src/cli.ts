@@ -26,6 +26,13 @@ const HELP = `sutra <command> [options]
   rollback  --project <name> [--to <id>]  Deploys the package before the current one.
   secret    set <NAME> (--value <v> | --from-env <VAR>)
   status                                  Server health, readiness and engines.
+  user      add <name> [--role administrator] [--project <name>] [--system] [--display "Name"] [--email e]
+                [--password <p> | --password-from-env <VAR>] [--keep-password]
+            Adds a person (or a system account) with a role for all projects or one project. People
+            choose a new password at their first sign-in unless --keep-password. This is how a headless
+            engine gets its first administrator.
+  user      list                          People and system accounts with their roles.
+  user      password <name> (--password <p> | --password-from-env <VAR>)
 
   Remote: --server <url> --token <token>  (or SUTRA_SERVER, SUTRA_ADMIN_TOKEN)
   Exit code 0 = success, 1 = failure, 2 = wrong usage.`;
@@ -76,6 +83,7 @@ async function local() {
     packages: await import('./packages.js'),
     projects: await import('./projects.js'),
     secrets: await import('./secrets.js'),
+    access: await (async () => { const m = await import('./access.js'); m.ensureBuiltins(); return m; })(),
   };
 }
 
@@ -185,6 +193,31 @@ async function main(argv: string[]) {
       if (call) await call('PUT', `/api/secrets/${encodeURIComponent(name)}`, { value });
       else (await local()).secrets.setSecret(name, value);
       out(`Secret ${name} saved`);
+      return 0;
+    }
+    case 'user': {
+      const sub = a._[1], name = a._[2];
+      const password = str(a, 'password') ?? (str(a, 'password-from-env') ? process.env[str(a, 'password-from-env')!] : undefined);
+      if (sub === 'list') {
+        const users: any[] = call ? await call('GET', '/api/access/users') : (await local()).access.listUsers();
+        for (const u of users) out(`  ${u.kind === 'system' ? 'system' : 'person'}  ${u.username}${u.disabled ? ' (disabled)' : ''}  ${u.grants.map((g: any) => `${g.role}${g.project ? ' on ' + g.project : ''}`).join(', ') || 'no roles'}`);
+        return 0;
+      }
+      if (!name || (sub !== 'add' && sub !== 'password')) throw new Usage('Use: sutra user add <name> ... | sutra user list | sutra user password <name> ...');
+      if (sub === 'password') {
+        if (!password) throw new Usage('Give --password or --password-from-env');
+        if (call) await call('POST', `/api/access/users/${encodeURIComponent(name)}/password`, { password, mustChange: !a['keep-password'] });
+        else (await local()).access.resetPassword(name, password, !a['keep-password']);
+        out(`Password of ${name} set`);
+        return 0;
+      }
+      const system = !!a.system;
+      if (!system && !password) throw new Usage('A person needs --password or --password-from-env');
+      const project = str(a, 'project') ? await projectId(a, call) : '';
+      const body = { username: name, kind: system ? 'system' : 'user', displayName: str(a, 'display') || '', email: str(a, 'email') || '', password, mustChange: !a['keep-password'], grants: [{ role: str(a, 'role') || (system ? 'apiCaller' : 'viewer'), project }] };
+      if (call) await call('POST', '/api/access/users', body);
+      else (await local()).access.createAccount(body as any);
+      out(`${system ? 'System account' : 'User'} ${name} added with role ${body.grants[0].role}${project ? ' on ' + str(a, 'project') : ' on all projects'}`);
       return 0;
     }
     case 'status': {

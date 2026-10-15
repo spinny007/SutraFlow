@@ -82,6 +82,7 @@ const FILES: Group[] = [
       ['server/src/api.ts', 'Admin API on port 4800 (Fastify): sign-in, projects, Sutras, runs, approvals, resources, secrets, packages, engine control, server settings, <code>/health</code>, <code>/ready</code>, <code>/metrics</code>, <code>/guide</code>, <code>/architecture</code> and the studio files. Bearer tokens for automation; a headless engine allows only a short list of routes.'],
       ['server/src/access.ts', 'Users and system accounts (provision, disable, lockout, password rules, sign out everywhere), roles made of permissions, grants for all projects or one project, permission checks, API tokens of system accounts (stored as hashes), and Basic sign-in of system accounts at the gateway.'],
       ['server/src/guard.ts', 'The permission of every admin API route and the project it applies to. The server refuses to start when a route has no rule. Also writes each change and each refusal to the audit log, without passwords or secret values.'],
+      ['server/src/console.ts', 'Data for the Admin Console: the overview (engines, deployed Sutras, runs of the last day, failures, approvals, gateway), deployed applications with their triggers and run counts, starting and stopping a deployed Sutra, and drain requests for any engine. Always limited to the projects the caller may see.'],
       ['server/src/audit.ts', 'The audit log: record, search, CSV export, and deletion after <code>SUTRA_AUDIT_RETENTION_DAYS</code>.'],
       ['server/src/auth.ts', 'Studio sign-in: the first visit creates the administrator, sessions are signed cookies, and changing requests need the X-Sutra header (a cross-site form cannot send it).'],
       ['server/src/gateway/gateway.ts', 'The gateway: HTTP and HTTPS listeners for deployed REST and SOAP services and MCP endpoints, WSDL publishing, policy checks, run start with the caller\'s traceparent, and waiting for the reply step (also when another engine runs it).'],
@@ -150,9 +151,10 @@ const FILES: Group[] = [
     id: 'web', title: 'Studio (web/src)', intro: 'The browser application: React with React Flow, built by Vite into dist/web and served by the admin API.',
     files: [
       ['web/index.html', 'Page shell for the studio.'],
-      ['web/vite.config.ts', 'Vite build and the development proxy to the admin API.'],
+      ['web/vite.config.ts', 'Vite build of two pages (designer and Admin Console) and the development proxy to the admin API.'],
       ['web/src/main.tsx', 'Mounts the React application.'],
       ['web/src/App.tsx', 'Top bar, sign-in, and the switch between Designer, Runs, Resources and Server.'],
+      ['web/src/Auth.tsx', 'Sign-in, first administrator and password change, shared by the designer and the Admin Console.'],
       ['web/src/api.ts', 'Thin client for the admin API; changing calls carry the X-Sutra header.'],
       ['web/src/types.ts', 'Studio-side types of Sutras, activities, fields and runs.'],
       ['web/src/ui.tsx', 'Toasts and the catalog (current project, its connections and schemas, secret names).'],
@@ -168,6 +170,23 @@ const FILES: Group[] = [
       ['web/src/templates.ts', 'Starter Sutras offered by "New Sutra".'],
       ['web/src/styles.css', 'Studio styles.'],
       ['web/src/env.d.ts', 'Vite type declarations.'],
+    ],
+  },
+  {
+    id: 'console', title: 'Admin Console (web/admin)', intro: 'The second page of the web build, served at <code>/admin</code> on every server, headless engines included. It manages what is deployed; design stays in the designer.',
+    files: [
+      ['web/admin.html', 'Page shell of the Admin Console.'],
+      ['web/admin/main.tsx', 'Mounts the console and applies the saved theme.'],
+      ['web/admin/Console.tsx', 'Sign-in (or, on a headless engine without users, how to add the first administrator), password change, navigation by permission, and the pages.'],
+      ['web/admin/shared.tsx', 'What the signed-in account may do, loading and refresh helpers, state labels, in-page confirmation, password generator.'],
+      ['web/admin/Overview.tsx', 'Tiles for engines, deployed Sutras, runs of the last day, approvals, work queue and gateway; recent failures with Resubmit.'],
+      ['web/admin/Apps.tsx', 'Deployed projects and Sutras: start and stop, runs with step results, resubmit and cancel, deploy an earlier version, package history and roll back. Also the side panel used by other pages.'],
+      ['web/admin/Approvals.tsx', 'Waiting approvals with comment, Approve and Reject.'],
+      ['web/admin/Engines.tsx', 'Engines of the cluster: alive, leader, load, heartbeat; drain and stop one; delete old runs now.'],
+      ['web/admin/People.tsx', 'Users and system accounts: add, roles per project, disable, unlock, passwords, sign out everywhere, delete; API tokens shown once.'],
+      ['web/admin/Roles.tsx', 'Permission matrix of all roles; custom roles.'],
+      ['web/admin/Audit.tsx', 'Audit log with filters, plain-word actions, details and CSV export.'],
+      ['web/admin/console.css', 'Console layout on the studio colour tokens, light and dark, one column on phones.'],
     ],
   },
   {
@@ -335,6 +354,7 @@ ${tw(['Address', 'What answers'], [
   ['<code>:4800/api/...</code>', 'Admin API'],
   ['<code>:4800/health</code>, <code>/ready</code>', 'Liveness and readiness'],
   ['<code>:4800/metrics</code>', 'Prometheus metrics'],
+  ['<code>:4800/admin</code>', 'Admin Console (also on headless engines)'],
   ['<code>:4800/guide</code>, <code>/architecture</code>', 'User guide and this page'],
   ['<code>:8080</code>, <code>:8443</code>', 'Gateway: deployed REST and SOAP services, <code>/mcp</code> and MCP server paths, ACME challenges'],
 ].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join(''))}`);
@@ -448,7 +468,9 @@ ${tw(['Strategy', 'How', 'When'], [
   ['Cluster', 'PostgreSQL, several engines, a load balancer on <code>/ready</code>', 'High availability and more throughput'],
 ].map(([a, b, c]) => `<tr><td><strong>${a}</strong></td><td>${b}</td><td>${c}</td></tr>`).join(''))}
 <h3 id="headless">Headless engines</h3>
-<p>With <code>SUTRA_MODE=engine</code> the studio is not served and the API answers only to the admin token, for packages, projects list, rollback, runs, secrets and engine control. Without a token the API is closed. Health, readiness and metrics stay available.</p>
+<p>With <code>SUTRA_MODE=engine</code> the designer is not served and its API is closed. The engine keeps the Admin Console at <code>/admin</code> for its users, and the API the console and automation need: packages, deployed Sutras and their versions, runs, approvals, secrets, engines, access and audit, for signed-in users and API tokens. There is no first-start page; the first administrator is added on the server with <code>sutra user add</code>. Health, readiness and metrics stay available.</p>
+<h3 id="console">Admin Console</h3>
+<p>The console (<code>web/admin</code>, <code>server/src/console.ts</code>) is for what is deployed. Operators see the overview, start and stop deployed Sutras (their triggers stop starting runs while they stay deployed), look into runs and resubmit them, decide approvals, deploy an earlier version or roll a project back to an earlier package, and drain any engine: the request is stored on the engine's row and that engine drains on its next heartbeat. Administrators manage users, system accounts with their API tokens, roles, and read the audit log. Every page shows only the projects the signed-in account may see, and every action is checked again by the server.</p>
 <h3 id="docker">Docker</h3>
 <p>The Dockerfile builds in one stage and runs in a slim Node 24 image as the <code>node</code> user under tini, with a health check on <code>/ready</code>. Defaults: headless mode, data in <code>/data</code>, packages from <code>/deploy</code>, admin on 0.0.0.0, JSON logs. <code>docker-compose.yml</code> runs one server; <code>docker-compose.cluster.yml</code> runs PostgreSQL, a studio and two engines with a shared <code>SUTRA_MASTER_KEY</code> and a 45-second stop grace period.</p>`);
 

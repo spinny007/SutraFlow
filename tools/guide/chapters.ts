@@ -429,15 +429,53 @@ sutra check    orders-1.4.0.sutra
 sutra test     orders-1.4.0.sutra --secrets-from-env
 sutra deploy   orders-1.4.0.sutra --server https://engine:4800 --token $TOKEN
 sutra rollback --project "Orders" --server https://engine:4800 --token $TOKEN</pre>
-<p>The token is the server's <code>SUTRA_ADMIN_TOKEN</code>. Without <code>--server</code> the tool works on the local data folder. Exit code 0 means success, 1 a failed check, test or deploy, 2 wrong usage. <code>sutra test</code> runs every Sutra of the package with its test data in a throw-away server.</p>
+<p>The token is a system account's API token (Admin Console, System accounts), limited to its roles, or the server's <code>SUTRA_ADMIN_TOKEN</code>. Without <code>--server</code> the tool works on the local data folder. Exit code 0 means success, 1 a failed check, test or deploy, 2 wrong usage. <code>sutra test</code> runs every Sutra of the package with its test data in a throw-away server.</p>
 <p class="h">From a Sutra</p>
 <p>The <strong>Release</strong> palette does the same steps inside a Sutra, so a release can itself be a Sutra: on a timer or a REST call, [[releasePackage]], [[releaseDeploy]] to a test engine, [[approval]], [[releaseDeploy]] to production, then [[emailSend]] the result. [[releaseCheck]] and [[releaseRollback]] complete it. These activities are off until an administrator allows them in Server &amp; APIs.</p>`,
+  },
+  {
+    id: 'console', title: 'The Admin Console',
+    html: `
+<p>The Admin Console manages what is deployed: running projects and Sutras, approvals, engines, people, system accounts, roles and the audit log. Designing stays in the designer. Open it with <strong>Admin Console</strong> in the designer's top bar, or at <code>/admin</code> on the admin port (<code>http://127.0.0.1:4800/admin</code>). Headless engines serve the console too, without the designer.</p>
+[[img:console-overview|The Overview: engines, deployed Sutras, runs of the last day, approvals, the work queue and the gateway, with recent failures.]]
+<p class="h">Operate</p>
+<ul>
+<li><strong>Overview</strong>: tiles for engines, deployed Sutras, runs of the last 24 hours, waiting approvals, the work queue and the gateway certificate, and the latest failed runs with <em>Resubmit</em>. Test runs from the designer are not counted.</li>
+<li><strong>Applications</strong>: every deployed project with its package version and its Sutras: version, started or stopped, what starts it (REST path, SOAP path, timer, skill), runs of the last day and the last run. <em>Stop</em> makes the Sutra's triggers start nothing (its address answers 404, timers and listeners pause) while it stays deployed; <em>Start</em> brings it back on every engine. <em>Runs</em> opens its runs with every step's result, <em>Resubmit</em> and <em>Cancel run</em>; <em>Versions</em> deploys an earlier version; <em>Package history</em> rolls the project back to an earlier package.</li>
+<li><strong>Approvals</strong>: running Sutras waiting for a person, with a comment and <em>Approve</em> or <em>Reject</em>.</li>
+<li><strong>Engines</strong>: every engine sharing the database: alive or silent, leader, steps running, heartbeat. <em>Drain and stop</em> asks one engine to finish its steps, hand the rest to the others and stop; your service manager starts it again. <em>Delete old runs now</em> runs housekeeping at once.</li>
+</ul>
+[[img:console-apps|Applications: deployed projects and Sutras with their triggers, state and runs; Stop and Start per Sutra.]]
+<p class="h">Users, system accounts and roles</p>
+<ul>
+<li><strong>Users</strong> are people. An administrator adds them with a first password (<em>Generate</em> makes a strong one); by default they choose their own at the first sign-in. Five wrong passwords lock an account for 15 minutes; <em>Unlock</em> ends it sooner. <em>Disable</em> ends the person's sessions at once and keeps everything; <em>Sign out everywhere</em> ends sessions only.</li>
+<li><strong>System accounts</strong> are for engines, CI pipelines and API callers. They do not sign in to the designer. They get <strong>API tokens</strong> for the admin API, shown once and stored only as a hash, with an expiry and a <em>Revoke</em> button. A system account with a password can call gateway services whose API security policy accepts system accounts.</li>
+<li><strong>Roles</strong> are sets of permissions. A role is granted for all projects or for one project, and an account can hold several. Built-in roles: Administrator, Developer, Deployer, Operator, Approver, Viewer and API caller. <em>New role</em> combines permissions differently.</li>
+</ul>
+<table class="t s"><thead><tr><th>Permission</th><th>Allows</th></tr></thead><tbody>
+<tr><td>View</td><td>See the project, its Sutras, connections, runs and logs.</td></tr>
+<tr><td>Design</td><td>Edit Sutras, schemas and project settings; test and debug runs.</td></tr>
+<tr><td>Connections</td><td>Add and change connections and API security policies.</td></tr>
+<tr><td>Deploy</td><td>Deploy and undeploy Sutras, deploy packages, roll back, edit the deployment config.</td></tr>
+<tr><td>Operate</td><td>Start, stop, cancel and resubmit; clear runtime variable values.</td></tr>
+<tr><td>Approve</td><td>Decide approvals.</td></tr>
+<tr><td>Call services</td><td>System accounts: call the project's gateway services with Basic sign-in.</td></tr>
+<tr><td>Secrets, Engines, Server settings, Users and roles, Audit, Alerts</td><td>Server permissions: they only come with a grant on all projects.</td></tr>
+</tbody></table>
+[[note:Always one administrator|Nobody can disable or delete their own account, and the last active administrator cannot lose the role.]]
+<p class="h">Audit log</p>
+<p>Every change, sign-in and refused request is recorded with who, when, from which address, what, the project and the result. Filter by person, result, text and dates; <em>Export CSV</em> saves what the filters show. Passwords, secret values and tokens are never recorded. Entries are kept for <code>SUTRA_AUDIT_RETENTION_DAYS</code> (365).</p>
+<p class="h">The first administrator of a headless engine</p>
+<p>A headless engine has no first-start page, so nobody who reaches it can claim it. Add the first administrator on the server, then sign in at <code>/admin</code>:</p>
+<pre>sutra user add admin --role administrator --password-from-env ADMIN_PASSWORD
+sutra user add ci-orders --system --role deployer --project "Orders"
+sutra user list</pre>`,
   },
   {
     id: 'production', title: 'Running in production: engines, Docker, clusters',
     html: `
 <p class="h">Headless engines</p>
-<p>The same program started with <code>SUTRA_MODE=engine</code> runs Sutras without the studio: no studio pages, no sign-in, no editing. It keeps <code>/health</code>, <code>/ready</code> and <code>/metrics</code>, and an automation API that accepts only the admin token. Packages in <code>SUTRA_DEPLOY_DIR</code> are deployed when it starts; a package that cannot be deployed stops the start.</p>
+<p>The same program started with <code>SUTRA_MODE=engine</code> runs Sutras without the studio: no designer pages and no editing. It keeps <code>/health</code>, <code>/ready</code> and <code>/metrics</code>, the Admin Console at <code>/admin</code> for its users, and an automation API for API tokens (the admin token or system account tokens). Packages in <code>SUTRA_DEPLOY_DIR</code> are deployed when it starts; a package that cannot be deployed stops the start.</p>
 <p class="h">Docker</p>
 <pre>docker build -t sutraflow:1.0.0 .
 docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=... \\

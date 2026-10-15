@@ -1,0 +1,45 @@
+import { useCallback, useState } from 'react';
+import { post } from '../src/api';
+import { useToast } from '../src/ui';
+import { PageHead, Err, Empty, useLoad, useEvery, ago, when } from './shared';
+
+interface Approval { id: number; runId: string; flowName: string; startedAt: string; step: string; wait: { kind?: string; message?: string; assignee?: string }; input: unknown }
+
+/** Runs waiting for a person's decision. */
+export function Approvals() {
+  const toast = useToast();
+  const { data, error, reload } = useLoad<Approval[]>('/api/approvals');
+  useEvery(useCallback(() => { reload(); }, [reload]), 10000);
+  const [comments, setComments] = useState<Record<number, string>>({});
+  const list = (data || []).filter(a => a.wait?.kind === 'approval');
+  const decide = async (a: Approval, approved: boolean) => {
+    try { await post(`/api/approvals/${a.id}`, { approved, comment: comments[a.id] || '' }); toast(approved ? 'Approved' : 'Rejected'); reload(); } catch (e: any) { toast(e.message, true); }
+  };
+  return (
+    <>
+      <PageHead title="Approvals" sub="Running Sutras waiting for a decision. You see those of projects you may view; deciding needs the Approve permission.">
+        <button className="btn small" onClick={reload}>Refresh</button>
+      </PageHead>
+      <Err text={error} />
+      {data && !list.length && <Empty title="Nothing is waiting">Approval steps of running Sutras appear here.</Empty>}
+      <div className="c-cards">
+        {list.map(a => (
+          <article key={a.id} className="c-card">
+            <div className="c-cardhead"><strong>{a.flowName}</strong><span className="muted xs" title={when(a.startedAt)}>started {ago(a.startedAt)}</span></div>
+            <div className="muted xs">Step {a.step}{a.wait.assignee ? ` · for ${a.wait.assignee}` : ''}</div>
+            <p className="c-message">{a.wait.message || 'No message.'}</p>
+            {a.input != null && <details><summary className="muted xs">What the step received</summary><pre className="c-code">{JSON.stringify(a.input, null, 2).slice(0, 4000)}</pre></details>}
+            <div className="fld" style={{ marginTop: 10 }}>
+              <label htmlFor={`c-ap-${a.id}`}>Comment</label>
+              <input id={`c-ap-${a.id}`} type="text" value={comments[a.id] || ''} onChange={e => setComments(c => ({ ...c, [a.id]: e.target.value }))} />
+            </div>
+            <div className="c-actions">
+              <button className="btn go" onClick={() => decide(a, true)}>Approve</button>
+              <button className="btn c-danger-soft" onClick={() => decide(a, false)}>Reject</button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </>
+  );
+}
