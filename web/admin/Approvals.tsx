@@ -3,7 +3,7 @@ import { act } from './log';
 import { useToast } from '../src/ui';
 import { PageHead, Err, Empty, useLoad, useEvery, ago, when } from './shared';
 
-interface Approval { id: number; runId: string; flowName: string; startedAt: string; step: string; wait: { kind?: string; message?: string; assignee?: string }; input: unknown }
+interface Approval { id: number; runId: string; flowName: string; startedAt: string; step: string; wait: { kind?: string; message?: string; assignee?: string; question?: boolean }; input: unknown }
 
 /** Runs waiting for a person's decision. */
 export function Approvals() {
@@ -31,12 +31,14 @@ export function Approvals() {
             <p className="c-message">{a.wait.message || 'No message.'}</p>
             {a.input != null && <details><summary className="muted xs">What the step received</summary><pre className="c-code">{JSON.stringify(a.input, null, 2).slice(0, 4000)}</pre></details>}
             <div className="fld" style={{ marginTop: 10 }}>
-              <label htmlFor={`c-ap-${a.id}`}>Comment</label>
-              <input id={`c-ap-${a.id}`} type="text" value={comments[a.id] || ''} onChange={e => setComments(c => ({ ...c, [a.id]: e.target.value }))} />
+              <label htmlFor={`c-ap-${a.id}`}>{a.wait.question ? 'Answer' : 'Comment'}</label>
+              {a.wait.question
+                ? <textarea id={`c-ap-${a.id}`} rows={3} value={comments[a.id] || ''} onChange={e => setComments(c => ({ ...c, [a.id]: e.target.value }))} />
+                : <input id={`c-ap-${a.id}`} type="text" value={comments[a.id] || ''} onChange={e => setComments(c => ({ ...c, [a.id]: e.target.value }))} />}
             </div>
             <div className="c-actions">
-              <button className="btn go" onClick={() => decide(a, true)}>Approve</button>
-              <button className="btn c-danger-soft" onClick={() => decide(a, false)}>Reject</button>
+              <button className="btn go" disabled={!!a.wait.question && !(comments[a.id] || '').trim()} onClick={() => decide(a, true)}>{a.wait.question ? 'Send answer' : 'Approve'}</button>
+              <button className="btn c-danger-soft" onClick={() => decide(a, false)}>{a.wait.question ? 'Decline' : 'Reject'}</button>
             </div>
           </article>
         ))}

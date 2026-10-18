@@ -162,11 +162,15 @@ function ident(name: string) {
 /** One pool per connection; a changed connection (or ops override) closes the old pool. */
 const pools = new Map<string, { rev: string; conn: Promise<Conn> }>();
 async function connFor(c: ExecCtx) {
-  const r = requireResource(c.raw('connection'), 'database', 'Database connection');
+  return dbConnection(requireResource(c.raw('connection'), 'database', 'Database connection'), c.secret);
+}
+
+/** The pooled connection of a database connection, for other parts that keep data in it (AI memory, knowledge). */
+export async function dbConnection(r: Resource, secret: (n: string, w?: string) => string) {
   const cur = pools.get(r.id);
   if (cur && cur.rev === r.rev) return cur.conn;
   if (cur) cur.conn.then(x => x.close()).catch(() => {});
-  const conn = open(r, c.secret);
+  const conn = open(r, secret);
   pools.set(r.id, { rev: r.rev!, conn });
   conn.catch(() => { if (pools.get(r.id)?.conn === conn) pools.delete(r.id); });
   return conn;

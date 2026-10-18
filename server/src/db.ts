@@ -164,6 +164,14 @@ create table if not exists gw_keys(
   expires_at integer not null default 0, last_used text);
 create table if not exists gw_usage(app_id text not null, win text not null, n integer not null default 0, expires integer not null, primary key(app_id, win));
 create table if not exists folders(project_id text not null, area text not null, path text not null, primary key(project_id, area, path));
+create table if not exists ai_sessions(store_id text not null, session text not null, project_id text, summary text, summary_upto integer not null default 0, last_seq integer not null default 0,
+  turns integer not null default 0, tokens integer not null default 0, lock_run text, lock_until integer not null default 0, created_at text not null, updated_at text not null, primary key(store_id, session));
+create table if not exists ai_memory(store_id text not null, session text not null, seq integer not null, role text not null, name text, content text not null, tokens integer not null, at text not null, primary key(store_id, session, seq));
+create table if not exists ai_knowledge(kb_id text not null, id text not null, source text not null, chunk integer not null, text text not null, meta text, vector text, at text not null, primary key(kb_id, id));
+create index if not exists ai_knowledge_source on ai_knowledge(kb_id, source);
+create table if not exists ai_session_queue(seq integer primary key autoincrement, store_id text not null, session text not null, run_id text not null, at text not null);
+create index if not exists ai_session_queue_s on ai_session_queue(store_id, session, seq);
+create table if not exists ai_agent_state(run_id text not null, node_id text not null, state text not null, updated_at text not null, primary key(run_id, node_id));
 create table if not exists gw_requests(
   id integer primary key autoincrement, at text not null, engine text, kind text, method text, path text, route text, flow_id text,
   project_id text, app_id text, caller text, status integer, ms integer, bytes_in integer, bytes_out integer, ip text, run_id text, error text);

@@ -44,10 +44,12 @@
     "selfsigned": "^5.5.0",
     "soap": "^1.14.0",
     "ssh2-sftp-client": "^11.0.0",
-    "undici": "^8.11.2"
+    "undici": "^8.11.2",
+    "unpdf": "^1.9.0"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.16",
+    "@electric-sql/pglite-socket": "^0.0.22",
     "@types/amqplib": "^0.10.8",
     "@types/mailparser": "^3.9.0",
     "@types/node": "^26.6.5",

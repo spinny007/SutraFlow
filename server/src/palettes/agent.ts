@@ -1,0 +1,344 @@
+import type { Activity, ExecCtx } from '../engine/types.js';
+import { requireResource } from '../resources.js';
+import { getFlow, versionDoc } from '../flows.js';
+import { F, when } from './common.js';
+import { runAgent } from '../ai/agent.js';
+import { appendTurns, cleanSession, clearOld, clearSession, compact, fitTurns, loadSession, settingsOf, tokensOf } from '../ai/memory.js';
+import { addKnowledge, embed, embedWith, rebuildKnowledge, removeKnowledge, searchKnowledge } from '../ai/knowledge.js';
+import { callMcpTool, listMcpTools } from '../ai/mcpClient.js';
+import { aiCall } from '../ai/providers.js';
+import { guardText, GUARD_CHECKS } from '../ai/guard.js';
+import { documentText, DOC_TYPES } from '../ai/documents.js';
+import { httpCall } from '../security/outbound.js';
+
+/**
+ * AI agent activities (AI palette): the agent itself, its memory, knowledge bases (RAG), outside
+ * MCP tools, asking a person, handing off to another agent, the agent channel (where people and
+ * other AIs talk to a published agent) and the AI guard.
+ */
+const AI = { ai: { provider: '', engine: '', model: '', inputTokens: 0, outputTokens: 0, totalTokens: 0, ms: 0 } };
+const provider = F('provider', 'AI provider', 'resource', '', { resourceKind: 'aiProvider', help: 'The model that thinks: Claude, Gemini, OpenAI, Ollama or a CLI.' });
+const memoryF = (help?: string) => F('memory', 'AI memory store', 'resource', '', { resourceKind: 'aiMemory', help: help || 'Where the conversation is kept between runs. Empty = no memory: each run starts fresh.' });
+const sessionF = F('session', 'Session id', 'text', '{{input.sessionId}}', { tpl: true, help: 'One id per conversation: a chat, ticket, email thread or customer id. Runs with the same id share the memory, one at a time.' });
+const knowledgeF = F('knowledge', 'Knowledge base', 'resource', '', { resourceKind: 'aiKnowledge' });
+const memoryOf = (c: ExecCtx) => requireResource(c.raw('memory'), 'aiMemory', 'AI memory store');
+const kbOf = (c: ExecCtx) => requireResource(c.raw('knowledge'), 'aiKnowledge', 'Knowledge base');
+const text = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : JSON.stringify(v));
+const USE = ['deployed (draft while testing)', 'deployed', 'draft'];
+
+export const agentActivities: Activity[] = [
+  // ---------- the agent ----------
+  {
+    type: 'aiAgent', palette: 'ai', name: 'AI agent', glyph: '✺', ports: ['done', 'needs a person', 'limit reached'], timeoutMs: 600000,
+    desc: 'Works towards a goal in steps: thinks, picks a tool, uses it, looks at the result, until it can answer. Tools are Sutras with an AI tool trigger, a knowledge base and the tools of an MCP server. Keeps the conversation in an AI memory store. Waits for tool Sutras without holding a worker, and never repeats a finished tool after a restart.',
+    fields: [
+      provider,
+      F('instructions', 'Instructions', 'textarea', 'You are the order desk assistant of Asha Traders. Answer questions about orders and stock. Be brief and polite. Never promise a refund: ask a person instead.', { tpl: true, help: 'Who the agent is, what it may do, and the tone. The tool list and the reply format are added for you.' }),
+      F('task', 'Message or goal', 'text', '{{input.message}}', { tpl: true, help: 'What the user said, or the goal for this run.' }),
+      memoryF(), sessionF,
+      F('tools', 'Tools', 'select', 'all AI tools of this project', { options: ['all AI tools of this project', 'chosen tools', 'none'], help: 'AI tools are Sutras that start with the AI tool trigger. Test runs use drafts; deployed runs use deployed tools.' }),
+      F('toolNames', 'Tool names', 'text', '', { ...when('tools', 'chosen tools'), help: 'Comma separated, as in each AI tool trigger.' }),
+      { ...knowledgeF, help: 'Adds the tool search_knowledge.' },
+      F('autoKnowledge', 'Passages fetched before the first step', 'number', 0, { help: 'Searches the knowledge base with the message first and gives the agent this many passages (up to a quarter of the context window). 0 = only when the agent searches.' }),
+      F('mcp', 'MCP client (outside tools)', 'resource', '', { resourceKind: 'mcpClient', help: 'Adds the tools of another MCP server.' }),
+      F('canAsk', 'May ask a person', 'bool', true, { help: 'The agent may stop with a question (output "needs a person"). Connect it to Ask a person.' }),
+      F('answerFormat', 'Answer as', 'select', 'text', { options: ['text', 'JSON'] }),
+      F('maxSteps', 'Maximum steps', 'number', 8, { group: 'Limits', help: 'Model calls in this run. Each tool use takes one.' }),
+      F('maxTokens', 'Maximum tokens', 'number', 60000, { group: 'Limits', help: 'Tokens of all model calls in this run together.' }),
+      F('maxSeconds', 'Maximum time (seconds)', 'number', 600, { group: 'Limits' }),
+      F('contextTokens', 'Context window without memory (tokens)', 'number', 8000, { group: 'Limits', help: 'With a memory store, its context window is used.' }),
+      F('saveSteps', 'Keep tool results in memory', 'bool', true, { help: 'Later runs of the session see which tools were used and what they returned.' }),
+      F('effort', 'Effort', 'select', 'medium', { options: ['low', 'medium', 'high'] }),
+    ],
+    outputHint: { answer: '', question: '', reason: '', thought: '', session: '', toolCalls: 0, tokens: 0, seconds: 0, steps: [{ tool: '', input: {}, result: null, error: '', thought: '' }], ...AI },
+    execute: c => runAgent(c),
+  },
+  {
+    type: 'askPerson', palette: 'ai', name: 'Ask a person', glyph: '☏', ports: ['answered', 'declined'],
+    desc: 'Waits for a person to answer a question, in Runs > Approvals or the Admin Console, for minutes or days, without holding a worker. The answer goes on, for example back to the agent with the same session.',
+    fields: [
+      F('question', 'Question', 'textarea', '{{input.question}}', { tpl: true }),
+      F('assignee', 'Who should answer (optional)', 'text', ''),
+    ],
+    outputHint: { answer: '', approval: { approved: true, by: '', comment: '', at: '' } },
+    execute: c => ({ wait: { kind: 'approval', question: true, message: text(c.v('question')), assignee: c.raw('assignee') || undefined } }),
+  },
+  {
+    type: 'agentHandoff', palette: 'ai', name: 'Hand off to agent', glyph: '⇢', ports: ['out'],
+    desc: 'Passes the conversation to another agent Sutra (one that starts with an Agent channel trigger) with the same session, and continues with its answer. For a supervisor agent with specialists.',
+    fields: [
+      F('process', 'Agent Sutra', 'process', ''),
+      F('use', 'Version', 'select', USE[0], { options: USE }),
+      F('message', 'Message', 'text', '{{input.message}}', { tpl: true }),
+      F('sessionId', 'Session id', 'text', '{{input.sessionId}}', { tpl: true }),
+      F('note', 'Note for the agent (optional)', 'text', '', { tpl: true, help: 'Why it is handed over, for example "The customer asks for a refund".' }),
+    ],
+    outputHint: { answer: '', sessionId: '', status: '' },
+    execute: c => {
+      const f = getFlow(String(c.raw('process') || ''));
+      if (!f) throw new Error('Choose the agent Sutra');
+      if (c.projectId && f.project_id !== c.projectId) throw new Error(`${f.name} belongs to another project`);
+      const trig = f.doc.nodes.find(n => n.type === 'agentChannel');
+      if (!trig) throw new Error(`${f.name} does not start with an Agent channel trigger`);
+      const testing = !Number(c.scope.run?.version);
+      const use = c.raw('use') || USE[0];
+      let doc = f.doc, version = 0;
+      if (use === 'deployed' || (use === USE[0] && !testing)) {
+        if (!f.deployed) throw new Error(`${f.name} is not deployed. Deploy it, or set Version to draft.`);
+        doc = versionDoc(f.id, f.deployed.version)!; version = f.deployed.version;
+      }
+      const note = text(c.v('note'));
+      return { call: { doc, flowId: f.id, version, projectId: f.project_id, name: f.name, wait: true, triggerNodeId: trig.id,
+        input: { message: note ? `${text(c.v('message'))}\n\n(Handed over: ${note})` : text(c.v('message')), sessionId: text(c.v('sessionId')), channel: 'handoff', caller: { subject: `agent:${c.node.name}`, method: 'handoff' }, history: [] } } };
+    },
+  },
+
+  // ---------- memory ----------
+  {
+    type: 'memoryLoad', palette: 'ai', name: 'Load memory', glyph: '⟲', ports: ['out', 'empty'],
+    desc: 'Reads a session from an AI memory store, trimmed to the context window: the running summary and the newest turns. Use it to build your own prompts; the AI agent loads memory by itself.',
+    fields: [memoryF('The store to read.'), sessionF, F('budget', 'Tokens for the history', 'number', 0, { help: '0 = the context window of the store minus the answer.' })],
+    outputHint: { summary: '', turns: [{ role: '', name: '', content: '', at: '' }], text: '', tokens: 0, leftOut: 0, total: 0 },
+    execute: async c => {
+      const r = memoryOf(c), session = cleanSession(c.v('session'));
+      const s = settingsOf(r);
+      const st = await loadSession(r, c.secret, session);
+      const fit = fitTurns(st, Number(c.raw('budget')) > 0 ? Number(c.raw('budget')) : s.contextTokens - s.replyTokens);
+      const turns = fit.turns.map(t => ({ role: t.role, ...(t.name ? { name: t.name } : {}), content: t.content, at: t.at }));
+      const textOut = [fit.summary ? `Summary: ${fit.summary}` : '', ...turns.map(t => `${t.role}${t.name ? ` (${t.name})` : ''}: ${t.content}`)].filter(Boolean).join('\n');
+      return { port: turns.length || fit.summary ? 'out' : 'empty', out: { session, summary: fit.summary, turns, text: textOut, tokens: fit.tokens, leftOut: fit.leftOut.length, total: st.turns.length } };
+    },
+  },
+  {
+    type: 'memorySave', palette: 'ai', name: 'Save memory', glyph: '⟳', ports: ['out'],
+    desc: 'Adds turns to a session, with their token counts. When the history no longer fits the context window, the oldest turns are folded into the running summary.',
+    fields: [memoryF('The store to write.'), sessionF,
+      F('turns', 'Turns', 'kv', [{ k: 'user', v: '{{trigger.message}}' }, { k: 'assistant', v: '{{input.answer}}' }], { tpl: true, help: 'One row per turn: role (user, assistant, tool or system) and text.' }),
+      F('summaryProvider', 'AI provider for the summary', 'resource', '', { resourceKind: 'aiProvider', help: 'Empty = the one set in the memory store; with neither, old turns are only left out.' })],
+    outputHint: { session: '', saved: 0, compacted: 0, summary: '' },
+    execute: async c => {
+      const r = memoryOf(c), session = cleanSession(c.v('session'));
+      const rows = (Array.isArray(c.raw('turns')) ? c.raw('turns') : []) as { k: string; v: string }[];
+      const turns = rows.filter(x => x?.k).map(x => {
+        const role = String(x.k).trim().toLowerCase();
+        if (!['user', 'assistant', 'tool', 'system'].includes(role)) throw new Error(`Role "${x.k}" is not user, assistant, tool or system`);
+        return { role: role as any, content: c.resolve(x.v) };
+      }).filter(t => text(t.content).trim());
+      const made = await appendTurns(r, c.secret, session, turns);
+      const s = settingsOf(r);
+      const sp = c.raw('summaryProvider') ? requireResource(c.raw('summaryProvider'), 'aiProvider', 'AI provider for the summary') : undefined;
+      const k = await compact(r, c.secret, session, (s.contextTokens - s.replyTokens) * 0.6, sp, c.signal);
+      return { out: { session, saved: made.length, compacted: k.compacted, summary: k.summary } };
+    },
+  },
+  {
+    type: 'memoryClear', palette: 'ai', name: 'Clear memory', glyph: '⌫', ports: ['out'],
+    desc: 'Forgets one session (for example on a privacy request), or every turn older than the days to keep of the store.',
+    fields: [memoryF('The store to clear.'), F('what', 'Clear', 'select', 'one session', { options: ['one session', 'older than the days to keep'] }), { ...sessionF, ...when('what', 'one session') }],
+    outputHint: { cleared: '', turns: 0 },
+    execute: async c => {
+      const r = memoryOf(c);
+      if (c.raw('what') === 'older than the days to keep') return { out: { cleared: 'old turns', turns: await clearOld(r, c.secret) } };
+      const session = cleanSession(c.v('session'));
+      const n = (await loadSession(r, c.secret, session)).turns.length;
+      await clearSession(r, c.secret, session);
+      return { out: { cleared: session, turns: n } };
+    },
+  },
+
+  // ---------- knowledge (RAG) ----------
+  {
+    type: 'knowledgeAdd', palette: 'ai', name: 'Add to knowledge', glyph: '⊕', ports: ['out'], timeoutMs: 600000,
+    desc: 'Adds a document to a knowledge base: splits it into passages, makes their vectors and stores them with the source name and details. Adding the same source again replaces it. Feed it from any palette: files, SFTP, SharePoint, Google Drive, a database, a web page.',
+    fields: [knowledgeF, F('source', 'Source name', 'text', '{{input.name}}', { tpl: true, help: 'File name, address or document id. Used to replace or remove it later and shown as the citation.' }),
+      F('text', 'Text', 'text', '{{input.text}}', { tpl: true }),
+      F('meta', 'Details', 'kv', [], { tpl: true, help: 'Stored with every passage and usable as search filters, for example department = sales or groups = finance.' })],
+    outputHint: { source: '', chunks: 0, tokens: 0, replaced: 0, model: '' },
+    execute: async c => {
+      const meta = Object.fromEntries(((c.raw('meta') as any[]) || []).filter(r => r?.k).map(r => [r.k, c.resolve(r.v)]));
+      return { out: await addKnowledge(kbOf(c), c.secret, text(c.v('source')), text(c.v('text')), meta, c.signal) };
+    },
+  },
+  {
+    type: 'docText', palette: 'ai', name: 'Read document text', glyph: '¶', ports: ['out'], timeoutMs: 600000,
+    desc: 'Takes the text out of a document for a knowledge base or an AI step: PDF, Word, PowerPoint, Excel, OpenDocument, HTML pages and text files. The document comes from an earlier step (Read file, SFTP, SharePoint, Google Drive, Dropbox: as base64) or from a web address.',
+    fields: [
+      F('from', 'Document from', 'select', 'earlier step', { options: ['earlier step', 'web address'] }),
+      F('content', 'Content', 'text', '{{input.content}}', { tpl: true, ...when('from', 'earlier step') }),
+      F('encoding', 'Content is', 'select', 'base64', { options: ['base64', 'text'], ...when('from', 'earlier step') }),
+      F('name', 'File name', 'text', '{{input.name}}', { tpl: true, ...when('from', 'earlier step'), help: 'Its extension tells the type when Type is auto.' }),
+      F('url', 'Web address', 'text', 'https://www.example.com/returns', { tpl: true, ...when('from', 'web address') }),
+      F('type', 'Type', 'select', 'auto', { options: [...DOC_TYPES] }),
+      F('maxMb', 'Maximum size (MB)', 'number', 25),
+    ],
+    outputHint: { text: '', type: '', title: '', pages: 0, name: '', url: '', chars: 0, tokens: 0 },
+    execute: async c => {
+      const max = (Number(c.raw('maxMb')) || 25) * 1024 * 1024;
+      let data: Buffer, name = '', contentType = '', url = '';
+      if (c.raw('from') === 'web address') {
+        url = text(c.v('url')).trim();
+        if (!/^https?:\/\//i.test(url)) throw new Error('The web address must start with http:// or https://');
+        const res = await httpCall({ method: 'GET', url, headers: { accept: 'text/html,application/pdf,*/*', 'user-agent': 'SutraFlow' }, timeoutMs: 120000, signal: c.signal, parse: 'buffer' });
+        if (res.status >= 400) throw new Error(`${url} answered ${res.status}`);
+        data = res.buffer!; name = url.split(/[?#]/)[0].split('/').pop() || url; contentType = res.headers['content-type'] || '';
+      } else {
+        const v = c.v('content');
+        data = c.raw('encoding') === 'text' ? Buffer.from(text(v)) : Buffer.from(text(v), 'base64');
+        name = text(c.v('name'));
+      }
+      if (data.length > max) throw new Error(`The document is ${(data.length / 1048576).toFixed(1)} MB, more than the maximum of ${max / 1048576} MB`);
+      const r = await documentText(data, { type: c.raw('type') || 'auto', name, contentType });
+      return { out: { ...r, name, ...(url ? { url } : {}), chars: r.text.length, tokens: tokensOf(r.text) } };
+    },
+  },
+  {
+    type: 'knowledgeSearch', palette: 'ai', name: 'Search knowledge', glyph: '⌕', ports: ['out', 'empty'],
+    desc: 'Finds the passages of a knowledge base closest to a question, by meaning and by shared words, best first, with their sources. Filter by source or details (for example only what the user may see).',
+    fields: [knowledgeF, F('question', 'Question', 'text', '{{input.message}}', { tpl: true }), F('top', 'Passages', 'number', 5),
+      F('minScore', 'Minimum score (0 to 1)', 'number', 0.05), F('sourceFilter', 'Only from source', 'text', '', { tpl: true, help: 'A source name or a folder of sources.' }),
+      F('metaFilter', 'Only with details', 'kv', [], { tpl: true })],
+    outputHint: { hits: [{ text: '', source: '', chunk: 0, score: 0, meta: {} }], count: 0, context: '' },
+    execute: async c => {
+      const meta = Object.fromEntries(((c.raw('metaFilter') as any[]) || []).filter(r => r?.k).map(r => [r.k, String(c.resolve(r.v))]));
+      const hits = await searchKnowledge(kbOf(c), c.secret, text(c.v('question')), { top: Number(c.raw('top')) || 5, minScore: Number(c.raw('minScore')) || 0, source: text(c.v('sourceFilter')) || undefined, meta: Object.keys(meta).length ? meta : undefined }, c.signal);
+      return { port: hits.length ? 'out' : 'empty', out: { hits, count: hits.length, context: hits.map(h => `[${h.source}#${h.chunk}] ${h.text}`).join('\n\n') } };
+    },
+  },
+  {
+    type: 'knowledgeAsk', palette: 'ai', name: 'Ask knowledge', glyph: '⁇', ports: ['out', 'not found'],
+    desc: 'Answers a question from a knowledge base only (retrieval-augmented generation): finds the closest passages and has the model answer from them, with the sources it used. No passages, or no answer in them, goes to "not found".',
+    fields: [provider, knowledgeF, F('question', 'Question', 'text', '{{input.message}}', { tpl: true }), F('top', 'Passages', 'number', 5),
+      F('instructions', 'Instructions', 'textarea', 'Answer briefly in the language of the question.', { tpl: true }),
+      F('metaFilter', 'Only with details', 'kv', [], { tpl: true }), F('effort', 'Effort', 'select', 'low', { options: ['low', 'medium', 'high'] })],
+    outputHint: { answer: '', sources: [''], found: true, hits: [{ text: '', source: '', chunk: 0, score: 0 }], ...AI },
+    execute: async c => {
+      const question = text(c.v('question'));
+      const meta = Object.fromEntries(((c.raw('metaFilter') as any[]) || []).filter(r => r?.k).map(r => [r.k, String(c.resolve(r.v))]));
+      const hits = await searchKnowledge(kbOf(c), c.secret, question, { top: Number(c.raw('top')) || 5, meta: Object.keys(meta).length ? meta : undefined }, c.signal);
+      if (!hits.length) return { port: 'not found', out: { answer: '', sources: [], found: false, hits } };
+      const p = requireResource(c.raw('provider'), 'aiProvider', 'AI provider');
+      const res = await aiCall(p, c.secret, {
+        system: `${text(c.v('instructions'))}\nAnswer only from the passages given. Cite each passage you use as [source#n]. When the passages do not answer the question, reply exactly: NOT FOUND`,
+        prompt: `Passages:\n${hits.map(h => `[${h.source}#${h.chunk}] ${h.text}`).join('\n\n')}\n\nQuestion: ${question}`, effort: c.raw('effort') || 'low', signal: c.signal,
+      });
+      const answer = res.text.trim();
+      const found = !/^NOT FOUND\.?$/i.test(answer);
+      const sources = [...new Set([...answer.matchAll(/\[([^\]#]+)#(\d+)\]/g)].map(m => m[1]))];
+      return { port: found ? 'out' : 'not found', out: { answer: found ? answer : '', sources, found, hits, ai: res.ai } };
+    },
+  },
+  {
+    type: 'knowledgeRemove', palette: 'ai', name: 'Remove knowledge', glyph: '⊖', ports: ['out'],
+    desc: 'Removes a source (or a folder of sources) from a knowledge base, everything, or makes every vector again after the vector model changed.',
+    fields: [knowledgeF, F('action', 'Action', 'select', 'remove a source', { options: ['remove a source', 'remove everything', 'rebuild vectors'] }),
+      F('source', 'Source name', 'text', '{{input.name}}', { tpl: true, ...when('action', 'remove a source') })],
+    outputHint: { removed: 0, chunks: 0, model: '' },
+    execute: async c => {
+      const kb = kbOf(c);
+      const a = c.raw('action') || 'remove a source';
+      if (a === 'rebuild vectors') return { out: await rebuildKnowledge(kb, c.secret, c.signal) };
+      return { out: { removed: await removeKnowledge(kb, text(c.v('source')), a === 'remove everything', c.secret) } };
+    },
+  },
+  {
+    type: 'aiEmbed', palette: 'ai', name: 'AI embed', glyph: '⋮', ports: ['out'],
+    desc: 'Turns texts into vectors (embeddings), for your own similarity checks or vector stores.',
+    fields: [F('from', 'Vectors from', 'select', 'knowledge base settings', { options: ['knowledge base settings', 'AI provider'] }),
+      { ...knowledgeF, ...when('from', 'knowledge base settings') },
+      { ...provider, ...when('from', 'AI provider') }, F('model', 'Vector model', 'text', 'nomic-embed-text', when('from', 'AI provider')),
+      F('texts', 'Text or list of texts', 'text', '{{input.text}}', { tpl: true })],
+    outputHint: { vectors: [[0]], dimensions: 0, model: '' },
+    execute: async c => {
+      const v = c.v('texts');
+      const texts = (Array.isArray(v) ? v : [v]).map(text);
+      const r = c.raw('from') === 'AI provider'
+        ? await embedWith(requireResource(c.raw('provider'), 'aiProvider', 'AI provider'), c.secret, String(c.raw('model') || ''), texts, c.signal)
+        : await embed(kbOf(c), c.secret, texts, c.signal);
+      return { out: { vectors: r.vectors, dimensions: r.vectors[0]?.length ?? 0, model: r.model } };
+    },
+  },
+
+  // ---------- outside tools ----------
+  {
+    type: 'mcpCall', palette: 'ai', name: 'Call MCP tool', glyph: '⧉', ports: ['out', 'tool error'], timeoutMs: 600000,
+    desc: 'Lists the tools of another MCP server, or calls one with arguments: a file system, GitHub, a database, a search engine, another SutraFlow. The tool reporting an error goes to "tool error".',
+    fields: [F('mcp', 'MCP client', 'resource', '', { resourceKind: 'mcpClient' }), F('action', 'Action', 'select', 'call a tool', { options: ['call a tool', 'list tools'] }),
+      F('tool', 'Tool name', 'text', '', { ...when('action', 'call a tool'), help: 'Use "list tools" in a test run to see the names.' }),
+      F('arguments', 'Arguments (JSON)', 'code', '{\n  "path": "{{input.path}}"\n}', { tpl: true, ...when('action', 'call a tool') })],
+    outputHint: { result: null, text: '', isError: false, tools: [{ name: '', description: '' }] },
+    execute: async c => {
+      const r = requireResource(c.raw('mcp'), 'mcpClient', 'MCP client');
+      if (c.raw('action') === 'list tools') { const tools = await listMcpTools(r, c.secret, c.signal); return { out: { tools, count: tools.length } }; }
+      let args = c.v('arguments');
+      if (typeof args === 'string') { try { args = JSON.parse(args || '{}'); } catch { throw new Error('Arguments are not valid JSON'); } }
+      const name = String(c.v('tool') || '').trim();
+      if (!name) throw new Error('Name the tool to call');
+      const res = await callMcpTool(r, c.secret, name, args, c.signal);
+      return { port: res.isError ? 'tool error' : 'out', out: res };
+    },
+  },
+
+  // ---------- where people and other AIs reach a published agent ----------
+  {
+    type: 'agentChannel', palette: 'ai', name: 'Agent channel', glyph: '☄', trigger: true, ports: ['out'],
+    desc: 'Publishes the Sutra as an agent while it is deployed, at several entry points at once: a chat page and chat API, an OpenAI-compatible API (model = agent name), a tool on an MCP server (Claude, ChatGPT, Copilot, Antigravity, Cursor) and an A2A agent. Every message arrives the same way; answer with Agent reply.',
+    fields: [
+      F('agentName', 'Agent name', 'text', 'order-desk', { help: 'Letters, digits and -. The chat page is /chat/<name>, the OpenAI model name <name>, the MCP tool ask_<name>, the A2A agent /a2a/<name>.' }),
+      F('title', 'Title', 'text', 'Order desk'),
+      F('description', 'What it does (for people and other AIs)', 'textarea', 'Answers questions about orders and stock, and hands refund requests to a person.'),
+      F('chat', 'Chat page and chat API', 'bool', true, { group: 'Entry points' }),
+      F('chatPolicy', 'Who may chat', 'resource', '', { resourceKind: 'inboundPolicy', group: 'Entry points', ...when('chat', true), help: 'Empty = anyone who reaches the gateway; set a policy with a rate limit for a public page.' }),
+      F('openai', 'OpenAI-compatible API', 'bool', false, { group: 'Entry points' }),
+      F('openaiPolicy', 'Who may use the API', 'resource', '', { resourceKind: 'inboundPolicy', group: 'Entry points', ...when('openai', true) }),
+      F('mcp', 'Tool on an MCP server', 'bool', false, { group: 'Entry points' }),
+      F('mcpServer', 'MCP server', 'resource', '', { resourceKind: 'mcpServer', group: 'Entry points', ...when('mcp', true), help: 'Empty = the default address /mcp. The tool is ask_<agent name>.' }),
+      F('a2a', 'Agent-to-agent (A2A)', 'bool', false, { group: 'Entry points' }),
+      F('a2aPolicy', 'Who may call it', 'resource', '', { resourceKind: 'inboundPolicy', group: 'Entry points', ...when('a2a', true) }),
+      F('waitSeconds', 'Answer within (seconds)', 'number', 50, { help: 'Callers wait this long for the answer. Longer work answers "working" with a job id; the caller asks again for the result.' }),
+      F('testMessage', 'Test message (JSON)', 'code', '{\n  "message": "Where is order A-1001?",\n  "sessionId": "test-1"\n}'),
+    ],
+    outputHint: { message: '', sessionId: '', channel: '', caller: { subject: '', method: '' }, history: [{ role: '', content: '' }], agent: '' },
+    execute: c => {
+      if (c.input && typeof c.input === 'object' && 'channel' in c.input) return { out: c.input };
+      let t: any = {};
+      try { t = JSON.parse(String(c.raw('testMessage') || '{}')); } catch { throw new Error('Test message is not valid JSON'); }
+      return { out: { message: String(t.message ?? ''), sessionId: String(t.sessionId ?? 'test'), channel: 'test', caller: { subject: 'studio test', method: 'none' }, history: [], agent: String(c.raw('agentName') || '') } };
+    },
+  },
+  {
+    type: 'agentReply', palette: 'ai', name: 'Agent reply', glyph: '↵', ports: ['out'],
+    desc: 'Sends the answer of a published agent back through the entry point the message came in: chat, OpenAI-compatible API, MCP or A2A. Use one on every branch.',
+    fields: [
+      F('answer', 'Answer', 'text', '{{input.answer}}', { tpl: true }),
+      F('status', 'Status', 'select', 'answer', { options: ['answer', 'needs a person', 'error'], help: '"needs a person": the caller is told someone will follow up. "error": the caller sees it as a failed request.' }),
+      F('sessionId', 'Session id', 'text', '{{trigger.sessionId}}', { tpl: true }),
+    ],
+    outputHint: { answer: '', status: '', sessionId: '' },
+    execute: c => {
+      const body = { answer: c.v('answer'), status: c.raw('status') || 'answer', sessionId: text(c.v('sessionId')) };
+      c.reply({ status: body.status === 'error' ? 500 : 200, body, contentType: 'application/json' });
+      return { out: body };
+    },
+  },
+
+  // ---------- safety ----------
+  {
+    type: 'aiGuard', palette: 'ai', name: 'AI guard', glyph: '⛉', ports: ['pass', 'blocked'],
+    desc: 'Checks text before it goes to a model or out to a person: hides personal data, catches instructions hidden in text an agent reads (prompt injection), blocks topics and checks length or JSON shape. Optionally asks a model as well.',
+    fields: [
+      F('text', 'Text', 'text', '{{input.message}}', { tpl: true }),
+      F('checks', 'Checks', 'list', ['hide personal data', 'hidden instructions', 'blocked topics'], { options: [...GUARD_CHECKS], help: 'Hidden personal data is replaced by [EMAIL], [PHONE], [CARD] and so on; the text goes on hidden.' }),
+      F('topics', 'Blocked topics', 'textarea', 'medical advice\nlegal advice\nweapons', { help: 'One per line: words or phrases.' }),
+      F('maxChars', 'Maximum length (characters)', 'number', 8000),
+      F('jsonSchema', 'Must match schema', 'schema', '', { schemaKinds: ['json'], help: 'For model answers that must be JSON of this shape.' }),
+      F('aiCheck', 'Also ask a model', 'resource', '', { resourceKind: 'aiProvider', help: 'A second opinion on hidden instructions and topics. Empty = rules only.' }),
+    ],
+    outputHint: { text: '', original: '', hidden: [{ kind: '', count: 0 }], findings: [''], reason: '' },
+    execute: async c => {
+      const r = await guardText(c, text(c.v('text')));
+      return { port: r.blocked ? 'blocked' : 'pass', out: r };
+    },
+  },
+];
+
+export { tokensOf };

@@ -76,6 +76,19 @@ async function run(r: Resource, secret: (n: string, w?: string) => string): Prom
     case 'sftp':
     case 'ftp':
       return testRemote(r, secret);
+    case 'aiMemory': {
+      const { testMemory } = await import('./ai/memory.js');
+      return testMemory(r, secret);
+    }
+    case 'aiKnowledge': {
+      const { testKnowledge } = await import('./ai/knowledge.js');
+      return testKnowledge(r, secret);
+    }
+    case 'mcpClient': {
+      const { listMcpTools } = await import('./ai/mcpClient.js');
+      const tools = await listMcpTools(r, secret);
+      return `Connected: ${tools.length} tools${tools.length ? `: ${tools.slice(0, 8).map(t => t.name).join(', ')}${tools.length > 8 ? ', ...' : ''}` : ''}`;
+    }
     case 'kafka':
     case 'rabbitmq':
     case 'amqp1':

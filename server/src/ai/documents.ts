@@ -1,0 +1,109 @@
+import zlib from 'node:zlib';
+
+/**
+ * Plain text out of documents, for knowledge bases and AI steps: PDF, Word (.docx), PowerPoint
+ * (.pptx), Excel (.xlsx), OpenDocument (.odt, .odp, .ods), HTML, and text formats. Office files
+ * are zip files of XML; they are read here without other libraries. PDF uses unpdf (PDF.js).
+ */
+export const DOC_TYPES = ['auto', 'pdf', 'docx', 'pptx', 'xlsx', 'odt', 'html', 'text'] as const;
+
+/** The files of a zip archive (stored or deflated entries). */
+export function unzip(buf: Buffer): Map<string, Buffer> {
+  const out = new Map<string, Buffer>();
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error('This is not a zip file (Office documents are zip files)');
+  const count = buf.readUInt16LE(eocd + 10);
+  let p = buf.readUInt32LE(eocd + 16);
+  for (let n = 0; n < count; n++) {
+    if (buf.readUInt32LE(p) !== 0x02014b50) break;
+    const method = buf.readUInt16LE(p + 10), csize = buf.readUInt32LE(p + 20), nameLen = buf.readUInt16LE(p + 28), extra = buf.readUInt16LE(p + 30), comment = buf.readUInt16LE(p + 32), local = buf.readUInt32LE(p + 42);
+    const name = buf.subarray(p + 46, p + 46 + nameLen).toString('utf8');
+    const lName = buf.readUInt16LE(local + 26), lExtra = buf.readUInt16LE(local + 28);
+    const data = buf.subarray(local + 30 + lName + lExtra, local + 30 + lName + lExtra + csize);
+    if (method === 0) out.set(name, data);
+    else if (method === 8) out.set(name, zlib.inflateRawSync(data));
+    p += 46 + nameLen + extra + comment;
+  }
+  return out;
+}
+
+const decode = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi, (_m, e: string) => {
+  const l = e.toLowerCase();
+  if (l[0] === '#') return String.fromCodePoint(l[1] === 'x' ? parseInt(l.slice(2), 16) : Number(l.slice(1)));
+  return ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' } as Record<string, string>)[l] ?? _m;
+});
+const tidy = (s: string) => s.replace(/[  ]+/g, ' ').replace(/ *\t */g, '\t').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+
+/** Word: paragraphs (w:p) of the body, headers and footers, with tabs and line breaks. */
+function docx(z: Map<string, Buffer>) {
+  const parts = ['word/document.xml', ...[...z.keys()].filter(k => /^word\/(header|footer|footnotes)\d*\.xml$/.test(k))];
+  return parts.filter(k => z.has(k)).map(k => z.get(k)!.toString('utf8')
+    .replace(/<w:tab\/>/g, '\t').replace(/<w:br[^>]*\/>/g, '\n').replace(/<\/w:p>/g, '\n')
+    .replace(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g, '\u0001$1\u0002').replace(/<[^>]+>/g, '').replace(/\u0001|\u0002/g, '')).map(decode).join('\n');
+}
+/** PowerPoint: each slide's text in order, then its notes. */
+function pptx(z: Map<string, Buffer>) {
+  const num = (k: string) => Number(/(\d+)\.xml$/.exec(k)?.[1] || 0);
+  const slides = [...z.keys()].filter(k => /^ppt\/slides\/slide\d+\.xml$/.test(k)).sort((a, b) => num(a) - num(b));
+  const textOf = (xml: string) => decode(xml.replace(/<\/a:p>/g, '\n').replace(/<a:t>([^<]*)<\/a:t>/g, '\u0001$1').replace(/<[^>]+>/g, '').replace(/\u0001/g, ''));
+  return slides.map(k => {
+    const notes = z.get(k.replace('slides/slide', 'notesSlides/notesSlide'));
+    return `Slide ${num(k)}\n${textOf(z.get(k)!.toString('utf8'))}${notes ? `\nNotes: ${textOf(notes.toString('utf8'))}` : ''}`;
+  }).join('\n\n');
+}
+/** Excel: every sheet as tab-separated rows (shared strings resolved). */
+function xlsx(z: Map<string, Buffer>) {
+  const shared = (z.get('xl/sharedStrings.xml')?.toString('utf8') || '').split('</si>').map(si => decode([...si.matchAll(/<t[^>]*>([^<]*)<\/t>/g)].map(m => m[1]).join('')));
+  const book = z.get('xl/workbook.xml')?.toString('utf8') || '';
+  const names = [...book.matchAll(/<sheet [^>]*name="([^"]*)"/g)].map(m => decode(m[1]));
+  const sheets = [...z.keys()].filter(k => /^xl\/worksheets\/sheet\d+\.xml$/.test(k)).sort((a, b) => Number(/(\d+)\.xml/.exec(a)![1]) - Number(/(\d+)\.xml/.exec(b)![1]));
+  return sheets.map((k, i) => {
+    const rows = [...z.get(k)!.toString('utf8').matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g)].map(r => [...r[1].matchAll(/<c ([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)].map(c => {
+      const t = /t="(\w+)"/.exec(c[1])?.[1];
+      const v = /<v>([^<]*)<\/v>/.exec(c[2] || '')?.[1] ?? /<t[^>]*>([^<]*)<\/t>/.exec(c[2] || '')?.[1] ?? '';
+      return t === 's' ? shared[Number(v)] ?? '' : decode(v);
+    }).join('\t'));
+    return `Sheet ${names[i] || i + 1}\n${rows.join('\n')}`;
+  }).join('\n\n');
+}
+/** OpenDocument: paragraphs and headings of content.xml. */
+const odf = (z: Map<string, Buffer>) => decode((z.get('content.xml')?.toString('utf8') || '').replace(/<text:tab\/>/g, '\t').replace(/<text:line-break\/>/g, '\n').replace(/<\/text:(p|h)>/g, '\n').replace(/<[^>]+>/g, ''));
+
+/** Visible text of an HTML page: no scripts, styles or navigation markup; block ends become lines. */
+export function htmlText(html: string) {
+  const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1]?.trim();
+  const body = html.replace(/<(script|style|noscript|svg|template|head)[\s\S]*?<\/\1>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<(br|hr)\b[^>]*>/gi, '\n').replace(/<\/(p|div|section|article|li|tr|h[1-6]|pre|blockquote|table|ul|ol|header|footer|main|nav)>/gi, '\n')
+    .replace(/<(td|th)\b[^>]*>/gi, '\t').replace(/<[^>]+>/g, ' ');
+  return { title: title ? decode(title) : '', text: tidy(decode(body)) };
+}
+
+const EXT: Record<string, string> = { pdf: 'pdf', docx: 'docx', docm: 'docx', pptx: 'pptx', xlsx: 'xlsx', xlsm: 'xlsx', odt: 'odt', odp: 'odt', ods: 'odt', html: 'html', htm: 'html', xhtml: 'html' };
+
+/** Text of a document; type 'auto' looks at the name, the content type and the first bytes. */
+export async function documentText(data: Buffer, o: { type?: string; name?: string; contentType?: string } = {}) {
+  let type = o.type && o.type !== 'auto' ? o.type : '';
+  if (!type) {
+    const ext = /\.([a-z0-9]+)$/i.exec(o.name || '')?.[1]?.toLowerCase() || '';
+    type = EXT[ext] || (/pdf/.test(o.contentType || '') ? 'pdf' : /html/.test(o.contentType || '') ? 'html' : /wordprocessingml/.test(o.contentType || '') ? 'docx' : /presentationml/.test(o.contentType || '') ? 'pptx' : /spreadsheetml/.test(o.contentType || '') ? 'xlsx' : '');
+    if (!type) type = data.subarray(0, 5).toString('latin1') === '%PDF-' ? 'pdf' : data[0] === 0x50 && data[1] === 0x4b ? 'zip' : /^\s*<(!doctype html|html)/i.test(data.subarray(0, 200).toString('utf8')) ? 'html' : 'text';
+  }
+  if (type === 'pdf') {
+    const { extractText, getDocumentProxy } = await import('unpdf');
+    const pdf = await getDocumentProxy(new Uint8Array(data));
+    const r = await extractText(pdf, { mergePages: false });
+    const pages = (r.text as string[]).map(t => tidy(t));
+    return { type, text: pages.join('\n\n'), pages: r.totalPages, title: '' };
+  }
+  if (['docx', 'pptx', 'xlsx', 'odt', 'zip'].includes(type)) {
+    const z = unzip(data);
+    if (type === 'zip') type = z.has('word/document.xml') ? 'docx' : z.has('ppt/presentation.xml') ? 'pptx' : z.has('xl/workbook.xml') ? 'xlsx' : z.has('content.xml') ? 'odt' : '';
+    if (!type) throw new Error('This zip file is not a Word, PowerPoint, Excel or OpenDocument file');
+    const text = type === 'docx' ? docx(z) : type === 'pptx' ? pptx(z) : type === 'xlsx' ? xlsx(z) : odf(z);
+    const core = z.get('docProps/core.xml')?.toString('utf8') || '';
+    return { type, text: tidy(text), pages: type === 'pptx' ? [...z.keys()].filter(k => /^ppt\/slides\/slide\d+\.xml$/.test(k)).length : null, title: decode(/<dc:title>([^<]*)<\/dc:title>/.exec(core)?.[1] || '') };
+  }
+  if (type === 'html') { const h = htmlText(data.toString('utf8')); return { type, text: h.text, pages: null, title: h.title }; }
+  return { type: 'text', text: data.toString('utf8').replace(/^﻿/, ''), pages: null, title: '' };
+}

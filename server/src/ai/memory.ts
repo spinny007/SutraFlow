@@ -1,0 +1,235 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { q, tx, now } from '../db.js';
+import { config } from '../config.js';
+import { encrypt, decrypt } from '../secrets.js';
+import { requireResource, type Resource } from '../resources.js';
+import { dbConnection } from '../connectors/db.js';
+import { aiCall } from './providers.js';
+
+/**
+ * AI memory: the conversation of a session (a chat, a ticket, a customer) kept across runs, because
+ * every Sutra run stands alone. Stored where the "AI memory store" connection says: SutraFlow's own
+ * database, a Database connection, or a folder with one file per session. Everything is kept in full;
+ * only what fits the model's context window is sent: the running summary plus the newest turns.
+ * Older turns are folded into the summary when the history no longer fits.
+ */
+export interface Turn { seq: number; role: 'user' | 'assistant' | 'tool' | 'system'; name?: string; content: string; tokens: number; at: string }
+export interface SessionState { summary: string; summaryUpto: number; turns: Turn[] }
+type Secret = (name: string, what?: string) => string;
+
+/** Tokens of a text: about four characters per token, the usual estimate when the model's own counter is not at hand. */
+export const tokensOf = (text: unknown) => Math.ceil(String(typeof text === 'string' ? text : JSON.stringify(text ?? '')).length / 4);
+
+export interface MemorySettings {
+  contextTokens: number; replyTokens: number; keepTurns: number; summarise: boolean; keepDays: number; encrypt: boolean;
+}
+export function settingsOf(r: Resource): MemorySettings {
+  const c = r.config;
+  const n = (v: unknown, d: number, min = 0) => (Number.isFinite(Number(v)) && Number(v) >= min ? Number(v) : d);
+  return {
+    contextTokens: n(c.contextTokens, 8000, 512), replyTokens: n(c.replyTokens, 1000, 0), keepTurns: n(c.keepTurns, 6, 1),
+    summarise: c.summarise !== 'drop the oldest', keepDays: n(c.keepDays, 90), encrypt: !!c.encrypt,
+  };
+}
+
+const seal = (text: string, on: boolean) => (on ? 'enc:' + JSON.stringify(encrypt(text)) : text);
+const open = (text: string) => (text.startsWith('enc:') ? decrypt(JSON.parse(text.slice(4))) : text);
+const safeName = (s: string) => s.replace(/[^\w.@-]+/g, '_').slice(0, 120) || '_';
+
+/** Where the turns live. The summary and the session lock always live in SutraFlow's own database. */
+interface Backend {
+  read(session: string, after: number): Promise<Turn[]>;
+  append(session: string, turns: Turn[]): Promise<void>;
+  clear(session: string): Promise<void>;
+  clearBefore(at: string): Promise<number>;
+}
+
+function builtIn(storeId: string): Backend {
+  return {
+    read: async (session, after) => q.all<any>('select seq, role, name, content, tokens, at from ai_memory where store_id = ? and session = ? and seq > ? order by seq', storeId, session, after)
+      .map(r => ({ seq: Number(r.seq), role: r.role, ...(r.name ? { name: r.name } : {}), content: open(r.content), tokens: Number(r.tokens), at: r.at })),
+    append: async (session, turns) => { for (const t of turns) q.run('insert into ai_memory(store_id, session, seq, role, name, content, tokens, at) values(?, ?, ?, ?, ?, ?, ?, ?)', storeId, session, t.seq, t.role, t.name ?? null, t.content, t.tokens, t.at); },
+    clear: async session => { q.run('delete from ai_memory where store_id = ? and session = ?', storeId, session); },
+    clearBefore: async at => Number(q.run('delete from ai_memory where store_id = ? and at < ?', storeId, at).changes || 0),
+  };
+}
+
+function folder(dir: string): Backend {
+  const file = (s: string) => path.join(dir, safeName(s) + '.jsonl');
+  const all = (s: string): Turn[] => { try { return fs.readFileSync(file(s), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)); } catch { return []; } };
+  return {
+    read: async (session, after) => all(session).filter(t => t.seq > after).map(t => ({ ...t, content: open(t.content) })),
+    append: async (session, turns) => { fs.mkdirSync(dir, { recursive: true }); fs.appendFileSync(file(session), turns.map(t => JSON.stringify(t) + '\n').join('')); },
+    clear: async session => { fs.rmSync(file(session), { force: true }); },
+    clearBefore: async at => {
+      let n = 0;
+      if (!fs.existsSync(dir)) return 0;
+      for (const f of fs.readdirSync(dir).filter(x => x.endsWith('.jsonl'))) {
+        const p = path.join(dir, f);
+        const keep = fs.readFileSync(p, 'utf8').split('\n').filter(Boolean).filter(l => { const old = JSON.parse(l).at < at; if (old) n++; return !old; });
+        if (keep.length) fs.writeFileSync(p, keep.join('\n') + '\n'); else fs.rmSync(p, { force: true });
+      }
+      return n;
+    },
+  };
+}
+
+async function database(r: Resource, secret: Secret): Promise<Backend> {
+  const dbRes = requireResource(String(r.config.database || ''), 'database', 'Database connection of the AI memory store');
+  const driver = dbRes.config.driver;
+  if (!['sqlite', 'postgres', 'mysql'].includes(driver)) throw new Error(`The AI memory store works with SQLite, PostgreSQL and MySQL databases; ${driver} is not supported yet. Use built-in or folder.`);
+  const table = String(r.config.table || 'sutra_ai_memory').replace(/[^\w]/g, '');
+  const db = await dbConnection(dbRes, secret);
+  await db.query(`CREATE TABLE IF NOT EXISTS ${table} (store_id VARCHAR(64) NOT NULL, session VARCHAR(200) NOT NULL, seq INTEGER NOT NULL, role VARCHAR(20) NOT NULL, name VARCHAR(100), content TEXT NOT NULL, tokens INTEGER NOT NULL, at VARCHAR(40) NOT NULL, PRIMARY KEY (store_id, session, seq))`, {});
+  return {
+    read: async (session, after) => (await db.query(`SELECT seq, role, name, content, tokens, at FROM ${table} WHERE store_id = :s AND session = :x AND seq > :a ORDER BY seq`, { s: r.id, x: session, a: after })).rows
+      .map((x: any) => ({ seq: Number(x.seq), role: x.role, ...(x.name ? { name: x.name } : {}), content: open(String(x.content)), tokens: Number(x.tokens), at: String(x.at) })),
+    append: async (session, turns) => { for (const t of turns) await db.query(`INSERT INTO ${table} (store_id, session, seq, role, name, content, tokens, at) VALUES (:s, :x, :q, :r, :n, :c, :t, :a)`, { s: r.id, x: session, q: t.seq, r: t.role, n: t.name ?? null, c: t.content, t: t.tokens, a: t.at }); },
+    clear: async session => { await db.query(`DELETE FROM ${table} WHERE store_id = :s AND session = :x`, { s: r.id, x: session }); },
+    clearBefore: async at => (await db.query(`DELETE FROM ${table} WHERE store_id = :s AND at < :a`, { s: r.id, a: at })).rowCount,
+  };
+}
+
+async function backendOf(r: Resource, secret: Secret): Promise<Backend> {
+  const store = r.config.store || 'built-in';
+  if (store === 'folder') {
+    const dir = String(r.config.folder || '').trim() || path.join(config.dataDir, 'ai-memory', r.id);
+    return folder(path.isAbsolute(dir) ? dir : path.join(config.dataDir, dir));
+  }
+  if (store === 'database') return database(r, secret);
+  return builtIn(r.id);
+}
+
+const sessionRow = (storeId: string, session: string) => q.get<any>('select * from ai_sessions where store_id = ? and session = ?', storeId, session);
+function ensureSession(r: Resource, session: string) {
+  if (!sessionRow(r.id, session)) q.run(`insert into ai_sessions(store_id, session, project_id, summary, summary_upto, last_seq, turns, tokens, created_at, updated_at) values(?, ?, ?, '', 0, 0, 0, 0, ?, ?) on conflict do nothing`, r.id, session, r.project_id ?? null, now(), now());
+}
+export const cleanSession = (s: unknown) => {
+  const v = String(s ?? '').trim();
+  if (!v) throw new Error('The session id is empty: give each conversation an id, such as the chat, ticket or customer id');
+  if (v.length > 200) throw new Error('A session id has at most 200 characters');
+  return v;
+};
+
+/** Everything kept for a session after its summary: the summary and the turns since. */
+export async function loadSession(r: Resource, secret: Secret, session: string): Promise<SessionState> {
+  const row = sessionRow(r.id, session);
+  const upto = Number(row?.summary_upto || 0);
+  const turns = await (await backendOf(r, secret)).read(session, upto);
+  return { summary: row?.summary ? open(row.summary) : '', summaryUpto: upto, turns };
+}
+
+/** Adds turns at the end of a session. */
+export async function appendTurns(r: Resource, secret: Secret, session: string, turns: { role: Turn['role']; content: unknown; name?: string }[]) {
+  const s = settingsOf(r);
+  ensureSession(r, session);
+  const made: Turn[] = [];
+  tx(() => {
+    let seq = Number(sessionRow(r.id, session)?.last_seq || 0);
+    for (const t of turns) {
+      const content = typeof t.content === 'string' ? t.content : JSON.stringify(t.content ?? null);
+      made.push({ seq: ++seq, role: t.role, ...(t.name ? { name: t.name } : {}), content, tokens: tokensOf(content), at: now() });
+    }
+    q.run('update ai_sessions set last_seq = ?, turns = turns + ?, tokens = tokens + ?, updated_at = ? where store_id = ? and session = ?', seq, made.length, made.reduce((a, t) => a + t.tokens, 0), now(), r.id, session);
+  });
+  await (await backendOf(r, secret)).append(session, made.map(t => ({ ...t, content: seal(t.content, s.encrypt) })));
+  return made;
+}
+
+/**
+ * The part of a session that fits: the summary plus the newest turns, newest first until the
+ * history budget is used. Older turns that do not fit are returned as "left out".
+ */
+export function fitTurns(state: SessionState, budget: number) {
+  let used = tokensOf(state.summary);
+  const kept: Turn[] = [];
+  for (let i = state.turns.length - 1; i >= 0; i--) {
+    const t = state.turns[i];
+    if (used + t.tokens > budget && kept.length) break;
+    used += t.tokens;
+    kept.unshift(t);
+  }
+  return { summary: state.summary, turns: kept, leftOut: state.turns.slice(0, state.turns.length - kept.length), tokens: used };
+}
+
+/**
+ * Folds the oldest turns into the running summary when the history no longer fits its budget,
+ * keeping at least keepTurns recent turns word for word. Without summaries, old turns are just left out.
+ */
+export async function compact(r: Resource, secret: Secret, session: string, budget: number, provider?: Resource, signal?: AbortSignal) {
+  const s = settingsOf(r);
+  const state = await loadSession(r, secret, session);
+  const total = tokensOf(state.summary) + state.turns.reduce((a, t) => a + t.tokens, 0);
+  if (total <= budget || state.turns.length <= s.keepTurns || !s.summarise) return { compacted: 0, summary: state.summary };
+  const fold = state.turns.slice(0, state.turns.length - s.keepTurns);
+  const sp = provider || (r.config.summaryProvider ? requireResource(r.config.summaryProvider, 'aiProvider', 'AI provider for summaries') : undefined);
+  if (!sp) return { compacted: 0, summary: state.summary };
+  const text = fold.map(t => `${t.role}${t.name ? ` (${t.name})` : ''}: ${t.content}`).join('\n');
+  const res = await aiCall(sp, secret, {
+    system: 'You keep the running summary of a conversation between a user and an AI agent. Keep facts, names, numbers, decisions, promises and open questions. Leave out greetings and filler. Write plain sentences, at most 200 words.',
+    prompt: `Summary so far:\n${state.summary || '(none)'}\n\nNew turns to add:\n${text}\n\nThe updated summary:`, effort: 'low', signal,
+  });
+  const upto = fold[fold.length - 1].seq;
+  q.run('update ai_sessions set summary = ?, summary_upto = ?, updated_at = ? where store_id = ? and session = ?', seal(res.text.trim(), s.encrypt), upto, now(), r.id, session);
+  return { compacted: fold.length, summary: res.text.trim() };
+}
+
+/** Forgets one session (privacy requests) or every turn older than the store's days to keep. */
+export async function clearSession(r: Resource, secret: Secret, session: string) {
+  await (await backendOf(r, secret)).clear(session);
+  q.run('delete from ai_sessions where store_id = ? and session = ?', r.id, session);
+}
+export async function clearOld(r: Resource, secret: Secret, days?: number) {
+  const keep = days ?? settingsOf(r).keepDays;
+  if (!keep) return 0;
+  const before = new Date(Date.now() - keep * 86400000).toISOString();
+  const n = await (await backendOf(r, secret)).clearBefore(before);
+  q.run('delete from ai_sessions where store_id = ? and updated_at < ?', r.id, before);
+  return n;
+}
+
+/**
+ * One run at a time per session, strictly in arrival order: each run takes a place in the session's
+ * queue the first time it asks, and gets the session when it is first in line. A run that ended
+ * (done, failed, cancelled) leaves the queue by itself, so a crash never blocks a conversation.
+ * Returns false while another run is ahead; the caller waits durably and asks again.
+ */
+export function lockSession(r: Resource, session: string, runId: string) {
+  ensureSession(r, session);
+  let mine = false;
+  tx(() => {
+    if (!q.get('select 1 from ai_session_queue where store_id = ? and session = ? and run_id = ?', r.id, session, runId)) {
+      q.run('insert into ai_session_queue(store_id, session, run_id, at) values(?, ?, ?, ?)', r.id, session, runId, now());
+    }
+    q.run(`delete from ai_session_queue where store_id = ? and session = ? and run_id not in (select id from runs where status in ('running', 'waiting', 'paused', 'queued'))`, r.id, session);
+    const head = q.get<{ run_id: string }>('select run_id from ai_session_queue where store_id = ? and session = ? order by seq limit 1', r.id, session);
+    mine = head?.run_id === runId;
+    if (mine) q.run('update ai_sessions set lock_run = ?, lock_until = ? where store_id = ? and session = ?', runId, Date.now(), r.id, session);
+  });
+  return mine;
+}
+export function unlockSession(r: Resource, session: string, runId: string) {
+  tx(() => {
+    q.run('delete from ai_session_queue where store_id = ? and session = ? and run_id = ?', r.id, session, runId);
+    q.run('update ai_sessions set lock_run = null, lock_until = 0 where store_id = ? and session = ? and lock_run = ?', r.id, session, runId);
+  });
+}
+/** Runs waiting for a session, in order (the first holds it). */
+export const sessionQueue = (r: Resource, session: string) => q.all<{ run_id: string; at: string }>('select run_id, at from ai_session_queue where store_id = ? and session = ? order by seq', r.id, session);
+
+/** Test connection: reaches the store, writes and reads a turn of a test session, then forgets it. */
+export async function testMemory(r: Resource, secret: Secret) {
+  const session = `__test-${Date.now()}`;
+  await appendTurns(r, secret, session, [{ role: 'user', content: 'test' }]);
+  const back = await loadSession(r, secret, session);
+  await clearSession(r, secret, session);
+  if (back.turns.length !== 1) throw new Error('The test turn was not read back');
+  const n = Number(q.get<{ n: number }>('select count(*) n from ai_sessions where store_id = ?', r.id)?.n || 0);
+  const s = settingsOf(r);
+  return `Stored and read back a test turn (${r.config.store || 'built-in'}). ${n} sessions kept; context window ${s.contextTokens} tokens, ${s.keepTurns} recent turns word for word.`;
+}
+
+/** Sessions of a store, newest first, for the Admin Console. */
+export const listSessions = (storeId: string, limit = 100) =>
+  q.all<any>('select session, turns, tokens, created_at, updated_at from ai_sessions where store_id = ? order by updated_at desc limit ?', storeId, limit);

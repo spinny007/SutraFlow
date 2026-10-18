@@ -88,7 +88,7 @@ export interface StepResult {
   /** Value stored as this step's output when it differs from what is emitted. */
   store?: any;
   /** Pause until a person decides (port approved/rejected). */
-  wait?: { kind: 'approval'; message: string; assignee?: string };
+  wait?: { kind: 'approval'; message: string; assignee?: string; /** Ask a person: the comment is the answer (ports answered / declined). */ question?: boolean };
   /** Durable timer: run this step again (phase "resume") after this epoch ms. */
   deferUntil?: number;
   /** Stops the whole run: other branches are cancelled and the run ends with this status. */
@@ -96,7 +96,13 @@ export interface StepResult {
   /** The process's result, returned to a calling process (Return activity). */
   result?: any;
   /** Call another process; the engine starts it and, when wait is set, resumes this step with its result. */
-  call?: { doc: FlowDoc; flowId?: string; version?: number; projectId?: string | null; input: any; wait: boolean; name: string };
+  call?: {
+    doc: FlowDoc; flowId?: string; version?: number; projectId?: string | null; input: any; wait: boolean; name: string;
+    /** Start at this trigger of the called Sutra (default: its first trigger). */
+    triggerNodeId?: string;
+    /** When the called Sutra ends, run this step again (phase "resume") with ctx.resumed, instead of finishing it with the result. */
+    resume?: boolean;
+  };
 }
 
 export interface ExecCtx {
@@ -112,6 +118,8 @@ export interface ExecCtx {
   resolveDeep(t: unknown): any;
   scope: Record<string, any>;
   phase?: string | null;
+  /** After a call with resume: how the called Sutra ended. */
+  resumed?: { status: string; result?: any; error?: string; name: string };
   attempt: number;
   signal: AbortSignal;
   log(level: 'info' | 'warn' | 'error', msg: string): void;

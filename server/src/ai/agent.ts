@@ -1,0 +1,321 @@
+import { q, now } from '../db.js';
+import { deployedFlows, getFlow, listFlows } from '../flows.js';
+import { toolDefinition } from '../mcp.js';
+import { requireResource, type Resource } from '../resources.js';
+import type { ExecCtx, FlowDoc, FlowNode, StepResult } from '../engine/types.js';
+import { aiCall, type AiResult } from './providers.js';
+import { appendTurns, compact, fitTurns, loadSession, lockSession, settingsOf, tokensOf, unlockSession, cleanSession } from './memory.js';
+import { searchKnowledge } from './knowledge.js';
+import { callMcpTool, listMcpTools, type McpToolInfo } from './mcpClient.js';
+
+/**
+ * The AI agent: works towards a goal in steps. Each step the model answers with one JSON object:
+ * use a tool, give the final answer, or ask a person. Tools are Sutras of the project that start with
+ * an "AI tool" trigger (run as called Sutras, so the agent holds no worker while they run), the
+ * knowledge base, and the tools of an MCP server. Its progress is saved after every tool, so a
+ * restart, a retry or a wait continues where it stopped and never runs a finished tool again.
+ * Works with every engine of the AI provider connection, including small local models.
+ */
+export interface AgentStep { thought?: string; tool: string; input: any; result?: any; error?: string; ms?: number }
+export interface AgentState { steps: AgentStep[]; tokens: number; calls: number; started: number; pending?: AgentStep | null; notes: string[] }
+
+interface ToolRef {
+  name: string; description: string; inputSchema: any;
+  kind: 'sutra' | 'knowledge' | 'mcp';
+  sutra?: { flowId: string; version: number; doc: FlowDoc; node: FlowNode; name: string; projectId: string };
+  mcpName?: string;
+}
+
+const loadState = (runId: string, nodeId: string): AgentState | null => {
+  const r = q.get<{ state: string }>('select state from ai_agent_state where run_id = ? and node_id = ?', runId, nodeId);
+  return r ? JSON.parse(r.state) : null;
+};
+const saveState = (runId: string, nodeId: string, s: AgentState) =>
+  q.run(`insert into ai_agent_state(run_id, node_id, state, updated_at) values(?, ?, ?, ?) on conflict(run_id, node_id) do update set state = excluded.state, updated_at = excluded.updated_at`, runId, nodeId, JSON.stringify(s), now());
+const dropState = (runId: string, nodeId: string) => q.run('delete from ai_agent_state where run_id = ? and node_id = ?', runId, nodeId);
+
+/** Sutras of the project that agents may use as tools: drafts while testing, deployed versions otherwise. */
+export function sutraTools(projectId: string, testing: boolean, exceptFlow?: string): ToolRef[] {
+  const docs = testing
+    ? listFlows(projectId).map(f => ({ flowId: f.id, version: 0, doc: getFlow(f.id)!.doc }))
+    : deployedFlows().filter(d => d.projectId === projectId).map(d => ({ flowId: d.flowId, version: d.version, doc: d.doc }));
+  const out: ToolRef[] = [];
+  for (const d of docs) {
+    if (d.flowId === exceptFlow) continue;
+    for (const n of d.doc.nodes) {
+      if (n.type !== 'mcpTool' || n.config.forAgents === false || !n.config.toolName) continue;
+      const def = toolDefinition(n);
+      out.push({ name: def.name, description: def.description, inputSchema: def.inputSchema, kind: 'sutra', sutra: { flowId: d.flowId, version: d.version, doc: d.doc, node: n, name: d.doc.name, projectId } });
+    }
+  }
+  return out;
+}
+
+/** The answer JSON in a model reply (whole text, fenced block or first balanced object). */
+export function jsonIn(text: string): any {
+  const tryParse = (t: string) => { try { const v = JSON.parse(t.trim()); return v && typeof v === 'object' ? v : undefined; } catch { return undefined; } };
+  const whole = tryParse(text);
+  if (whole) return whole;
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(text);
+  if (fenced) { const v = tryParse(fenced[1]); if (v) return v; }
+  for (let start = text.indexOf('{'); start >= 0; start = text.indexOf('{', start + 1)) {
+    let depth = 0, inStr = false, esc = false;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false; continue; }
+      if (ch === '"') inStr = true;
+      else if (ch === '{') depth++;
+      else if (ch === '}' && --depth === 0) { const v = tryParse(text.slice(start, i + 1)); if (v) return v; break; }
+    }
+  }
+  return undefined;
+}
+
+const short = (v: unknown, max: number) => { const s = typeof v === 'string' ? v : JSON.stringify(v ?? null); return s.length > max ? s.slice(0, max) + ` ... (${s.length - max} more characters)` : s; };
+const schemaLine = (s: any) => {
+  const props = s?.properties || {};
+  const req = new Set<string>(s?.required || []);
+  const parts = Object.entries(props).map(([k, v]: [string, any]) => `${k}${req.has(k) ? '' : '?'}: ${v?.type || 'any'}${v?.description ? ` (${String(v.description).slice(0, 80)})` : ''}`);
+  return parts.length ? `{ ${parts.join(', ')} }` : '{}';
+};
+
+export interface AgentConfig {
+  provider: Resource; instructions: string; task: string; session: string; memory?: Resource; knowledge?: Resource; mcp?: Resource;
+  toolMode: string; toolNames: string[]; canAsk: boolean; maxSteps: number; maxTokens: number; maxSeconds: number;
+  contextTokens: number; autoKnowledge: number; answerFormat: string; effort: string; saveSteps: boolean;
+}
+
+export function agentConfig(c: ExecCtx): AgentConfig {
+  const n = (k: string, d: number) => (Number(c.raw(k)) > 0 ? Number(c.raw(k)) : d);
+  const memoryId = String(c.raw('memory') || '');
+  return {
+    provider: requireResource(c.raw('provider'), 'aiProvider', 'AI provider'),
+    instructions: String(c.v('instructions') ?? ''), task: (() => { const t = c.v('task'); return typeof t === 'string' ? t : JSON.stringify(t ?? ''); })(),
+    session: memoryId ? cleanSession(c.v('session')) : String(c.v('session') ?? ''),
+    memory: memoryId ? requireResource(memoryId, 'aiMemory', 'AI memory store') : undefined,
+    knowledge: c.raw('knowledge') ? requireResource(c.raw('knowledge'), 'aiKnowledge', 'Knowledge base') : undefined,
+    mcp: c.raw('mcp') ? requireResource(c.raw('mcp'), 'mcpClient', 'MCP client') : undefined,
+    toolMode: String(c.raw('tools') || 'all AI tools of this project'),
+    toolNames: String(c.raw('toolNames') || '').split(/[,\n]/).map(s => s.trim()).filter(Boolean),
+    canAsk: !!c.raw('canAsk'), maxSteps: n('maxSteps', 8), maxTokens: n('maxTokens', 60000), maxSeconds: n('maxSeconds', 600),
+    contextTokens: n('contextTokens', 8000), autoKnowledge: Number(c.raw('autoKnowledge')) || 0, answerFormat: String(c.raw('answerFormat') || 'text'),
+    effort: String(c.raw('effort') || 'medium'), saveSteps: c.raw('saveSteps') !== false,
+  };
+}
+
+async function toolsFor(c: ExecCtx, cfg: AgentConfig): Promise<ToolRef[]> {
+  const testing = !Number(c.scope.run?.version);
+  let tools: ToolRef[] = cfg.toolMode === 'none' ? [] : sutraTools(c.projectId || '', testing, c.scope.run?.flowId);
+  if (cfg.toolMode === 'chosen tools') tools = tools.filter(t => cfg.toolNames.includes(t.name));
+  if (cfg.knowledge) tools.push({ name: 'search_knowledge', description: `Searches the knowledge base "${cfg.knowledge.name}" and returns the passages closest to a question, with their sources. Use it for facts you do not know.`, inputSchema: { type: 'object', properties: { question: { type: 'string', description: 'What to look for' } }, required: ['question'] }, kind: 'knowledge' });
+  if (cfg.mcp) {
+    let list: McpToolInfo[] = [];
+    try { list = await listMcpTools(cfg.mcp, c.secret, c.signal); } catch (e: any) { c.log('warn', `MCP server ${cfg.mcp.name}: ${e.message}`); }
+    const allow = String(cfg.mcp.config.allowTools || '').split(/[,\n]/).map(s => s.trim()).filter(Boolean);
+    for (const t of list) {
+      if (allow.length && !allow.includes(t.name)) continue;
+      if (tools.some(x => x.name === t.name)) continue;
+      tools.push({ name: t.name, description: t.description || t.title || '', inputSchema: t.inputSchema || {}, kind: 'mcp', mcpName: t.name });
+    }
+  }
+  return tools;
+}
+
+/** The prompt of one step: instructions, tools, then the history in the fill order of the context window. */
+function buildPrompt(cfg: AgentConfig, tools: ToolRef[], memory: { summary: string; turns: { role: string; name?: string; content: string }[] }, knowledge: string, st: AgentState) {
+  const system = [
+    cfg.instructions || 'You are a helpful agent.',
+    '',
+    'You work in steps. Reply to every step with ONE JSON object and nothing else:',
+    tools.length ? '- To use a tool: {"thought": "why, in one sentence", "tool": "<tool name>", "input": { ...the tool input... }}' : '',
+    `- To finish: {"thought": "...", "answer": ${cfg.answerFormat === 'JSON' ? '{ ...your answer as a JSON object... }' : '"your answer for the user"'}}`,
+    cfg.canAsk ? '- When you cannot continue without a person (a decision, a missing fact): {"thought": "...", "ask": "your question"}' : '',
+    'Rules: use only the tools listed; one tool per step; never invent a tool result; when you have what you need, finish.',
+    tools.length ? `Example: {"thought": "I need data", "tool": "${tools[0].name}", "input": {}} or {"thought": "I know it", "answer": "..."}` : '',
+    tools.length ? `\nTools:\n${tools.map(t => `- ${t.name}: ${t.description.replace(/\s+/g, ' ').slice(0, 400)}\n  input: ${schemaLine(t.inputSchema)}`).join('\n')}` : '\nYou have no tools: answer from what you know and what you are given.',
+  ].filter(x => x !== '').join('\n');
+  const parts: string[] = [];
+  if (memory.summary) parts.push(`Summary of the conversation so far:\n${memory.summary}`);
+  if (knowledge) parts.push(`From the knowledge base (cite the source when you use it):\n${knowledge}`);
+  if (memory.turns.length) parts.push(`Earlier in this conversation:\n${memory.turns.map(t => (t.role === 'tool' ? `result of ${t.name || 'a tool'}: ${t.content}` : `${t.role}: ${t.content}`)).join('\n')}`);
+  parts.push(`Now:\nuser: ${cfg.task}`);
+  if (st.steps.length) parts.push(`Your steps so far:\n${st.steps.map((s, i) => `${i + 1}. tool ${s.tool} with ${short(s.input, 300)} -> ${s.error ? `ERROR: ${s.error}` : short(s.result, 1500)}`).join('\n')}`);
+  if (st.notes.length) parts.push(st.notes.slice(-3).join('\n'));
+  parts.push('Your next step, as one JSON object:');
+  return { system, prompt: parts.join('\n\n') };
+}
+
+/** Older tool results are shortened when this run's steps alone would fill the window. */
+function trimSteps(st: AgentState, budget: number) {
+  const size = () => st.steps.reduce((a, s) => a + tokensOf(s.result) + tokensOf(s.input), 0);
+  for (let i = 0; i < st.steps.length - 2 && size() > budget; i++) {
+    const s = st.steps[i];
+    if (typeof s.result === 'string' && s.result.startsWith('(shortened)')) continue;
+    s.result = `(shortened) ${short(s.result, 200)}`;
+  }
+}
+
+const sumAi = (a: AiResult['ai'][], provider: Resource) => ({
+  provider: provider.name, engine: a[a.length - 1]?.engine ?? '', model: a[a.length - 1]?.model ?? '',
+  inputTokens: a.reduce((x, y) => x + (y.inputTokens ?? 0), 0), outputTokens: a.reduce((x, y) => x + (y.outputTokens ?? 0), 0),
+  totalTokens: a.reduce((x, y) => x + (y.totalTokens ?? 0), 0), ms: a.reduce((x, y) => x + y.ms, 0), calls: a.length,
+});
+
+/** One activation of the agent step: runs until it finishes, asks, hits a limit, or calls a tool Sutra. */
+export async function runAgent(c: ExecCtx): Promise<StepResult> {
+  const cfg = agentConfig(c);
+  const runId = c.runId, nodeId = c.node.id;
+  if (cfg.memory && !lockSession(cfg.memory, cfg.session, runId)) {
+    if (!loadState(runId, nodeId)) c.log('info', `Session ${cfg.session} is busy with another run; waiting`);
+    return { deferUntil: Date.now() + 1000 };
+  }
+  const st: AgentState = loadState(runId, nodeId) || { steps: [], tokens: 0, calls: 0, started: Date.now(), pending: null, notes: [] };
+  if (st.pending && c.resumed) {
+    const p = st.pending;
+    st.steps.push({ ...p, ...(c.resumed.status === 'done' ? { result: unwrapTool(c.resumed.result) } : { error: c.resumed.error || c.resumed.status }) });
+    st.pending = null;
+    c.log(c.resumed.status === 'done' ? 'info' : 'warn', `Tool ${p.tool} ${c.resumed.status === 'done' ? 'finished' : `failed: ${c.resumed.error}`}`);
+  }
+  const ais: AiResult['ai'][] = [];
+  const finish = async (port: string, out: Record<string, any>, turns: { role: 'user' | 'assistant' | 'tool'; content: unknown; name?: string }[]) => {
+    if (cfg.memory) {
+      await appendTurns(cfg.memory, c.secret, cfg.session, turns);
+      const s = settingsOf(cfg.memory);
+      await compact(cfg.memory, c.secret, cfg.session, Math.max(500, s.contextTokens - s.replyTokens) * 0.6, cfg.provider, c.signal).catch(e => c.log('warn', `Memory summary not updated: ${e.message}`));
+      unlockSession(cfg.memory, cfg.session, runId);
+    }
+    dropState(runId, nodeId);
+    return { port, out: { ...out, session: cfg.session || null, steps: st.steps, toolCalls: st.steps.length, tokens: st.tokens, seconds: Math.round((Date.now() - st.started) / 1000), ai: sumAi(ais, cfg.provider) } };
+  };
+  const stepTurns = () => (cfg.saveSteps ? st.steps.map(s => ({ role: 'tool' as const, name: s.tool, content: s.error ? `ERROR: ${s.error}` : short(s.result, 2000) })) : []);
+  try {
+    const tools = await toolsFor(c, cfg);
+    // Context window: what memory and knowledge may use after the instructions, tools and this run's steps.
+    const window = cfg.memory ? Math.max(512, settingsOf(cfg.memory).contextTokens - settingsOf(cfg.memory).replyTokens) : cfg.contextTokens;
+    let knowledgeText = '';
+    if (cfg.knowledge && cfg.autoKnowledge > 0 && !st.steps.length && !st.calls) {
+      const hits = await searchKnowledge(cfg.knowledge, c.secret, cfg.task, { top: cfg.autoKnowledge }, c.signal);
+      let used = 0;
+      knowledgeText = hits.filter(h => (used += tokensOf(h.text)) <= window * 0.25).map(h => `[${h.source}#${h.chunk}] ${h.text}`).join('\n');
+    }
+    while (true) {
+      if (st.calls >= cfg.maxSteps || st.tokens >= cfg.maxTokens || Date.now() - st.started > cfg.maxSeconds * 1000) {
+        const reason = st.calls >= cfg.maxSteps ? `the step limit (${cfg.maxSteps})` : st.tokens >= cfg.maxTokens ? `the token limit (${cfg.maxTokens})` : `the time limit (${cfg.maxSeconds} s)`;
+        // At the step limit with tool results in hand: one plain request for the answer, without tools.
+        if (st.calls >= cfg.maxSteps && st.steps.some(s => !s.error) && st.tokens < cfg.maxTokens && Date.now() - st.started < cfg.maxSeconds * 1000) {
+          const results = st.steps.filter(s => !s.error).map(s => `${s.tool} with ${short(s.input, 200)} returned ${short(s.result, 1500)}`).join('\n');
+          const last = await aiCall(cfg.provider, c.secret, { system: `${cfg.instructions}\nAnswer the user now in plain text, using only these tool results. No JSON.`, prompt: `Tool results:\n${results}\n\nuser: ${cfg.task}\n\nYour answer:`, effort: cfg.effort, signal: c.signal });
+          ais.push(last.ai);
+          st.tokens += last.ai.totalTokens ?? 0;
+          const answer = last.text.trim();
+          if (answer) {
+            c.log('warn', `Agent reached ${reason}; answered from its tool results`);
+            return await finish('done', { answer, thought: '', limitReached: true }, [{ role: 'user', content: cfg.task }, ...stepTurns(), { role: 'assistant', content: answer }]);
+          }
+        }
+        c.log('warn', `Agent stopped at ${reason}`);
+        return await finish('limit reached', { reason: `Stopped at ${reason}`, lastThought: st.steps[st.steps.length - 1]?.thought || '' },
+          [{ role: 'user', content: cfg.task }, ...stepTurns(), { role: 'assistant', content: `(stopped at ${reason} before finishing)` }]);
+      }
+      const fixed = tokensOf(buildPrompt(cfg, tools, { summary: '', turns: [] }, knowledgeText, st).system) + tokensOf(cfg.task) + tokensOf(knowledgeText);
+      trimSteps(st, Math.max(400, window * 0.4));
+      const stepsTokens = st.steps.reduce((a, s) => a + tokensOf(s.result) + tokensOf(s.input), 0);
+      let memory = { summary: '', turns: [] as any[] };
+      if (cfg.memory) memory = fitTurns(await loadSession(cfg.memory, c.secret, cfg.session), Math.max(200, window - fixed - stepsTokens));
+      const { system, prompt } = buildPrompt(cfg, tools, memory, knowledgeText, st);
+      st.calls++;
+      const res = await aiCall(cfg.provider, c.secret, { system, prompt, effort: cfg.effort, signal: c.signal, json: true });
+      ais.push(res.ai);
+      st.tokens += res.ai.totalTokens ?? tokensOf(system) + tokensOf(prompt) + tokensOf(res.text);
+      const a = normalise(jsonIn(res.text));
+      if (!a) { st.notes.push(`Your last reply was not one JSON object. It began: ${res.text.slice(0, 80)}`); saveState(runId, nodeId, st); continue; }
+      st.notes = [];
+      if (st.calls === cfg.maxSteps - 1) st.notes.push('This is your last step: reply with {"answer": ...} using what you have.');
+      if ('answer' in a) {
+        const answer = cfg.answerFormat === 'JSON' && typeof a.answer === 'string' ? (jsonIn(a.answer) ?? a.answer) : a.answer;
+        c.log('info', `Agent answered after ${st.steps.length} tool calls`);
+        return await finish('done', { answer, thought: a.thought || '' }, [{ role: 'user', content: cfg.task }, ...stepTurns(), { role: 'assistant', content: answer }]);
+      }
+      if ('ask' in a) {
+        if (!cfg.canAsk) { st.notes.push('Asking a person is not allowed here: decide yourself or finish with what you have.'); saveState(runId, nodeId, st); continue; }
+        c.log('info', `Agent asks: ${a.ask}`);
+        return await finish('needs a person', { question: String(a.ask), thought: a.thought || '' }, [{ role: 'user', content: cfg.task }, ...stepTurns(), { role: 'assistant', content: `Question: ${a.ask}` }]);
+      }
+      const name = String(a.tool || '').trim();
+      const tool = tools.find(t => t.name === name) || tools.find(t => t.name.toLowerCase() === name.toLowerCase());
+      const input = a.input && typeof a.input === 'object' ? a.input : {};
+      if (!tool) {
+        const how = 'To answer without a tool, reply {"answer": "..."}.';
+        st.steps.push({ thought: a.thought, tool: name || '(none)', input, error: name ? `There is no tool named ${name}. Use one of: ${tools.map(t => t.name).join(', ') || '(none)'}. ${how}` : `You named no tool. ${how}` });
+        saveState(runId, nodeId, st);
+        continue;
+      }
+      const same = st.steps.find(s => s.tool === tool.name && !s.error && JSON.stringify(s.input) === JSON.stringify(input));
+      if (same) {
+        st.notes.push(`You already used ${tool.name} with this input; its result is in your steps above. Answer now with {"answer": ...} unless you need a different tool.`);
+        saveState(runId, nodeId, st);
+        continue;
+      }
+      const missing = ((tool.inputSchema?.required || []) as string[]).filter(k => input[k] === undefined || input[k] === null || input[k] === '');
+      if (missing.length) { st.steps.push({ thought: a.thought, tool: name, input, error: `Missing input: ${missing.join(', ')}` }); saveState(runId, nodeId, st); continue; }
+      c.log('info', `Agent uses ${name}${a.thought ? `: ${a.thought}` : ''}`);
+      if (tool.kind === 'sutra') {
+        const s = tool.sutra!;
+        st.pending = { thought: a.thought, tool: name, input };
+        saveState(runId, nodeId, st);
+        return {
+          call: {
+            doc: s.doc, flowId: s.flowId, version: s.version || undefined, projectId: s.projectId, name: s.name, wait: true, resume: true, triggerNodeId: s.node.id,
+            input: { arguments: input, tool: name, auth: { subject: `agent:${c.node.name}`, method: 'agent' }, client: { ip: '', secure: true, name: `AI agent ${c.node.name}`, version: '' }, session: cfg.session || null },
+          },
+        };
+      }
+      const t0 = Date.now();
+      try {
+        const result = tool.kind === 'knowledge'
+          ? (await searchKnowledge(cfg.knowledge!, c.secret, String(input.question ?? input.query ?? ''), { top: 5 }, c.signal)).map(h => ({ source: `${h.source}#${h.chunk}`, score: h.score, text: h.text }))
+          : await callMcpTool(cfg.mcp!, c.secret, tool.mcpName!, input, c.signal).then(r => (r.isError ? Promise.reject(new Error(r.text || 'The tool reported an error')) : r.result));
+        st.steps.push({ thought: a.thought, tool: name, input, result, ms: Date.now() - t0 });
+      } catch (e: any) {
+        st.steps.push({ thought: a.thought, tool: name, input, error: e.message, ms: Date.now() - t0 });
+      }
+      saveState(runId, nodeId, st);
+    }
+  } catch (e) {
+    saveState(runId, nodeId, st);
+    // A retry keeps its place in the session queue; after the last attempt the next message may go.
+    if (cfg.memory && c.attempt >= (Number(c.node.settings?.retries) || 0)) unlockSession(cfg.memory, cfg.session, runId);
+    throw e;
+  }
+}
+
+/**
+ * Small models phrase the step their own way: "final_answer" or "response" for the answer, a tool
+ * name in brackets or quotes, "none" for no tool. Brings them to answer / ask / tool.
+ */
+const NO_TOOL = new Set(['', 'none', 'null', 'no', 'n/a', 'na', 'no tool', 'none used yet', 'nothing', 'answer', 'final']);
+export function normalise(a: any): any {
+  if (!a || typeof a !== 'object' || Array.isArray(a)) return a;
+  const out = { ...a };
+  for (const k of ['final_answer', 'finalAnswer', 'final', 'response', 'reply']) if (!('answer' in out) && out[k] !== undefined && typeof out[k] !== 'object') out.answer = out[k];
+  if (!('ask' in out) && typeof out.question === 'string' && !out.tool) out.ask = out.question;
+  const raw = out.tool ?? out.tool_name ?? out.toolName ?? out.action ?? out.name;
+  const tool = typeof raw === 'string' ? raw.replace(/[()`"'[\]{}<>]/g, '').trim() : '';
+  if ('answer' in out || 'ask' in out) { delete out.tool; return out; }
+  if (NO_TOOL.has(tool.toLowerCase())) {
+    // A reply with only a thought: nothing to run.
+    out.tool = '';
+  } else out.tool = tool;
+  if (!out.input && out.arguments && typeof out.arguments === 'object') out.input = out.arguments;
+  if (!out.input && out.args && typeof out.args === 'object') out.input = out.args;
+  return out;
+}
+
+/** What a tool Sutra hands back: Reply to AI sends { result, isError }; anything else is the result itself. */
+function unwrapTool(v: any) {
+  if (v && typeof v === 'object' && 'result' in v && 'isError' in v) return v.isError ? { error: v.result } : v.result;
+  return v;
+}
+
+/** The agent's progress in a run, for the Runs view. */
+export const agentProgress = (runId: string) => q.all<any>('select node_id, state, updated_at from ai_agent_state where run_id = ?', runId).map(r => ({ nodeId: r.node_id, ...JSON.parse(r.state), updatedAt: r.updated_at }));

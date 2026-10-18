@@ -1,0 +1,176 @@
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { testEnv, node, edge } from './helpers.js';
+
+/** Published agents: chat page and API, OpenAI-compatible API, MCP tool, A2A, jobs, policies; MCP client; hand-off. */
+const env = testEnv(19910);
+const { boot } = await import('../server/src/index.js');
+const { engine } = await import('../server/src/engine/engine.js');
+const { q } = await import('../server/src/db.js');
+const flows = await import('../server/src/flows.js');
+const projects = await import('../server/src/projects.js');
+const { saveResource, getResource } = await import('../server/src/resources.js');
+const { setSecret } = await import('../server/src/secrets.js');
+const { listMcpTools, callMcpTool } = await import('../server/src/ai/mcpClient.js');
+const here = path.dirname(fileURLToPath(import.meta.url));
+
+let delayMs = 0;
+let fake: http.Server, fakeUrl = '';
+let srv: Awaited<ReturnType<typeof boot>>;
+let pid = '', prov = '', mem = '', agentFlow = '';
+before(async () => {
+  // Fake model: the agent answers with the message it got and what memory showed it.
+  fake = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', d => (body += d));
+    req.on('end', async () => {
+      const b = JSON.parse(body || '{}');
+      const prompt = b.messages?.find((m: any) => m.role === 'user')?.content || '';
+      if (delayMs) await new Promise(r => setTimeout(r, delayMs));
+      const now = /Now:\nuser: ([^\n]*)/.exec(prompt)?.[1] || '';
+      const before = /Earlier in this conversation:\n(?:user: ([^\n]*))/.exec(prompt)?.[1];
+      const answer = now.startsWith('add ') && !prompt.includes('add with') ? { tool: 'add', input: { a: 2, b: 3 } } : prompt.includes('add with') ? { answer: 'The sum is 5' } : { answer: `You said "${now}"${before ? `; before that "${before}"` : ''}` };
+      res.end(JSON.stringify({ model: 'fake', message: { role: 'assistant', content: JSON.stringify(answer) }, prompt_eval_count: 10, eval_count: 5 }));
+    });
+  });
+  await new Promise<void>(r => fake.listen(0, '127.0.0.1', () => r()));
+  fakeUrl = `http://127.0.0.1:${(fake.address() as any).port}`;
+  srv = await boot({ listenAdmin: false });
+  pid = projects.saveProject({ name: 'Published agents', config: { variables: [] } }).id;
+  prov = saveResource({ kind: 'aiProvider', name: 'Fake', project_id: pid, config: { engine: 'Ollama', baseUrl: fakeUrl, model: 'fake' } }).id;
+  mem = saveResource({ kind: 'aiMemory', name: 'Chats', project_id: pid, config: { store: 'built-in' } }).id;
+  const t = node('agentChannel', 'Desk', { agentName: 'order-desk', title: 'Order desk', description: 'Answers order questions.', chat: true, openai: true, mcp: true, a2a: true, waitSeconds: 5 });
+  const a = node('aiAgent', 'Agent', { provider: prov, task: '{{input.message}}', memory: mem, session: '{{input.sessionId}}', tools: 'none', maxSteps: 4 });
+  const r1 = node('agentReply', 'Reply', { answer: '{{input.answer}}', status: 'answer', sessionId: '{{trigger.sessionId}}' });
+  agentFlow = flows.saveFlow(undefined, { name: 'Order desk agent', nodes: [t, a, r1], edges: [edge(t, a), edge(a, r1, 'done')] }, pid).id;
+  flows.deploy(agentFlow);
+});
+after(async () => { await srv.stop(); fake.close(); });
+
+const post = (p: string, body: any, headers: Record<string, string> = {}) => fetch(`${env.http}${p}`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
+
+test('chat page and chat API: sessions carry the conversation', async () => {
+  const page = await fetch(`${env.http}/chat/order-desk`);
+  assert.equal(page.status, 200);
+  assert.match(await page.text(), /<title>Order desk<\/title>/);
+  assert.match(await (await fetch(`${env.http}/chat/order-desk/widget.js`)).text(), /\/chat\/order-desk/);
+  let r = await post('/chat/order-desk/api', { message: 'Hello' });
+  let o = await r.json();
+  assert.equal(r.status, 200, JSON.stringify(o));
+  assert.equal(o.answer, 'You said "Hello"');
+  assert.ok(o.sessionId, 'a new session id is given');
+  r = await post('/chat/order-desk/api', { message: 'Again', sessionId: o.sessionId });
+  o = await r.json();
+  assert.equal(o.answer, 'You said "Again"; before that "Hello"');
+  assert.equal((await post('/chat/nobody/api', { message: 'x' })).status, 404);
+  assert.equal((await post('/chat/order-desk/api', { message: '  ' })).status, 400);
+});
+
+test('slow work answers with a job; the job gives the answer later', async () => {
+  const n = flows.getFlow(agentFlow)!.doc;
+  n.nodes.find(x => x.type === 'agentChannel')!.config.waitSeconds = 1;
+  flows.saveFlow(agentFlow, n); flows.deploy(agentFlow);
+  delayMs = 1800;
+  try {
+    const r = await post('/chat/order-desk/api', { message: 'Slow one', sessionId: 'slow-1' });
+    const o = await r.json();
+    assert.equal(r.status, 202);
+    assert.equal(o.status, 'working');
+    let j: any = {};
+    for (let i = 0; i < 40 && j.status !== 'answer'; i++) { await new Promise(res => setTimeout(res, 150)); j = await (await fetch(`${env.http}/chat/order-desk/jobs/${o.job}`)).json(); }
+    assert.equal(j.answer, 'You said "Slow one"');
+    assert.equal(j.sessionId, 'slow-1');
+  } finally {
+    delayMs = 0;
+    n.nodes.find(x => x.type === 'agentChannel')!.config.waitSeconds = 5;
+    flows.saveFlow(agentFlow, n); flows.deploy(agentFlow);
+  }
+});
+
+test('OpenAI-compatible API: models, answers, streaming, one session per conversation', async () => {
+  const models = await (await fetch(`${env.http}/v1/models`)).json();
+  assert.deepEqual(models.data.map((m: any) => m.id), ['order-desk']);
+  let r = await post('/v1/chat/completions', { model: 'order-desk', messages: [{ role: 'system', content: 'x' }, { role: 'user', content: 'First question' }] });
+  let o = await r.json();
+  assert.equal(o.choices[0].message.content, 'You said "First question"');
+  const sid = r.headers.get('x-session-id');
+  // The client sends the whole history again: same conversation, same session.
+  r = await post('/v1/chat/completions', { model: 'order-desk', messages: [{ role: 'user', content: 'First question' }, { role: 'assistant', content: 'You said...' }, { role: 'user', content: 'Second' }] });
+  o = await r.json();
+  assert.equal(r.headers.get('x-session-id'), sid);
+  assert.equal(o.choices[0].message.content, 'You said "Second"; before that "First question"');
+  r = await post('/v1/chat/completions', { model: 'order-desk', stream: true, messages: [{ role: 'user', content: 'Stream it' }] });
+  const sse = await r.text();
+  const text = sse.split('\n').filter(l => l.startsWith('data: {')).map(l => JSON.parse(l.slice(6)).choices[0].delta.content || '').join('');
+  assert.equal(text, 'You said "Stream it"');
+  assert.match(sse, /data: \[DONE\]/);
+  assert.equal((await post('/v1/chat/completions', { model: 'nope', messages: [{ role: 'user', content: 'x' }] })).status, 404);
+});
+
+test('MCP: the agent is the tool ask_order_desk; an MCP client calls it', async () => {
+  const mcpConn = getResource(saveResource({ kind: 'mcpClient', name: 'This gateway', project_id: pid, config: { transport: 'HTTP', url: `${env.http}/mcp` } }).id)!;
+  const tools = await listMcpTools(mcpConn, () => '');
+  assert.ok(tools.some(t => t.name === 'ask_order_desk'));
+  const res = await callMcpTool(mcpConn, () => '', 'ask_order_desk', { message: 'From Claude' });
+  assert.equal(res.text, 'You said "From Claude"');
+  assert.equal(res.result.status, 'answer');
+  const again = await callMcpTool(mcpConn, () => '', 'ask_order_desk', { message: 'Follow-up', session: res.result.session });
+  assert.equal(again.text, 'You said "Follow-up"; before that "From Claude"');
+});
+
+test('A2A: agent card, message/send with a context, tasks/get', async () => {
+  const card = await (await fetch(`${env.http}/a2a/order-desk/.well-known/agent-card.json`)).json();
+  assert.equal(card.name, 'Order desk');
+  assert.equal(card.url, `${env.http}/a2a/order-desk`);
+  const r = await post('/a2a/order-desk', { jsonrpc: '2.0', id: 1, method: 'message/send', params: { message: { role: 'user', messageId: 'm1', contextId: 'ctx-9', parts: [{ kind: 'text', text: 'Hi agent' }] } } });
+  const o = await r.json();
+  assert.equal(o.result.kind, 'message');
+  assert.equal(o.result.contextId, 'ctx-9');
+  assert.equal(o.result.parts[0].text, 'You said "Hi agent"');
+  const missing = await (await post('/a2a/order-desk', { jsonrpc: '2.0', id: 2, method: 'tasks/get', params: { id: '00000000-0000-0000-0000-000000000000' } })).json();
+  assert.equal(missing.error.code, -32001);
+});
+
+test('a policy on an entry point keeps strangers out', async () => {
+  setSecret('DESK_KEY', 'desk-key-123456');
+  const pol = saveResource({ kind: 'inboundPolicy', name: 'Desk key', project_id: pid, config: { auth: 'apiKey', apiKeyHeader: 'X-API-Key', apiKeySecrets: ['DESK_KEY'], requireHttps: false } }).id;
+  const n = flows.getFlow(agentFlow)!.doc;
+  n.nodes.find(x => x.type === 'agentChannel')!.config.openaiPolicy = pol;
+  flows.saveFlow(agentFlow, n); flows.deploy(agentFlow);
+  assert.equal((await post('/v1/chat/completions', { model: 'order-desk', messages: [{ role: 'user', content: 'x' }] })).status, 401);
+  const ok = await post('/v1/chat/completions', { model: 'order-desk', messages: [{ role: 'user', content: 'With key' }] }, { 'x-api-key': 'desk-key-123456' });
+  assert.equal(ok.status, 200);
+  assert.equal((await post('/chat/order-desk/api', { message: 'chat stays open' })).status, 200, 'other entry points keep their own policy');
+});
+
+test('MCP client over a command; Call MCP tool; an agent uses outside tools; hand-off to an agent', async () => {
+  const cmd = getResource(saveResource({ kind: 'mcpClient', name: 'Calculator', project_id: pid, config: { transport: 'command', command: `"${process.execPath}" "${path.join(here, 'mcpstdio.mjs')}"` } }).id)!;
+  assert.deepEqual((await listMcpTools(cmd, () => '')).map(t => t.name), ['add']);
+  const s = node('start', 'Go', { payload: '{}' });
+  const call = node('mcpCall', 'Add', { mcp: cmd.id, action: 'call a tool', tool: 'add', arguments: '{"a": 4, "b": 5}' });
+  const bad = node('mcpCall', 'Bad add', { mcp: cmd.id, action: 'call a tool', tool: 'add', arguments: '{"a": "x"}' });
+  const errLog = node('log', 'Tool error', { message: 'TOOLERR {{input.text}}' });
+  let id = engine.startRun({ doc: { name: 'MCP', nodes: [s, call, bad, errLog], edges: [edge(s, call), edge(call, bad), edge(bad, errLog, 'tool error')] }, projectId: pid });
+  await engine.waitFor(id, 20000);
+  let st = JSON.parse(q.get<any>('select state from runs where id = ?', id).state);
+  assert.deepEqual(st.outputs.Add.result, { sum: 9 });
+  assert.match(st.logs.map((l: any) => l.msg).join('\n'), /TOOLERR a and b must be numbers/);
+
+  // An agent with the calculator's tools.
+  const ag = node('aiAgent', 'Calc agent', { provider: prov, task: 'add two and three', mcp: cmd.id, tools: 'none', maxSteps: 4 });
+  id = engine.startRun({ doc: { name: 'Calc', nodes: [s, ag], edges: [edge(s, ag)] }, projectId: pid });
+  await engine.waitFor(id, 20000);
+  st = JSON.parse(q.get<any>('select state from runs where id = ?', id).state);
+  assert.equal(st.outputs['Calc agent'].answer, 'The sum is 5');
+  assert.deepEqual(st.outputs['Calc agent'].steps[0].result, { sum: 5 });
+
+  // Hand off: a supervisor Sutra passes the conversation to the order desk agent.
+  const h = node('agentHandoff', 'To order desk', { process: agentFlow, use: 'draft', message: 'Handed over', sessionId: 'handoff-1', note: 'customer asks about A-1' });
+  id = engine.startRun({ doc: { name: 'Supervisor', nodes: [s, h], edges: [edge(s, h)] }, projectId: pid });
+  await engine.waitFor(id, 20000);
+  st = JSON.parse(q.get<any>('select state from runs where id = ?', id).state);
+  assert.match(st.outputs['To order desk'].answer, /^You said "Handed over/);
+});

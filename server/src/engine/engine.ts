@@ -310,6 +310,7 @@ export class Engine {
       } else {
         const once = () => act.execute({
           node, runId: t.run_id, input, scope, phase: t.phase, attempt: t.attempt, signal: ac.signal,
+          resumed: t.phase === 'resume' && t.wait ? (JSON.parse(t.wait).outcome ?? undefined) : undefined,
           // Settings may use project/engine variables; mappable inputs are returned as written.
           raw: k => resolveSetting(act.fields.find(f => f.k === k), node.config?.[k], scope),
           v: k => resolve(node.config?.[k], scope),
@@ -437,7 +438,7 @@ export class Engine {
         childId = crypto.randomUUID();
         if (res.call.wait) {
           finished = false;
-          q.run(`update tasks set status = 'waiting', wait = ?, ms = ? where id = ?`, JSON.stringify({ kind: 'process', child: childId, name: res.call.name }), extra.ms, t.id);
+          q.run(`update tasks set status = 'waiting', wait = ?, ms = ? where id = ?`, JSON.stringify({ kind: 'process', child: childId, name: res.call.name, ...(res.call.resume ? { resume: true } : {}) }), extra.ms, t.id);
           st.logs.push({ t: now(), level: 'info', msg: `${node.name}: calling ${res.call.name}`, step: node.name });
           this.saveState(t.run_id, st);
           return;
@@ -475,7 +476,7 @@ export class Engine {
     if (call && childId) {
       const depth = (this.loadRun(t.run_id)?.state.depth || 0) + 1;
       try {
-        this.startRun({ doc: call.doc, flowId: call.flowId, version: call.version, projectId: call.projectId, input: call.input, source: 'sutra', id: childId, depth });
+        this.startRun({ doc: call.doc, flowId: call.flowId, version: call.version, projectId: call.projectId, input: call.input, source: 'sutra', id: childId, depth, triggerNodeId: call.triggerNodeId });
       } catch (e: any) {
         if (call.wait) return this.fail({ ...t, status: 'waiting' }, doc, node, new Error(`${call.name}: ${e.message}`), { ms: extra.ms });
         throw e;
@@ -492,7 +493,16 @@ export class Engine {
     const node = run?.doc.nodes.find(n => n.id === t.node_id);
     const child = this.loadRun(childRunId);
     if (!run || !node || !child) return;
-    const name = (JSON.parse(t.wait || '{}').name as string) || 'Called Sutra';
+    const wait = JSON.parse(t.wait || '{}');
+    const name = (wait.name as string) || 'Called Sutra';
+    if (wait.resume) {
+      // The step asked to continue itself (an AI agent after a tool): run it again with the outcome.
+      const err = status === 'done' ? undefined : q.get<{ error: string }>('select error from runs where id = ?', childRunId)?.error || status;
+      const outcome = { status, name, ...(status === 'done' ? { result: child.state.result !== undefined ? child.state.result : child.state.last ?? null } : { error: err }) };
+      q.run(`update tasks set status = 'pending', phase = 'resume', not_before = 0, wait = ? where id = ? and status = 'waiting'`, JSON.stringify({ ...wait, outcome }), t.id);
+      this.pump();
+      return;
+    }
     if (status === 'done') {
       const result = child.state.result !== undefined ? child.state.result : child.state.last;
       this.complete(t, run.doc, node, { out: result ?? null }, { ms: 0, revealed: new Set(), logs: [{ t: now(), level: 'info', msg: `${node.name}: ${name} finished`, step: node.name }], varsSet: {} });
@@ -848,8 +858,10 @@ export class Engine {
     const node = run?.doc.nodes.find(n => n.id === t.node_id);
     if (!run || !node) throw new Error('Run not found');
     const input = t.input == null ? null : JSON.parse(t.input);
-    const out = { ...(input && typeof input === 'object' && !Array.isArray(input) ? input : { value: input }), approval: { approved, by, comment, at: now() } };
-    this.complete(t, run.doc, node, { port: approved ? 'approved' : 'rejected', out }, { ms: 0, revealed: new Set(), logs: [{ t: now(), level: 'info', msg: `${node.name}: ${approved ? 'approved' : 'rejected'} by ${by}${comment ? ` (${comment})` : ''}`, step: node.name }], varsSet: {} });
+    const question = !!JSON.parse(t.wait || '{}').question;
+    if (question && approved && !comment.trim()) throw new Error('Write the answer first');
+    const out = { ...(input && typeof input === 'object' && !Array.isArray(input) ? input : { value: input }), ...(question ? { answer: approved ? comment : '' } : {}), approval: { approved, by, comment, at: now() } };
+    this.complete(t, run.doc, node, { port: question ? (approved ? 'answered' : 'declined') : approved ? 'approved' : 'rejected', out }, { ms: 0, revealed: new Set(), logs: [{ t: now(), level: 'info', msg: `${node.name}: ${approved ? 'approved' : 'rejected'} by ${by}${comment ? ` (${comment})` : ''}`, step: node.name }], varsSet: {} });
     this.pump();
   }
 

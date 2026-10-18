@@ -16,6 +16,7 @@ import { MCP_PROTOCOLS, toolDefinition, toolResult } from '../mcp.js';
 import { metrics } from '../metrics.js';
 import { version as sutraVersion } from '../config.js';
 import { firewallAllows, getFirewall, getGatewayOptions, issueToken, logRequest, openApi } from './apps.js';
+import { agentMcpEndpoints, agentMcpTools, callAgentTool, handleAgents, listAgents, rebuildAgents } from './agents.js';
 
 /**
  * The gateway serves deployed REST and SOAP services on its own HTTP and HTTPS
@@ -66,6 +67,7 @@ export function rebuildRoutes() {
     const srv = node.config.server ? effectiveResource(node.config.server) : undefined;
     return { endpoint: srv ? mcpPath(srv.config.path) : '/mcp', serverId: srv?.id || '', flowId: d.flowId, projectId: d.projectId, version: d.version, doc: d.doc, node };
   }));
+  rebuildAgents(mcpPath);
 }
 
 /** Deployed REST and SOAP services, for OpenAPI and the Admin Console. */
@@ -89,6 +91,14 @@ export function listRoutes() {
       policy: pol ? getResource(pol)?.name ?? '(missing)' : null,
       urls: [`http://${tls.domains[0] || 'localhost'}:${s.httpPort}${t.endpoint}`, ...(tls.mode !== 'off' && getCert() ? [`https://${tls.domains[0] || 'localhost'}:${s.httpsPort}${t.endpoint}`] : [])],
       wsdl: undefined, tool: String(t.node.config.toolName || ''),
+    };
+  })).concat(listAgents().map(a => {
+    const base = (https: boolean) => `${https ? 'https' : 'http'}://${tls.domains[0] || 'localhost'}:${https ? s.httpsPort : s.httpPort}`;
+    const bases = [base(false), ...(tls.mode !== 'off' && getCert() ? [base(true)] : [])];
+    return {
+      kind: 'agent' as any, method: 'AGENT', path: `/chat/${a.name}`, flowId: a.flowId, flow: a.flow, version: a.version, step: a.title,
+      policy: null, wsdl: undefined, tool: a.tool || undefined,
+      urls: bases.flatMap(b => [...(a.chat ? [`${b}/chat/${a.name}`] : []), ...(a.openai ? [`${b}/v1/chat/completions (model ${a.name})`] : []), ...(a.mcp ? [`${b}${a.mcp} (tool ${a.tool})`] : []), ...(a.a2a ? [`${b}/a2a/${a.name}`] : [])]),
     };
   }));
 }
@@ -199,8 +209,12 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
     if (!getGatewayOptions().publishOpenApi) return reply.code(404).send({ error: 'OpenAPI is not published on this gateway' });
     return reply.send(openApi(routes.map(r => ({ kind: r.kind, method: r.method, path: r.path, flowName: r.doc.name, projectId: r.projectId, version: r.version, node: r.node })), `${secure ? 'https' : 'http'}://${req.headers.host || 'localhost'}`));
   }
+  if (/^\/(chat|a2a)\/|^\/v1\/(models|chat\/completions)$/.test(path)) {
+    const done = await handleAgents(req, reply, secure, path);
+    if (done) return done;
+  }
   const mcpAt = mcpPath(path);
-  if (mcpAt === '/mcp' || mcpTools.some(t => t.endpoint === mcpAt)) { gw.kind = 'mcp'; gw.route = `MCP ${mcpAt}`; return handleMcp(req, reply, secure, mcpAt); }
+  if (mcpAt === '/mcp' || mcpTools.some(t => t.endpoint === mcpAt) || agentMcpEndpoints().includes(mcpAt)) { gw.kind = 'mcp'; gw.route = `MCP ${mcpAt}`; return handleMcp(req, reply, secure, mcpAt); }
 
   const method = req.method.toUpperCase();
   const candidates = routes.filter(r => r.re.test(path));
@@ -348,7 +362,8 @@ async function handleMcp(req: FastifyRequest, reply: FastifyReply, secure: boole
     return reply.code(400).send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Request is not valid JSON' } });
   }
   const tools = mcpTools.filter(t => t.endpoint === endpoint);
-  const server = tools.find(t => t.serverId)?.serverId;
+  const agentTools = agentMcpTools(endpoint);
+  const server = tools.find(t => t.serverId)?.serverId || (agentTools[0]?.agent.node.config.mcpServer as string | undefined);
   const srv = server ? effectiveResource(server) : undefined;
   const batch = Array.isArray(msg) ? msg : [msg];
   const ctx = { headers: req.headers, ip: req.ip, secure, socket: req.raw.socket };
@@ -356,6 +371,16 @@ async function handleMcp(req: FastifyRequest, reply: FastifyReply, secure: boole
     const ref = t.node.config.policy || (t.serverId ? effectiveResource(t.serverId)?.config.policy : '');
     const policy = ref ? effectiveResource(ref) : undefined;
     if (ref && !policy) throw new PolicyError(503, "The tool's security policy is missing; refusing to serve it unprotected");
+    const who = await authorize(policy, ctx);
+    const g = (req as any).gw as GwInfo | undefined;
+    if (g) { g.caller = who.subject; g.appId = who.appId; }
+    return who;
+  };
+  /** Agents on this address follow the MCP server's policy. */
+  const serverAllowed = async () => {
+    const ref = srv?.config.policy || '';
+    const policy = ref ? effectiveResource(ref) : undefined;
+    if (ref && !policy) throw new PolicyError(503, "The MCP server's security policy is missing; refusing to serve it unprotected");
     const who = await authorize(policy, ctx);
     const g = (req as any).gw as GwInfo | undefined;
     if (g) { g.caller = who.subject; g.appId = who.appId; }
@@ -384,6 +409,9 @@ async function handleMcp(req: FastifyRequest, reply: FastifyReply, secure: boole
       for (const t of tools) {
         try { await allowed(t); list.push(toolDefinition(t.node)); } catch (e: any) { denied ||= e; }
       }
+      for (const t of agentTools) {
+        try { await serverAllowed(); list.push(t.def); } catch (e: any) { denied ||= e; }
+      }
       if (!list.length && denied) {
         if (denied.headers) reply.headers(denied.headers);
         return reply.code(denied.status || 401).send({ jsonrpc: '2.0', id: m.id, error: { code: -32001, message: denied.message } });
@@ -391,6 +419,18 @@ async function handleMcp(req: FastifyRequest, reply: FastifyReply, secure: boole
       ok({ tools: list });
     } else if (m.method === 'tools/call') {
       const name = String(m.params?.name || '');
+      const at = agentTools.find(x => x.def.name === name);
+      if (at) {
+        let who;
+        try { who = await serverAllowed(); } catch (e: any) {
+          const pe = e as PolicyError;
+          if (pe.headers) reply.headers(pe.headers);
+          return reply.code(pe.status || 401).send({ jsonrpc: '2.0', id: m.id, error: { code: -32001, message: pe.message } });
+        }
+        if (!String(m.params?.arguments?.message || '').trim() && !m.params?.arguments?.job) { ok(toolResult('Missing argument: message', true)); continue; }
+        ok(await callAgentTool(at.agent, m.params?.arguments || {}, who));
+        continue;
+      }
       const t = tools.find(x => x.node.config.toolName === name);
       if (!t) { err(-32602, `Unknown tool: ${name}`); continue; }
       let caller;

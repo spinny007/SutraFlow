@@ -110,6 +110,59 @@ export const RESOURCE_KINDS: ResourceKind[] = [
     ],
   },
   {
+    kind: 'aiMemory',
+    name: 'AI memory store',
+    desc: 'Where AI agents keep conversations between runs, per session (a chat, ticket or customer), and how much of it fits the model.',
+    fields: [
+      F('store', 'Keep conversations in', 'select', 'built-in', { options: ['built-in', 'database', 'folder'], help: 'built-in: the SutraFlow database. database: a table in one of your databases (SQLite, PostgreSQL, MySQL); several servers can share it. folder: one file per session.' }),
+      F('database', 'Database connection', 'resource', '', { resourceKind: 'database', ...when('store', 'database') }),
+      F('table', 'Table', 'text', 'sutra_ai_memory', { ...when('store', 'database'), help: 'Made when missing.' }),
+      F('folder', 'Folder', 'text', '', { ...when('store', 'folder'), help: 'Empty = ai-memory in the data folder.' }),
+      F('contextTokens', 'Context window (tokens)', 'number', 8000, { help: 'How much the agent may send to the model in one step: instructions, tools, memory, knowledge and the question. Keep it below the limit of the model.' }),
+      F('replyTokens', 'Kept free for the answer (tokens)', 'number', 1000),
+      F('keepTurns', 'Recent turns kept word for word', 'number', 6, { help: 'Older turns are folded into the running summary when the history no longer fits.' }),
+      F('summarise', 'When the history no longer fits', 'select', 'summarise older turns', { options: ['summarise older turns', 'drop the oldest'] }),
+      F('summaryProvider', 'AI provider for summaries', 'resource', '', { resourceKind: 'aiProvider', help: 'Empty = the provider of the agent. A small, fast model is enough.' }),
+      F('keepDays', 'Days to keep', 'number', 90, { help: 'Clear memory with "older than the days to keep" deletes older turns. 0 = keep.' }),
+      F('encrypt', 'Encrypt the text', 'bool', false, { help: 'With the master key of the server.' }),
+    ],
+  },
+  {
+    kind: 'aiKnowledge',
+    name: 'Knowledge base (RAG)',
+    desc: 'Documents split into passages with vectors, for agents and Search knowledge to find by meaning (retrieval-augmented generation).',
+    fields: [
+      F('store', 'Vector store', 'select', 'built-in', { options: ['built-in', 'folder', 'PostgreSQL (pgvector)', 'Qdrant', 'Chroma', 'Pinecone'], help: 'built-in and folder need nothing else (good up to tens of thousands of passages). For more, or to share with other tools, use a vector database.' }),
+      F('folder', 'Folder', 'text', '', { ...when('store', 'folder'), help: 'Empty = knowledge in the data folder.' }),
+      F('database', 'Database connection', 'resource', '', { resourceKind: 'database', ...when('store', 'PostgreSQL (pgvector)'), help: 'A PostgreSQL database with the vector extension (CREATE EXTENSION vector).' }),
+      F('table', 'Table', 'text', 'sutra_knowledge', when('store', 'PostgreSQL (pgvector)')),
+      F('url', 'Address', 'text', '', { ...when('store', 'Qdrant', 'Chroma', 'Pinecone'), help: 'Qdrant: http://127.0.0.1:6333. Chroma: http://127.0.0.1:8000. Pinecone: the index host, https://<index>-<project>.svc.<region>.pinecone.io' }),
+      F('collection', 'Collection', 'text', 'sutra_knowledge', when('store', 'Qdrant', 'Chroma')),
+      F('namespace', 'Namespace', 'text', '', when('store', 'Pinecone')),
+      F('apiKeySecret', 'API key', 'secret', '', { ...when('store', 'Qdrant', 'Chroma', 'Pinecone'), help: 'Vault secret; needed for Pinecone and for cloud Qdrant or Chroma.' }),
+      F('embedWith', 'Vectors from', 'select', 'built-in', { options: ['built-in', 'AI provider'], help: 'built-in: word vectors made here, offline, no model; finds shared words, not synonyms. AI provider: a vector model (Ollama nomic-embed-text, OpenAI text-embedding-3-small, Gemini) finds meaning.' }),
+      F('provider', 'AI provider for vectors', 'resource', '', { resourceKind: 'aiProvider', ...when('embedWith', 'AI provider') }),
+      F('embedModel', 'Vector model', 'text', '', { ...when('embedWith', 'AI provider'), help: 'For example nomic-embed-text (Ollama: ollama pull nomic-embed-text). After changing it, use Rebuild in Remove knowledge.' }),
+      F('chunkTokens', 'Passage size (tokens)', 'number', 300),
+      F('overlapTokens', 'Overlap (tokens)', 'number', 40, { help: 'Each passage repeats the end of the one before, so a sentence is not lost at a cut.' }),
+    ],
+  },
+  {
+    kind: 'mcpClient',
+    name: 'MCP client (outside tools)',
+    desc: 'Another MCP server whose tools AI agents and Call MCP tool may use: over HTTP, or a command started on this server.',
+    fields: [
+      F('transport', 'Connect by', 'select', 'HTTP', { options: ['HTTP', 'command'] }),
+      F('url', 'Address', 'text', 'https://tools.example.com/mcp', when('transport', 'HTTP')),
+      F('tokenSecret', 'Bearer token', 'secret', '', { ...when('transport', 'HTTP'), help: 'Vault secret, sent as Authorization: Bearer.' }),
+      F('headers', 'Headers', 'kv', [], when('transport', 'HTTP')),
+      F('command', 'Command', 'text', 'npx -y @modelcontextprotocol/server-filesystem C:/data', { ...when('transport', 'command'), help: 'Runs as the SutraFlow server user. Only commands you trust.' }),
+      F('workDir', 'Working folder', 'text', '', when('transport', 'command')),
+      F('timeoutSec', 'Time limit per call (seconds)', 'number', 60),
+      F('allowTools', 'Allowed tools', 'text', '', { help: 'Comma separated. Empty = every tool of the server.' }),
+    ],
+  },
+  {
     kind: 'mcpServer',
     name: 'MCP server (AI skills)',
     desc: 'An address on the gateway where AI assistants find a set of skills: every deployed Sutra whose MCP skill trigger names this server is one of its tools.',
@@ -126,7 +179,7 @@ export const RESOURCE_KINDS: ResourceKind[] = [
 /** Explorer symbols, in the same plain style as the activity symbols. */
 const ICONS: Record<string, string> = {
   httpConnection: '⇄', outboundAuth: '⚿', inboundPolicy: '⛨', aiProvider: '✦', smtp: '✉', imap: '⇩', sftp: '⇅', ftp: '⇵',
-  database: '⛁', kafka: '≋', rabbitmq: '⇶', amqp1: '⇉', firebase: '◭', oauthApp: '⚇', mcpServer: '✧',
+  database: '⛁', kafka: '≋', rabbitmq: '⇶', amqp1: '⇉', firebase: '◭', oauthApp: '⚇', mcpServer: '✧', aiMemory: '❖', aiKnowledge: '❏', mcpClient: '⧉',
 };
 for (const k of RESOURCE_KINDS) k.icon ||= ICONS[k.kind] || '⚙';
 

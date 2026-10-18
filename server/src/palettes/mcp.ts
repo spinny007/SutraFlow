@@ -10,8 +10,8 @@ const safeJson = (t: unknown): any => { if (typeof t !== 'string') return t; try
  */
 export const mcpActivities: Activity[] = [
   {
-    type: 'mcpTool', palette: 'triggers', name: 'MCP skill', glyph: '✧', trigger: true, ports: ['out'],
-    desc: 'Makes the Sutra a tool (skill) that AI assistants such as Claude can call over the Model Context Protocol, at the gateway address /mcp. Describe what it does and what it needs; end the Sutra with Reply to AI.',
+    type: 'mcpTool', palette: 'ai', name: 'AI tool', glyph: '✧', trigger: true, ports: ['out'],
+    desc: 'Makes the Sutra a tool: the AI agents of this project can use it, and, while deployed, AI assistants such as Claude can call it over the Model Context Protocol at the gateway address /mcp. Describe what it does and what it needs; end the Sutra with Reply to AI.',
     fields: [
       F('server', 'MCP server', 'resource', '', { resourceKind: 'mcpServer', help: 'The set of skills this tool belongs to (Resources > MCP server). Empty = the gateway\'s default address /mcp.' }),
       F('toolName', 'Tool name', 'text', 'check_order_status', { help: 'Letters, digits, _ and -. The AI sees and calls it by this name; unique on this server.' }),
@@ -20,6 +20,7 @@ export const mcpActivities: Activity[] = [
       F('inputs', 'Inputs', 'kv', [{ k: 'orderId', v: 'The order number, e.g. A-1001' }], { help: 'One row per input: name and description. Start the description with number:, integer:, boolean:, array: or object: for other types, and with optional: when it may be left out.' }),
       F('inputSchema', 'Input schema (instead of the rows)', 'schema', '', { schemaKinds: ['json'], help: 'Optional. A shared JSON schema for richer inputs.' }),
       F('outputSchema', 'Result schema', 'schema', '', { schemaKinds: ['json'], help: 'Optional. Tells the AI the shape of the result.' }),
+      F('forAgents', 'AI agents of this project may use it', 'bool', true, { help: 'Unticked: only AI assistants over MCP (when deployed).' }),
       F('changesData', 'Changes data (not read-only)', 'bool', false, { help: 'Tick when the tool creates, changes or deletes something; assistants then ask the user before calling it.' }),
       F('policy', 'API security policy', 'resource', '', { resourceKind: 'inboundPolicy', help: 'Who may call it: an API key, bearer token (JWT) or Basic, sent by the AI assistant as a header. Empty = the MCP server\'s policy; with neither, anyone who reaches the gateway.' }),
       F('testArguments', 'Test arguments (JSON)', 'code', '{\n  "orderId": "A-1001"\n}'),
@@ -32,8 +33,8 @@ export const mcpActivities: Activity[] = [
     },
   },
   {
-    type: 'mcpReply', palette: 'triggers', name: 'Reply to AI', glyph: '↵', ports: ['out'],
-    desc: 'Sends the outcome back to the AI assistant that called this Sutra through an MCP skill trigger. Use one on every branch, including error branches (tick "Is an error" there).',
+    type: 'mcpReply', palette: 'ai', name: 'Reply to AI', glyph: '↵', ports: ['out'],
+    desc: 'Sends the outcome back to the AI agent or assistant that called this Sutra through its AI tool trigger. Use one on every branch, including error branches (tick "Is an error" there).',
     fields: [
       F('source', 'Result from', 'select', 'value', { options: ['value', 'mapping'] }),
       F('result', 'Result', 'text', '{{input}}', { tpl: true, help: 'Text, or data (sent as JSON and as structured content).', ...when('source', 'value') }),

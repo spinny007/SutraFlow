@@ -1,4 +1,5 @@
 import { coreActivities } from './core.js';
+import { agentActivities } from './agent.js';
 import { httpActivities } from './http.js';
 import { soapActivities } from './soap.js';
 import { aiActivities } from './ai.js';
@@ -14,6 +15,7 @@ import { dbActivities } from '../connectors/db.js';
 import { busActivities } from '../connectors/bus.js';
 import { firebaseActivities } from '../connectors/firebase.js';
 import { saasActivities } from '../connectors/saas.js';
+import { microsoftActivities } from '../connectors/microsoft.js';
 import { remoteActivities } from '../connectors/remote.js';
 
 /** Palette order in the studio. New palettes (connectors) register here. */
@@ -39,5 +41,5 @@ export const PALETTES = [
 
 export const allActivities = [
   ...coreActivities, ...processActivities, ...transformActivities, ...httpActivities, ...soapActivities, ...fileActivities, ...remoteActivities, ...dbActivities, ...busActivities,
-  ...emailActivities, ...firebaseActivities, ...saasActivities, ...codeActivities, ...scriptActivities, ...releaseActivities, ...aiActivities, ...mcpActivities,
+  ...emailActivities, ...firebaseActivities, ...saasActivities, ...microsoftActivities, ...codeActivities, ...scriptActivities, ...releaseActivities, ...aiActivities, ...agentActivities, ...mcpActivities,
 ];

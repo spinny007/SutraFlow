@@ -126,6 +126,14 @@ function FieldInput({ f, value, onChange, resources, secrets, onFocusField }: {
           <div className="hint">Mapped field by field in the <b>Input</b> tab.</div></div>
       );
     case 'list':
+      if (f.options?.length) {
+        const on = new Set(Array.isArray(value) ? value : []);
+        return (
+          <div className="fld"><span className="lbl">{f.label}</span>
+            {f.options.map(o => <label key={o} className="check"><input type="checkbox" checked={on.has(o)} onChange={e => onChange(f.options!.filter(x => (x === o ? e.target.checked : on.has(x))))} /> {o}</label>)}
+            {f.help && <div className="hint">{f.help}</div>}</div>
+        );
+      }
       input = <textarea id={id} className="code" rows={3} spellCheck={false} value={Array.isArray(value) ? value.join('\n') : String(value || '')} onChange={e => onChange(e.target.value.split('\n'))} onBlur={e => onChange(e.target.value.split('\n').map(x => x.trim()).filter(Boolean))} />;
       break;
     case 'kv':

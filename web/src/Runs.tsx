@@ -4,7 +4,7 @@ import { fmtTime, Json, since, useToast } from './ui';
 import type { RunDetail } from './types';
 
 interface RunRow { id: string; flowId: string; flowName: string; version: number; status: string; source: string; error: string | null; steps: number; startedAt: string; finishedAt: string | null }
-interface Approval { id: number; runId: string; flowName: string; step: string; startedAt: string; wait: { message: string; assignee?: string }; input: any }
+interface Approval { id: number; runId: string; flowName: string; step: string; startedAt: string; wait: { message: string; assignee?: string; question?: boolean }; input: any }
 
 export function Runs() {
   const toast = useToast();
@@ -41,15 +41,17 @@ export function Runs() {
       <p className="lead">Every run is stored with each step's input and output. Secret values are masked.</p>
       {approvals.length > 0 && (
         <div className="card" style={{ marginBottom: 14 }}>
-          <h2>Waiting for approval ({approvals.length})</h2>
+          <h2>Waiting for a person ({approvals.length})</h2>
           {approvals.map(a => (
             <div key={a.id} style={{ borderTop: '1px solid var(--line)', padding: '10px 0' }}>
               <div><b>{a.flowName}</b> · {a.step} <span className="muted" style={{ fontSize: 12 }}>since {fmtTime(a.startedAt)}{a.wait.assignee ? ` · for ${a.wait.assignee}` : ''}</span></div>
               <p style={{ margin: '4px 0 8px', whiteSpace: 'pre-wrap' }}>{a.wait.message}</p>
               <div className="row">
-                <input className="inp" style={{ maxWidth: 320 }} placeholder="Comment (optional)" aria-label="Comment" value={comment[a.id] || ''} onChange={e => setComment(c => ({ ...c, [a.id]: e.target.value }))} />
-                <button className="btn go" onClick={() => decide(a, true)}>Approve</button>
-                <button className="btn danger" onClick={() => decide(a, false)}>Reject</button>
+                {a.wait.question
+                  ? <textarea className="inp" rows={2} style={{ maxWidth: 420 }} placeholder="Your answer" aria-label="Answer" value={comment[a.id] || ''} onChange={e => setComment(c => ({ ...c, [a.id]: e.target.value }))} />
+                  : <input className="inp" style={{ maxWidth: 320 }} placeholder="Comment (optional)" aria-label="Comment" value={comment[a.id] || ''} onChange={e => setComment(c => ({ ...c, [a.id]: e.target.value }))} />}
+                <button className="btn go" disabled={!!a.wait.question && !(comment[a.id] || '').trim()} onClick={() => decide(a, true)}>{a.wait.question ? 'Send answer' : 'Approve'}</button>
+                <button className="btn danger" onClick={() => decide(a, false)}>{a.wait.question ? 'Decline' : 'Reject'}</button>
                 <button className="btn link" onClick={() => openRun(a.runId)}>Open run</button>
               </div>
             </div>

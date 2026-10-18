@@ -53,6 +53,11 @@ export const SAMPLES: { id: string; name: string; desc: string; palettes: string
   { id: 'sqlinstall', name: 'SQL install script and procedure as a service', palettes: 'DB Ops, Triggers, HTTP', desc: 'A SQL script creates a MySQL database, two tables, seed rows and a stored procedure; a REST service then calls the procedure and returns its rows as JSON.', needs: 'MySQL (Laragon: 127.0.0.1:3306, user root, no password); the service deployed' },
   { id: 'sftp', name: 'SFTP: upload, list, read, archive', palettes: 'SFTP / FTP, Triggers', desc: 'Writes a CSV to an SFTP server, appends to it, lists and reads it back, copies it to an archive folder and deletes the copy; a Remote file trigger picks up new files in inbox/.', needs: 'an SFTP server: set the host, user and password of the "Sample SFTP" connection' },
   { id: 'ftp', name: 'FTP: upload, list, read, archive', palettes: 'SFTP / FTP, Triggers', desc: 'The same steps over FTP or FTPS: write, list with rows, read lines, move to a dated archive name; a Remote file trigger picks up new files and deletes them after the run.', needs: 'an FTP server: set the host, user and password of the "Sample FTP" connection' },
+  { id: 'agentdesk', name: 'AI agent: order desk with tools and memory', palettes: 'AI', desc: 'A published agent (chat page, OpenAI API, MCP tool, A2A) that checks its input with the AI guard, looks orders and stock up with two AI tool Sutras, remembers each conversation, and asks a person before any refund.', needs: 'Ollama with a model (phi4-mini works); the three Sutras deployed to chat at /chat/order-desk' },
+  { id: 'agentrag', name: 'AI agent: knowledge base (RAG)', palettes: 'AI, Apps', desc: 'Fills a knowledge base from web pages and from a SharePoint library (kept up to date by a trigger), and a policy assistant that answers only from it, with sources.', needs: 'Ollama with a model; for SharePoint, a Microsoft OAuth connection' },
+  { id: 'agentqueue', name: 'AI agent: fed by a message queue', palettes: 'AI, Service Bus', desc: 'Takes questions from a RabbitMQ or ActiveMQ queue, answers each with the agent (one at a time per conversation), publishes the answer to a reply queue and confirms the message.', needs: 'a RabbitMQ or ActiveMQ connection; Ollama with a model' },
+  { id: 'agentteam', name: 'AI agent: supervisor and specialists', palettes: 'AI', desc: 'A supervisor agent published at /chat/help sends each question to the order desk or the policy assistant with Hand off to agent, and answers with what they say.', needs: 'the order desk and knowledge base samples; Ollama with a model' },
+  { id: 'agentmcp', name: 'AI agent: tools from another MCP server', palettes: 'AI', desc: 'Lists the tools of an outside MCP server (the file system server started with npx), calls one directly, and gives them to an agent that answers questions about files.', needs: 'Node.js npx on the server; Ollama with a model' },
   { id: 'skills', name: 'MCP skills: Write CSV file, Post to Facebook page', palettes: 'Triggers, AI, Files, Apps', desc: 'Two Sutras that AI assistants call as tools, on a sample MCP server.', needs: 'a security policy on the MCP server; a Facebook connection for posting' },
 ];
 
@@ -800,13 +805,127 @@ export function addSamples(projectId: string, ids?: string[]) {
   const ftpConn = !want('ftp') ? null : conn('ftp', 'Sample FTP', { host: 'ftp.example.com', port: 21, user: 'sample', security: 'explicit TLS', verifyTls: true, baseFolder: '/', connectSec: 30, responseSec: 120, attempts: 3, retryWaitSec: 5 });
   const ftp = ftpConn ? remote('FTP', ftpConn) : [];
 
+  // ---------- AI agents ----------
+  const ai = (want('agentdesk') || want('agentrag') || want('agentqueue') || want('agentteam') || want('agentmcp'))
+    ? conn('aiProvider', 'Local Ollama', { engine: 'Ollama', model: '', baseUrl: '', maxTokens: 800, ollamaApi: 'chat' }) : null;
+  const memStore = ai && conn('aiMemory', 'Sample AI memory', { store: 'built-in', contextTokens: 6000, replyTokens: 800, keepTurns: 6, summarise: 'summarise older turns', keepDays: 90 });
+  const kbConn = ai && conn('aiKnowledge', 'Sample knowledge base', { store: 'built-in', embedWith: 'built-in', chunkTokens: 250, overlapTokens: 40 });
+  const tool = (sutra: string, toolName: string, description: string, inputs: { k: string; v: string }[], expression: string, test: unknown) => save({
+    name: sutra,
+    description: `An AI tool: AI agents of this project use it, and while deployed AI assistants can call ${toolName} over MCP. ${description}`,
+    nodes: [
+      N('t', 'mcpTool', toolName, 60, 220, { toolName, title: sutra.replace(/^Sample: AI tool /, ''), description, inputs, forAgents: true, changesData: false, testArguments: JSON.stringify(test, null, 2) }),
+      N('j', 'jsonata', 'Look up', 380, 220, { source: '{{input}}', expression }),
+      N('r', 'mcpReply', 'Reply to AI', 700, 220, { source: 'value', result: '{{input}}', isError: false }),
+    ],
+    edges: [E('t', 'j'), E('j', 'r')],
+  });
+  const ordersData = { 'A-1001': { status: 'SHIPPED', carrier: 'Blue Dart', deliveryDate: '2026-10-21', amount: 1450 }, 'A-1002': { status: 'PACKING', carrier: '', deliveryDate: '2026-10-24', amount: 980 }, 'A-1003': { status: 'DELIVERED', carrier: 'Delhivery', deliveryDate: '2026-10-15', amount: 2200 } };
+  const toolOrder = ai && want('agentdesk') && tool('Sample: AI tool order status', 'order_status', 'Returns the status, carrier, delivery date and amount of an order by its number, such as A-1001.', [{ k: 'orderId', v: 'The order number, such as A-1001' }],
+    `(\n  $o := $lookup(${JSON.stringify(ordersData)}, arguments.orderId);\n  $o ? $merge([{ "orderId": arguments.orderId }, $o]) : { "orderId": arguments.orderId, "error": "No such order" }\n)`, { orderId: 'A-1001' });
+  const toolStock = toolOrder && tool('Sample: AI tool stock check', 'stock_check', 'Returns how many of a product are in stock and its price, by product name or code (TEA-01 Assam tea, CUP-02 clay cups).', [{ k: 'product', v: 'Product name or code' }],
+    '(\n  $p := $lowercase(arguments.product);\n  $contains($p, "tea") ? { "sku": "TEA-01", "title": "Assam tea 500 g", "inStock": 120, "price": 240 } : $contains($p, "cup") ? { "sku": "CUP-02", "title": "Clay cups, set of 6", "inStock": 4, "price": 450 } : { "error": "Unknown product" }\n)', { product: 'tea' });
+  const desk = toolOrder && save({
+    name: 'Sample: Order desk agent',
+    description: `Published as the agent "order-desk": chat at ${gw}/chat/order-desk (add ${gw}/chat/order-desk/widget.js to any web page for a chat button), OpenAI-compatible model order-desk at ${gw}/v1/chat/completions, MCP tool ask_order_desk at ${gw}/mcp, and A2A at ${gw}/a2a/order-desk. The AI guard hides personal data and stops hidden instructions; refund and cancellation requests go straight to the shop owner (Runs > Approvals) and the caller gets the answer as a job; everything else goes to the agent, which uses the order and stock tools, remembers each session, and may ask the owner itself. Deploy the two AI tool Sutras and this one.`,
+    nodes: [
+      N('t', 'agentChannel', 'Order desk', 60, 260, { agentName: 'order-desk', title: 'Order desk', description: 'Answers questions about orders, delivery and stock for Asha Traders, and passes refund requests to a person.', chat: true, chatPolicy: '', openai: true, openaiPolicy: '', mcp: true, mcpServer: '', a2a: true, a2aPolicy: '', waitSeconds: 50, testMessage: JSON.stringify({ message: 'When will order A-1001 arrive, and is Assam tea in stock?', sessionId: 'test-1' }, null, 2) }),
+      N('g', 'aiGuard', 'Check the message', 340, 260, { text: '{{input.message}}', checks: ['hide personal data', 'hidden instructions', 'blocked topics', 'length'], topics: 'medical advice\nlegal advice\nweapons', maxChars: 4000 }),
+      N('i', 'if', 'Refund or cancel', 640, 260, { left: '{{input.text}}', op: 'matches regex', right: '[Rr]efund|[Cc]ancel|money back' }),
+      N('q', 'askPerson', 'Ask about the refund', 980, 420, { question: 'Order desk ({{trigger.sessionId}}) refund or cancellation: {{input.text}}', assignee: 'shop-owner' }),
+      N('a', 'aiAgent', 'Order desk agent', 940, 200, { provider: ai.id, instructions: 'You are the order desk of Asha Traders, a tea and crockery shop in Pune. Answer questions about orders, delivery and stock in one to three short sentences. Use the tools for facts; never guess an order status. Never make up phone numbers, emails, addresses or policies. Refunds, cancellations and complaints are decided by the shop owner: for those, always ask (the ask step) with the order number and what the customer wants.', task: '{{input.text}}', memory: memStore!.id, session: '{{trigger.sessionId}}', tools: 'chosen tools', toolNames: 'order_status, stock_check', canAsk: true, answerFormat: 'text', maxSteps: 6, maxTokens: 40000, maxSeconds: 300, saveSteps: true, effort: 'low' }),
+      N('r', 'agentReply', 'Reply', 1280, 120, { answer: '{{input.answer}}', status: 'answer', sessionId: '{{trigger.sessionId}}' }),
+      N('p', 'askPerson', 'Ask the shop owner', 1280, 280, { question: 'Order desk ({{trigger.sessionId}}): {{input.question}}', assignee: 'shop-owner' }),
+      N('pa', 'agentReply', 'Reply with the answer', 1600, 300, { answer: '{{input.answer}}', status: 'answer', sessionId: '{{trigger.sessionId}}' }),
+      N('pd', 'agentReply', 'Reply declined', 1600, 460, { answer: 'Sorry, we cannot do that. The shop owner will contact you.', status: 'needs a person', sessionId: '{{trigger.sessionId}}' }),
+      N('l', 'agentReply', 'Reply limit', 1280, 600, { answer: 'This needs more work than I can do now. A person will follow up.', status: 'needs a person', sessionId: '{{trigger.sessionId}}' }),
+      N('b', 'agentReply', 'Reply blocked', 640, 460, { answer: 'I can only help with orders, delivery and stock.', status: 'answer', sessionId: '{{trigger.sessionId}}' }),
+    ],
+    edges: [E('t', 'g'), E('g', 'i', 'pass'), E('i', 'q', 'true'), E('i', 'a', 'false'), E('q', 'pa', 'answered'), E('q', 'pd', 'declined'), E('g', 'b', 'blocked'), E('a', 'r', 'done'), E('a', 'p', 'needs a person'), E('p', 'pa', 'answered'), E('p', 'pd', 'declined'), E('a', 'l', 'limit reached')],
+  });
+
+  const ragWeb = ai && want('agentrag') && save({
+    name: 'Sample: Knowledge feed from web pages',
+    description: 'Reads each web page of the list (HTML or PDF), takes its text and adds it to the "Sample knowledge base"; adding a page again replaces it. Run it whenever the pages change, or put a Timer in front of it.',
+    nodes: [
+      N('s', 'start', 'Pages', 60, 220, { payload: JSON.stringify({ pages: ['https://en.wikipedia.org/wiki/Assam_tea', 'https://en.wikipedia.org/wiki/Darjeeling_tea'] }, null, 2) }),
+      N('f', 'forEach', 'Each page', 360, 220, { list: '{{input.pages}}', max: 50 }),
+      N('d', 'docText', 'Read the page', 660, 160, { from: 'web address', url: '{{input}}', type: 'auto', maxMb: 10 }),
+      N('k', 'knowledgeAdd', 'Add to knowledge', 960, 160, { knowledge: kbConn!.id, source: '{{input.url}}', text: '{{input.text}}', meta: [{ k: 'kind', v: 'web' }, { k: 'title', v: '{{input.title}}' }] }),
+      N('l', 'log', 'Log added', 1260, 160, { level: 'info', message: '{{input.source}}: {{input.chunks}} passages' }),
+      N('x', 'log', 'Log page failed', 960, 340, { level: 'warn', message: 'Page not added: {{input.error.message}}' }),
+    ],
+    edges: [E('s', 'f'), E('f', 'd', 'item'), E('d', 'k'), E('k', 'l'), E('d', 'x', 'error')],
+  });
+  const ragSp = ragWeb && save({
+    name: 'Sample: Knowledge feed from SharePoint',
+    description: 'While deployed, watches a SharePoint document library (Policies site, folder Customer) and keeps the knowledge base in step: a new or changed file is read as text and added (replacing the old version), a removed file is removed. Set the Microsoft connection, the site address and the folder first; "Start with the files already there" fills the knowledge base on the first check.',
+    nodes: [
+      N('t', 'msFilesTrigger', 'Policy library', 60, 240, { connection: '', location: 'SharePoint site', site: 'https://contoso.sharepoint.com/sites/Policies', library: '', folder: 'Customer', pattern: '*.docx', recursive: true, pollSeconds: 300, existing: true }),
+      N('r', 'msFiles', 'Read as text', 380, 160, { connection: '', location: 'SharePoint site', site: 'https://contoso.sharepoint.com/sites/Policies', library: '', op: 'read', path: '{{input.path}}', readAs: 'document text' }),
+      N('k', 'knowledgeAdd', 'Add to knowledge', 700, 160, { knowledge: kbConn!.id, source: '{{trigger.path}}', text: '{{input.text}}', meta: [{ k: 'kind', v: 'policy' }, { k: 'url', v: '{{trigger.webUrl}}' }] }),
+      N('x', 'knowledgeRemove', 'Remove from knowledge', 380, 360, { knowledge: kbConn!.id, action: 'remove a source', source: '{{input.path}}' }),
+    ],
+    edges: [E('t', 'r', 'added'), E('t', 'r', 'modified'), E('r', 'k'), E('t', 'x', 'removed')],
+  });
+  const ragAsk = ragWeb && save({
+    name: 'Sample: Policy assistant',
+    description: `Published as "policy-assistant" (chat at ${gw}/chat/policy-assistant): answers only from the knowledge base, with the sources it used, and says so when the answer is not there. Run a knowledge feed first.`,
+    nodes: [
+      N('t', 'agentChannel', 'Policy assistant', 60, 220, { agentName: 'policy-assistant', title: 'Policy assistant', description: 'Answers questions about our policies from the policy documents, with sources.', chat: true, openai: true, mcp: false, a2a: false, waitSeconds: 50, testMessage: JSON.stringify({ message: 'How many days do I have to return an item?', sessionId: 'test-1' }, null, 2) }),
+      N('k', 'knowledgeAsk', 'Ask the policies', 380, 220, { provider: ai.id, knowledge: kbConn!.id, question: '{{input.message}}', top: 5, instructions: 'Answer briefly in the language of the question.', effort: 'low' }),
+      N('r', 'agentReply', 'Reply', 700, 140, { answer: '{{input.answer}}', status: 'answer', sessionId: '{{trigger.sessionId}}' }),
+      N('n', 'agentReply', 'Reply not found', 700, 300, { answer: 'I could not find that in our policies. Please ask the shop directly.', status: 'answer', sessionId: '{{trigger.sessionId}}' }),
+    ],
+    edges: [E('t', 'k'), E('k', 'r'), E('k', 'n', 'not found')],
+  });
+
+  const queueAgent = ai && want('agentqueue') && save({
+    name: 'Sample: Agent fed by a queue',
+    description: 'Message subscriber takes questions from the queue "agent.questions" ({"sessionId", "message", "replyTo"}); the agent answers each (one at a time per session, in arrival order); Publish message sends the answer to the queue named in replyTo; Confirm message acknowledges the question only after the answer is sent, so nothing is lost. Pick a RabbitMQ or ActiveMQ connection in both, then deploy.',
+    nodes: [
+      N('t', 'busSubscribe', 'Questions', 60, 220, { broker: 'amqp1', amqpConn: '', rabbitConn: '', kafkaConn: '', destinationType: 'queue', destination: 'agent.questions', messageType: 'JSON', ackMode: 'explicit', onFailure: 'requeue', maxRedeliveries: 5, concurrency: 4, declare: true, testMessage: JSON.stringify({ sessionId: 'cust-42', message: 'Is Assam tea in stock?', replyTo: 'agent.answers' }, null, 2) }),
+      N('a', 'aiAgent', 'Agent', 380, 220, { provider: ai.id, instructions: 'You answer customer questions for Asha Traders in one or two sentences.', task: '{{input.body.message}}', memory: memStore!.id, session: '{{input.body.sessionId}}', tools: 'all AI tools of this project', canAsk: false, maxSteps: 6, effort: 'low' }),
+      N('p', 'busPublish', 'Answer', 700, 220, { broker: 'amqp1', amqpConn: '', rabbitConn: '', kafkaConn: '', destinationType: 'queue', destination: "=coalesce({trigger.body.replyTo}, 'agent.answers')", messageType: 'JSON', body: '{"sessionId": "{{trigger.body.sessionId}}", "answer": {{input.answer | json}}}', deliveryMode: 'persistent', correlationId: '{{trigger.headers.messageId}}' }),
+      N('c', 'busConfirm', 'Confirm', 1020, 220, { action: 'confirm' }),
+    ],
+    edges: [E('t', 'a'), E('a', 'p', 'done'), E('a', 'p', 'limit reached'), E('p', 'c')],
+  });
+
+  const team = ai && want('agentteam') && save({
+    name: 'Sample: Supervisor agent',
+    description: `Published as "help" (chat at ${gw}/chat/help): AI classify decides whether a question is about orders or policies, and Hand off to agent passes it, with the same session, to the order desk or the policy assistant; their answer is sent back. Add the order desk and knowledge base samples and deploy them first.`,
+    nodes: [
+      N('t', 'agentChannel', 'Help', 60, 240, { agentName: 'help', title: 'Help', description: 'One address for every customer question.', chat: true, openai: true, mcp: true, a2a: true, waitSeconds: 55, testMessage: JSON.stringify({ message: 'Where is order A-1002?', sessionId: 'test-1' }, null, 2) }),
+      N('c', 'aiClassify', 'Orders or policies', 360, 240, { provider: ai.id, text: '{{input.message}}', labels: 'orders, policies', guidance: 'orders: order status, delivery, stock, prices. policies: returns, refunds rules, privacy, shipping rules.', effort: 'low' }),
+      N('o', 'agentHandoff', 'To order desk', 680, 160, { process: desk ? desk.id : '', use: 'deployed (draft while testing)', message: '{{trigger.message}}', sessionId: '{{trigger.sessionId}}', note: '' }),
+      N('p', 'agentHandoff', 'To policy assistant', 680, 320, { process: ragAsk ? ragAsk.id : '', use: 'deployed (draft while testing)', message: '{{trigger.message}}', sessionId: '{{trigger.sessionId}}', note: '' }),
+      N('r', 'agentReply', 'Reply', 1000, 240, { answer: '{{input.answer}}', status: 'answer', sessionId: '{{trigger.sessionId}}' }),
+    ],
+    edges: [E('t', 'c'), E('c', 'o', 'orders'), E('c', 'p', 'policies'), E('c', 'o', 'other'), E('o', 'r'), E('p', 'r')],
+  });
+
+  const fsConn = ai && want('agentmcp') && conn('mcpClient', 'Sample MCP file system', { transport: 'command', command: `npx -y @modelcontextprotocol/server-filesystem ${folder}`, timeoutSec: 120, allowTools: 'list_directory, read_text_file, search_files, get_file_info' });
+  const mcpAgent = fsConn && save({
+    name: 'Sample: Agent with outside MCP tools',
+    description: `Starts the MCP file system server (npx) on ${folder}, lists its tools with Call MCP tool, then lets an agent use the read-only ones (the connection allows only list, read, search and info) to answer a question about the files. Run "Sample: CSV import and totals" first so there is a file to find.`,
+    nodes: [
+      N('s', 'start', 'Question', 60, 220, { payload: JSON.stringify({ message: 'Which CSV files are in the samples folder, and what columns does sales.csv have?' }, null, 2) }),
+      N('l', 'mcpCall', 'List the tools', 360, 220, { mcp: fsConn.id, action: 'list tools' }),
+      N('a', 'aiAgent', 'File agent', 660, 220, { provider: ai.id, instructions: `You answer questions about the files in ${folder}. Use the tools; give paths in full.`, task: '{{trigger.message}}', memory: '', tools: 'none', mcp: fsConn.id, canAsk: false, maxSteps: 6, effort: 'low' }),
+      N('g', 'log', 'Log answer', 960, 220, { level: 'info', message: '{{input.answer}} ({{input.toolCalls}} tool calls)' }),
+    ],
+    edges: [E('s', 'l'), E('l', 'a'), E('a', 'g', 'done')],
+  });
+
   linkConnections(projectId, made, conn);
   for (const m of made) setFlowFolder(m.id, folderOf(m.sample));
   // Connections made for the samples go to a Samples folder of Resources.
   for (const r of listResources(undefined, projectId)) if (!resourcesBefore.has(r.id) && !r.folder) setItemFolder('resources', r.id, 'Samples');
 
   return [forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, release, localAi, email, queue, timer, fileTrig, textFormats, dbUpd, dbProc, soapCall, emailIn, firebase, google, apps, aiMore,
-    soapPublic, soapMock, soapMockCall, msCustomers, msStock, msOrders, sqlInstall, sqlService, ...sftp, ...ftp]
+    soapPublic, soapMock, soapMockCall, msCustomers, msStock, msOrders, sqlInstall, sqlService, ...sftp, ...ftp,
+    toolOrder, toolStock, desk, ragWeb, ragSp, ragAsk, queueAgent, team, mcpAgent]
     .filter((f): f is NonNullable<typeof f> & { id: string; name: string } => !!f)
     .map(f => ({ id: f.id, name: f.name, folder: folderOf(made.find(m => m.id === f.id)?.sample || '') }));
 }
@@ -825,6 +944,7 @@ const FOLDERS: Record<string, string[]> = {
   'Apps': ['firebase', 'google', 'apps', 'skills'],
   'Queues': ['queue'],
   'Operations': ['scripts', 'release'],
+  'AI agents': ['agentdesk', 'agentrag', 'agentqueue', 'agentteam', 'agentmcp'],
 };
 const folderOf = (sample: string) => { const t = Object.entries(FOLDERS).find(([, ids]) => ids.includes(sample)); return t ? `Samples/${t[0]}` : 'Samples'; };
 for (const s of SAMPLES) s.folder = folderOf(s.id);
@@ -843,6 +963,7 @@ export const SAMPLE_SUTRAS: Record<string, string[]> = {
   'Samples/Queues': ['Queue in and out'],
   'Samples/SOAP': ['Call a SOAP service', 'Call a public SOAP service', 'Mock SOAP weather service', 'Call the mock SOAP service'],
   'Samples/SFTP and FTP': ['SFTP upload list read archive', 'SFTP file trigger', 'FTP upload list read archive', 'FTP file trigger'],
+  'Samples/AI agents': ['AI tool order status', 'AI tool stock check', 'Order desk agent', 'Knowledge feed from web pages', 'Knowledge feed from SharePoint', 'Policy assistant', 'Agent fed by a queue', 'Supervisor agent', 'Agent with outside MCP tools'],
 };
 /** Letters and digits only, without "Sample:" and a " 2" suffix, so renamed punctuation still matches. */
 const sampleKey = (name: string) => name.replace(/^Sample:\s*/i, '').replace(/\s+\d+$/, '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -882,7 +1003,10 @@ const SAMPLE_CONNECTIONS: Record<string, (type: string) => { name: string; confi
   sftp: () => ({ name: 'Sample SFTP', config: { host: 'sftp.example.com', port: 22, user: 'sample' } }),
   ftp: () => ({ name: 'Sample FTP', config: { host: 'ftp.example.com', port: 21, user: 'sample' } }),
   aiProvider: () => ({ name: 'Local Ollama', config: { engine: 'Ollama', model: '', baseUrl: '', maxTokens: 600, ollamaApi: 'chat' } }),
-  oauthApp: type => /^facebook/i.test(type) ? { name: 'Sample Facebook', config: { provider: 'facebook', scopes: 'pages_manage_posts pages_read_engagement' } }
+  aiMemory: () => ({ name: 'Sample AI memory', config: { store: 'built-in' } }),
+  aiKnowledge: () => ({ name: 'Sample knowledge base', config: { store: 'built-in', embedWith: 'built-in' } }),
+  oauthApp: type => /^ms/i.test(type) ? { name: 'Sample Microsoft', config: { provider: 'microsoft', scopes: 'Files.Read.All Sites.Read.All offline_access' } }
+    : /^facebook/i.test(type) ? { name: 'Sample Facebook', config: { provider: 'facebook', scopes: 'pages_manage_posts pages_read_engagement' } }
     : /^dropbox/i.test(type) ? { name: 'Sample Dropbox', config: { provider: 'dropbox', scopes: 'files.content.write files.content.read' } }
     : { name: 'Sample Google', config: { provider: 'google' } },
 };
