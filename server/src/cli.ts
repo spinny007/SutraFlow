@@ -25,6 +25,11 @@ const HELP = `sutra <command> [options]
   history   --project <name>              Deployments of packages to a project.
   rollback  --project <name> [--to <id>]  Deploys the package before the current one.
   secret    set <NAME> (--value <v> | --from-env <VAR>)
+  db        copy --to <postgres://user:pass@host/db | file.db> [--replace]
+            Copies this server's data (SUTRA_DATA_DIR or SUTRA_DB) to another database, for example
+            from SQLite to PostgreSQL. A missing PostgreSQL database is created. Stop the server first;
+            then start it with SUTRA_DB set to the new address and the same master key.
+  db        info                          Which database the server uses, and its row counts.
   status                                  Server health, readiness and engines.
   user      add <name> [--role administrator] [--project <name>] [--system] [--display "Name"] [--email e]
                 [--password <p> | --password-from-env <VAR>] [--keep-password]
@@ -132,6 +137,22 @@ function printCheck(c: any) {
   for (const s of c.secrets || []) out(`  secret   ${s.name}: ${s.present ? 'present' : 'MISSING'}`);
 }
 
+/** Creates the PostgreSQL database of an address when it does not exist yet. */
+async function ensurePgDatabase(url: string) {
+  const { default: pg } = await import('pg');
+  const u = new URL(url);
+  const name = decodeURIComponent(u.pathname.replace(/^\//, '')) || 'postgres';
+  const c = new pg.Client({ connectionString: url });
+  try { await c.connect(); await c.end(); return; } catch (e: any) {
+    if (e.code !== '3D000') throw new Error(`PostgreSQL at ${u.host}: ${e.message}`);
+  }
+  if (!/^[A-Za-z_][\w-]{0,62}$/.test(name)) throw new Error(`"${name}" is not a database name SutraFlow will create; create it yourself`);
+  u.pathname = '/postgres';
+  const admin = new pg.Client({ connectionString: u.toString() });
+  await admin.connect();
+  try { await admin.query(`CREATE DATABASE "${name}"`); out(`Created the database ${name}`); } finally { await admin.end(); }
+}
+
 async function main(argv: string[]) {
   const a = parse(argv);
   const cmd = a._[0];
@@ -212,6 +233,24 @@ async function main(argv: string[]) {
       const id = await projectId(a, call);
       const r = call ? await call('POST', `/api/projects/${id}/rollback`, { to: str(a, 'to') }) : (await local()).packages.rollbackPackage(id, { to: str(a, 'to'), by: 'cli' });
       out(`Rolled back to ${r.package.name} ${r.package.version}`);
+      return 0;
+    }
+    case 'db': {
+      const { openDb, copyDatabase, dbKind, q } = await import('./db.js');
+      const { config } = await import('./config.js');
+      if (a._[1] === 'info') {
+        openDb();
+        const counts = ['projects', 'flows', 'resources', 'runs', 'users', 'settings'].map(t => [t, String(q.get<any>(`select count(*) as n from ${t}`)?.n ?? 0)]);
+        out(`${dbKind() === 'postgres' ? `PostgreSQL ${config.dbUrl.replace(/\/\/([^:@/]+):[^@/]*@/, '//$1:***@')}` : `SQLite ${config.dataDir}`}`);
+        table([['TABLE', 'ROWS'], ...counts]);
+        return 0;
+      }
+      if (a._[1] !== 'copy') throw new Usage('Use: sutra db copy --to <address> [--replace] | sutra db info');
+      const to = need(a, 'to');
+      if (/^postgres(ql)?:/.test(to)) await ensurePgDatabase(to);
+      openDb();
+      const r = copyDatabase(to, { replace: !!a.replace, log: m => out(`  ${m}`) });
+      out(`Copied ${r.rows} rows in ${r.tables.length} tables. Start the server with SUTRA_DB=${to.replace(/\/\/([^:@/]+):[^@/]*@/, '//$1:***@')} and the same master key.`);
       return 0;
     }
     case 'secret': {

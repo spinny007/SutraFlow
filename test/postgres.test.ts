@@ -11,7 +11,7 @@ import { root, startServer, waitFor } from './proc.js';
  * several processes on one database (headless, cluster, the command-line cases) need a real server:
  * set SUTRA_TEST_PG_URL=postgres://user:pass@host/db to run the cluster check below as well.
  */
-const SUITES = ['access', 'alerts', 'admin', 'connectors', 'console', 'engine', 'expr', 'features', 'folders', 'gateway', 'gatewayapps', 'mcp', 'observability', 'packages', 'palettes', 'process', 'project', 'release', 'remote', 'scripts', 'sutras', 'template', 'tuning'];
+const SUITES = ['access', 'agent', 'agentchannel', 'alerts', 'admin', 'connectors', 'console', 'engine', 'expr', 'features', 'folders', 'gateway', 'gatewayapps', 'mcp', 'observability', 'packages', 'palettes', 'process', 'project', 'rag', 'release', 'remote', 'scripts', 'sutras', 'template', 'tuning'];
 
 /** The child is a test run of its own: drop the variable that makes node --test report to a parent run. */
 function childEnv(extra: Record<string, string>) {
@@ -39,14 +39,30 @@ test('every in-process suite passes on PostgreSQL (PGlite)', { timeout: 900000 }
 });
 
 test('two engines share a real PostgreSQL server', { skip: !process.env.SUTRA_TEST_PG_URL && 'set SUTRA_TEST_PG_URL to run against a PostgreSQL server' }, async () => {
-  const url = process.env.SUTRA_TEST_PG_URL!;
-  const env = { SUTRA_DB: url, SUTRA_MODE: 'engine', SUTRA_ADMIN_TOKEN: 'pg-token-0123456789abcdef', SUTRA_MASTER_KEY: crypto.randomBytes(32).toString('base64'), SUTRA_HEARTBEAT_MS: '400' };
+  // A database of its own, made and dropped here: the server's own databases are never touched.
+  const { default: pg } = await import('pg');
+  const name = `sutra_cluster_test_${Date.now()}`;
+  const admin = new pg.Client({ connectionString: process.env.SUTRA_TEST_PG_URL! });
+  await admin.connect();
+  await admin.query(`CREATE DATABASE ${name}`);
+  const u = new URL(process.env.SUTRA_TEST_PG_URL!); u.pathname = `/${name}`;
+  const env = { SUTRA_DB: u.toString(), SUTRA_MODE: 'engine', SUTRA_ADMIN_TOKEN: 'pg-token-0123456789abcdef', SUTRA_MASTER_KEY: crypto.randomBytes(32).toString('base64'), SUTRA_HEARTBEAT_MS: '400' };
+  // Both engines start on the empty database at the same moment: the schema is made once.
   const a = startServer({ adminPort: 19410, httpPort: 19460, env: { ...env, SUTRA_ENGINE_ID: 'PG-A' } });
   const b = startServer({ adminPort: 19420, httpPort: 19470, env: { ...env, SUTRA_ENGINE_ID: 'PG-B' } });
   try {
     await Promise.all([waitFor(`${a.admin}/ready`, a), waitFor(`${b.admin}/ready`, b)]);
-    const s = await (await fetch(`${a.admin}/api/engine/status`, { headers: { authorization: `Bearer ${env.SUTRA_ADMIN_TOKEN}` } })).json();
+    let s: any;
+    for (let i = 0; i < 20; i++) {
+      s = await (await fetch(`${a.admin}/api/engine/status`, { headers: { authorization: `Bearer ${env.SUTRA_ADMIN_TOKEN}` } })).json();
+      if (s.engines.filter((e: any) => e.alive && e.id.startsWith('PG-')).length === 2) break;
+      await new Promise(r => setTimeout(r, 300));
+    }
     assert.equal(s.engines.filter((e: any) => e.alive && e.id.startsWith('PG-')).length, 2);
     assert.equal(s.engines.filter((e: any) => e.leader).length, 1);
-  } finally { await a.stop(); await b.stop(); }
+  } finally {
+    await a.stop(); await b.stop();
+    await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`).catch(() => {});
+    await admin.end();
+  }
 });

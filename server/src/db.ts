@@ -185,7 +185,10 @@ export function openDb(file?: string) {
   const url = config.dbUrl;
   if (!file && /^(postgres(ql)?:|pglite:)/.test(url)) {
     db = postgresBackend(url);
-    db.exec(pgSchema(SCHEMA));
+    // Engines starting together on an empty database would create the same tables at once: one at a time.
+    db.exec('select pg_advisory_lock(424243)');
+    try { db.exec(pgSchema(SCHEMA)); migrate(); } finally { db.exec('select pg_advisory_unlock(424243)'); }
+    return db;
   } else {
     const f = file || path.join(config.dataDir, 'sutra.db');
     if (f !== ':memory:') ensureDataDir();
@@ -278,6 +281,65 @@ export function tx<T>(fn: () => T): T {
   } catch (e) {
     d.rollback();
     throw e;
+  }
+}
+
+/**
+ * Copies everything from the open database to another one (for example SQLite to PostgreSQL):
+ * the target gets the full schema, then every table row by row in batches, then its id counters
+ * continue after the copied rows. A target with data is refused unless replace is set. Secrets
+ * stay encrypted, so the engines on the target need the same master key.
+ */
+export function copyDatabase(toUrl: string, o: { replace?: boolean; log?: (m: string) => void } = {}) {
+  const src = getDb();
+  if (!/^(postgres(ql)?:|pglite:)/.test(toUrl) && !/\.(db|sqlite3?)$/i.test(toUrl)) throw new Error('Copy to a postgres://user:pass@host/db address, or to a .db file');
+  const target = /^(postgres(ql)?:|pglite:)/.test(toUrl) ? postgresBackend(toUrl) : sqliteBackend(toUrl);
+  const log = o.log || (() => {});
+  try {
+    target.exec(target.kind === 'postgres' ? pgSchema(SCHEMA) : SCHEMA);
+    db = target; migrate(); db = src;
+    const tables = src.kind === 'sqlite'
+      ? (src.all(`select name from sqlite_master where type = 'table' and name not like 'sqlite_%' order by name`, []) as any[]).map(r => r.name as string)
+      : (src.all(`select table_name as name from information_schema.tables where table_schema = current_schema() and table_type = 'BASE TABLE' order by table_name`, []) as any[]).map(r => r.name as string);
+    const colsOf = (b: Backend, t: string) => b.kind === 'sqlite'
+      ? (b.all(`pragma table_info(${t})`, []) as any[]).map(c => c.name as string)
+      : (b.all(`select column_name as name from information_schema.columns where table_schema = current_schema() and table_name = ?`, [t]) as any[]).map(c => c.name as string);
+    const busy = tables.filter(t => colsOf(target, t).length && Number((target.get(`select count(*) as n from ${t}`, []) as any)?.n || 0) > 0);
+    if (busy.length && !o.replace) throw new Error(`The target already has data in ${busy.join(', ')}. Use replace to overwrite it.`);
+    const report: { table: string; rows: number }[] = [];
+    for (const t of tables) {
+      const have = new Set(colsOf(target, t));
+      if (!have.size) { log(`${t}: not in the target schema, skipped`); continue; }
+      const cols = colsOf(src, t).filter(c => have.has(c));
+      const list = cols.map(c => `"${c}"`).join(', ');
+      target.begin();
+      try {
+        target.run(`delete from ${t}`, []);
+        let n = 0;
+        for (let off = 0; ; off += 500) {
+          const rows = src.all(`select ${list} from ${t} limit 500 offset ${off}`, []) as any[];
+          for (const r of rows) target.run(`insert into ${t}(${list}) values(${cols.map(() => '?').join(', ')})`, cols.map(c => (r[c] instanceof Uint8Array ? Buffer.from(r[c]).toString('utf8') : r[c])));
+          n += rows.length;
+          if (rows.length < 500) break;
+        }
+        target.commit();
+        report.push({ table: t, rows: n });
+        log(`${t}: ${n} rows`);
+      } catch (e: any) {
+        target.rollback();
+        throw new Error(`${t}: ${e.message}`);
+      }
+    }
+    // Serial ids continue after the copied rows.
+    if (target.kind === 'postgres') {
+      for (const r of target.all(`select table_name as t, column_name as c from information_schema.columns where table_schema = current_schema() and column_default like 'nextval%'`, []) as any[]) {
+        target.run(`select setval(pg_get_serial_sequence('${r.t}', '${r.c}'), coalesce((select max(${r.c}) from ${r.t}), 0) + 1, false)`, []);
+      }
+    }
+    return { tables: report, rows: report.reduce((a, x) => a + x.rows, 0) };
+  } finally {
+    db = src;
+    target.close();
   }
 }
 

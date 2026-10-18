@@ -442,6 +442,38 @@ export const CHAPTERS: Chapter[] = [
 [[tip:Guidelines|Protect every MCP server with an API security policy: a skill acts with the server's rights.<br>Tick <em>Changes data</em> on skills that create, change or delete something, so the assistant asks the user first.<br>Write descriptions for someone who has never seen the Sutra: the AI chooses skills by them.]]`,
   },
   {
+    id: 'agents', title: 'AI agents and knowledge bases (RAG)',
+    html: `
+<p>An [[aiAgent]] works towards a goal in steps: it thinks, picks a tool, uses it, reads the result, and repeats until it can answer. Its tools are your own Sutras: any Sutra that starts with an [[mcpTool]] trigger is a tool for the agents of its project. A knowledge base and an outside MCP server add more tools.</p>
+<p class="h">Build an agent</p>
+<ol>
+<li>Make the tools: Sutras that start with <strong>AI tool</strong>, describe what they do, and end with <strong>Reply to AI</strong>. The description is what the agent chooses by.</li>
+<li>Under Resources, add an <strong>AI memory store</strong> (built-in is enough to start) and, for documents, a <strong>Knowledge base</strong>.</li>
+<li>Make the agent Sutra: [[agentChannel]] (or any trigger), [[aiGuard]], [[aiAgent]], and [[agentReply]] on every branch. Connect <em>needs a person</em> to [[askPerson]].</li>
+<li>Test it with the trigger's test message; the Output tab shows each step the agent took.</li>
+<li>Deploy the tools and the agent.</li>
+</ol>
+<p class="h">Memory and the context window</p>
+<p>Every run stands alone, so a conversation lives in the memory store under its session id. Each step sends, in this order: instructions and tools, the running summary, knowledge passages (at most a quarter of the window), the newest turns that still fit, and the message. When the history no longer fits, the oldest turns are folded into the summary. Messages of one session are handled one at a time, in arrival order; other sessions run alongside, and the queue survives restarts.</p>
+<p class="h">Where the agent lives</p>
+<p>A deployed Sutra with an [[agentChannel]] trigger is reachable at once at every entry point you tick:</p>
+<table class="t"><thead><tr><th>Entry point</th><th>Address</th><th>Used by</th></tr></thead><tbody>
+<tr><td>Chat page and API</td><td><code>/chat/&lt;name&gt;</code>, <code>POST /chat/&lt;name&gt;/api</code>, <code>/chat/&lt;name&gt;/widget.js</code></td><td>People; any web page (one script tag adds a chat button)</td></tr>
+<tr><td>OpenAI-compatible</td><td><code>POST /v1/chat/completions</code> with model = name</td><td>Apps and SDKs that take an OpenAI base address</td></tr>
+<tr><td>MCP</td><td>the tool <code>ask_&lt;name&gt;</code> on <code>/mcp</code> or your MCP server</td><td>Claude, ChatGPT, Copilot, Antigravity, Cursor</td></tr>
+<tr><td>A2A</td><td><code>/a2a/&lt;name&gt;</code> and its agent card</td><td>Other agents</td></tr>
+</tbody></table>
+<p>Work that takes longer than <em>Answer within</em>, or waits for a person, answers at once with a job id; the caller fetches the answer later with it (<code>GET /chat/&lt;name&gt;/jobs/&lt;id&gt;</code>, the job argument of the MCP tool, <code>tasks/get</code> in A2A, or the message <code>status &lt;id&gt;</code> in the OpenAI API). The same agent can run on several servers; point them at one PostgreSQL database to share sessions.</p>
+<p class="h">Knowledge bases (RAG)</p>
+<p>A knowledge base keeps documents as passages with vectors, so agents find them by meaning. Store them built-in or in a folder, or in PostgreSQL with pgvector, Qdrant, Chroma or Pinecone. Vectors come from a model (Ollama nomic-embed-text, OpenAI, Gemini) or, offline, from built-in word vectors.</p>
+<ul>
+<li><strong>Fill it</strong> with a feed Sutra: a source ([[msFilesTrigger]], [[googleDriveTrigger]], [[fileTrigger]], [[remoteTrigger]], a list of web pages) &rarr; [[docText]] &rarr; [[knowledgeAdd]]. A removed file goes to [[knowledgeRemove]].</li>
+<li><strong>Use it</strong> with [[knowledgeAsk]] (answers only from the documents, with sources), [[knowledgeSearch]], or an agent with the knowledge base set.</li>
+<li><strong>Who sees what</strong>: store details with each source (for example <code>groups = finance</code>) and filter on them when searching.</li>
+</ul>
+[[tip:Guidelines|Put rules before the agent: route refunds, cancellations and other decisions with an If, not by asking the model to choose.<br>Give small models few tools and short instructions; they look things up well but may wander.<br>Protect public entry points with a policy that has a rate limit.]]`,
+  },
+  {
     id: 'secrets', title: 'Secrets and studio security',
     html: `
 <ul>

@@ -151,6 +151,14 @@ Keep `SUTRA_MASTER_KEY` in your secret store: it decrypts the vault. With it set
 
 Point every engine at one database: `SUTRA_DB=postgres://user:pass@host/db` (or the same SQLite file, on one host). Give each engine a name (`SUTRA_ENGINE_ID`) and all of them the same `SUTRA_MASTER_KEY`.
 
+**Moving from SQLite to PostgreSQL.** Stop the server, then copy everything (projects, Sutras and their versions, connections, the vault, users, runs, audit, gateway apps, AI memory and knowledge):
+
+```
+sutra db copy --to postgres://postgres@127.0.0.1:5432/sutraflow
+```
+
+A missing database is created. A target that already holds data is refused unless you add `--replace`. Then start the server with `SUTRA_DB` set to that address and the same master key (the `SUTRA_MASTER_KEY`, or the key file in the data folder), so the vault stays readable. `sutra db info` shows which database is in use and its row counts. With Laragon, `_env.cmd` holds the `SUTRA_DB` line.
+
 | Behaviour | How |
 |---|---|
 | Work is shared | Every engine claims due steps with one atomic statement; a step is run by exactly one engine |
