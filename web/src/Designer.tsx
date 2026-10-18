@@ -1,11 +1,12 @@
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { missingInNode, missingText } from './vars';
 import {
   ReactFlow, ReactFlowProvider, Background, Controls, MiniMap, Handle, Position, useReactFlow, useUpdateNodeInternals,
   type Connection, type Edge, type EdgeChange, type Node, type NodeChange, type NodeProps,
 } from '@xyflow/react';
 import { del, get, post, put } from './api';
 import { famOf, Modal, useCatalog, useToast } from './ui';
-import { ACTIVE, portsOf, type ActivityMeta, type FlowDoc, type FlowNode, type FlowSummary, type Meta, type NodeDesign, type RunDetail } from './types';
+import { ACTIVE, portsOf, type ActivityMeta, type FlowDoc, type FlowNode, type FlowSummary, type Meta, type NodeDesign, type Project, type Resource, type RunDetail } from './types';
 import { TEMPLATES } from './templates';
 import { Inspector, type InspectorTab } from './Inspector';
 import { ExplorerEditor, ProjectExplorer, type ExplorerSel } from './Project';
@@ -18,12 +19,16 @@ type NodeData = { n: FlowNode; status?: string; count?: number; bp?: boolean };
 type ANode = Node<NodeData, 'activity'>;
 
 const MetaCtx = createContext<Meta | null>(null);
+/** Project and connections, for the missing-variable mark on each activity. */
+const VarsCtx = createContext<{ project: Project | null | undefined; resources: Resource[] }>({ project: null, resources: [] });
 
 /** Input port sits beside the title; output ports are listed below the type line so labels never overlap text. */
 const IN_Y = 28, PORT_Y0 = 70, PORT_GAP = 24;
 
 const ActivityNode = memo(function ActivityNode({ data, selected }: NodeProps<ANode>) {
   const meta = useContext(MetaCtx)!;
+  const vars = useContext(VarsCtx);
+  const miss = missingInNode(data.n, vars.project, vars.resources);
   const a = meta.activities.find(x => x.type === data.n.type);
   const ports = portsOf(a, data.n.config);
   const fam = a ? famOf(meta, a.palette) : 'fam-general';
@@ -31,7 +36,7 @@ const ActivityNode = memo(function ActivityNode({ data, selected }: NodeProps<AN
   return (
     <div className={`anode ${fam}${selected ? ' selected' : ''}${data.status ? ' st-' + data.status : ''}${data.n.settings?.disabled ? ' disabled' : ''}`} style={{ height }}>
       {data.bp && <span className="bp" title="Breakpoint" />}
-      <div className="head"><span className="glyph">{a?.glyph ?? '?'}</span><span className="nm">{data.n.name}</span><span className="dot" /></div>
+      <div className="head"><span className="glyph">{a?.glyph ?? '?'}</span><span className="nm">{data.n.name}</span>{miss.length > 0 && <span className="vwarn" title={missingText(miss)} aria-label="Missing project variables">⚠</span>}<span className="dot" /></div>
       <div className="ty">{a?.name ?? data.n.type}{data.count && data.count > 1 ? ` ×${data.count}` : ''}{data.n.settings?.loop ? <span className="loopmark" title={data.n.settings.loop === 'for each item' ? 'Runs once per item' : 'Repeats while a condition holds'}> ↻</span> : null}</div>
       {ports.length > 0 && <span className="ports-sep" />}
       {a && !a.trigger && !a.noInput && <Handle type="target" position={Position.Left} id="in" style={{ top: IN_Y }} />}
@@ -88,7 +93,7 @@ export function uniqueName(doc: FlowDoc, base: string, except?: string) {
 }
 
 function DesignerInner() {
-  const { meta, projectId } = useCatalog();
+  const { meta, projectId, project, resources } = useCatalog();
   const toast = useToast();
   const rf = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
@@ -391,7 +396,7 @@ function DesignerInner() {
   const selNode = sel?.kind === 'node' ? doc?.nodes.find(n => n.id === sel.id) : undefined;
 
   return (
-    <MetaCtx.Provider value={meta}>
+    <MetaCtx.Provider value={meta}><VarsCtx.Provider value={{ project, resources }}>
       <main className={`work${tab === 'input' && selNode && !explorerSel ? ' wide' : ''}`}>
         <aside className="pal">
           <div className="ltabs" role="tablist">
@@ -470,18 +475,19 @@ function DesignerInner() {
         <DeployDialog flowId={flowId} doc={doc} deployed={current?.deployed?.version} onClose={() => setDialog(null)}
           onDone={async () => { await refreshFlows(); setDialog(null); }} save={() => saveNow(doc)} />
       )}
-    </MetaCtx.Provider>
+    </VarsCtx.Provider></MetaCtx.Provider>
   );
 }
 
 function DeployDialog({ flowId, doc, deployed, onClose, onDone, save }: { flowId: string; doc: FlowDoc; deployed?: number; onClose(): void; onDone(): void; save(): Promise<void> }) {
   const toast = useToast();
+  const { projectId } = useCatalog();
   const [check, setCheck] = useState<{ errors: string[]; warnings: string[] } | null>(null);
   const [note, setNote] = useState('');
   const [versions, setVersions] = useState<{ version: number; note: string; created_at: string }[]>([]);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    post('/api/flows/validate', doc).then(setCheck).catch(e => toast(e.message, true));
+    post(`/api/flows/validate?projectId=${encodeURIComponent(projectId)}`, doc).then(setCheck).catch(e => toast(e.message, true));
     get(`/api/flows/${flowId}/versions`).then(setVersions).catch(() => {});
   }, [flowId, doc, toast]);
   const go = async (version?: number) => {

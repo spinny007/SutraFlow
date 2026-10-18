@@ -66,7 +66,7 @@ export interface FlowSummary {
   deployed: { version: number; enabled: boolean; deployed_at: string } | null;
 }
 
-export interface Resource { id: string; kind: string; name: string; project_id?: string; config: Record<string, any>; updated_at?: string }
+export interface Resource { id: string; kind: string; name: string; project_id?: string; config: Record<string, any>; updated_at?: string; folder?: string }
 
 export interface SNode {
   name: string;
@@ -83,7 +83,7 @@ export interface NodeDesign { in: SNode | null; out: SNode | null; ports?: Recor
 export interface MapRule { expr?: string; forEach?: string; where?: string; groupBy?: string; sortBy?: string; sortDesc?: boolean; ifCond?: string; choose?: { when: string; expr: string }[]; otherwise?: string }
 export interface MappingValue { rules: Record<string, MapRule>; fields?: string[] }
 
-export interface SchemaInfo { id: string; project_id: string; name: string; kind: 'json' | 'xsd' | 'wsdl'; root: string | null; updated_at: string; roots: string[] }
+export interface SchemaInfo { id: string; project_id: string; name: string; kind: 'json' | 'xsd' | 'wsdl'; root: string | null; updated_at: string; roots: string[]; folder?: string }
 export interface ProjectVariable { name: string; type: 'string' | 'number' | 'boolean' | 'secret'; value: string; description?: string }
 export interface LoggingConfig { enabled: boolean; file: string; level: string; format: string; maxSizeMb: number; maxFiles: number; stepData: boolean }
 export interface Project { id: string; name: string; description: string; config: { variables: ProjectVariable[]; logging: LoggingConfig }; flows?: number }

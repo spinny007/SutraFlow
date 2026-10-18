@@ -163,7 +163,7 @@ create table if not exists gw_keys(
   id text primary key, app_id text not null, name text not null, hash text not null, created_at text not null,
   expires_at integer not null default 0, last_used text);
 create table if not exists gw_usage(app_id text not null, win text not null, n integer not null default 0, expires integer not null, primary key(app_id, win));
-create table if not exists flow_folders(project_id text not null, path text not null, primary key(project_id, path));
+create table if not exists folders(project_id text not null, area text not null, path text not null, primary key(project_id, area, path));
 create table if not exists gw_requests(
   id integer primary key autoincrement, at text not null, engine text, kind text, method text, path text, route text, flow_id text,
   project_id text, app_id text, caller text, status integer, ms integer, bytes_in integer, bytes_out integer, ip text, run_id text, error text);
@@ -199,6 +199,13 @@ function migrate() {
   const add = (t: string, c: string, ddl: string) => { if (!cols(t).includes(c)) d.exec(`alter table ${t} add column ${d.kind === 'postgres' ? pgSchema(ddl) : ddl}`); };
   add('flows', 'project_id', 'project_id text');
   add('flows', 'folder', "folder text not null default ''");
+  add('resources', 'folder', "folder text not null default ''");
+  add('schemas', 'folder', "folder text not null default ''");
+  // Folders kept by the first folder release (Sutras only) move to the folders table.
+  if (d.all(d.kind === 'sqlite' ? "select name from sqlite_master where type = 'table' and name = 'flow_folders'" : "select table_name as name from information_schema.tables where table_name = 'flow_folders'", []).length) {
+    d.exec("insert into folders(project_id, area, path) select project_id, 'sutras', path from flow_folders where true on conflict do nothing");
+    d.exec('drop table flow_folders');
+  }
   add('resources', 'project_id', 'project_id text');
   add('runs', 'project_id', 'project_id text');
   add('runs', 'debug', 'debug text');

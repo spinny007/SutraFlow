@@ -25,10 +25,10 @@ export interface SNode {
 }
 
 export type SchemaKind = 'json' | 'xsd' | 'wsdl';
-export interface SchemaRow { id: string; project_id: string; name: string; kind: SchemaKind; root: string | null; text: string; updated_at: string }
+export interface SchemaRow { id: string; project_id: string; name: string; kind: SchemaKind; root: string | null; text: string; updated_at: string; folder?: string }
 
 export const listSchemas = (projectId: string) =>
-  q.all<SchemaRow>('select id, project_id, name, kind, root, updated_at from schemas where project_id = ? order by kind, name', projectId);
+  q.all<SchemaRow>('select id, project_id, name, kind, root, folder, updated_at from schemas where project_id = ? order by kind, name', projectId);
 export const getSchema = (id: string) => q.get<SchemaRow>('select * from schemas where id = ?', id);
 
 export function saveSchema(s: { id?: string; project_id: string; name: string; kind: SchemaKind; root?: string; text: string }) {

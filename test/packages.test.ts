@@ -261,7 +261,7 @@ test('new project from chosen Sutras of a package: drafts by default (no address
   assert.equal(r.statusCode, 200, r.body);
   const study = projects.listProjects().find(x => x.name === 'Study')!.id;
   assert.deepEqual(flows.listFlows(study).map(f => [f.name, !!f.deployed]).sort(), [['Double', false], ['Order API', false]], 'only the chosen Sutras, as drafts');
-  assert.equal(listResources(undefined, study).length, 2, 'connections come along');
+  assert.deepEqual(listResources(undefined, study).map(r => r.name), ['Shop keys'], 'the connections the chosen Sutras use come along (the policy of Order API), not the unused MCP server');
   assert.equal(pk.packageHistory(study).length, 0, 'an import is not a package deployment');
   const api = flows.getFlow(shopFlow('Order API', study).id)!;
   const call = api.doc.nodes.find((n: any) => n.type === 'callProcess')!;

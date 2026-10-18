@@ -16,13 +16,98 @@ const flows = await import('../server/src/flows.js');
 const projects = await import('../server/src/projects.js');
 const { listResources, saveResource, getResource } = await import('../server/src/resources.js');
 const { setSecret } = await import('../server/src/secrets.js');
-const { addSamples, SAMPLES } = await import('../server/src/samples.js');
+const { addSamples, SAMPLES, SAMPLE_SUTRAS, fileSamples } = await import('../server/src/samples.js');
 const { buildPackage, importPackage } = await import('../server/src/packages.js');
+const folders = await import('../server/src/folders.js');
+const schemas = await import('../server/src/schemas.js');
 const require = createRequire(import.meta.url);
 
 let srv: Awaited<ReturnType<typeof boot>>;
 before(async () => { srv = await boot({ listenAdmin: false }); });
 after(async () => { await srv.stop(); });
+
+const start = { id: 's', type: 'start', name: 'Start', x: 0, y: 0, config: {} };
+
+test('resources, schemas and service descriptors have folders of their own', () => {
+  const pid = projects.saveProject({ name: 'Areas', config: { variables: [] } }).id;
+  const r = saveResource({ kind: 'httpConnection', name: 'Orders API', project_id: pid, config: {} });
+  const js = schemas.saveSchema({ project_id: pid, name: 'Order', kind: 'json', text: '{"id": "A-1"}' });
+  folders.setItemFolder('resources', r.id, 'Partners/HTTP');
+  folders.setItemFolder('schemas', js.id, 'Orders');
+  folders.createFolder(pid, 'Inbound', 'wsdl');
+  assert.deepEqual(folders.listFolders(pid, 'resources'), ['Partners', 'Partners/HTTP']);
+  assert.deepEqual(folders.listFolders(pid, 'schemas'), ['Orders']);
+  assert.deepEqual(folders.listFolders(pid, 'wsdl'), ['Inbound']);
+  assert.deepEqual(folders.listFolders(pid, 'sutras'), [], 'each area is its own tree');
+  assert.throws(() => folders.setItemFolder('wsdl', js.id, 'x'), /not found/, 'a JSON schema is not a service descriptor');
+  assert.equal(listResources(undefined, pid)[0].folder, 'Partners/HTTP');
+  saveResource({ ...listResources(undefined, pid)[0], name: 'Orders API v2' });
+  assert.equal(listResources(undefined, pid)[0].folder, 'Partners/HTTP', 'saving a connection keeps its folder');
+  folders.moveFolder(pid, 'Partners', 'Outside', 'resources');
+  assert.equal(listResources(undefined, pid)[0].folder, 'Outside/HTTP');
+  assert.throws(() => folders.areaOf('pictures'), /Unknown folder area/);
+});
+
+test('a Sutra imported alone brings only the connections and schemas it uses, in their folders', () => {
+  const pid = projects.saveProject({ name: 'Source', config: { variables: [] } }).id;
+  const policy = saveResource({ kind: 'inboundPolicy', name: 'Partner policy', project_id: pid, config: {} });
+  const mcp = saveResource({ kind: 'mcpServer', name: 'Tools', project_id: pid, config: { policy: policy.id } });
+  const unused = saveResource({ kind: 'httpConnection', name: 'Unused API', project_id: pid, config: {} });
+  const sch = schemas.saveSchema({ project_id: pid, name: 'Order', kind: 'json', text: '{"id": "A-1"}' });
+  schemas.saveSchema({ project_id: pid, name: 'Unused schema', kind: 'json', text: '{"x": 1}' });
+  folders.setItemFolder('resources', mcp.id, 'AI/Servers');
+  folders.setItemFolder('resources', policy.id, 'Security');
+  folders.setItemFolder('schemas', sch.id, 'Orders');
+  const doc = (name: string, config: any) => ({ name, nodes: [start, { id: 'm', type: 'log', name: 'Log', x: 0, y: 0, config }], edges: [] });
+  flows.saveFlow(undefined, doc('Uses MCP', { message: 'x', server: mcp.id, schema: sch.id }), pid);
+  flows.saveFlow(undefined, doc('Other', { message: 'y', conn: unused.id }), pid);
+
+  const pkg = buildPackage(pid, { version: '1.0.0', sutras: ['Uses MCP'] });
+  assert.deepEqual(pkg.resources.map(r => r.name).sort(), ['Partner policy', 'Tools'], 'the MCP server and, through it, its policy; not the unused connection');
+  assert.deepEqual(pkg.schemas.map(s => s.name), ['Order']);
+  importPackage(buildPackage(pid, { version: '1.0.1' }), { project: 'Picked', sutras: ['Uses MCP'] });
+  const picked = projects.listProjects().find(p => p.name === 'Picked')!.id;
+  assert.deepEqual(Object.fromEntries(listResources(undefined, picked).map(r => [r.name, r.folder])), { 'Partner policy': 'Security', Tools: 'AI/Servers' }, 'from a whole package, only what the chosen Sutra uses, with folders');
+  assert.deepEqual(schemas.listSchemas(picked).map(s => [s.name, s.folder]), [['Order', 'Orders']]);
+});
+
+test('samples added before folders existed are filed; other Sutras stay put', async () => {
+  const pid = projects.saveProject({ name: 'Old samples', config: { variables: [] } }).id;
+  const mk = (name: string) => flows.saveFlow(undefined, { name, nodes: [start], edges: [] }, pid).id;
+  mk('Sample: SQL update'); mk('Sample: Router, Switch and Merge 2'); mk('Skill: Write CSV file'); mk('Sample: Something I wrote'); mk('Orders');
+  saveResource({ kind: 'smtp', name: 'Sample SMTP', project_id: pid, config: {} });
+  saveResource({ kind: 'smtp', name: 'Office mail', project_id: pid, config: {} });
+  assert.equal(fileSamples(pid), 4);
+  assert.deepEqual(Object.fromEntries(flows.listFlows(pid).map(f => [f.name, f.folder])), {
+    'Orders': '', 'Sample: Router, Switch and Merge 2': 'Samples/Flow control', 'Sample: Something I wrote': '', 'Sample: SQL update': 'Samples/SQL', 'Skill: Write CSV file': 'Samples/Apps',
+  });
+  assert.deepEqual(Object.fromEntries(listResources(undefined, pid).map(r => [r.name, r.folder])), { 'Office mail': '', 'Sample SMTP': 'Samples' });
+  assert.equal(fileSamples(pid), 0, 'filed samples are left alone');
+  // At start the server files every project once, so a sample moved back to the top later stays there.
+  const { getSetting } = await import('../server/src/db.js');
+  assert.equal(getSetting('folders.samplesFiled', false), true);
+});
+
+test('the list used to file old samples matches what addSamples makes', () => {
+  const pid = projects.saveProject({ name: 'Sample list', config: { variables: [] } }).id;
+  const listed = new Map(Object.entries(SAMPLE_SUTRAS).flatMap(([f, names]) => names.map(n => [n, f] as const)));
+  for (const a of addSamples(pid)) assert.equal(listed.get(a.name.replace(/^Sample: /, '')), a.folder, a.name);
+  assert.equal(listed.size, addSamples(projects.saveProject({ name: 'Sample list 2', config: { variables: [] } }).id).length, 'no stale names');
+});
+
+test('missing project variables are warnings on the step that reads them', () => {
+  const pid = projects.saveProject({ name: 'Vars', config: { variables: [{ name: 'INBOX', type: 'string', value: 'C:/in' }] } }).id;
+  const conn = saveResource({ kind: 'httpConnection', name: 'Partner API', project_id: pid, config: { baseUrl: '{{gv.PARTNER_URL}}' } });
+  const doc = { name: 'V', nodes: [start,
+    { id: 'a', type: 'log', name: 'Uses vars', x: 0, y: 0, config: { message: '{{gv.INBOX}} {gv.OUTBOX} $gv.ARCHIVE get-project-variable(\'LIMIT\')' } },
+    { id: 'b', type: 'httpRequest', name: 'Call partner', x: 0, y: 0, config: { connection: conn.id, url: '/x' } }], edges: [] };
+  const w = flows.validateDoc(doc as any, pid).warnings.filter(x => /project variable/.test(x));
+  assert.deepEqual(w.map(x => x.replace(/ is not defined.*$/, '')), [
+    'Uses vars: project variable OUTBOX', 'Uses vars: project variable ARCHIVE', 'Uses vars: project variable LIMIT', 'Call partner: project variable PARTNER_URL',
+  ]);
+  assert.match(w[3], /used by the connection Partner API/);
+  assert.equal(flows.validateDoc(doc as any).warnings.filter(x => /project variable/.test(x)).length, 0, 'without a project there is nothing to check against');
+});
 
 const run = async (doc: any, projectId: string, input?: any) => {
   const id = engine.startRun({ doc, projectId, input });

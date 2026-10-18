@@ -213,6 +213,8 @@ table.t tr.click:hover td { background: var(--paper); }
 .xmore { border: 0; background: none; color: var(--muted); width: 20px; padding: 0; opacity: 0; flex: none; }
 .xrow:hover .xmore, .xmore:focus-visible { opacity: 1; }
 .xfolder .xl { font-weight: 600; }
+.xwarn { color: var(--warn); font-size: 12px; flex: none; }
+.anode .vwarn { color: var(--warn); margin-left: 4px; font-size: 12px; }
 .xroot { display: flex; align-items: center; gap: 8px; padding: 4px 6px; margin-top: 2px; border-radius: 6px; }
 
 /* ---------- wide inspector for the mapper ---------- */

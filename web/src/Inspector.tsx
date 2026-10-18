@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { missingInNode } from './vars';
+import { MissingVariables } from './Project';
 import { post } from './api';
 import { FieldList, visible } from './Fields';
 import { Mapper, inferShape } from './Mapper';
@@ -68,6 +70,7 @@ export function Inspector(p: Props) {
         {tabs.map(([t, l]) => <button key={t} role="tab" aria-selected={p.tab === t} className={p.tab === t ? 'act' : ''} onClick={() => p.setTab(t)}>{l}</button>)}
       </div>
       <div className="tabbody">
+        <NodeVariables node={p.selNode} />
         {p.tab === 'general' && <General {...p} node={p.selNode} />}
         {p.tab === 'input' && <InputTab {...p} node={p.selNode} />}
         {p.tab === 'output' && <StepOutput {...p} node={p.selNode} />}
@@ -75,6 +78,12 @@ export function Inspector(p: Props) {
       </div>
     </aside>
   );
+}
+
+function NodeVariables({ node }: { node: FlowNode }) {
+  const { project, resources } = useCatalog();
+  const miss = missingInNode(node, project, resources);
+  return <MissingVariables names={miss.map(m => m.name)} via={Object.fromEntries(miss.filter(m => m.via).map(m => [m.name, m.via]))} />;
 }
 
 const runOutputs = (p: Props) => (p.run && !ACTIVE.includes(p.run.status) ? p.run.outputs : p.run?.outputs && Object.keys(p.run.outputs).length ? p.run.outputs : p.sample.outputs);

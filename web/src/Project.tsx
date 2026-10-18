@@ -3,6 +3,7 @@ import { del, get, post, put } from './api';
 import { FieldList } from './Fields';
 import { Modal, useCatalog, useToast } from './ui';
 import { NewProjectDialog } from './NewProject';
+import { missingInResource, missingText } from './vars';
 import type { FlowSummary, LoggingConfig, ProjectVariable, Resource, SchemaInfo, SNode } from './types';
 
 /** What the right-hand panel shows when a project item (not an activity) is selected. */
@@ -51,7 +52,8 @@ export function ProjectExplorer({ flows, flowId, openFlow, newFlow, sel, setSel,
         <button className="btn small" title="New project: empty, with samples, from a package file, or a copy" aria-label="New project" onClick={() => setCreating(true)}>+</button>
       </div>
       {project?.description && <p className="muted xs" style={{ margin: '0 2px 6px' }}>{project.description}</p>}
-      {sec('proc', 'Sutras', flows.length, newFlow, <SutraTree flows={flows} flowId={sel ? null : flowId} open={id => { setSel(null); openFlow(id); }} onChanged={onFlowsChanged} />)}
+      {sec('proc', 'Sutras', flows.length, newFlow, <FolderTree area="sutras" activeId={sel ? null : flowId} onChanged={onFlowsChanged} open={id => { setSel(null); openFlow(id); }}
+        items={flows.map(f => ({ id: f.id, name: f.name, folder: f.folder, icon: '⧉', sub: f.deployed ? `v${f.deployed.version}` : undefined }))} />)}
       {sec('res', 'Resources', resources.length, () => setKindMenu(m => !m), <>
         {kindMenu && (
           <div className="kmenu" role="menu" aria-label="New resource">
@@ -63,15 +65,19 @@ export function ProjectExplorer({ flows, flowId, openFlow, newFlow, sel, setSel,
           </div>
         )}
         {!resources.length && !kindMenu && <p className="muted xs" style={{ margin: '2px 6px' }}>No connections yet. Click + to add one.</p>}
-        {[...resources].sort((a, b) => kindOrder(a.kind) - kindOrder(b.kind) || a.name.localeCompare(b.name)).map(r => {
-          const k = meta.resourceKinds.find(x => x.kind === r.kind);
-          return <div key={r.id} title={k?.name}>{item(r.name, isSel({ kind: 'resource', id: r.id }), () => setSel({ kind: 'resource', id: r.id }), k?.icon || '⚙')}</div>;
-        })}
+        <FolderTree area="resources" activeId={sel?.kind === 'resource' ? sel.id : null} onChanged={reload} open={id => setSel({ kind: 'resource', id })}
+          items={[...resources].sort((a, b) => kindOrder(a.kind) - kindOrder(b.kind) || a.name.localeCompare(b.name)).map(r => {
+            const k = meta.resourceKinds.find(x => x.kind === r.kind);
+            const miss = missingInResource(r, project);
+            return { id: r.id, name: r.name, folder: r.folder, icon: k?.icon || '⚙', title: k?.name, warn: miss.length ? `Project variables not defined: ${miss.join(', ')}` : undefined };
+          })} />
       </>)}
       {sec('sch', 'Schemas', schemas.filter(s => s.kind !== 'wsdl').length, () => setSel({ kind: 'newSchema', schemaKind: 'json' }),
-        schemas.filter(s => s.kind !== 'wsdl').map(s => <div key={s.id}>{item(s.name, isSel({ kind: 'schema', id: s.id }), () => setSel({ kind: 'schema', id: s.id }), 'S', s.kind.toUpperCase())}</div>))}
+        <FolderTree area="schemas" activeId={sel?.kind === 'schema' ? sel.id : null} onChanged={reload} open={id => setSel({ kind: 'schema', id })}
+          items={schemas.filter(s => s.kind !== 'wsdl').map(s => ({ id: s.id, name: s.name, folder: s.folder, icon: 'S', sub: s.kind.toUpperCase() }))} />)}
       {sec('wsdl', 'Service descriptors', schemas.filter(s => s.kind === 'wsdl').length, () => setSel({ kind: 'newSchema', schemaKind: 'wsdl' }),
-        schemas.filter(s => s.kind === 'wsdl').map(s => <div key={s.id}>{item(s.name, isSel({ kind: 'schema', id: s.id }), () => setSel({ kind: 'schema', id: s.id }), 'W', 'WSDL')}</div>))}
+        <FolderTree area="wsdl" activeId={sel?.kind === 'schema' ? sel.id : null} onChanged={reload} open={id => setSel({ kind: 'schema', id })}
+          items={schemas.filter(s => s.kind === 'wsdl').map(s => ({ id: s.id, name: s.name, folder: s.folder, icon: 'W', sub: 'WSDL' }))} />)}
       {sec('cfg', 'Configuration', 4, undefined, <>
         {item(`Project variables (${project?.config.variables.length ?? 0})`, isSel({ kind: 'variables' }), () => setSel({ kind: 'variables' }), '$')}
         {item('Deployment config (ops)', isSel({ kind: 'ops' }), () => setSel({ kind: 'ops' }), '⇅')}
@@ -83,38 +89,45 @@ export function ProjectExplorer({ flows, flowId, openFlow, newFlow, sel, setSel,
   );
 }
 
-const SUTRA_MIME = 'application/x-sutra';
+const ITEM_MIME = 'application/x-sutra-item';
 const FOLDER_MIME = 'application/x-sutra-folder';
 const store = { get: (k: string) => { try { return JSON.parse(localStorage.getItem(k) || '{}'); } catch { return {}; } }, set: (k: string, v: unknown) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private window */ } } };
 
+export type FolderArea = 'sutras' | 'resources' | 'schemas' | 'wsdl';
+export interface TreeItem { id: string; name: string; folder?: string; icon: string; sub?: string; title?: string; warn?: string }
+const MOVE_URL: Record<FolderArea, (id: string) => string> = {
+  sutras: id => `/api/flows/${id}/folder`, resources: id => `/api/resources/${id}/folder`, schemas: id => `/api/schemas/${id}/folder`, wsdl: id => `/api/schemas/${id}/folder`,
+};
+const WHAT: Record<FolderArea, string> = { sutras: 'Sutra', resources: 'connection', schemas: 'schema', wsdl: 'service descriptor' };
+
 /**
- * The project's Sutras in folders. Drag a Sutra or a folder onto a folder (or onto "Top level") to
- * move it; the ⋯ button does the same from the keyboard and renames or removes folders. Removing a
- * folder never deletes Sutras: they move up one level.
+ * One section of the explorer as folders. Drag an item or a folder onto a folder (or onto the line
+ * at the bottom for the top level) to move it; the ⋯ button does the same from the keyboard and
+ * renames or removes folders. Removing a folder never deletes anything: its contents move up one level.
  */
-function SutraTree({ flows, flowId, open, onChanged }: { flows: FlowSummary[]; flowId: string | null; open(id: string): void; onChanged(): void }) {
+function FolderTree({ area, items, activeId, open, onChanged }: { area: FolderArea; items: TreeItem[]; activeId: string | null; open(id: string): void; onChanged(): void | Promise<void> }) {
   const { projectId } = useCatalog();
   const toast = useToast();
   const [folders, setFolders] = useState<string[]>([]);
-  const key = `sutraflow.folders.${projectId}`;
+  const key = `sutraflow.folders.${projectId}.${area}`;
   const [shut, setShut] = useState<Record<string, boolean>>(() => store.get(key));
   const [over, setOver] = useState<string | null>(null);
-  const [dlg, setDlg] = useState<{ kind: 'sutra'; id: string } | { kind: 'folder'; path: string } | { kind: 'new'; parent: string } | null>(null);
-  const load = () => get<string[]>(`/api/projects/${projectId}/folders`).then(setFolders).catch(() => setFolders([]));
-  useEffect(() => { load(); setShut(store.get(key)); }, [projectId, flows.map(f => f.folder).join('|')]);
-  const current = flows.find(f => f.id === flowId)?.folder || '';
+  const [dlg, setDlg] = useState<{ kind: 'item'; id: string } | { kind: 'folder'; path: string } | { kind: 'new'; parent: string } | null>(null);
+  const load = () => get<string[]>(`/api/projects/${projectId}/folders?area=${area}`).then(setFolders).catch(() => setFolders([]));
+  useEffect(() => { load(); setShut(store.get(key)); }, [projectId, area, items.map(f => f.folder || '').join('|')]);
+  const current = items.find(f => f.id === activeId)?.folder || '';
   const isOpen = (p: string) => (p in shut ? !shut[p] : current === p || current.startsWith(p + '/'));
   const toggle = (p: string) => setShut(s => { const n = { ...s, [p]: isOpen(p) }; store.set(key, n); return n; });
-  const done = async (p: Promise<unknown>, msg?: string) => { try { await p; if (msg) toast(msg); await load(); onChanged(); } catch (e: any) { toast(e.message, true); } };
-  const moveSutra = (id: string, folder: string) => done(put(`/api/flows/${id}/folder`, { folder }), `Moved to ${folder || 'the top level'}`);
-  const moveFolder = (from: string, to: string) => done(post(`/api/projects/${projectId}/folders/move`, { from, to }), `Folder now ${to}`);
+  const done = async (p: Promise<unknown>, msg?: string) => { try { await p; if (msg) toast(msg); await load(); await onChanged(); } catch (e: any) { toast(e.message, true); } };
+  const moveItem = (id: string, folder: string) => done(put(MOVE_URL[area](id), { folder }), `Moved to ${folder || 'the top level'}`);
+  const moveFolder = (from: string, to: string) => done(post(`/api/projects/${projectId}/folders/move`, { area, from, to }), `Folder now ${to}`);
   const dropOn = (target: string) => ({
-    onDragOver: (e: React.DragEvent) => { if (e.dataTransfer.types.includes(SUTRA_MIME) || e.dataTransfer.types.includes(FOLDER_MIME)) { e.preventDefault(); setOver(target); } },
+    onDragOver: (e: React.DragEvent) => { if (e.dataTransfer.types.includes(ITEM_MIME + area) || e.dataTransfer.types.includes(FOLDER_MIME + area)) { e.preventDefault(); setOver(target); } },
     onDragLeave: () => setOver(o => (o === target ? null : o)),
     onDrop: (e: React.DragEvent) => {
       e.preventDefault(); setOver(null);
-      const id = e.dataTransfer.getData(SUTRA_MIME), from = e.dataTransfer.getData(FOLDER_MIME);
-      if (id) { if ((flows.find(f => f.id === id)?.folder || '') !== target) moveSutra(id, target); return; }
+      const id = e.dataTransfer.getData(ITEM_MIME + area), from = e.dataTransfer.getData(FOLDER_MIME + area);
+      if (id) { if ((items.find(f => f.id === id)?.folder || '') !== target) moveItem(id, target); return; }
       if (!from) return;
       const to = [target, from.split('/').pop()].filter(Boolean).join('/');
       if (to === from) return;
@@ -124,19 +137,19 @@ function SutraTree({ flows, flowId, open, onChanged }: { flows: FlowSummary[]; f
   });
   const childrenOf = (p: string) => folders.filter(f => f.split('/').slice(0, -1).join('/') === p);
   const name = (p: string) => p.split('/').pop() || p;
-  const count = (p: string) => flows.filter(f => (f.folder || '') === p || (f.folder || '').startsWith(p + '/')).length;
+  const count = (p: string) => items.filter(f => (f.folder || '') === p || (f.folder || '').startsWith(p + '/')).length;
   const pad = (depth: number) => ({ paddingLeft: 6 + depth * 12 });
-  const sutraRow = (f: FlowSummary, depth: number) => (
-    <div key={f.id} className="xrow" draggable onDragStart={e => { e.dataTransfer.setData(SUTRA_MIME, f.id); e.dataTransfer.effectAllowed = 'move'; }}>
-      <button className={`xitem${f.id === flowId ? ' act' : ''}`} style={pad(depth)} onClick={() => open(f.id)}>
-        <span className="xi">⧉</span><span className="xl">{f.name}</span>{f.deployed && <span className="muted xs">v{f.deployed.version}</span>}
+  const itemRow = (f: TreeItem, depth: number) => (
+    <div key={f.id} className="xrow" title={f.warn || f.title} draggable onDragStart={e => { e.dataTransfer.setData(ITEM_MIME + area, f.id); e.dataTransfer.effectAllowed = 'move'; }}>
+      <button className={`xitem${f.id === activeId ? ' act' : ''}`} style={pad(depth)} onClick={() => open(f.id)}>
+        <span className="xi">{f.icon}</span><span className="xl">{f.name}</span>{f.warn && <span className="xwarn" aria-label={f.warn}>⚠</span>}{f.sub && <span className="muted xs">{f.sub}</span>}
       </button>
-      <button className="xmore" title="Move to a folder" aria-label={`Move ${f.name} to a folder`} onClick={() => setDlg({ kind: 'sutra', id: f.id })}>⋯</button>
+      <button className="xmore" title="Move to a folder" aria-label={`Move ${f.name} to a folder`} onClick={() => setDlg({ kind: 'item', id: f.id })}>⋯</button>
     </div>
   );
   const folderRow = (p: string, depth: number): React.ReactNode => (
     <div key={'d' + p}>
-      <div className={`xrow${over === p ? ' drop' : ''}`} draggable onDragStart={e => { e.dataTransfer.setData(FOLDER_MIME, p); e.dataTransfer.effectAllowed = 'move'; }} {...dropOn(p)}>
+      <div className={`xrow${over === p ? ' drop' : ''}`} draggable onDragStart={e => { e.dataTransfer.setData(FOLDER_MIME + area, p); e.dataTransfer.effectAllowed = 'move'; }} {...dropOn(p)}>
         <button className="xitem xfolder" style={pad(depth)} aria-expanded={isOpen(p)} onClick={() => toggle(p)}>
           <span className="xi">{isOpen(p) ? '▾' : '▸'}</span><span className="xl">{name(p)}</span><span className="muted xs">{count(p)}</span>
         </button>
@@ -144,38 +157,39 @@ function SutraTree({ flows, flowId, open, onChanged }: { flows: FlowSummary[]; f
       </div>
       {isOpen(p) && <>
         {childrenOf(p).map(c => folderRow(c, depth + 1))}
-        {flows.filter(f => (f.folder || '') === p).map(f => sutraRow(f, depth + 1))}
+        {items.filter(f => (f.folder || '') === p).map(f => itemRow(f, depth + 1))}
       </>}
     </div>
   );
   return (
     <>
       {childrenOf('').map(p => folderRow(p, 0))}
-      {flows.filter(f => !f.folder).map(f => sutraRow(f, 0))}
+      {items.filter(f => !f.folder).map(f => itemRow(f, 0))}
       <div className={`xroot${over === '' ? ' drop' : ''}`} {...dropOn('')}>
         <button className="btn link small" onClick={() => setDlg({ kind: 'new', parent: '' })}>+ Folder</button>
         {folders.length > 0 && <span className="muted xs">Drag here for the top level</span>}
       </div>
-      {dlg && <FolderDialog dlg={dlg} folders={folders} flows={flows} onClose={() => setDlg(null)} act={async p => { await done(p); setDlg(null); }} moveSutra={async (id, f) => { await moveSutra(id, f); setDlg(null); }} moveFolder={async (a, b) => { await moveFolder(a, b); setDlg(null); }} />}
+      {dlg && <FolderDialog area={area} dlg={dlg} folders={folders} items={items} onClose={() => setDlg(null)}
+        act={async p => { await done(p); setDlg(null); }} moveItem={async (id, f) => { await moveItem(id, f); setDlg(null); }} moveFolder={async (a, b) => { await moveFolder(a, b); setDlg(null); }} />}
     </>
   );
 }
 
-function FolderDialog({ dlg, folders, flows, onClose, act, moveSutra, moveFolder }: {
-  dlg: { kind: 'sutra'; id: string } | { kind: 'folder'; path: string } | { kind: 'new'; parent: string };
-  folders: string[]; flows: FlowSummary[]; onClose(): void; act(p: Promise<unknown>): Promise<void>;
-  moveSutra(id: string, folder: string): Promise<void>; moveFolder(from: string, to: string): Promise<void>;
+function FolderDialog({ area, dlg, folders, items, onClose, act, moveItem, moveFolder }: {
+  area: FolderArea; dlg: { kind: 'item'; id: string } | { kind: 'folder'; path: string } | { kind: 'new'; parent: string };
+  folders: string[]; items: TreeItem[]; onClose(): void; act(p: Promise<unknown>): Promise<void>;
+  moveItem(id: string, folder: string): Promise<void>; moveFolder(from: string, to: string): Promise<void>;
 }) {
   const { projectId } = useCatalog();
-  const sutra = dlg.kind === 'sutra' ? flows.find(f => f.id === dlg.id) : undefined;
-  const [target, setTarget] = useState(sutra?.folder || '');
+  const item = dlg.kind === 'item' ? items.find(f => f.id === dlg.id) : undefined;
+  const [target, setTarget] = useState(item?.folder || '');
   const [path, setPath] = useState(dlg.kind === 'folder' ? dlg.path : dlg.kind === 'new' ? (dlg.parent ? dlg.parent + '/' : '') : '');
   const [sub, setSub] = useState('');
-  if (dlg.kind === 'sutra') {
+  if (dlg.kind === 'item') {
     return (
-      <Modal title={`Move ${sutra?.name || 'Sutra'}`} onClose={onClose} actions={<>
+      <Modal title={`Move ${item?.name || WHAT[area]}`} onClose={onClose} actions={<>
         <button className="btn" onClick={onClose}>Cancel</button>
-        <button className="btn go" onClick={() => moveSutra(dlg.id, target)}>Move</button>
+        <button className="btn go" onClick={() => moveItem(dlg.id, target)}>Move</button>
       </>}>
         <div className="fld"><label htmlFor="mvto">Folder</label>
           <input id="mvto" list="mvlist" value={target} onChange={e => setTarget(e.target.value)} placeholder="Empty = top level" />
@@ -188,26 +202,45 @@ function FolderDialog({ dlg, folders, flows, onClose, act, moveSutra, moveFolder
     return (
       <Modal title="New folder" onClose={onClose} actions={<>
         <button className="btn" onClick={onClose}>Cancel</button>
-        <button className="btn go" disabled={!path.trim()} onClick={() => act(post(`/api/projects/${projectId}/folders`, { path }))}>Create</button>
+        <button className="btn go" disabled={!path.trim()} onClick={() => act(post(`/api/projects/${projectId}/folders`, { area, path }))}>Create</button>
       </>}>
         <div className="fld"><label htmlFor="nf">Folder path</label><input id="nf" autoFocus value={path} onChange={e => setPath(e.target.value)} placeholder="Orders/Inbound" />
           <div className="hint">Use / for a folder inside another.</div></div>
       </Modal>
     );
   }
-  const n = flows.filter(f => (f.folder || '') === dlg.path || (f.folder || '').startsWith(dlg.path + '/')).length;
+  const n = items.filter(f => (f.folder || '') === dlg.path || (f.folder || '').startsWith(dlg.path + '/')).length;
   return (
     <Modal title={`Folder ${dlg.path}`} onClose={onClose} actions={<button className="btn" onClick={onClose}>Close</button>}>
       <div className="fld"><label htmlFor="fpath">Name and place</label>
         <div className="row" style={{ gap: 6 }}><input id="fpath" style={{ flex: 1 }} value={path} onChange={e => setPath(e.target.value)} />
           <button className="btn" disabled={!path.trim() || path.trim() === dlg.path} onClick={() => moveFolder(dlg.path, path)}>Rename / move</button></div>
-        <div className="hint">Change the last part to rename; change the path before it to move the folder with its {n} Sutras.</div></div>
+        <div className="hint">Change the last part to rename; change the path before it to move the folder with its {n} items.</div></div>
       <div className="fld"><label htmlFor="fsub">New folder inside</label>
         <div className="row" style={{ gap: 6 }}><input id="fsub" style={{ flex: 1 }} value={sub} onChange={e => setSub(e.target.value)} />
-          <button className="btn" disabled={!sub.trim()} onClick={() => act(post(`/api/projects/${projectId}/folders`, { path: `${dlg.path}/${sub}` }))}>Create</button></div></div>
-      <div className="fld"><button className="btn danger" onClick={() => act(del(`/api/projects/${projectId}/folders?path=${encodeURIComponent(dlg.path)}`))}>Remove folder</button>
-        <div className="hint">{n ? `Its ${n} Sutras and folders move up one level; nothing is deleted.` : 'The folder is empty.'}</div></div>
+          <button className="btn" disabled={!sub.trim()} onClick={() => act(post(`/api/projects/${projectId}/folders`, { area, path: `${dlg.path}/${sub}` }))}>Create</button></div></div>
+      <div className="fld"><button className="btn danger" onClick={() => act(del(`/api/projects/${projectId}/folders?area=${area}&path=${encodeURIComponent(dlg.path)}`))}>Remove folder</button>
+        <div className="hint">{n ? `Its ${n} items and folders move up one level; nothing is deleted.` : 'The folder is empty.'}</div></div>
     </Modal>
+  );
+}
+
+/** Warns about project variables used but not defined, with a button that adds them (empty, as text). */
+export function MissingVariables({ names, via }: { names: string[]; via?: Record<string, string> }) {
+  const { project, reload } = useCatalog();
+  const toast = useToast();
+  if (!names.length || !project) return null;
+  const add = async () => {
+    const vars = [...project.config.variables, ...[...new Set(names)].map(name => ({ name, type: 'string' as const, value: '', description: '' }))];
+    try { await put(`/api/projects/${project.id}`, { name: project.name, config: { variables: vars } }); await reload(); toast(`Added ${[...new Set(names)].join(', ')}; give ${names.length > 1 ? 'them values' : 'it a value'} under Configuration > Project variables`); }
+    catch (e: any) { toast(e.message, true); }
+  };
+  return (
+    <div className="warnbox" role="alert">
+      {missingText(names.map(n => ({ name: n, via: via?.[n] || '' })))}
+      {'\n'}Runs read it as empty until it is defined.
+      <div style={{ marginTop: 6 }}><button className="btn small" onClick={add}>Add to project variables</button></div>
+    </div>
   );
 }
 
@@ -226,7 +259,7 @@ export function ExplorerEditor({ sel, setSel }: { sel: ExplorerSel; setSel(s: Ex
 }
 
 function ResourceEditor({ sel, setSel }: { sel: Extract<ExplorerSel, { kind: 'resource' | 'newResource' }>; setSel(s: ExplorerSel | null): void }) {
-  const { meta, resources, secrets, projectId, reload } = useCatalog();
+  const { meta, resources, secrets, projectId, project, reload } = useCatalog();
   const toast = useToast();
   const existing = sel.kind === 'resource' ? resources.find(r => r.id === sel.id) : undefined;
   const kind = existing?.kind || (sel.kind === 'newResource' ? sel.resourceKind : '');
@@ -259,6 +292,7 @@ function ResourceEditor({ sel, setSel }: { sel: Extract<ExplorerSel, { kind: 're
     <>
       <div className="phead rhead"><span className="kicon" aria-hidden>{k.icon || '⚙'}</span><div><h2>{r.name || k.name}</h2><p><b>{k.name}</b> · {k.desc}</p></div></div>
       <div className="fld"><label htmlFor="rname">Name</label><input id="rname" type="text" value={r.name} autoFocus={!r.id} onChange={e => setR({ ...r, name: e.target.value })} /><div className="hint">Your name for it: shown in activity settings and used as its key in the deployment config. Settings marked {'{x}'} take project variables.</div></div>
+      <MissingVariables names={missingInResource(r, project)} />
       <FieldList fields={k.fields} values={r.config} onChange={(fk, v) => { setR({ ...r, config: { ...r.config, [fk]: v } }); setTest(null); }} resources={resources} secrets={secrets} />
       {test && test !== 'running' && <div className={test.ok ? 'okbox' : 'errbox'} role="status"><b>{test.ok ? 'Connection works.' : 'Connection failed.'}</b> {test.message}{test.ms ? <span className="muted"> ({test.ms} ms)</span> : null}</div>}
       <div className="row">

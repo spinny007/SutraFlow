@@ -6,6 +6,7 @@ import type { FlowDoc } from './engine/types.js';
 import { listFlows, getFlow, saveFlow, publish, deploy, undeploy, versionDoc, validateDoc, deployedFlows, normPath, normalizeDoc, setFlowFolder } from './flows.js';
 import { listResources, saveResource, RESOURCE_KINDS } from './resources.js';
 import { listSchemas, getSchema, saveSchema } from './schemas.js';
+import { setItemFolder } from './folders.js';
 import { listProjects, getProject, saveProject, importOpsFile } from './projects.js';
 import { getSecret } from './secrets.js';
 
@@ -27,8 +28,8 @@ export interface Package {
   createdAt: string;
   createdWith: string;
   project: { name: string; description: string; variables: any[]; logging: any };
-  schemas: { id: string; name: string; kind: string; root: string | null; text: string }[];
-  resources: { id: string; kind: string; name: string; config: Record<string, any> }[];
+  schemas: { id: string; name: string; kind: string; root: string | null; text: string; folder?: string }[];
+  resources: { id: string; kind: string; name: string; config: Record<string, any>; folder?: string }[];
   sutras: PackageSutra[];
   manifest: {
     sutras: { name: string; version: number; triggers: string[]; exposes: string[] }[];
@@ -45,6 +46,21 @@ export function checksumOf(p: Omit<Package, 'checksum'> | Package) {
   const { checksum: _drop, ...rest } = p as Package;
   const canon = (v: any): any => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k => [k, canon(v[k])])) : v);
   return 'sha256:' + crypto.createHash('sha256').update(JSON.stringify(canon(rest))).digest('hex');
+}
+
+/**
+ * The connections, schemas and WSDLs the given Sutras use, directly or through each other (an MCP
+ * server and its policy, a SOAP step and its WSDL). Found by their ids in the Sutras and settings.
+ */
+export function usedBy<R extends { id: string; config: unknown }, S extends { id: string; text: string }>(docs: unknown[], resources: R[], schemas: S[]) {
+  let text = JSON.stringify(docs);
+  const res = new Set<R>(), sch = new Set<S>();
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const r of resources) if (!res.has(r) && text.includes(r.id)) { res.add(r); text += JSON.stringify(r.config); grew = true; }
+    for (const s of schemas) if (!sch.has(s) && text.includes(s.id)) { sch.add(s); grew = true; }
+  }
+  return { resources: resources.filter(r => res.has(r)), schemas: schemas.filter(s => sch.has(s)) };
 }
 
 /** Secret names a project needs: from connection settings, secret project variables, and {{secret.X}} references. */
@@ -99,9 +115,11 @@ export function buildPackage(projectId: string, o: { version?: string; note?: st
     const missing = o.sutras.filter(n => !sutras.some(s => s.name.toLowerCase() === n.toLowerCase()));
     if (missing.length) throw new Error(`No Sutra named ${missing.map(m => `"${m}"`).join(', ')} in ${project.name}`);
   }
-  const schemas = listSchemas(projectId).map(s => { const full = getSchema(s.id)!; return { id: s.id, name: s.name, kind: s.kind, root: full.root, text: full.text }; });
-  const resources = listResources(undefined, projectId).map(r => ({ id: r.id, kind: r.kind, name: r.name, config: r.config }));
+  const allSchemas = listSchemas(projectId).map(s => { const full = getSchema(s.id)!; return { id: s.id, name: s.name, kind: s.kind, root: full.root, text: full.text, ...(s.folder ? { folder: s.folder } : {}) }; });
+  const allResources = listResources(undefined, projectId).map(r => ({ id: r.id, kind: r.kind, name: r.name, config: r.config, ...(r.folder ? { folder: r.folder } : {}) }));
   const docs = sutras.map(s => s.doc);
+  // Chosen Sutras take only the connections and schemas they use; a whole project takes all of them.
+  const { resources, schemas } = o.sutras?.length ? usedBy(docs, allResources, allSchemas) : { resources: allResources, schemas: allSchemas };
   const body: Omit<Package, 'checksum'> = {
     format: PACKAGE_FORMAT, formatVersion: 1, name: project.name, version, ...(o.note ? { note: o.note } : {}),
     createdAt: now(), createdWith: sutraVersion,
@@ -190,6 +208,7 @@ export function deployPackage(input: unknown, o: { project?: string; ops?: unkno
   for (const s of p.schemas) {
     const existing = schemasHere.find(x => x.name.toLowerCase() === s.name.toLowerCase() && x.kind === s.kind);
     const saved = saveSchema({ id: existing?.id, project_id: pid, name: s.name, kind: s.kind as any, root: s.root || undefined, text: s.text });
+    if (!existing && s.folder) setItemFolder(s.kind === 'wsdl' ? 'wsdl' : 'schemas', saved.id, s.folder);
     map.set(s.id, saved.id);
   }
   const resHere = listResources(undefined, pid);
@@ -208,7 +227,11 @@ export function deployPackage(input: unknown, o: { project?: string; ops?: unkno
     return JSON.parse(text);
   };
   // Resources reference each other (MCP server -> policy), so save them after every id is known.
-  for (const r of p.resources) saveResource({ id: map.get(r.id), kind: r.kind, name: r.name, project_id: pid, config: remap(r.config) });
+  for (const r of p.resources) {
+    const isNew = !resHere.some(x => x.id === map.get(r.id));
+    saveResource({ id: map.get(r.id), kind: r.kind, name: r.name, project_id: pid, config: remap(r.config) });
+    if (isNew && r.folder) setItemFolder('resources', map.get(r.id)!, r.folder);
+  }
 
   const report: DeployReport = { project: { id: pid, name: project.name, created }, package: { name: p.name, version: p.version, checksum: p.checksum }, sutras: [], undeployed: [], unchanged: true, warnings: [] };
   const keep = new Set<string>();
@@ -259,7 +282,8 @@ export function importPackage(input: unknown, o: { project: string; sutras?: str
   const drafts = o.asDrafts !== false;
   const sutras = p.sutras.filter(s => !pick || pick.has(s.name.toLowerCase())).map(s => (drafts ? { ...s, deployed: false } : s));
   if (!sutras.length) throw new Error('Choose at least one Sutra');
-  const chosen: Package = { ...p, sutras, manifest: { ...p.manifest, sutras: p.manifest.sutras.filter((m: any) => sutras.some(s => s.name === m.name)) } };
+  const used = pick ? usedBy(sutras.map(s => s.doc), p.resources, p.schemas) : { resources: p.resources, schemas: p.schemas };
+  const chosen: Package = { ...p, sutras, resources: used.resources, schemas: used.schemas, manifest: { ...p.manifest, sutras: p.manifest.sutras.filter((m: any) => sutras.some(s => s.name === m.name)), secrets: secretsOf(used.resources, p.project.variables || [], sutras.map(s => s.doc)) } };
   chosen.checksum = checksumOf(chosen);
   const c = checkPackage(chosen, { project: name });
   const errors = drafts ? c.errors.filter(e => !e.startsWith('Missing secrets')) : c.errors;

@@ -87,16 +87,19 @@ export const CHAPTERS: Chapter[] = [
 <tr><td><strong>Configuration</strong></td><td>Project variables, the deployment config and the log file settings.</td></tr>
 </tbody></table>
 [[img:project-explorer|The Project explorer with a shared XSD schema open: its fields are shown as a tree, as activities will see them.]]
-<p class="h">Folders for Sutras</p>
-<p>Sutras can sit in folders, and folders in folders, so a large project stays tidy. Folders only arrange the list: a Sutra name is still unique in the project, and deploying, calling and packages work as before.</p>
+<p class="h">Folders</p>
+<p>Sutras, Resources, Schemas and Service descriptors can each sit in folders, and folders in folders, so a large project stays tidy. Each section has its own folders. Folders only arrange the explorer: a name is still unique in the project, and deploying, calling and packages work as before.</p>
 <ul>
 <li><strong>+ Folder</strong> under the list makes a folder; type <code>Orders/Inbound</code> for one inside another.</li>
 <li><strong>Drag</strong> a Sutra or a folder onto a folder to move it there, or onto the line <em>Drag here for the top level</em>.</li>
 <li>The <strong>⋯</strong> button beside a Sutra moves it by typing or picking a folder. Beside a folder it renames or moves the folder with everything in it, makes a folder inside, or removes the folder. Removing a folder never deletes Sutras: they move up one level.</li>
 <li>A new Sutra goes in the folder of the Sutra open at the time.</li>
-<li>Samples go to <code>Samples/&lt;topic&gt;</code>, for example <em>Samples/SQL</em> and <em>Samples/REST and microservices</em>. Move them anywhere afterwards.</li>
-<li>Packages and project copies keep each Sutra's folder.</li>
+<li>Samples go to <code>Samples/&lt;topic&gt;</code>, for example <em>Samples/SQL</em> and <em>Samples/REST and microservices</em>, and the connections made for them to <em>Resources &gt; Samples</em>. Samples added before folders existed were filed there once, when the server was updated. Move them anywhere afterwards.</li>
+<li>Packages and project copies keep each item's folder.</li>
+<li>Importing chosen Sutras (a new project from a package or a copy) brings the connections, schemas and service descriptors those Sutras use, directly or through each other (an MCP server and its policy), in their folders, and nothing else.</li>
 </ul>
+<p class="h">Missing project variables</p>
+<p>When a step reads a project variable the project does not define (<code>{{gv.X}}</code>, <code>{gv.X}</code>, <code>$gv.X</code> in JSONata or <code>get-project-variable('X')</code>), the activity shows ⚠ on the canvas and a warning at the top of its tabs, and it reads as empty while running. The same warning shows on a connection that reads one, and on every step that uses that connection. <strong>Add to project variables</strong> adds the missing names; give them values under <em>Configuration &gt; Project variables</em>. <em>Deploy</em> lists the same warnings.</p>
 <p class="h">Add a connection</p>
 <ol>
 <li>Next to <em>Resources</em>, click <strong>+</strong> and choose the kind, for example <em>HTTP connection</em>.</li>

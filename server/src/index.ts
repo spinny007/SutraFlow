@@ -1,4 +1,5 @@
 import { openDb, q } from './db.js';
+import { fileSamplesOnce } from './samples.js';
 import { engine } from './engine/engine.js';
 import { allActivities } from './palettes/index.js';
 import { onDeploymentsChange } from './flows.js';
@@ -83,6 +84,7 @@ export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gatew
     setEngine: (name, value) => setEngineVariable(name, value),
   });
   loadOpsFiles(m => console.log(m));
+  fileSamplesOnce();
   await deployFolder(config.deployDir);
   lifecycle.packagesDeployed = true;
   // Tuning from the Admin Console: applied now and whenever any engine changes it.

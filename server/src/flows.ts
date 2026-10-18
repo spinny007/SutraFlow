@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 import { q, tx, now } from './db.js';
 import { engine } from './engine/engine.js';
-import { ensureDefaultProject } from './projects.js';
+import { ensureDefaultProject, getProject } from './projects.js';
+import { setItemFolder } from './folders.js';
 import type { FlowDoc } from './engine/types.js';
 
 /**
@@ -57,8 +58,36 @@ export function normalizeDoc(doc: any): FlowDoc {
 }
 
 /** Problems that stop a deploy (errors) or deserve attention (warnings). */
-export function validateDoc(doc: FlowDoc) {
+/**
+ * Project variables a value reads: {gv.X}, {{gv.X}}, $gv.X (JSONata) and get-project-variable('X').
+ * The studio has the same rule in web/src/vars.ts.
+ */
+export function variablesUsed(v: unknown): string[] {
+  const text = JSON.stringify(v ?? '');
+  const out = new Set<string>();
+  for (const m of text.matchAll(/\bgv\.([A-Za-z_]\w*)/g)) out.add(m[1]);
+  for (const m of text.matchAll(/get-project-variable\(\s*\\?['"]([A-Za-z_]\w*)/g)) out.add(m[1]);
+  return [...out];
+}
+
+/** Steps that read project variables the project does not define, themselves or through their connections. */
+export function missingVariables(doc: FlowDoc, projectId: string) {
+  const p = getProject(projectId);
+  if (!p) return [];
+  const defined = new Set((p.config.variables || []).map((v: { name: string }) => v.name));
+  const conns = q.all<{ id: string; name: string; config: string }>('select id, name, config from resources where project_id = ?', projectId);
+  const out: { step: string; name: string; via: string }[] = [];
+  for (const n of doc.nodes) {
+    const text = JSON.stringify(n.config);
+    for (const name of variablesUsed(n.config)) if (!defined.has(name)) out.push({ step: n.name, name, via: '' });
+    for (const r of conns) if (text.includes(r.id)) for (const name of variablesUsed(JSON.parse(r.config))) if (!defined.has(name)) out.push({ step: n.name, name, via: r.name });
+  }
+  return out;
+}
+
+export function validateDoc(doc: FlowDoc, projectId?: string) {
   const errors: string[] = [], warnings: string[] = [];
+  if (projectId) for (const m of missingVariables(doc, projectId)) warnings.push(`${m.step}: project variable ${m.name} is not defined in this project${m.via ? ` (used by the connection ${m.via})` : ''}; it reads as empty`);
   const names = new Set<string>();
   for (const n of doc.nodes) {
     const a = engine.activity(n.type);
@@ -93,78 +122,13 @@ export function validateDoc(doc: FlowDoc) {
   return { errors, warnings };
 }
 
-// ---------- folders ----------
-// A Sutra sits in a folder of its project ('' = the top). Folders are paths such as "Samples/SQL";
-// one with nothing in it is kept in flow_folders. Folders only arrange the list: names stay unique per project.
-
-/** Cleans a folder path: "/a//b/ " -> "a/b". */
-export function normFolder(v: unknown) {
-  const parts = String(v ?? '').split(/[\\/]+/).map(p => p.replace(/[\u0000-\u001f<>:"|?*]/g, '').trim()).filter(Boolean);
-  if (parts.length > 8) throw new Error('Folders go at most 8 levels deep');
-  if (parts.some(p => p.length > 60)) throw new Error('A folder name has at most 60 characters');
-  return parts.join('/');
-}
-const parentsOf = (p: string) => p.split('/').map((_x, i, a) => a.slice(0, i + 1).join('/'));
-const inside = (p: string, folder: string) => p === folder || p.startsWith(folder + '/');
-
-/** Every folder of a project (with their parents), sorted. */
-export function listFolders(projectId: string) {
-  const all = new Set<string>();
-  for (const r of q.all<{ path: string }>('select path from flow_folders where project_id = ?', projectId)) parentsOf(r.path).forEach(p => all.add(p));
-  for (const r of q.all<{ folder: string }>("select distinct folder from flows where project_id = ? and folder != ''", projectId)) parentsOf(r.folder).forEach(p => all.add(p));
-  return [...all].sort((a, b) => a.localeCompare(b));
-}
-
-export function createFolder(projectId: string, path: unknown) {
-  const p = normFolder(path);
-  if (!p) throw new Error('Give the folder a name');
-  q.run('insert into flow_folders(project_id, path) values(?, ?) on conflict do nothing', projectId, p);
-  return listFolders(projectId);
-}
+// ---------- folders (see folders.ts) ----------
+export { normFolder, listFolders, createFolder, moveFolder, removeFolder } from './folders.js';
 
 /** Moves a Sutra to a folder ('' = the top); the folder is made when missing. */
 export function setFlowFolder(id: string, folder: unknown) {
-  const p = normFolder(folder);
-  if (!q.get('select 1 from flows where id = ?', id)) throw new Error('Sutra not found');
-  q.run('update flows set folder = ? where id = ?', p, id);
+  setItemFolder('sutras', id, folder);
   return getFlow(id)!;
-}
-
-/** Renames or moves a folder with everything in it: "Samples/SQL" -> "Database/SQL". */
-export function moveFolder(projectId: string, from: unknown, to: unknown) {
-  const a = normFolder(from), b = normFolder(to);
-  if (!a) throw new Error('Choose a folder');
-  if (!b) throw new Error('Give the folder a name');
-  if (inside(b, a) && a !== b) throw new Error('A folder cannot go inside itself');
-  const swap = (p: string) => (inside(p, a) ? b + p.slice(a.length) : p);
-  tx(() => {
-    for (const r of q.all<{ id: string; folder: string }>('select id, folder from flows where project_id = ?', projectId)) if (inside(r.folder, a)) q.run('update flows set folder = ? where id = ?', swap(r.folder), r.id);
-    for (const r of q.all<{ path: string }>('select path from flow_folders where project_id = ?', projectId)) {
-      if (!inside(r.path, a)) continue;
-      q.run('delete from flow_folders where project_id = ? and path = ?', projectId, r.path);
-      q.run('insert into flow_folders(project_id, path) values(?, ?) on conflict do nothing', projectId, swap(r.path));
-    }
-    q.run('insert into flow_folders(project_id, path) values(?, ?) on conflict do nothing', projectId, b);
-  });
-  return listFolders(projectId);
-}
-
-/** Removes a folder; its Sutras and sub-folders move up to the folder above. Nothing is deleted. */
-export function removeFolder(projectId: string, path: unknown) {
-  const a = normFolder(path);
-  if (!a) throw new Error('Choose a folder');
-  const up = a.split('/').slice(0, -1).join('/');
-  const lift = (p: string) => (p === a ? up : [up, p.slice(a.length + 1)].filter(Boolean).join('/'));
-  tx(() => {
-    for (const r of q.all<{ id: string; folder: string }>('select id, folder from flows where project_id = ?', projectId)) if (inside(r.folder, a)) q.run('update flows set folder = ? where id = ?', lift(r.folder), r.id);
-    for (const r of q.all<{ path: string }>('select path from flow_folders where project_id = ?', projectId)) {
-      if (!inside(r.path, a)) continue;
-      q.run('delete from flow_folders where project_id = ? and path = ?', projectId, r.path);
-      const p = lift(r.path);
-      if (p && r.path !== a) q.run('insert into flow_folders(project_id, path) values(?, ?) on conflict do nothing', projectId, p);
-    }
-  });
-  return listFolders(projectId);
 }
 
 export function saveFlow(id: string | undefined, raw: any, projectId?: string) {
@@ -193,7 +157,7 @@ export function deleteFlow(id: string) {
 export function publish(flowId: string, note = '') {
   const f = getFlow(flowId);
   if (!f) throw new Error('Sutra not found');
-  const v = validateDoc(f.doc);
+  const v = validateDoc(f.doc, f.project_id);
   if (v.errors.length) throw new Error(v.errors.join('\n'));
   const version = f.version + 1;
   tx(() => {

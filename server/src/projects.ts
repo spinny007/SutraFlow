@@ -87,7 +87,7 @@ export function deleteProject(id: string) {
   tx(() => {
     q.run('delete from resources where project_id = ?', id);
     q.run('delete from schemas where project_id = ?', id);
-    q.run('delete from flow_folders where project_id = ?', id);
+    q.run('delete from folders where project_id = ?', id);
     q.run('delete from projects where id = ?', id);
   });
   setSetting(`ops:${id}`, emptyOps);

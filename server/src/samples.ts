@@ -2,7 +2,8 @@ import { getFlow, listFlows, saveFlow, setFlowFolder } from './flows.js';
 import { listResources, RESOURCE_KINDS, saveResource } from './resources.js';
 import { allActivities } from './palettes/index.js';
 import { config } from './config.js';
-import { getSetting } from './db.js';
+import { getSetting, q, setSetting } from './db.js';
+import { setItemFolder } from './folders.js';
 import type { Field, FlowNode } from './engine/types.js';
 
 /**
@@ -60,6 +61,7 @@ export function addSamples(projectId: string, ids?: string[]) {
   let current = '';
   const want = (id: string) => { current = id; return !ids?.length || ids.includes(id); };
   const taken = new Set(listFlows(projectId).map(f => f.name.toLowerCase()));
+  const resourcesBefore = new Set(listResources(undefined, projectId).map(r => r.id));
   const name = (base: string) => { let n = base; for (let i = 2; taken.has(n.toLowerCase()); i++) n = `${base} ${i}`; taken.add(n.toLowerCase()); return n; };
   const made: { id: string; sample: string }[] = [];
   const save = (doc: any) => { const f = saveFlow(undefined, { ...doc, name: name(doc.name) }, projectId); made.push({ id: f.id, sample: current }); return f; };
@@ -800,6 +802,8 @@ export function addSamples(projectId: string, ids?: string[]) {
 
   linkConnections(projectId, made, conn);
   for (const m of made) setFlowFolder(m.id, folderOf(m.sample));
+  // Connections made for the samples go to a Samples folder of Resources.
+  for (const r of listResources(undefined, projectId)) if (!resourcesBefore.has(r.id) && !r.folder) setItemFolder('resources', r.id, 'Samples');
 
   return [forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, release, localAi, email, queue, timer, fileTrig, textFormats, dbUpd, dbProc, soapCall, emailIn, firebase, google, apps, aiMore,
     soapPublic, soapMock, soapMockCall, msCustomers, msStock, msOrders, sqlInstall, sqlService, ...sftp, ...ftp]
@@ -824,6 +828,47 @@ const FOLDERS: Record<string, string[]> = {
 };
 const folderOf = (sample: string) => { const t = Object.entries(FOLDERS).find(([, ids]) => ids.includes(sample)); return t ? `Samples/${t[0]}` : 'Samples'; };
 for (const s of SAMPLES) s.folder = folderOf(s.id);
+
+/** Sample Sutras by folder, to file the ones added before folders existed. A test keeps this list in step with addSamples(). */
+export const SAMPLE_SUTRAS: Record<string, string[]> = {
+  'Samples/Data and mapping': ['For-Each mapping', 'Loop on an activity', 'XML in and out', 'JSONata, JavaScript and HTML', 'Parse JSON and CSV text'],
+  'Samples/Flow control': ['Calculate tax (called Sutra)', 'Invoice with a sub-Sutra', 'Try and catch with logs', 'Router, Switch and Merge', 'Connection conditions', 'Channel sender', 'Channel listener', 'Counter, Wait and Sutra variables'],
+  'Samples/Apps': ['Skill: Write CSV file', 'Skill: Post to Facebook page', 'Firebase order to app', 'Google Drive and Sheets', 'Dropbox YouTube and any API'],
+  'Samples/REST and microservices': ['REST API with validation', 'Microservice Customers', 'Microservice Stock', 'Microservice Orders'],
+  'Samples/Files': ['CSV import and totals', 'Folder of files', 'Timer nightly archive', 'File trigger CSV drop folder'],
+  'Samples/SQL': ['Database (SQLite)', 'SQL update', 'Stored procedure', 'SQL install script', 'Procedure as a microservice'],
+  'Samples/Operations': ['Scripts', 'Release pipeline'],
+  'Samples/AI': ['Local AI with Ollama', 'AI translate extract route and reply'],
+  'Samples/Email': ['Email a report', 'Email trigger orders by email'],
+  'Samples/Queues': ['Queue in and out'],
+  'Samples/SOAP': ['Call a SOAP service', 'Call a public SOAP service', 'Mock SOAP weather service', 'Call the mock SOAP service'],
+  'Samples/SFTP and FTP': ['SFTP upload list read archive', 'SFTP file trigger', 'FTP upload list read archive', 'FTP file trigger'],
+};
+/** Letters and digits only, without "Sample:" and a " 2" suffix, so renamed punctuation still matches. */
+const sampleKey = (name: string) => name.replace(/^Sample:\s*/i, '').replace(/\s+\d+$/, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const SAMPLE_FOLDER = new Map(Object.entries(SAMPLE_SUTRAS).flatMap(([f, names]) => names.map(n => [sampleKey(n), f] as const)));
+
+/**
+ * Moves sample Sutras still at the top level into their Samples/<topic> folder, and "Sample ..."
+ * connections into Resources/Samples. Only items at the top are touched; returns how many moved.
+ */
+export function fileSamples(projectId: string) {
+  let n = 0;
+  for (const f of listFlows(projectId)) {
+    if (f.folder || !(/^(Sample|Skill):/i.test(f.name))) continue;
+    const folder = SAMPLE_FOLDER.get(sampleKey(f.name));
+    if (folder) { setFlowFolder(f.id, folder); n++; }
+  }
+  for (const r of listResources(undefined, projectId)) if (!r.folder && /^Sample /.test(r.name)) { setItemFolder('resources', r.id, 'Samples'); n++; }
+  return n;
+}
+
+/** Once per data folder: files the samples of every project added before folders existed. */
+export function fileSamplesOnce() {
+  if (getSetting('folders.samplesFiled', false)) return;
+  for (const p of q.all<{ id: string }>('select id from projects')) fileSamples(p.id);
+  setSetting('folders.samplesFiled', true);
+}
 
 /** Connections a sample step needs but did not set: made once per project as "Sample ..." placeholders to fill in. */
 const SAMPLE_CONNECTIONS: Record<string, (type: string) => { name: string; config: Record<string, any> } | null> = {

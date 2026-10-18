@@ -137,6 +137,8 @@ export interface Resource {
   project_id?: string | null;
   config: Record<string, any>;
   updated_at?: string;
+  /** Folder in the Project explorer ('' = the top). */
+  folder?: string;
   /** Hash of the effective settings, for caches (changes when ops overrides change). */
   rev?: string;
 }

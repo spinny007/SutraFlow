@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import * as folders from './folders.js';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fs from 'node:fs';
@@ -456,14 +457,22 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     return req.body?.folder ? flows.setFlowFolder(f.id, req.body.folder) : f;
   });
   app.put('/api/flows/:id/folder', async (req: any) => flows.setFlowFolder(req.params.id, req.body?.folder));
-  app.get('/api/projects/:id/folders', async (req: any) => flows.listFolders(projects.requireProject(req.params.id).id));
-  app.post('/api/projects/:id/folders', async (req: any) => flows.createFolder(projects.requireProject(req.params.id).id, req.body?.path));
-  app.post('/api/projects/:id/folders/move', async (req: any) => flows.moveFolder(projects.requireProject(req.params.id).id, req.body?.from, req.body?.to));
-  app.delete('/api/projects/:id/folders', async (req: any) => flows.removeFolder(projects.requireProject(req.params.id).id, req.query?.path));
+  // Folders of the explorer: ?area= / area = sutras (default), resources, schemas or wsdl.
+  app.get('/api/projects/:id/folders', async (req: any) => folders.listFolders(projects.requireProject(req.params.id).id, folders.areaOf(req.query?.area)));
+  app.post('/api/projects/:id/folders', async (req: any) => folders.createFolder(projects.requireProject(req.params.id).id, req.body?.path, folders.areaOf(req.body?.area)));
+  app.post('/api/projects/:id/folders/move', async (req: any) => folders.moveFolder(projects.requireProject(req.params.id).id, req.body?.from, req.body?.to, folders.areaOf(req.body?.area)));
+  app.delete('/api/projects/:id/folders', async (req: any) => folders.removeFolder(projects.requireProject(req.params.id).id, req.query?.path, folders.areaOf(req.query?.area)));
+  app.put('/api/resources/:id/folder', async (req: any) => { folders.setItemFolder('resources', req.params.id, req.body?.folder); return { ok: true }; });
+  app.put('/api/schemas/:id/folder', async (req: any) => {
+    const s = schemas.getSchema(req.params.id);
+    if (!s) throw new HttpError(404, 'Schema not found');
+    folders.setItemFolder(s.kind === 'wsdl' ? 'wsdl' : 'schemas', s.id, req.body?.folder);
+    return { ok: true };
+  });
   app.get('/api/flows/:id', async (req: any) => flows.getFlow(req.params.id) ?? (() => { throw new HttpError(404, 'Sutra not found'); })());
   app.put('/api/flows/:id', async (req: any) => flows.saveFlow(req.params.id, req.body));
   app.delete('/api/flows/:id', async (req: any) => { flows.deleteFlow(req.params.id); return { ok: true }; });
-  app.post('/api/flows/validate', async (req: any) => flows.validateDoc(flows.normalizeDoc(req.body)));
+  app.post('/api/flows/validate', async (req: any) => flows.validateDoc(flows.normalizeDoc(req.body), req.query?.projectId ? String(req.query.projectId) : undefined));
   app.get('/api/flows/:id/versions', async (req: any) => flows.versions(req.params.id));
   app.post('/api/flows/:id/deploy', async (req: any) => flows.deploy(req.params.id, req.body?.version ? Number(req.body.version) : undefined, req.body?.note));
   app.delete('/api/flows/:id/deploy', async (req: any) => { flows.undeploy(req.params.id); return { ok: true }; });
