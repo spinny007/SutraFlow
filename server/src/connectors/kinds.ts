@@ -3,6 +3,15 @@ import type { Field, ResourceKind } from '../engine/types.js';
 const F = (k: string, label: string, type: Field['type'], def?: any, extra: Partial<Field> = {}): Field => ({ k, label, type, def, ...extra });
 const when = (k: string, ...vals: any[]) => ({ showIf: { k, in: vals } });
 
+/** Time limits of SFTP and FTP connections: servers far away or busy need more. */
+const timing = (sftp: boolean): Field[] => [
+  F('connectSec', 'Connect time limit (seconds)', 'number', 30, { help: 'Reaching the server and signing in.' }),
+  F('responseSec', 'Response time limit (seconds)', 'number', 60, { help: 'Each operation: list, read, write, rename. A large file is one operation; allow for its transfer time.' }),
+  F('attempts', 'Connection attempts', 'number', 3, { help: 'Tries to connect again after a network failure. A wrong password or host key is not retried.' }),
+  F('retryWaitSec', 'Wait between attempts (seconds)', 'number', 5),
+  ...(sftp ? [F('keepaliveSec', 'Keep-alive every (seconds)', 'number', 15, { help: 'Keeps slow sessions open through firewalls. 0 = off.' })] : []),
+];
+
 /** Connection kinds for the connector palettes (email, databases, service bus, Firebase, OAuth apps). */
 export const CONNECTOR_KINDS: ResourceKind[] = [
   {
@@ -72,6 +81,31 @@ export const CONNECTOR_KINDS: ResourceKind[] = [
       F('serviceAccountSecret', 'Service account key (JSON)', 'secret', '', { help: 'Vault secret holding the JSON key downloaded from Firebase > Project settings > Service accounts.' }),
       F('databaseUrl', 'Realtime Database URL', 'text', 'https://PROJECT-default-rtdb.firebaseio.com'),
       F('apiBase', 'API base (testing only)', 'text', '', { help: 'Leave empty. Lets tests point at an emulator.' }),
+    ],
+  },
+  {
+    kind: 'sftp', name: 'SFTP server', desc: 'A server reached over SSH file transfer, for the SFTP / FTP palette.',
+    fields: [
+      F('host', 'Host', 'text', 'sftp.example.com'), F('port', 'Port', 'number', 22),
+      F('user', 'Username', 'text', ''),
+      F('auth', 'Sign in with', 'select', 'password', { options: ['password', 'private key'] }),
+      F('passwordSecret', 'Password', 'secret', '', when('auth', 'password')),
+      F('keySecret', 'Private key', 'secret', '', { help: 'Vault secret holding the private key (OpenSSH or PEM).', ...when('auth', 'private key') }),
+      F('passphraseSecret', 'Key passphrase', 'secret', '', when('auth', 'private key')),
+      F('hostFingerprint', 'Host key fingerprint', 'text', '', { help: 'SHA256:... of the server key. Set it to refuse any other server; Test connection shows it.' }),
+      F('baseFolder', 'Base folder', 'text', '/', { help: 'Activities work inside this folder only.' }),
+      ...timing(true),
+    ],
+  },
+  {
+    kind: 'ftp', name: 'FTP server', desc: 'An FTP or FTPS server, for the SFTP / FTP palette.',
+    fields: [
+      F('host', 'Host', 'text', 'ftp.example.com'), F('port', 'Port', 'number', 21),
+      F('user', 'Username', 'text', ''), F('passwordSecret', 'Password', 'secret', ''),
+      F('security', 'Security', 'select', 'explicit TLS', { options: ['explicit TLS', 'implicit TLS', 'none'], help: 'none sends the password unencrypted: only inside a trusted network.' }),
+      F('verifyTls', 'Verify server certificate', 'bool', true, when('security', 'explicit TLS', 'implicit TLS')),
+      F('baseFolder', 'Base folder', 'text', '/', { help: 'Activities work inside this folder only.' }),
+      ...timing(false),
     ],
   },
   {

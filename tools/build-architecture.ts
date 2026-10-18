@@ -66,11 +66,11 @@ const FILES: Group[] = [
     id: 'projects', title: 'Projects, Sutras, connections and releases', intro: 'What a team edits and ships.',
     files: [
       ['server/src/projects.ts', 'Projects: Project variables, logging, deployment (ops) configs with <code>${env:...}</code> values, runtime variable values, Sengine variables and the server policies (Sengine variables writable, scripts allowed, release activities allowed).'],
-      ['server/src/flows.ts', 'Sutras: draft, published versions, deploy and undeploy, validation (names, ports, connection conditions, Error handler, API paths, MCP skill names), and the change hooks.'],
+      ['server/src/flows.ts', 'Sutras: draft, published versions, deploy and undeploy, validation (names, ports, connection conditions, Error handler, API paths, MCP skill names), the change hooks, and folders (a <code>folder</code> path per Sutra, empty folders in <code>flow_folders</code>; move, rename and remove lift contents, never delete).'],
       ['server/src/resources.ts', 'Connection types (HTTP, SOAP, security profiles, API policies, AI provider, MCP server and the connector kinds) with their fields and icons. Secret values are never stored here, only vault names.'],
       ['server/src/resourceTest.ts', '"Test connection": tries the settings as they are on screen, with variables resolved, and reports the result in one sentence.'],
       ['server/src/secrets.ts', 'The vault. AES-256-GCM with a key from <code>SUTRA_MASTER_KEY</code> or <code>data/master.key</code>. Values are never returned by the API and are masked in run history.'],
-      ['server/src/samples.ts', 'The sample catalog offered in "New Sutra" (' + SAMPLES.length + ' samples covering every activity) and <code>addSamples()</code>.'],
+      ['server/src/samples.ts', 'The sample catalog offered in "New Sutra" (' + SAMPLES.length + ' samples covering every activity) and <code>addSamples()</code>: each goes to a <code>Samples/&lt;topic&gt;</code> folder, and every empty connection field it uses is set to a "Sample ..." connection made once in the project.'],
       ['server/src/channels.ts', 'Send to channel: starts every deployed Sutra of the project whose Channel trigger listens on that name. Reads deployments from the database, so it works across engines.'],
       ['server/src/packages.ts', 'Project packages: build (Sutras at their versions, connections, schemas, variables, a sha256 checksum), read, check, deploy (matched by name, prune or keep others, deployment config), history, rollback and test.'],
       ['server/src/cli.ts', 'The <code>sutra</code> command: package, check, deploy, test, history, rollback, secret, status. Works on a remote server with a token or on the local data folder.'],
@@ -135,7 +135,8 @@ const FILES: Group[] = [
     id: 'connectors', title: 'Connectors', intro: 'Activities for outside systems and their connection kinds.',
     files: [
       ['server/src/connectors/kinds.ts', 'Connection kinds for email, databases, service bus, Firebase and OAuth apps.'],
-      ['server/src/connectors/db.ts', 'DB Ops for PostgreSQL, MySQL, SQL Server, Oracle and SQLite: query, update, stored procedure and transaction, with <code>:name</code> parameters always bound (no SQL injection), and connection pools.'],
+      ['server/src/connectors/remote.ts', 'SFTP / FTP palette: Remote file trigger, list, read, write and move / copy / delete over SFTP (ssh2-sftp-client, host key fingerprint check) or FTP / FTPS (basic-ftp). Paths are fenced into the base folder; each connection has connect and response time limits, attempts with a wait between them (sign-in and host key errors are not retried) and SFTP keep-alive.'],
+      ['server/src/connectors/db.ts', 'DB Ops for PostgreSQL, MySQL, SQL Server, Oracle and SQLite: query, update, stored procedure, SQL script and transaction, with <code>:name</code> parameters always bound (no SQL injection), and connection pools.'],
       ['server/src/connectors/bus.ts', 'Service Bus for Kafka, RabbitMQ and AMQP 1.0 brokers: publish, subscribe and confirm, with message headers, acknowledge modes and reply queues.'],
       ['server/src/connectors/email.ts', 'Send email (SMTP) and the mailbox trigger (IMAP).'],
       ['server/src/connectors/firebase.ts', 'Firestore, Realtime Database and Cloud Messaging with a service account.'],
@@ -244,6 +245,7 @@ const FILES: Group[] = [
     files: [
       ['test/helpers.ts', 'Test environment per suite: temporary data folder, ports (with <code>SUTRA_TEST_PORT_OFFSET</code>), node and edge builders, a capture server.'],
       ['test/proc.ts', 'Starts real server processes for multi-process tests and waits for their endpoints.'],
+      ['test/sftpserver.ts', 'A small SFTP server over a local folder (ssh2), with password and key sign-in and an optional slow read, for the SFTP tests.'],
     ],
   },
 ];
@@ -294,6 +296,7 @@ const TABLE_TEXT: Record<string, string> = {
   gw_apps: 'Gateway apps: name, contact, scopes, plan, disabled.',
   gw_keys: 'API keys of gateway apps: hash, name, expiry and last use. Key values are never stored.',
   gw_usage: 'Requests per app in the current minute, hour, day and month windows, shared by every engine.',
+  flow_folders: 'Folders of a project kept while nothing is in them; the folder of each Sutra is the folder column of flows.',
   gw_requests: 'The gateway request log: time, engine, method, path, service, app, caller, status, time taken, sizes, address, run and error.',
   users: 'People and system accounts: password hash, name, email, disabled, must change password, failed sign-ins, lock, sessions valid after, last sign-in.',
   roles: 'Built-in and custom roles with their permissions.',

@@ -273,7 +273,7 @@ export class Engine {
     const ac = new AbortController();
     this.controllers.set(t.id, ac);
     const s = node.settings || {};
-    const timeoutMs = Number(s.timeoutMs) > 0 ? Number(s.timeoutMs) : DEFAULT_TIMEOUT_MS;
+    const timeoutMs = Number(s.timeoutMs) > 0 ? Number(s.timeoutMs) : act.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const trigName = run.doc.nodes.find(n => n.id === run.row.trigger_node)?.name;
     const gv = effectiveVariables(run.row.project_id);
     gv.secrets.forEach(v => revealed.add(v));

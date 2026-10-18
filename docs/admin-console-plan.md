@@ -15,8 +15,8 @@ architecture page.
 | 3. Tuning parameters | Done (with Sutra restart, the Console panel and shell commands for every action) |
 | 4. Gateway management | Done |
 | 5. Alerts and dashboard | Done |
-| 6. SFTP / FTP palette | Next |
-| 7. Git projects from the designer | Planned |
+| 6. SFTP / FTP palette | Done (with time limits per connection, Sutra folders and new samples) |
+| 7. Git projects from the designer | Next |
 | 8. Cluster throughput | Planned |
 
 ## Phase 1: Users, roles, access and audit (server)
@@ -75,8 +75,18 @@ restart. Environment variables stay the defaults.
 
 ## Phase 6: SFTP / FTP palette
 
-List, read, write, move, delete and a folder trigger over SFTP (password or key from the vault) and
-FTP / FTPS.
+Done. List, read, write, move / copy / delete and a Remote file trigger over SFTP (password or key
+from the vault, host key fingerprint) and FTP / FTPS, fenced into a base folder.
+
+- **Time limits** per connection for slow or far-away servers: connect, response per operation,
+  attempts and the wait between them (sign-in and host key errors are not retried), SFTP keep-alive.
+  SFTP / FTP steps allow 10 minutes by default; an activity may now declare its own default step time limit.
+- **Samples**: public SOAP service (WSDL), mock SOAP service and its caller, JSON microservices
+  (Customers, Stock, and Orders calling both), SQL install script with a stored procedure exposed as a
+  REST microservice (MySQL), SFTP and FTP. New **SQL script** activity for install scripts.
+- **Sample connections**: every connection a sample uses is made once in the project as "Sample ...".
+- **Folders for Sutras**: folders and sub-folders in the explorer, drag and drop, rename, move, remove
+  (contents move up; nothing deleted). Samples go to `Samples/<topic>`; packages keep folders.
 
 ## Phase 7: Git projects from the designer
 

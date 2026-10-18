@@ -7,6 +7,7 @@ import { aiCall } from './ai/providers.js';
 import { testDatabase } from './connectors/db.js';
 import { testBroker } from './connectors/bus.js';
 import { testMail } from './connectors/email.js';
+import { testRemote } from './connectors/remote.js';
 import { testFirebase } from './connectors/firebase.js';
 import { connectionStatus } from './connectors/oauth.js';
 
@@ -72,6 +73,9 @@ async function run(r: Resource, secret: (n: string, w?: string) => string): Prom
       return testMail(r, secret);
     case 'database':
       return testDatabase(r, secret);
+    case 'sftp':
+    case 'ftp':
+      return testRemote(r, secret);
     case 'kafka':
     case 'rabbitmq':
     case 'amqp1':

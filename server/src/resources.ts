@@ -125,7 +125,7 @@ export const RESOURCE_KINDS: ResourceKind[] = [
 
 /** Explorer symbols, in the same plain style as the activity symbols. */
 const ICONS: Record<string, string> = {
-  httpConnection: '⇄', outboundAuth: '⚿', inboundPolicy: '⛨', aiProvider: '✦', smtp: '✉', imap: '⇩',
+  httpConnection: '⇄', outboundAuth: '⚿', inboundPolicy: '⛨', aiProvider: '✦', smtp: '✉', imap: '⇩', sftp: '⇅', ftp: '⇵',
   database: '⛁', kafka: '≋', rabbitmq: '⇶', amqp1: '⇉', firebase: '◭', oauthApp: '⚇', mcpServer: '✧',
 };
 for (const k of RESOURCE_KINDS) k.icon ||= ICONS[k.kind] || '⚙';

@@ -18,6 +18,8 @@ export interface Field {
 }
 
 export interface ActivityMeta {
+  /** Default step time limit (ms). */
+  timeoutMs?: number;
   type: string;
   palette: string;
   name: string;
@@ -57,6 +59,8 @@ export interface FlowDoc { name: string; description?: string; variables?: Proce
 export interface FlowSummary {
   id: string;
   name: string;
+  /** Folder in the project, such as "Samples/SQL"; '' = the top. */
+  folder?: string;
   version: number;
   updated_at: string;
   deployed: { version: number; enabled: boolean; deployed_at: string } | null;

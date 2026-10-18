@@ -152,6 +152,8 @@ export interface Activity {
   noErrorPort?: boolean;
   /** Has no input connection: started by the engine itself (error handler). */
   noInput?: boolean;
+  /** Default step time limit for this activity (Settings tab), when longer work is normal. */
+  timeoutMs?: number;
   /** What the output looks like, shown in the mapper before the first run. */
   outputHint?: any;
   /** Design-time shape of the output; inputSchema is the shape of what this step receives. */

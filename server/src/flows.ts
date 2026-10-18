@@ -14,9 +14,9 @@ export interface FlowRow { id: string; name: string; project_id: string; doc: Fl
 const rowToFlow = (r: any): FlowRow => ({ ...r, doc: JSON.parse(r.doc) });
 
 export function listFlows(projectId?: string) {
-  return q.all<any>(`select f.id, f.name, f.project_id, f.version, f.updated_at, d.version dversion, d.enabled, d.deployed_at
+  return q.all<any>(`select f.id, f.name, f.project_id, f.folder, f.version, f.updated_at, d.version dversion, d.enabled, d.deployed_at
     from flows f left join deployments d on d.flow_id = f.id ${projectId ? 'where f.project_id = ?' : ''} order by f.name`, ...(projectId ? [projectId] : [])).map(r => ({
-    id: r.id, name: r.name, projectId: r.project_id, version: r.version, updated_at: r.updated_at,
+    id: r.id, name: r.name, projectId: r.project_id, folder: r.folder || '', version: r.version, updated_at: r.updated_at,
     deployed: r.dversion != null ? { version: r.dversion, enabled: !!r.enabled, deployed_at: r.deployed_at } : null,
   }));
 }
@@ -91,6 +91,80 @@ export function validateDoc(doc: FlowDoc) {
   }
   if (doc.nodes.filter(n => engine.activity(n.type)?.noInput).length > 1) errors.push('A Sutra can have only one Error handler');
   return { errors, warnings };
+}
+
+// ---------- folders ----------
+// A Sutra sits in a folder of its project ('' = the top). Folders are paths such as "Samples/SQL";
+// one with nothing in it is kept in flow_folders. Folders only arrange the list: names stay unique per project.
+
+/** Cleans a folder path: "/a//b/ " -> "a/b". */
+export function normFolder(v: unknown) {
+  const parts = String(v ?? '').split(/[\\/]+/).map(p => p.replace(/[\u0000-\u001f<>:"|?*]/g, '').trim()).filter(Boolean);
+  if (parts.length > 8) throw new Error('Folders go at most 8 levels deep');
+  if (parts.some(p => p.length > 60)) throw new Error('A folder name has at most 60 characters');
+  return parts.join('/');
+}
+const parentsOf = (p: string) => p.split('/').map((_x, i, a) => a.slice(0, i + 1).join('/'));
+const inside = (p: string, folder: string) => p === folder || p.startsWith(folder + '/');
+
+/** Every folder of a project (with their parents), sorted. */
+export function listFolders(projectId: string) {
+  const all = new Set<string>();
+  for (const r of q.all<{ path: string }>('select path from flow_folders where project_id = ?', projectId)) parentsOf(r.path).forEach(p => all.add(p));
+  for (const r of q.all<{ folder: string }>("select distinct folder from flows where project_id = ? and folder != ''", projectId)) parentsOf(r.folder).forEach(p => all.add(p));
+  return [...all].sort((a, b) => a.localeCompare(b));
+}
+
+export function createFolder(projectId: string, path: unknown) {
+  const p = normFolder(path);
+  if (!p) throw new Error('Give the folder a name');
+  q.run('insert into flow_folders(project_id, path) values(?, ?) on conflict do nothing', projectId, p);
+  return listFolders(projectId);
+}
+
+/** Moves a Sutra to a folder ('' = the top); the folder is made when missing. */
+export function setFlowFolder(id: string, folder: unknown) {
+  const p = normFolder(folder);
+  if (!q.get('select 1 from flows where id = ?', id)) throw new Error('Sutra not found');
+  q.run('update flows set folder = ? where id = ?', p, id);
+  return getFlow(id)!;
+}
+
+/** Renames or moves a folder with everything in it: "Samples/SQL" -> "Database/SQL". */
+export function moveFolder(projectId: string, from: unknown, to: unknown) {
+  const a = normFolder(from), b = normFolder(to);
+  if (!a) throw new Error('Choose a folder');
+  if (!b) throw new Error('Give the folder a name');
+  if (inside(b, a) && a !== b) throw new Error('A folder cannot go inside itself');
+  const swap = (p: string) => (inside(p, a) ? b + p.slice(a.length) : p);
+  tx(() => {
+    for (const r of q.all<{ id: string; folder: string }>('select id, folder from flows where project_id = ?', projectId)) if (inside(r.folder, a)) q.run('update flows set folder = ? where id = ?', swap(r.folder), r.id);
+    for (const r of q.all<{ path: string }>('select path from flow_folders where project_id = ?', projectId)) {
+      if (!inside(r.path, a)) continue;
+      q.run('delete from flow_folders where project_id = ? and path = ?', projectId, r.path);
+      q.run('insert into flow_folders(project_id, path) values(?, ?) on conflict do nothing', projectId, swap(r.path));
+    }
+    q.run('insert into flow_folders(project_id, path) values(?, ?) on conflict do nothing', projectId, b);
+  });
+  return listFolders(projectId);
+}
+
+/** Removes a folder; its Sutras and sub-folders move up to the folder above. Nothing is deleted. */
+export function removeFolder(projectId: string, path: unknown) {
+  const a = normFolder(path);
+  if (!a) throw new Error('Choose a folder');
+  const up = a.split('/').slice(0, -1).join('/');
+  const lift = (p: string) => (p === a ? up : [up, p.slice(a.length + 1)].filter(Boolean).join('/'));
+  tx(() => {
+    for (const r of q.all<{ id: string; folder: string }>('select id, folder from flows where project_id = ?', projectId)) if (inside(r.folder, a)) q.run('update flows set folder = ? where id = ?', lift(r.folder), r.id);
+    for (const r of q.all<{ path: string }>('select path from flow_folders where project_id = ?', projectId)) {
+      if (!inside(r.path, a)) continue;
+      q.run('delete from flow_folders where project_id = ? and path = ?', projectId, r.path);
+      const p = lift(r.path);
+      if (p && r.path !== a) q.run('insert into flow_folders(project_id, path) values(?, ?) on conflict do nothing', projectId, p);
+    }
+  });
+  return listFolders(projectId);
 }
 
 export function saveFlow(id: string | undefined, raw: any, projectId?: string) {

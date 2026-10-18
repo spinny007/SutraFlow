@@ -3,7 +3,7 @@ import { q, now } from './db.js';
 import { version as sutraVersion } from './config.js';
 import { engine } from './engine/engine.js';
 import type { FlowDoc } from './engine/types.js';
-import { listFlows, getFlow, saveFlow, publish, deploy, undeploy, versionDoc, validateDoc, deployedFlows, normPath, normalizeDoc } from './flows.js';
+import { listFlows, getFlow, saveFlow, publish, deploy, undeploy, versionDoc, validateDoc, deployedFlows, normPath, normalizeDoc, setFlowFolder } from './flows.js';
 import { listResources, saveResource, RESOURCE_KINDS } from './resources.js';
 import { listSchemas, getSchema, saveSchema } from './schemas.js';
 import { listProjects, getProject, saveProject, importOpsFile } from './projects.js';
@@ -17,7 +17,7 @@ import { getSecret } from './secrets.js';
  */
 export const PACKAGE_FORMAT = 'sutraflow-package';
 
-export interface PackageSutra { id: string; name: string; version: number; deployed: boolean; doc: FlowDoc }
+export interface PackageSutra { id: string; name: string; version: number; deployed: boolean; doc: FlowDoc; folder?: string }
 export interface Package {
   format: typeof PACKAGE_FORMAT;
   formatVersion: 1;
@@ -88,11 +88,11 @@ export function buildPackage(projectId: string, o: { version?: string; note?: st
   for (const f of listFlows(projectId)) {
     if (o.sutras?.length && !o.sutras.some(n => n.toLowerCase() === f.name.toLowerCase())) continue;
     if (f.deployed) {
-      sutras.push({ id: f.id, name: f.name, version: f.deployed.version, deployed: true, doc: versionDoc(f.id, f.deployed.version)! });
+      sutras.push({ id: f.id, name: f.name, version: f.deployed.version, deployed: true, doc: versionDoc(f.id, f.deployed.version)!, ...(f.folder ? { folder: f.folder } : {}) });
     } else if (o.includeUndeployed !== false) {
       const row = getFlow(f.id)!;
       const v = row.version && JSON.stringify(versionDoc(f.id, row.version)) === JSON.stringify(row.doc) ? row.version : publish(f.id, `Package ${version}`).version;
-      sutras.push({ id: f.id, name: f.name, version: v, deployed: false, doc: versionDoc(f.id, v)! });
+      sutras.push({ id: f.id, name: f.name, version: v, deployed: false, doc: versionDoc(f.id, v)!, ...(f.folder ? { folder: f.folder } : {}) });
     }
   }
   if (o.sutras?.length) {
@@ -220,9 +220,12 @@ export function deployPackage(input: unknown, o: { project?: string; ops?: unkno
     const current = before ? (s.deployed ? before.deployed?.version : before.deployed ? undefined : before.version) : undefined;
     const same = current !== undefined && current > 0 && JSON.stringify(normalizeDoc(versionDoc(id, current))) === JSON.stringify(doc);
     keep.add(id);
-    if (same) { report.sutras.push({ name: s.name, action: 'unchanged', version: current!, deployed: s.deployed }); continue; }
+    // A new Sutra takes the package's folder; one already here stays where it was put.
+    const placeFolder = () => { if (!before && s.folder) setFlowFolder(id, s.folder); };
+    if (same) { placeFolder(); report.sutras.push({ name: s.name, action: 'unchanged', version: current!, deployed: s.deployed }); continue; }
     report.unchanged = false;
     saveFlow(id, doc, pid);
+    placeFolder();
     const pub = publish(id, `Package ${p.name} ${p.version}`);
     if (s.deployed) {
       const d = deploy(id, pub.version);

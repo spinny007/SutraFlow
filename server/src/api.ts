@@ -67,7 +67,7 @@ function activityMeta() {
   return engine.allActivities().map(a => {
     const meta: any = {
       type: a.type, palette: a.palette, name: a.name, glyph: a.glyph, desc: a.desc, trigger: !!a.trigger,
-      join: !!a.join, noErrorPort: !!a.noErrorPort, noInput: !!a.noInput, fields: a.fields, outputHint: a.outputHint ?? null,
+      join: !!a.join, noErrorPort: !!a.noErrorPort, noInput: !!a.noInput, fields: a.fields, outputHint: a.outputHint ?? null, timeoutMs: a.timeoutMs ?? 120000,
     };
     if (typeof a.ports === 'function') {
       const field = a.fields.find(f => f.ports)?.k || '';
@@ -451,7 +451,15 @@ export async function buildAdmin(): Promise<FastifyInstance> {
 
   // ---------- flows ----------
   app.get('/api/flows', async (req: any) => { const ok = seen(req); return flows.listFlows(req.query?.projectId).filter(f => ok(f.projectId)); });
-  app.post('/api/flows', async (req: any) => flows.saveFlow(undefined, req.body?.doc ?? req.body, req.body?.projectId));
+  app.post('/api/flows', async (req: any) => {
+    const f = flows.saveFlow(undefined, req.body?.doc ?? req.body, req.body?.projectId);
+    return req.body?.folder ? flows.setFlowFolder(f.id, req.body.folder) : f;
+  });
+  app.put('/api/flows/:id/folder', async (req: any) => flows.setFlowFolder(req.params.id, req.body?.folder));
+  app.get('/api/projects/:id/folders', async (req: any) => flows.listFolders(projects.requireProject(req.params.id).id));
+  app.post('/api/projects/:id/folders', async (req: any) => flows.createFolder(projects.requireProject(req.params.id).id, req.body?.path));
+  app.post('/api/projects/:id/folders/move', async (req: any) => flows.moveFolder(projects.requireProject(req.params.id).id, req.body?.from, req.body?.to));
+  app.delete('/api/projects/:id/folders', async (req: any) => flows.removeFolder(projects.requireProject(req.params.id).id, req.query?.path));
   app.get('/api/flows/:id', async (req: any) => flows.getFlow(req.params.id) ?? (() => { throw new HttpError(404, 'Sutra not found'); })());
   app.put('/api/flows/:id', async (req: any) => flows.saveFlow(req.params.id, req.body));
   app.delete('/api/flows/:id', async (req: any) => { flows.deleteFlow(req.params.id); return { ok: true }; });

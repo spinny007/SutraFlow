@@ -197,13 +197,15 @@ function WsdlLoader({ node, setCfg }: { node: FlowNode; setCfg(k: string, v: any
 
 function StepSettings({ node, updateNode, breakpoints, toggleBreakpoint }: Props & { node: FlowNode }) {
   const s = node.settings || {};
+  const { meta } = useCatalog();
+  const defTimeout = meta.activities.find(x => x.type === node.type)?.timeoutMs ?? 120000;
   const set = (k: string, v: any) => updateNode(node.id, n => ({ ...n, settings: { ...(n.settings || {}), [k]: v } }));
   return (
     <>
       <p className="muted" style={{ marginTop: 0 }}>How the engine runs this activity.</p>
       <div className="fld"><label htmlFor="rt">Retries on failure</label><input id="rt" type="number" min={0} max={20} value={s.retries ?? 0} onChange={e => set('retries', Number(e.target.value))} /><div className="hint">Each retry waits twice as long as the one before.</div></div>
       <div className="fld"><label htmlFor="rd">First retry delay (ms)</label><input id="rd" type="number" min={0} value={s.retryDelayMs ?? 1000} onChange={e => set('retryDelayMs', Number(e.target.value))} /></div>
-      <div className="fld"><label htmlFor="to">Timeout (ms)</label><input id="to" type="number" min={0} value={s.timeoutMs ?? 120000} onChange={e => set('timeoutMs', Number(e.target.value))} /></div>
+      <div className="fld"><label htmlFor="to">Timeout (ms)</label><input id="to" type="number" min={0} value={s.timeoutMs ?? defTimeout} onChange={e => set('timeoutMs', Number(e.target.value))} /><div className="hint">Longest time one try of this step may take. Default {defTimeout / 1000} s{defTimeout !== 120000 ? ' for this activity' : ''}.</div></div>
       <div className="fld"><label className="check"><input type="checkbox" checked={!!s.disabled} onChange={e => set('disabled', e.target.checked)} /> Skip this activity (pass input through)</label></div>
       <div className="fld"><label htmlFor="lp">Loop</label>
         <select id="lp" value={s.loop || ''} onChange={e => set('loop', e.target.value)}>

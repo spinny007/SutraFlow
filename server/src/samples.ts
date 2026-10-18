@@ -1,6 +1,9 @@
-import { listFlows, saveFlow } from './flows.js';
-import { listResources, saveResource } from './resources.js';
-import type { FlowNode } from './engine/types.js';
+import { getFlow, listFlows, saveFlow, setFlowFolder } from './flows.js';
+import { listResources, RESOURCE_KINDS, saveResource } from './resources.js';
+import { allActivities } from './palettes/index.js';
+import { config } from './config.js';
+import { getSetting } from './db.js';
+import type { Field, FlowNode } from './engine/types.js';
 
 /**
  * Sample Sutras added to a project from "New Sutra": For-Each mapping, loops on an activity,
@@ -12,8 +15,8 @@ const N = (id: string, type: string, name: string, x: number, y: number, config:
 let e = 0;
 const E = (from: string, to: string, port = 'out') => ({ id: `e${++e}`, from, port, to });
 
-/** The samples offered in "New Sutra"; needs = what must be set up before the sample can run. */
-export const SAMPLES: { id: string; name: string; desc: string; palettes: string; needs?: string }[] = [
+/** The samples offered in "New Sutra"; needs = what must be set up before the sample can run; folder = where its Sutras go. */
+export const SAMPLES: { id: string; name: string; desc: string; palettes: string; needs?: string; folder?: string }[] = [
   { id: 'foreach', name: 'For-Each mapping', palettes: 'Data & mapping', desc: 'Invoice lines from order lines: Where, Sort by, position(), and a For-Each grouped by country.' },
   { id: 'loops', name: 'Loop on an activity', palettes: 'Data & mapping, General', desc: 'One activity run per order, and a counter repeated while below 3, like polling a job.' },
   { id: 'subsutra', name: 'Sub-Sutra (Call Sutra and Return)', palettes: 'Flow control', desc: 'A reusable tax Sutra and an invoice Sutra that calls it and logs its result or its failure.' },
@@ -43,14 +46,25 @@ export const SAMPLES: { id: string; name: string; desc: string; palettes: string
   { id: 'localai', name: 'Local AI with Ollama', palettes: 'AI', desc: 'Classifies, summarises and rates a customer email with a local Ollama model, offline.', needs: 'Ollama running on this machine with at least one model' },
   { id: 'email', name: 'Email a report', palettes: 'Email, Custom code', desc: 'Builds an HTML report and emails it; a failure is logged.', needs: 'an Email (SMTP) connection' },
   { id: 'queue', name: 'Queue in and out', palettes: 'Service Bus', desc: 'Takes orders from a queue, reshapes them, publishes them on, and confirms each message.', needs: 'a Kafka, RabbitMQ or ActiveMQ connection' },
+  { id: 'soappublic', name: 'Call a public SOAP service', palettes: 'SOAP / Web services', desc: 'Loads the WSDL of a free public calculator service and calls its Add and Multiply operations; a fault and a network error each have their own output.', needs: 'internet access' },
+  { id: 'soapmock', name: 'Mock SOAP service and its caller', palettes: 'Triggers, SOAP / Web services', desc: 'A mock weather SOAP service with a WSDL and canned replies (and a fault for an unknown city), and a Sutra that calls it with a raw envelope, as you would before the real service exists.', needs: 'the mock service deployed' },
+  { id: 'microservices', name: 'JSON microservices', palettes: 'Triggers, HTTP, Data & mapping', desc: 'Three small REST services: Customers and Stock answer JSON on their own, Orders calls both over HTTP and returns one combined JSON reply (or 404 / 409 / 502).', needs: 'the three services deployed' },
+  { id: 'sqlinstall', name: 'SQL install script and procedure as a service', palettes: 'DB Ops, Triggers, HTTP', desc: 'A SQL script creates a MySQL database, two tables, seed rows and a stored procedure; a REST service then calls the procedure and returns its rows as JSON.', needs: 'MySQL (Laragon: 127.0.0.1:3306, user root, no password); the service deployed' },
+  { id: 'sftp', name: 'SFTP: upload, list, read, archive', palettes: 'SFTP / FTP, Triggers', desc: 'Writes a CSV to an SFTP server, appends to it, lists and reads it back, copies it to an archive folder and deletes the copy; a Remote file trigger picks up new files in inbox/.', needs: 'an SFTP server: set the host, user and password of the "Sample SFTP" connection' },
+  { id: 'ftp', name: 'FTP: upload, list, read, archive', palettes: 'SFTP / FTP, Triggers', desc: 'The same steps over FTP or FTPS: write, list with rows, read lines, move to a dated archive name; a Remote file trigger picks up new files and deletes them after the run.', needs: 'an FTP server: set the host, user and password of the "Sample FTP" connection' },
   { id: 'skills', name: 'MCP skills: Write CSV file, Post to Facebook page', palettes: 'Triggers, AI, Files, Apps', desc: 'Two Sutras that AI assistants call as tools, on a sample MCP server.', needs: 'a security policy on the MCP server; a Facebook connection for posting' },
 ];
 
 export function addSamples(projectId: string, ids?: string[]) {
-  const want = (id: string) => !ids?.length || ids.includes(id);
+  // want() also notes which sample is being built, so save() knows the folder of the Sutras it makes.
+  let current = '';
+  const want = (id: string) => { current = id; return !ids?.length || ids.includes(id); };
   const taken = new Set(listFlows(projectId).map(f => f.name.toLowerCase()));
   const name = (base: string) => { let n = base; for (let i = 2; taken.has(n.toLowerCase()); i++) n = `${base} ${i}`; taken.add(n.toLowerCase()); return n; };
-  const save = (doc: any) => saveFlow(undefined, { ...doc, name: name(doc.name) }, projectId);
+  const made: { id: string; sample: string }[] = [];
+  const save = (doc: any) => { const f = saveFlow(undefined, { ...doc, name: name(doc.name) }, projectId); made.push({ id: f.id, sample: current }); return f; };
+  const conn = (kind: string, cname: string, cfg: Record<string, any>) => listResources(kind, projectId).find(r => r.name === cname) || saveResource({ kind, name: cname, project_id: projectId, config: cfg });
+  const gw = `http://127.0.0.1:${getSetting<{ httpPort?: number }>('gateway', {}).httpPort || config.gatewayHttpPort}`;
 
   const order = {
     orderId: 'A-1001', customer: 'asha traders', country: 'IN',
@@ -633,7 +647,229 @@ export function addSamples(projectId: string, ids?: string[]) {
     edges: [E('t', 'm'), E('m', 'p'), E('p', 'c')],
   });
 
-  return [forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, release, localAi, email, queue, timer, fileTrig, textFormats, dbUpd, dbProc, soapCall, emailIn, firebase, google, apps, aiMore]
+  // Public SOAP service from its WSDL.
+  const soapPublic = want('soappublic') && save({
+    name: 'Sample: Call a public SOAP service',
+    description: 'Invoke SOAP service loads the WSDL of the free calculator service at dneonline.com, calls Add, then Multiply with the sum. A SOAP fault (for example a number too large) goes to the fault output; no internet goes to the error output. "Load operations" in the step lists what a WSDL offers.',
+    nodes: [
+      N('s', 'start', 'Numbers', 60, 220, { payload: JSON.stringify({ a: 12, b: 30, times: 3 }, null, 2) }),
+      N('a', 'soapInvoke', 'Add', 380, 220, { mode: 'wsdl', connection: '', auth: '', wsdlSource: 'url', wsdlUrl: 'http://www.dneonline.com/calculator.asmx?WSDL', service: 'Calculator', port: 'CalculatorSoap', operation: 'Add', argsSource: 'template', args: '{\n  "intA": {{input.a}},\n  "intB": {{input.b}}\n}', responseSchema: '', endpoint: '' }),
+      N('m', 'soapInvoke', 'Multiply', 700, 160, { mode: 'wsdl', connection: '', auth: '', wsdlSource: 'url', wsdlUrl: 'http://www.dneonline.com/calculator.asmx?WSDL', service: 'Calculator', port: 'CalculatorSoap', operation: 'Multiply', argsSource: 'template', args: '{\n  "intA": {{input.body.AddResult}},\n  "intB": {{trigger.times}}\n}', responseSchema: '', endpoint: '' }),
+      N('l', 'log', 'Log result', 1020, 160, { level: 'info', message: '({{trigger.a}} + {{trigger.b}}) x {{trigger.times}} = {{input.body.MultiplyResult}} ({{input.ms}} ms)' }),
+      N('f', 'log', 'Log fault', 700, 320, { level: 'warn', message: 'SOAP fault {{input.fault.code}}: {{input.fault.message}}' }),
+      N('x', 'log', 'Log call failure', 700, 460, { level: 'error', message: 'Service not reached: {{input.error.message}}' }),
+    ],
+    edges: [E('s', 'a'), E('a', 'm'), E('m', 'l'), E('a', 'f', 'fault'), E('m', 'f', 'fault'), E('a', 'x', 'error'), E('m', 'x', 'error')],
+  });
+
+  // Mock SOAP service (canned replies) and a caller.
+  const weather = { Pune: { TempC: 31, Sky: 'Sunny', Humidity: 40 }, Shimla: { TempC: 12, Sky: 'Cloudy', Humidity: 70 }, Chennai: { TempC: 34, Sky: 'Humid', Humidity: 82 } };
+  const soapMock = want('soapmock') && save({
+    name: 'Sample: Mock SOAP weather service',
+    description: `A stand-in for a SOAP service that does not exist yet. Deploy it: the WSDL is at ${gw}/samples/soap/weather?wsdl. GetWeather answers canned values for Pune, Shimla and Chennai; any other city gets a SOAP fault. ListCities returns the names.`,
+    nodes: [
+      N('t', 'soapService', 'Weather WS', 60, 220, { serviceName: 'WeatherService', namespace: 'urn:sutra:weather', path: '/samples/soap/weather', operations: 'GetWeather, ListCities', soapVersion: '1.1', policy: '', testRequest: JSON.stringify({ operation: 'GetWeather', body: { City: 'Pune' } }, null, 2) }),
+      N('j', 'jsonata', 'Canned weather', 380, 140, { source: '{{input}}', expression: `(\n  $data := ${JSON.stringify(weather)};\n  $w := $lookup($data, body.City);\n  $w ? $merge([{ "City": body.City }, $w]) : { "City": body.City, "Unknown": true }\n)` }),
+      N('i', 'if', 'Known city', 700, 140, { left: '{{input.Unknown}}', op: 'is empty', right: '' }),
+      N('r', 'soapReply', 'Reply weather', 1020, 60, { kind: 'response', bodySource: 'template', body: '{{input}}' }),
+      N('f', 'soapReply', 'Unknown city', 1020, 220, { kind: 'fault', faultCode: 'soap:Client', faultString: 'No weather for {{input.City}}' }),
+      N('c', 'soapReply', 'Reply cities', 380, 340, { kind: 'response', bodySource: 'template', body: JSON.stringify({ City: Object.keys(weather) }) }),
+    ],
+    edges: [E('t', 'j', 'GetWeather'), E('j', 'i'), E('i', 'r', 'true'), E('i', 'f', 'false'), E('t', 'c', 'ListCities')],
+  });
+  const soapMockCall = soapMock && save({
+    name: 'Sample: Call the mock SOAP service',
+    description: `Calls GetWeather on the deployed "Sample: Mock SOAP weather service" (${gw}/samples/soap/weather) with a raw envelope, then reads the reply. Try the city Delhi to see the fault output. When the real service is ready, change only the endpoint.`,
+    nodes: [
+      N('s', 'start', 'City', 60, 220, { payload: JSON.stringify({ city: 'Pune' }, null, 2) }),
+      N('c', 'soapInvoke', 'GetWeather', 380, 220, { mode: 'raw envelope', connection: '', auth: '', endpoint: `${gw}/samples/soap/weather`, soapVersion: '1.1', soapAction: 'urn:sutra:weather/GetWeather',
+        bodyXml: '<w:GetWeather xmlns:w="urn:sutra:weather">\n  <w:City>{{input.city | xmlescape}}</w:City>\n</w:GetWeather>', extraHeaders: '' }),
+      N('l', 'log', 'Log weather', 700, 140, { level: 'info', message: '{{input.body.GetWeatherResponse.City}}: {{input.body.GetWeatherResponse.TempC}} C, {{input.body.GetWeatherResponse.Sky}} ({{input.ms}} ms)' }),
+      N('f', 'log', 'Log fault', 700, 300, { level: 'warn', message: 'SOAP fault {{input.fault.code}}: {{input.fault.message}}' }),
+      N('x', 'log', 'Log not deployed', 700, 440, { level: 'error', message: 'Mock service not reached (deploy it first): {{input.error.message}}' }),
+    ],
+    edges: [E('s', 'c'), E('c', 'l'), E('c', 'f', 'fault'), E('c', 'x', 'error')],
+  });
+
+  // JSON microservices: two small services and one that composes them.
+  const customers = { 'C-1': { id: 'C-1', name: 'Asha Traders', city: 'Pune', tier: 'gold' }, 'C-2': { id: 'C-2', name: 'Kandy Stores', city: 'Colombo', tier: 'silver' } };
+  const stock = { 'TEA-01': { sku: 'TEA-01', title: 'Assam tea 500 g', price: 240, onHand: 120 }, 'CUP-02': { sku: 'CUP-02', title: 'Clay cups, set of 6', price: 450, onHand: 4 } };
+  const lookupService = (id: string, title: string, path: string, data: any, key: string, y: number, test: string) => save({
+    name: `Sample: Microservice ${title}`,
+    description: `GET ${path}/:id answers one ${title.toLowerCase()} record as JSON, or 404. Deploy it; "Sample: Microservice Orders" calls it at ${gw}${path}/...`,
+    nodes: [
+      N('t', 'restService', `${title} API`, 60, y, { method: 'GET', path: `${path}/:id`, policy: '', maxBodyKb: 16, bodySchema: '', testRequest: JSON.stringify({ method: 'GET', params: { id: test }, query: {}, headers: {}, body: null }, null, 2) }),
+      N('j', 'jsonata', `Find ${key}`, 380, y, { source: '{{input}}', expression: `(\n  $data := ${JSON.stringify(data)};\n  $lookup($data, params.id) ? $lookup($data, params.id) : { "missing": params.id }\n)` }),
+      N('i', 'if', 'Found', 700, y, { left: '{{input.missing}}', op: 'is empty', right: '' }),
+      N('ok', 'httpResponse', 'Reply 200', 1020, y - 80, { status: '200', contentType: 'application/json', bodySource: 'template', body: '{{input}}', headers: [] }),
+      N('no', 'httpResponse', 'Reply 404', 1020, y + 80, { status: '404', contentType: 'application/json', bodySource: 'template', body: `{"error": "No ${key} {{input.missing}}"}`, headers: [] }),
+    ],
+    edges: [E('t', 'j'), E('j', 'i'), E('i', 'ok', 'true'), E('i', 'no', 'false')],
+  });
+  const msCustomers = want('microservices') && lookupService('customers', 'Customers', '/samples/ms/customers', customers, 'customer', 220, 'C-1');
+  const msStock = msCustomers && lookupService('stock', 'Stock', '/samples/ms/stock', stock, 'item', 220, 'TEA-01');
+  const msOrders = msCustomers && save({
+    name: 'Sample: Microservice Orders',
+    description: `POST /samples/ms/orders with {"customerId", "sku", "qty"}: calls the Customers and Stock services over HTTP (${gw}), checks the stock, and answers one JSON order. 404 from a service goes to the error output and becomes 404; too little stock is 409. Deploy all three, then: curl -X POST ${gw}/samples/ms/orders -H "Content-Type: application/json" -d "{\\"customerId\\":\\"C-1\\",\\"sku\\":\\"TEA-01\\",\\"qty\\":3}"`,
+    nodes: [
+      N('t', 'restService', 'Orders API', 60, 240, { method: 'POST', path: '/samples/ms/orders', policy: '', maxBodyKb: 16, bodySchema: '', testRequest: JSON.stringify({ method: 'POST', params: {}, query: {}, headers: { 'content-type': 'application/json' }, body: { customerId: 'C-1', sku: 'TEA-01', qty: 3 } }, null, 2) }),
+      N('c', 'httpRequest', 'Get customer', 380, 240, { connection: '', auth: '', method: 'GET', url: `${gw}/samples/ms/customers/{{input.body.customerId | urlencode}}`, query: [], headers: [{ k: 'Accept', v: 'application/json' }], bodyType: 'none', parse: 'json', failOn: '4xx or 5xx' }),
+      N('k', 'httpRequest', 'Get stock', 700, 240, { connection: '', auth: '', method: 'GET', url: `${gw}/samples/ms/stock/{{trigger.body.sku | urlencode}}`, query: [], headers: [{ k: 'Accept', v: 'application/json' }], bodyType: 'none', parse: 'json', failOn: '4xx or 5xx' }),
+      N('j', 'jsonata', 'Combine', 1020, 240, { source: '{{input}}', expression: '(\n  $c := $nodes."Get customer".body;\n  $s := $nodes."Get stock".body;\n  $q := $number($trigger.body.qty);\n  {\n    "orderId": "O-" & $string($millis()),\n    "customer": { "id": $c.id, "name": $c.name, "tier": $c.tier },\n    "item": { "sku": $s.sku, "title": $s.title, "qty": $q, "price": $s.price },\n    "discount": $c.tier = "gold" ? 0.1 : 0,\n    "total": $round($q * $s.price * ($c.tier = "gold" ? 0.9 : 1), 2),\n    "inStock": $s.onHand >= $q\n  }\n)' }),
+      N('i', 'if', 'In stock', 1340, 240, { left: '{{input.inStock}}', op: 'equals', right: 'true' }),
+      N('ok', 'httpResponse', 'Reply 201', 1660, 160, { status: '201', contentType: 'application/json', bodySource: 'template', body: '{{input}}', headers: [] }),
+      N('no', 'httpResponse', 'Reply 409', 1660, 320, { status: '409', contentType: 'application/json', bodySource: 'template', body: '{"error": "Only {{nodes.Get stock.body.onHand}} in stock", "order": {{input | json}}}', headers: [] }),
+      N('nf', 'httpResponse', 'Reply 404 or 502', 700, 440, { status: "=if(contains({input.error.message}, 'returned 404'), '404', '502')", contentType: 'application/json', bodySource: 'template', body: '{"error": {{input.error.message | json}}}', headers: [] }),
+    ],
+    edges: [E('t', 'c'), E('c', 'k'), E('k', 'j'), E('j', 'i'), E('i', 'ok', 'true'), E('i', 'no', 'false'), E('c', 'nf', 'error'), E('k', 'nf', 'error')],
+  });
+
+  // SQL install script, then a stored procedure exposed as a microservice (MySQL).
+  const mysql = !want('sqlinstall') ? null : conn('database', 'Sample MySQL', { driver: 'mysql', host: '127.0.0.1', port: 3306, database: '', user: 'root', passwordSecret: '' });
+  const sqlInstall = mysql && save({
+    name: 'Sample: SQL install script',
+    description: 'SQL script runs an install script on the "Sample MySQL" connection (Laragon defaults: 127.0.0.1:3306, root, no password): creates the database sutraflow_samples, the tables customers and orders, seed rows, and the stored procedure customer_orders(customer, min_total). Safe to run again. Then deploy "Sample: Procedure as a microservice".',
+    nodes: [
+      N('s', 'start', 'Install', 60, 220, { payload: JSON.stringify({ seedCity: 'Pune' }, null, 2) }),
+      N('x', 'dbScript', 'Install schema', 380, 220, { connection: mysql.id, onError: 'stop', params: [{ k: 'city', v: '{{input.seedCity}}' }], sql: [
+        'CREATE DATABASE IF NOT EXISTS sutraflow_samples',
+        'CREATE TABLE IF NOT EXISTS sutraflow_samples.customers (\n  id VARCHAR(20) PRIMARY KEY,\n  name VARCHAR(100) NOT NULL,\n  city VARCHAR(60)\n)',
+        'CREATE TABLE IF NOT EXISTS sutraflow_samples.orders (\n  id VARCHAR(20) PRIMARY KEY,\n  customer_id VARCHAR(20) NOT NULL,\n  total DECIMAL(10,2) NOT NULL,\n  status VARCHAR(20) NOT NULL,\n  INDEX (customer_id)\n)',
+        "INSERT IGNORE INTO sutraflow_samples.customers (id, name, city) VALUES\n  ('C-1', 'Asha Traders', :city),\n  ('C-2', 'Kandy Stores', 'Colombo')",
+        "INSERT IGNORE INTO sutraflow_samples.orders (id, customer_id, total, status) VALUES\n  ('A-1', 'C-1', 1200.00, 'paid'),\n  ('A-2', 'C-1', 300.00, 'open'),\n  ('A-3', 'C-2', 2450.50, 'paid'),\n  ('A-4', 'C-1', 5400.00, 'paid')",
+        'DROP PROCEDURE IF EXISTS sutraflow_samples.customer_orders',
+        'CREATE PROCEDURE sutraflow_samples.customer_orders(IN p_customer VARCHAR(20), IN p_min DECIMAL(10,2))\nBEGIN\n  SELECT o.id, c.name AS customer, o.total, o.status\n  FROM sutraflow_samples.orders o JOIN sutraflow_samples.customers c ON c.id = o.customer_id\n  WHERE o.customer_id = p_customer AND o.total >= p_min\n  ORDER BY o.total DESC;\nEND',
+      ].join('\n;\n') }),
+      N('l', 'log', 'Log install', 700, 160, { level: 'info', message: '{{input.ran}} statements ran on {{input.connection}} in {{input.ms}} ms' }),
+      N('e', 'log', 'Log failure', 700, 320, { level: 'error', message: 'Install stopped: {{input.error.message}}' }),
+    ],
+    edges: [E('s', 'x'), E('x', 'l'), E('x', 'e', 'error')],
+  });
+  const sqlService = mysql && save({
+    name: 'Sample: Procedure as a microservice',
+    description: `GET /samples/sql/customers/:id/orders?min=500 calls the stored procedure customer_orders (made by "Sample: SQL install script") and answers its rows as JSON. Deploy it, then open ${gw}/samples/sql/customers/C-1/orders?min=500`,
+    nodes: [
+      N('t', 'restService', 'Customer orders API', 60, 220, { method: 'GET', path: '/samples/sql/customers/:id/orders', policy: '', maxBodyKb: 16, bodySchema: '', testRequest: JSON.stringify({ method: 'GET', params: { id: 'C-1' }, query: { min: '500' }, headers: {}, body: null }, null, 2) }),
+      N('p', 'dbProcedure', 'customer_orders', 380, 220, { connection: mysql.id, procedure: 'sutraflow_samples.customer_orders', params: [{ k: 'p_customer', v: '{{input.params.id}}' }, { k: 'p_min', v: "=coalesce({input.query.min}, '0')" }] }),
+      N('ok', 'httpResponse', 'Reply 200', 700, 140, { status: '200', contentType: 'application/json', bodySource: 'template', body: '{"customer": "{{trigger.params.id}}", "count": {{input.rowCount}}, "orders": {{input.rows | json}}, "ms": {{input.ms}}}', headers: [] }),
+      N('bad', 'httpResponse', 'Reply 500', 700, 320, { status: '500', contentType: 'application/json', bodySource: 'template', body: '{"error": {{input.error.message | json}}}', headers: [] }),
+    ],
+    edges: [E('t', 'p'), E('p', 'ok'), E('p', 'bad', 'error')],
+  });
+
+  // SFTP and FTP: every remote file step, and a trigger.
+  const remote = (proto: 'SFTP' | 'FTP', c: { id: string }) => {
+    const k = proto === 'SFTP' ? { protocol: 'SFTP', sftpConn: c.id } : { protocol: 'FTP', ftpConn: c.id };
+    const tag = proto.toLowerCase();
+    const steps = save({
+      name: `Sample: ${proto} upload list read archive`,
+      description: `Uses the "Sample ${proto}" connection (set its host, user and password first; servers far away may need longer time limits there). Writes outbox/orders.csv, appends a line, lists the CSV files with their rows, reads the file as lines, copies it to archive/, moves the original to a dated name and deletes the copy.`,
+      nodes: [
+        N('s', 'start', 'Orders', 60, 220, { payload: JSON.stringify({ rows: sales.slice(0, 3), more: 'A-9,Late Shop,IN,paid,75' }, null, 2) }),
+        N('w', 'remoteWrite', 'Write CSV', 340, 220, { ...k, path: 'outbox/orders.csv', format: 'CSV from rows', rows: '{{input.rows}}', delimiter: ',', header: true, encoding: 'utf-8', lineEnding: 'LF', append: false, overwrite: true }),
+        N('a', 'remoteWrite', 'Append a line', 620, 220, { ...k, path: 'outbox/orders.csv', format: 'text', content: '{{trigger.more}}', encoding: 'utf-8', append: true, newline: true }),
+        N('l', 'remoteList', 'List CSV files', 900, 220, { ...k, folder: 'outbox', pattern: '*.csv', recursive: false, sort: 'newest first', max: 100, format: 'CSV rows', encoding: 'utf-8', delimiter: ',', header: true, skipRows: 0, trimValues: true, decimal: '.' }),
+        N('r', 'remoteRead', 'Read as lines', 1180, 220, { ...k, path: 'outbox/orders.csv', format: 'lines', encoding: 'utf-8', skipRows: 1, maxMb: 50 }),
+        N('c', 'remoteMove', 'Copy to archive', 1460, 220, { ...k, action: 'copy', from: 'outbox/orders.csv', to: 'archive/orders-copy.csv', overwrite: true }),
+        N('m', 'remoteMove', 'Move to dated name', 1740, 220, { ...k, action: 'move', from: 'outbox/orders.csv', to: "=concat('archive/orders-', current-timestamp('YYYYMMDD-HHmmss'), '.csv')", overwrite: true }),
+        N('d', 'remoteMove', 'Delete the copy', 2020, 220, { ...k, action: 'delete', from: 'archive/orders-copy.csv' }),
+        N('g', 'log', 'Log done', 2300, 220, { level: 'info', message: '{{nodes.List CSV files.count}} CSV files listed, {{nodes.Read as lines.count}} order lines read on {{nodes.Read as lines.server}}' }),
+        N('n', 'log', 'Log nothing listed', 900, 380, { level: 'warn', message: 'No CSV files in outbox/' }),
+        N('x', 'log', 'Log failure', 620, 520, { level: 'error', message: '{{input.error.step}}: {{input.error.message}}' }),
+      ],
+      edges: [E('s', 'w'), E('w', 'a'), E('a', 'l'), E('l', 'r'), E('r', 'c'), E('c', 'm'), E('m', 'd'), E('d', 'g'), E('l', 'n', 'empty'),
+        ...['w', 'a', 'l', 'r', 'c', 'm', 'd'].map(n => E(n, 'x', 'error'))],
+    });
+    const trig = save({
+      name: `Sample: ${proto} file trigger`,
+      description: `While deployed, checks inbox/ on the "Sample ${proto}" server every 60 seconds for new *.csv files that have stopped growing, reads each as CSV rows, logs the total, and ${proto === 'SFTP' ? 'moves the file to inbox/done/' : 'deletes the file'} after a successful run.`,
+      nodes: [
+        N('t', 'remoteTrigger', 'New CSV in inbox', 60, 220, { ...k, folder: 'inbox', pattern: '*.csv', pollSeconds: 60, after: proto === 'SFTP' ? 'move to a folder' : 'delete', moveTo: 'inbox/done', format: 'CSV rows', encoding: 'utf-8', delimiter: ',', header: true, skipRows: 0, trimValues: true, decimal: '.', maxMb: 50,
+          testEvent: JSON.stringify({ name: 'orders.csv', path: '/inbox/orders.csv', relativePath: 'inbox/orders.csv', size: 120, server: `${tag}.example.com`, rows: [{ id: 'A-1', amount: 300 }, { id: 'A-2', amount: 1200 }], count: 2 }, null, 2) }),
+        N('a', 'aggregate', 'Total', 380, 220, { list: '{{input.rows}}', field: 'amount', fn: 'sum', groupBy: '' }),
+        N('l', 'log', 'Log file', 700, 220, { level: 'info', message: '{{trigger.name}} from {{trigger.server}}: {{trigger.count}} rows, total {{input.result}}' }),
+      ],
+      edges: [E('t', 'a'), E('a', 'l')],
+    });
+    return [steps, trig];
+  };
+  const sftpConn = !want('sftp') ? null : conn('sftp', 'Sample SFTP', { host: 'sftp.example.com', port: 22, user: 'sample', auth: 'password', baseFolder: '/', connectSec: 30, responseSec: 120, attempts: 3, retryWaitSec: 5, keepaliveSec: 15 });
+  const sftp = sftpConn ? remote('SFTP', sftpConn) : [];
+  const ftpConn = !want('ftp') ? null : conn('ftp', 'Sample FTP', { host: 'ftp.example.com', port: 21, user: 'sample', security: 'explicit TLS', verifyTls: true, baseFolder: '/', connectSec: 30, responseSec: 120, attempts: 3, retryWaitSec: 5 });
+  const ftp = ftpConn ? remote('FTP', ftpConn) : [];
+
+  linkConnections(projectId, made, conn);
+  for (const m of made) setFlowFolder(m.id, folderOf(m.sample));
+
+  return [forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, release, localAi, email, queue, timer, fileTrig, textFormats, dbUpd, dbProc, soapCall, emailIn, firebase, google, apps, aiMore,
+    soapPublic, soapMock, soapMockCall, msCustomers, msStock, msOrders, sqlInstall, sqlService, ...sftp, ...ftp]
     .filter((f): f is NonNullable<typeof f> & { id: string; name: string } => !!f)
-    .map(f => ({ id: f.id, name: f.name }));
+    .map(f => ({ id: f.id, name: f.name, folder: folderOf(made.find(m => m.id === f.id)?.sample || '') }));
+}
+
+/** Where each sample's Sutras go: Samples/<topic>. */
+const FOLDERS: Record<string, string[]> = {
+  'Data and mapping': ['foreach', 'loops', 'xml', 'transform', 'textformats'],
+  'Flow control': ['subsutra', 'trycatch', 'routing', 'conditions', 'counter', 'channels'],
+  'REST and microservices': ['rest', 'microservices'],
+  'SOAP': ['soapcall', 'soappublic', 'soapmock'],
+  'Files': ['csv', 'folder', 'filetrigger', 'timer'],
+  'SFTP and FTP': ['sftp', 'ftp'],
+  'SQL': ['database', 'dbmore', 'sqlinstall'],
+  'AI': ['localai', 'aimore'],
+  'Email': ['email', 'emailin'],
+  'Apps': ['firebase', 'google', 'apps', 'skills'],
+  'Queues': ['queue'],
+  'Operations': ['scripts', 'release'],
+};
+const folderOf = (sample: string) => { const t = Object.entries(FOLDERS).find(([, ids]) => ids.includes(sample)); return t ? `Samples/${t[0]}` : 'Samples'; };
+for (const s of SAMPLES) s.folder = folderOf(s.id);
+
+/** Connections a sample step needs but did not set: made once per project as "Sample ..." placeholders to fill in. */
+const SAMPLE_CONNECTIONS: Record<string, (type: string) => { name: string; config: Record<string, any> } | null> = {
+  smtp: () => ({ name: 'Sample SMTP', config: { host: 'smtp.example.com', port: 587 } }),
+  imap: () => ({ name: 'Sample IMAP', config: { host: 'imap.example.com', port: 993 } }),
+  database: () => ({ name: 'Sample MySQL', config: { driver: 'mysql', host: '127.0.0.1', port: 3306, database: '', user: 'root', passwordSecret: '' } }),
+  kafka: () => ({ name: 'Sample Kafka', config: { brokers: ['localhost:9092'] } }),
+  rabbitmq: () => ({ name: 'Sample RabbitMQ', config: {} }),
+  amqp1: () => ({ name: 'Sample ActiveMQ', config: {} }),
+  firebase: () => ({ name: 'Sample Firebase', config: {} }),
+  sftp: () => ({ name: 'Sample SFTP', config: { host: 'sftp.example.com', port: 22, user: 'sample' } }),
+  ftp: () => ({ name: 'Sample FTP', config: { host: 'ftp.example.com', port: 21, user: 'sample' } }),
+  aiProvider: () => ({ name: 'Local Ollama', config: { engine: 'Ollama', model: '', baseUrl: '', maxTokens: 600, ollamaApi: 'chat' } }),
+  oauthApp: type => /^facebook/i.test(type) ? { name: 'Sample Facebook', config: { provider: 'facebook', scopes: 'pages_manage_posts pages_read_engagement' } }
+    : /^dropbox/i.test(type) ? { name: 'Sample Dropbox', config: { provider: 'dropbox', scopes: 'files.content.write files.content.read' } }
+    : { name: 'Sample Google', config: { provider: 'google' } },
+};
+
+/** Shown in the Inspector: same rule as the field list (showIf, showIfAny), with defaults for unset fields. */
+function shown(f: Field, cfg: Record<string, any>, fields: Field[]) {
+  const val = (k: string) => (k in cfg ? cfg[k] : fields.find(x => x.k === k)?.def);
+  const holds = (c: { k: string; in: any[] }) => c.in.includes(val(c.k));
+  if (f.showIf && !holds(f.showIf)) return false;
+  if (f.showIfAny && !f.showIfAny.some(holds)) return false;
+  return true;
+}
+
+/** Sets every empty, visible connection field of the sample steps to a sample connection in the project. */
+function linkConnections(projectId: string, made: { id: string }[], conn: (kind: string, name: string, cfg: Record<string, any>) => { id: string }) {
+  const kinds = new Set(RESOURCE_KINDS.map(k => k.kind));
+  for (const m of made) {
+    const f = getFlow(m.id);
+    if (!f) continue;
+    let changed = false;
+    for (const n of f.doc.nodes) {
+      const act = allActivities.find(a => a.type === n.type);
+      for (const fld of act?.fields || []) {
+        if (fld.type !== 'resource' || !fld.resourceKind || !kinds.has(fld.resourceKind) || n.config[fld.k]) continue;
+        const make = SAMPLE_CONNECTIONS[fld.resourceKind];
+        if (!make || !shown(fld, n.config, act!.fields)) continue;
+        const c = make(n.type);
+        if (!c) continue;
+        n.config[fld.k] = conn(fld.resourceKind, c.name, c.config).id;
+        changed = true;
+      }
+    }
+    if (changed) saveFlow(m.id, f.doc, projectId);
+  }
 }

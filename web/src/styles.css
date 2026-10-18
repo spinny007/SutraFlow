@@ -207,6 +207,13 @@ table.t tr.click:hover td { background: var(--paper); }
 .xi { width: 16px; text-align: center; color: var(--muted); font-size: 12px; flex: none; }
 .xl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tw { border: 0; background: none; width: 16px; padding: 0; color: var(--muted); flex: none; font-size: 11px; }
+.xrow { display: flex; align-items: center; border-radius: 6px; }
+.xrow .xitem { flex: 1; }
+.xrow.drop, .xroot.drop { background: color-mix(in srgb, var(--focus) 18%, transparent); outline: 1px dashed var(--focus); }
+.xmore { border: 0; background: none; color: var(--muted); width: 20px; padding: 0; opacity: 0; flex: none; }
+.xrow:hover .xmore, .xmore:focus-visible { opacity: 1; }
+.xfolder .xl { font-weight: 600; }
+.xroot { display: flex; align-items: center; gap: 8px; padding: 4px 6px; margin-top: 2px; border-radius: 6px; }
 
 /* ---------- wide inspector for the mapper ---------- */
 .work.wide { grid-template-columns: 236px minmax(260px, 1fr) min(66vw, 1120px); }

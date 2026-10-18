@@ -353,7 +353,8 @@ function DesignerInner() {
     const d = structuredClone(t.doc);
     let name = d.name, i = 2;
     while (flows.some(f => f.name.toLowerCase() === name.toLowerCase())) name = `${d.name} ${i++}`;
-    const f = await post('/api/flows', { doc: { ...d, name }, projectId });
+    // A new Sutra goes in the folder of the one open now.
+    const f = await post('/api/flows', { doc: { ...d, name }, projectId, folder: flows.find(x => x.id === flowId)?.folder || '' });
     await refreshFlows();
     setFlowId(f.id);
     setDialog(null);
@@ -398,14 +399,17 @@ function DesignerInner() {
             <button role="tab" aria-selected={leftTab === 'palette'} className={leftTab === 'palette' ? 'act' : ''} onClick={() => setLeftTab('palette')}>Palettes</button>
           </div>
           {leftTab === 'project'
-            ? <ProjectExplorer flows={flows} flowId={flowId} openFlow={id => setFlowId(id)} newFlow={() => setDialog('new')} sel={explorerSel} setSel={setExplorerSel} />
+            ? <ProjectExplorer flows={flows} flowId={flowId} openFlow={id => setFlowId(id)} newFlow={() => setDialog('new')} sel={explorerSel} setSel={setExplorerSel} onFlowsChanged={refreshFlows} />
             : <Palette meta={meta} onAdd={t => addNode(t)} />}
         </aside>
         <section className="canvas" onDragOver={e => { if (e.dataTransfer.types.includes(ACT_MIME)) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } }} onDrop={onDrop}>
           <div className="flowbar">
             <select className="name" aria-label="Sutra" value={flowId || ''} onChange={e => setFlowId(e.target.value)}>
               {!flows.length && <option value="">No Sutras yet</option>}
-              {flows.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+              {flows.filter(f => !f.folder).map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+              {[...new Set(flows.map(f => f.folder || '').filter(Boolean))].sort().map(d => (
+                <optgroup key={d} label={d}>{flows.filter(f => f.folder === d).map(f => <option key={f.id} value={f.id}>{f.name}</option>)}</optgroup>
+              ))}
             </select>
             <button className="btn" onClick={() => setDialog('new')}>+ New Sutra</button>
             {doc && <>

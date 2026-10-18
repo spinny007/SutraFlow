@@ -163,6 +163,7 @@ create table if not exists gw_keys(
   id text primary key, app_id text not null, name text not null, hash text not null, created_at text not null,
   expires_at integer not null default 0, last_used text);
 create table if not exists gw_usage(app_id text not null, win text not null, n integer not null default 0, expires integer not null, primary key(app_id, win));
+create table if not exists flow_folders(project_id text not null, path text not null, primary key(project_id, path));
 create table if not exists gw_requests(
   id integer primary key autoincrement, at text not null, engine text, kind text, method text, path text, route text, flow_id text,
   project_id text, app_id text, caller text, status integer, ms integer, bytes_in integer, bytes_out integer, ip text, run_id text, error text);
@@ -197,6 +198,7 @@ function migrate() {
     : (d.all(`select column_name as name from information_schema.columns where table_name = ?`, [t]) as any[]).map(c => c.name);
   const add = (t: string, c: string, ddl: string) => { if (!cols(t).includes(c)) d.exec(`alter table ${t} add column ${d.kind === 'postgres' ? pgSchema(ddl) : ddl}`); };
   add('flows', 'project_id', 'project_id text');
+  add('flows', 'folder', "folder text not null default ''");
   add('resources', 'project_id', 'project_id text');
   add('runs', 'project_id', 'project_id text');
   add('runs', 'debug', 'debug text');

@@ -1,0 +1,76 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { Server, utils } = require('ssh2');
+const { STATUS_CODE, flagsToString } = utils.sftp;
+
+/**
+ * A small SFTP server over a local folder, for tests: password and public-key sign-in, and the
+ * requests the SFTP activities use (open, read, write, stat, readdir, rename, remove, mkdir).
+ */
+export async function sftpServer(root: string, o: { user: string; password: string; publicKey?: string; slowReadMs?: number }) {
+  const hostKey = utils.generateKeyPairSync('ecdsa', { bits: 256 });
+  const allowed = o.publicKey ? utils.parseKey(o.publicKey) : null;
+  const local = (p: string) => path.join(root, path.posix.normalize('/' + String(p || '/')).replace(/^\/+/, ''));
+  const attrsOf = (st: fs.Stats) => ({ mode: st.mode, uid: 0, gid: 0, size: st.size, atime: Math.floor(st.atimeMs / 1000), mtime: Math.floor(st.mtimeMs / 1000) });
+  const longname = (name: string, st: fs.Stats) => `${st.isDirectory() ? 'd' : '-'}rw-r--r-- 1 u g ${st.size} Jan 01 00:00 ${name}`;
+
+  const server = new Server({ hostKeys: [hostKey.private] }, (client: any) => {
+    client.on('authentication', (ctx: any) => {
+      if (ctx.username !== o.user) return ctx.reject();
+      if (ctx.method === 'password' && ctx.password === o.password) return ctx.accept();
+      if (ctx.method === 'publickey' && allowed && ctx.key.algo === allowed.type && Buffer.compare(ctx.key.data, allowed.getPublicSSH()) === 0) {
+        if (!ctx.signature) return ctx.accept();
+        if (allowed.verify(ctx.blob, ctx.signature, ctx.hashAlgo)) return ctx.accept();
+      }
+      ctx.reject(['password', 'publickey']);
+    });
+    client.on('ready', () => client.on('session', (accept: any) => accept().on('sftp', (acceptSftp: any) => {
+      const sftp = acceptSftp();
+      const handles = new Map<number, { fd?: number; dir?: string; done?: boolean; append?: boolean }>();
+      let next = 1;
+      const handle = (h: Buffer) => handles.get(h.readUInt32BE(0));
+      const newHandle = (v: any) => { const b = Buffer.alloc(4); b.writeUInt32BE(next); handles.set(next++, v); return b; };
+      const fail = (id: number, e: any) => sftp.status(id, e?.code === 'ENOENT' ? STATUS_CODE.NO_SUCH_FILE : STATUS_CODE.FAILURE, e?.message);
+      sftp.on('OPEN', (id: number, file: string, flags: number) => {
+        try { const f = flagsToString(flags); sftp.handle(id, newHandle({ fd: fs.openSync(local(file), f), append: f.startsWith('a') })); } catch (e) { fail(id, e); }
+      });
+      sftp.on('READ', (id: number, h: Buffer, offset: number, length: number) => {
+        if (o.slowReadMs) { const ms = o.slowReadMs; o.slowReadMs = 0; setTimeout(() => sftp.emit('READ', id, h, offset, length), ms); return; }
+        const x = handle(h); if (!x?.fd) return sftp.status(id, STATUS_CODE.FAILURE);
+        const buf = Buffer.alloc(length); const n = fs.readSync(x.fd, buf, 0, length, offset);
+        return n ? sftp.data(id, buf.subarray(0, n)) : sftp.status(id, STATUS_CODE.EOF);
+      });
+      sftp.on('WRITE', (id: number, h: Buffer, offset: number, data: Buffer) => {
+        const x = handle(h); if (!x?.fd) return sftp.status(id, STATUS_CODE.FAILURE);
+        fs.writeSync(x.fd, data, 0, data.length, x.append ? null : offset);
+        sftp.status(id, STATUS_CODE.OK);
+      });
+      sftp.on('CLOSE', (id: number, h: Buffer) => { const x = handle(h); if (x?.fd) fs.closeSync(x.fd); handles.delete(h.readUInt32BE(0)); sftp.status(id, STATUS_CODE.OK); });
+      const stat = (id: number, p: string) => { try { sftp.attrs(id, attrsOf(fs.statSync(local(p)))); } catch (e) { fail(id, e); } };
+      sftp.on('STAT', stat); sftp.on('LSTAT', stat);
+      sftp.on('FSTAT', (id: number, h: Buffer) => { const x = handle(h); try { sftp.attrs(id, attrsOf(fs.fstatSync(x!.fd!))); } catch (e) { fail(id, e); } });
+      sftp.on('SETSTAT', (id: number) => sftp.status(id, STATUS_CODE.OK));
+      sftp.on('FSETSTAT', (id: number) => sftp.status(id, STATUS_CODE.OK));
+      sftp.on('OPENDIR', (id: number, p: string) => { try { if (!fs.statSync(local(p)).isDirectory()) throw new Error('not a folder'); sftp.handle(id, newHandle({ dir: local(p) })); } catch (e) { fail(id, e); } });
+      sftp.on('READDIR', (id: number, h: Buffer) => {
+        const x = handle(h); if (!x?.dir) return sftp.status(id, STATUS_CODE.FAILURE);
+        if (x.done) return sftp.status(id, STATUS_CODE.EOF);
+        x.done = true;
+        const names = fs.readdirSync(x.dir).map(n => { const st = fs.statSync(path.join(x.dir!, n)); return { filename: n, longname: longname(n, st), attrs: attrsOf(st) }; });
+        return names.length ? sftp.name(id, names) : sftp.status(id, STATUS_CODE.EOF);
+      });
+      sftp.on('REALPATH', (id: number, p: string) => sftp.name(id, [{ filename: path.posix.normalize('/' + p), longname: '', attrs: {} }]));
+      sftp.on('REMOVE', (id: number, p: string) => { try { fs.rmSync(local(p)); sftp.status(id, STATUS_CODE.OK); } catch (e) { fail(id, e); } });
+      sftp.on('RMDIR', (id: number, p: string) => { try { fs.rmdirSync(local(p)); sftp.status(id, STATUS_CODE.OK); } catch (e) { fail(id, e); } });
+      sftp.on('MKDIR', (id: number, p: string) => { try { fs.mkdirSync(local(p)); sftp.status(id, STATUS_CODE.OK); } catch (e) { fail(id, e); } });
+      sftp.on('RENAME', (id: number, a: string, b: string) => { try { fs.renameSync(local(a), local(b)); sftp.status(id, STATUS_CODE.OK); } catch (e) { fail(id, e); } });
+    })));
+    client.on('error', () => {});
+  });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  const hostPub = utils.parseKey(hostKey.public);
+  return { port: (server.address() as any).port, hostKeyRaw: hostPub.getPublicSSH() as Buffer, close: () => new Promise<void>(r => server.close(() => r())) };
+}

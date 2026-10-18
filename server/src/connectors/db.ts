@@ -214,6 +214,33 @@ export const dbActivities: Activity[] = [
     execute: async c => ({ out: await (await connFor(c)).procedure(String(c.raw('procedure') || ''), params(c)) }),
   },
   {
+    type: 'dbScript', palette: 'db', name: 'SQL script', glyph: '⛭', ports: ['out'], timeoutMs: 600000,
+    desc: 'Runs an install or change script: CREATE DATABASE, CREATE TABLE, CREATE PROCEDURE, seed rows. Statements are separated by a line with only ";" and run one after another, not in one transaction: most databases keep table and procedure changes at once.',
+    fields: [conn,
+      F('sql', 'Script', 'code', 'CREATE TABLE IF NOT EXISTS customers (\n  id VARCHAR(20) PRIMARY KEY,\n  name VARCHAR(100) NOT NULL\n)\n;\nINSERT INTO customers (id, name) VALUES (:id, :name)'),
+      F('params', 'Parameters', 'kv', [], { tpl: true, help: 'Values for :name placeholders in any statement. Always sent as bound parameters.' }),
+      F('onError', 'When a statement fails', 'select', 'stop', { options: ['stop', 'continue'], help: 'Stop: the step fails at that statement (those before it stay done). Continue: runs the rest and lists the failures.' })],
+    outputHint: { results: [{ n: 0, statement: '', ok: true, rowCount: 0, error: '' }], ran: 0, failed: 0 },
+    execute: async c => {
+      const stmts = String(c.raw('sql') || '').split(/^\s*;\s*$/m).map(s => s.trim()).filter(Boolean);
+      if (!stmts.length) throw new Error('The script has no statements');
+      const p = params(c);
+      const db = await connFor(c);
+      const results: { n: number; statement: string; ok: boolean; rowCount: number; rows?: any[]; error?: string }[] = [];
+      for (const [i, s] of stmts.entries()) {
+        const statement = s.replace(/\s+/g, ' ').slice(0, 80);
+        try {
+          const r = await db.query(s, Object.fromEntries(namedParams(s).map(n => [n.name, p[n.name]])));
+          results.push({ n: i + 1, statement, ok: true, rowCount: r.rowCount, ...(r.rows.length ? { rows: r.rows } : {}) });
+        } catch (e: any) {
+          if (c.raw('onError') !== 'continue') throw new Error(`Statement ${i + 1} of ${stmts.length} failed (${statement}): ${e.message}`);
+          results.push({ n: i + 1, statement, ok: false, rowCount: 0, error: e.message });
+        }
+      }
+      return { out: { results, ran: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length } };
+    },
+  },
+  {
     type: 'dbTransaction', palette: 'db', name: 'SQL transaction', glyph: '⛬', ports: ['out'],
     desc: 'Runs several statements in one transaction: all succeed or none are kept. Statements are separated by a line with only ";".',
     fields: [conn, F('sql', 'Statements', 'code', 'INSERT INTO audit(order_id, action) VALUES (:id, \'ship\')\n;\nUPDATE orders SET status = \'SHIPPED\' WHERE id = :id'), paramField],

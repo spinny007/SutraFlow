@@ -87,6 +87,16 @@ export const CHAPTERS: Chapter[] = [
 <tr><td><strong>Configuration</strong></td><td>Project variables, the deployment config and the log file settings.</td></tr>
 </tbody></table>
 [[img:project-explorer|The Project explorer with a shared XSD schema open: its fields are shown as a tree, as activities will see them.]]
+<p class="h">Folders for Sutras</p>
+<p>Sutras can sit in folders, and folders in folders, so a large project stays tidy. Folders only arrange the list: a Sutra name is still unique in the project, and deploying, calling and packages work as before.</p>
+<ul>
+<li><strong>+ Folder</strong> under the list makes a folder; type <code>Orders/Inbound</code> for one inside another.</li>
+<li><strong>Drag</strong> a Sutra or a folder onto a folder to move it there, or onto the line <em>Drag here for the top level</em>.</li>
+<li>The <strong>⋯</strong> button beside a Sutra moves it by typing or picking a folder. Beside a folder it renames or moves the folder with everything in it, makes a folder inside, or removes the folder. Removing a folder never deletes Sutras: they move up one level.</li>
+<li>A new Sutra goes in the folder of the Sutra open at the time.</li>
+<li>Samples go to <code>Samples/&lt;topic&gt;</code>, for example <em>Samples/SQL</em> and <em>Samples/REST and microservices</em>. Move them anywhere afterwards.</li>
+<li>Packages and project copies keep each Sutra's folder.</li>
+</ul>
 <p class="h">Add a connection</p>
 <ol>
 <li>Next to <em>Resources</em>, click <strong>+</strong> and choose the kind, for example <em>HTTP connection</em>.</li>
@@ -135,6 +145,7 @@ export const CHAPTERS: Chapter[] = [
 </tbody></table>
 <p>A connection that is not taken counts as a skipped branch, so a [[merge]] after it still continues. For many routes, or for routes on the same message used in several places, a [[router]] activity keeps them in one place.</p>
 <p class="h">Sample Sutras</p>
+<p>Samples that need a connection get one in the project, named <em>Sample ...</em> (Sample MySQL, Sample SFTP, Sample SMTP and so on), already chosen in their activities. Fill in its address, user and password, click <strong>Test connection</strong>, and the sample runs. Adding more samples later reuses these connections. The SQL samples use Laragon's MySQL defaults (127.0.0.1:3306, user root, no password).</p>
 <p>Click <strong>+ New Sutra</strong>, then <strong>Choose samples</strong> to tick the ones you want, or <strong>Add all</strong>. Test each one and open its activities' Input and Output tabs to see how it is built. Samples that write files use <code>C:/sutra/samples</code>; change the folder to suit your machine.</p>
 [[samples]]
 [[img:sample-foreach|Sample: For-Each mapping. The repeating target <em>lines</em> is selected: its For-Each takes the order lines, keeps rows where qty &gt; 0 and sorts them by sku.]]
@@ -344,13 +355,30 @@ export const CHAPTERS: Chapter[] = [
 <li>[[fileList]] takes wildcards: <code>C:\\in\\*.csv</code>, or <code>=concat({gv.DIR}, '\\*.csv')</code>.</li>
 <li>[[fileWrite]] appends or overwrites, and always returns the file's name, path, size and what it did.</li>
 <li>[[fileTrigger]] reacts to added, modified and removed files; move processed files away with [[fileMove]].</li>
-</ul>`,
+</ul>
+<p class="h">SFTP and FTP servers</p>
+<p>The <strong>SFTP / FTP</strong> palette works with files on another server: [[remoteTrigger]], [[remoteList]], [[remoteRead]], [[remoteWrite]] and [[remoteMove]]. Each step names the protocol and an <em>SFTP server</em> or <em>FTP server</em> connection.</p>
+<ul>
+<li><strong>SFTP</strong> signs in with a password or a private key from the vault. Paste the server's <em>host key fingerprint</em> (Test connection shows it, as <code>SHA256:...</code>) so a different server is refused.</li>
+<li><strong>FTP</strong> uses explicit TLS (FTPS) by default; implicit TLS and plain FTP are there for old servers.</li>
+<li>The <em>base folder</em> fences the steps in: a path such as <code>../../etc</code> is refused.</li>
+</ul>
+<p class="h">Time limits for slow or far-away servers</p>
+<p>A server in another region, or a busy one, can take a while to answer. Each SFTP or FTP connection has its own limits:</p>
+<table class="t"><thead><tr><th>Setting</th><th>Default</th><th>What it limits</th></tr></thead><tbody>
+<tr><td>Connect time limit</td><td>30 s</td><td>Reaching the server and signing in.</td></tr>
+<tr><td>Response time limit</td><td>60 s</td><td>Each operation: a listing, a read, a write, a rename. A large file is one operation, so allow for its transfer time.</td></tr>
+<tr><td>Connection attempts</td><td>3</td><td>Tries after a network failure. A wrong password or host key is not tried again.</td></tr>
+<tr><td>Wait between attempts</td><td>5 s</td><td>The pause before the next try.</td></tr>
+<tr><td>Keep-alive every</td><td>15 s</td><td>SFTP only: keeps a slow session open through firewalls. 0 turns it off.</td></tr>
+</tbody></table>
+<p>The step itself has a time limit too, in its <em>Settings</em> tab. SFTP and FTP steps allow 10 minutes by default (other activities 2 minutes); raise it for very large files. When a limit is passed, the error says which one, for example <em>Reading inbox/big.csv took longer than 60 s (Response time limit of the connection)</em>.</p>`,
   },
   {
     id: 'apps', title: 'Databases, email, Firebase and apps',
     html: `
 <ul>
-<li><strong>DB Ops</strong> works with PostgreSQL, MySQL/MariaDB, SQL Server, Oracle and SQLite. Parameters are written <code>:name</code> and are always bound, never pasted into the SQL.</li>
+<li><strong>DB Ops</strong> works with PostgreSQL, MySQL/MariaDB, SQL Server, Oracle and SQLite. Parameters are written <code>:name</code> and are always bound, never pasted into the SQL. [[dbScript]] runs install scripts (tables, procedures, seed rows); a REST service with [[dbProcedure]] then turns a stored procedure into a microservice, as <em>Sample: Procedure as a microservice</em> shows.</li>
 <li><strong>Email</strong>: SMTP to send, IMAP to start a run per incoming message.</li>
 <li><strong>Firebase</strong>: Firestore, Realtime Database and push notifications, with a service-account key held in the vault.</li>
 <li><strong>Apps</strong> (Google Sheets, Drive and Docs, Dropbox, YouTube, Facebook Pages) use an <strong>OAuth connection</strong>: create it in Resources, then click <em>Connect account</em> and sign in once. Tokens are stored in the vault and refreshed automatically. [[oauthRequest]] reaches any other API of the same account.</li>

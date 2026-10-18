@@ -14,6 +14,7 @@ import { dbActivities } from '../connectors/db.js';
 import { busActivities } from '../connectors/bus.js';
 import { firebaseActivities } from '../connectors/firebase.js';
 import { saasActivities } from '../connectors/saas.js';
+import { remoteActivities } from '../connectors/remote.js';
 
 /** Palette order in the studio. New palettes (connectors) register here. */
 export const PALETTES = [
@@ -23,6 +24,7 @@ export const PALETTES = [
   { id: 'data', name: 'Data & mapping', color: 'data' },
   { id: 'flow', name: 'Flow control', color: 'flow' },
   { id: 'files', name: 'Files', color: 'data' },
+  { id: 'remote', name: 'SFTP / FTP', color: 'data' },
   { id: 'db', name: 'DB Ops', color: 'data' },
   { id: 'bus', name: 'Service Bus', color: 'flow' },
   { id: 'email', name: 'Email', color: 'general' },
@@ -36,6 +38,6 @@ export const PALETTES = [
 ];
 
 export const allActivities = [
-  ...coreActivities, ...processActivities, ...transformActivities, ...httpActivities, ...soapActivities, ...fileActivities, ...dbActivities, ...busActivities,
+  ...coreActivities, ...processActivities, ...transformActivities, ...httpActivities, ...soapActivities, ...fileActivities, ...remoteActivities, ...dbActivities, ...busActivities,
   ...emailActivities, ...firebaseActivities, ...saasActivities, ...codeActivities, ...scriptActivities, ...releaseActivities, ...aiActivities, ...mcpActivities,
 ];

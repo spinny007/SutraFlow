@@ -51,11 +51,48 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
   },
   fileTrigger: {
     scope: ['A folder with a wildcard pattern (<code>*.csv</code>, <code>orders-*.xml</code>), optionally with sub-folders.', 'Added, modified and removed events, each its own output.', 'Reading the file: text, CSV rows or lines typed by a schema, JSON, XML or base64, in the chosen encoding.'],
-    outScope: ['Remote folders (FTP, SFTP).', 'Google Drive: use [[googleDriveTrigger]].'],
+    outScope: ['Remote folders: use [[remoteTrigger]] for SFTP and FTP.', 'Google Drive: use [[googleDriveTrigger]].'],
     use: ['Processing files dropped by another system or by people.'],
     other: [['Read a file at a point in a Sutra', 'fileRead'], ['Sutra every file already in a folder', 'fileList']],
     steps: ['Enter the folder, for example <code>{{gv.INBOX}}</code>, and the pattern.', 'Tick the events you need; each becomes an output.', 'Set <em>stable for</em> seconds so files still being copied are not read early.', 'Choose how to read the content. For CSV, pick a row schema to get typed, repeating rows.', 'Move or delete the file at the end with [[fileMove]], so it is not picked up again after a restart.'],
     output: ['<code>event</code> and the file details (<code>name</code>, <code>path</code>, <code>relativePath</code>, <code>folder</code>, <code>extension</code>, <code>size</code>, <code>modifiedAt</code>), plus the content fields of the chosen format.'],
+  },
+  /* ---------------- SFTP / FTP ---------------- */
+  remoteTrigger: {
+    scope: ['A folder on an SFTP or FTP server, checked every few seconds for files matching a pattern.', 'Only files whose size stopped changing, so uploads still running are not read early.', 'After a successful run: move the file to a folder, delete it, or leave it and remember it.', 'Reading the file as text, CSV rows, lines, JSON, XML or base64.'],
+    outScope: ['Servers that push events: the trigger polls.', 'Local folders: use [[fileTrigger]].'],
+    use: ['Files a partner, bank or supplier drops on their server or yours.'],
+    other: [['List or read at a point in a Sutra', 'remoteList'], ['Read one file', 'remoteRead']],
+    steps: ['Pick the protocol and the SFTP or FTP connection.', 'Enter the folder (inside the connection\'s base folder) and the pattern, for example <code>*.csv</code>.', 'Choose what happens after the run. <em>Move to a folder</em> keeps a copy; <em>Leave and remember</em> never touches the partner\'s files.', 'Choose how to read the content, then deploy.'],
+    output: ['The file details (<code>name</code>, <code>path</code>, <code>relativePath</code>, <code>size</code>, <code>modifiedAt</code>, <code>server</code>) and the content fields of the chosen format.'],
+  },
+  remoteList: {
+    scope: ['Files of a remote folder matching a pattern, optionally with sub-folders, sorted by name, age or size.', 'Optionally reading each file as rows, lines or text.'],
+    outScope: ['Deleting or moving: use [[remoteMove]].'],
+    use: ['Picking up every file waiting on a server at a set time, with a [[timer]] and a For each.'],
+    steps: ['Pick the connection, enter the folder and the pattern.', 'Choose the order and the maximum number of files.', 'Connect <em>empty</em> for no files.'],
+    output: ['<code>files</code> (repeating, with their content when read) and <code>count</code>.'],
+  },
+  remoteRead: {
+    scope: ['One file on an SFTP or FTP server, read as text, CSV rows, lines, JSON, XML or base64.', 'A size limit, so a wrong file cannot fill the memory.'],
+    outScope: ['Paths outside the connection\'s base folder: they are refused.'],
+    use: ['Reading a price list or a statement that has a known name.'],
+    steps: ['Pick the connection and enter the file, for example <code>inbox/{{input.name}}</code>.', 'Choose the format; for CSV, the delimiter and header.'],
+    output: ['The file details and the content fields of the chosen format (<code>text</code>, <code>rows</code> and <code>count</code>, <code>json</code>, ...).'],
+  },
+  remoteWrite: {
+    scope: ['Text, CSV built from rows, lines, JSON, XML or base64 written to a remote file.', 'Append, overwrite, or fail when the file exists; folders are made as needed.'],
+    outScope: ['Partial uploads that resume: a failed upload is written again whole.'],
+    use: ['Sending a daily report or an invoice file to a partner\'s server.'],
+    steps: ['Pick the connection and enter the file path, for example <code>=concat(\'outbox/report-\', current-timestamp(\'YYYYMMDD\'), \'.csv\')</code>.', 'Choose the format and fill in the content or the rows.', 'Choose append or overwrite.'],
+    output: ['The file details and <code>action</code>: created, overwritten or appended.'],
+  },
+  remoteMove: {
+    scope: ['Move (rename), copy or delete one remote file.', 'Overwriting the target or failing when it exists.'],
+    outScope: ['Copying between two servers: read with [[remoteRead]], then write with [[remoteWrite]].'],
+    use: ['Archiving a processed file under a dated name.'],
+    steps: ['Pick the connection and the action.', 'Enter the file and, for move and copy, where it goes.'],
+    output: ['<code>action</code>, <code>from</code> and <code>to</code>.'],
   },
   /* ---------------- Flow control ---------------- */
   if: {
@@ -312,6 +349,13 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     use: ['Business logic that already lives in the database.'],
     steps: ['Pick the connection, enter the procedure name and its parameters.'],
     output: ['<code>rows</code> of the first result set and the driver\'s result.'],
+  },
+  dbScript: {
+    scope: ['An install or change script: CREATE DATABASE, CREATE TABLE, CREATE PROCEDURE, seed rows.', 'Statements separated by a line with only <code>;</code>, run one after another, so procedure bodies may hold their own semicolons.', 'Stopping at the first failure, or running the rest and listing the failures.'],
+    outScope: ['All-or-nothing changes to data: use [[dbTransaction]]. Most databases keep table and procedure changes at once anyway.'],
+    use: ['Setting up the tables and procedures a Sutra needs, on a new server or in a test.'],
+    steps: ['Pick the connection.', 'Write the script; put a line with only <code>;</code> between statements.', 'Use <code>IF NOT EXISTS</code> and <code>DROP ... IF EXISTS</code> so the script can run again.', 'Choose what happens when a statement fails.'],
+    output: ['<code>results</code> (one per statement, with <code>ok</code> and <code>error</code>), <code>ran</code> and <code>failed</code>.'],
   },
   dbTransaction: {
     scope: ['Several statements in one transaction: all succeed or none.'],
