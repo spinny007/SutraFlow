@@ -8,6 +8,7 @@
  */
 import { TABLE_TEXT, schemaTables } from './guide/tables.js';
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { allActivities, PALETTES } from '../server/src/palettes/index.js';
@@ -30,14 +31,15 @@ const problems: string[] = [];
 // ---------------------------------------------------------------------------------------------
 type Group = { id: string; title: string; intro: string; files: [string, string][] };
 
+const CLI_COMMANDS = (() => { try { return cliCommands(); } catch { return 'see sutra help'; } })();
 const FILES: Group[] = [
   {
     id: 'core', title: 'Server start, storage and cluster', intro: 'The process: how it starts and stops, where it keeps its data, and how several engines share one database.',
     files: [
       ['server/src/main.ts', 'Entry point of <code>npm start</code>. Boots the server, prints the studio and gateway addresses, and turns SIGTERM and Ctrl+C into a graceful stop (drain first).'],
       ['server/src/index.ts', '<code>boot()</code>: opens storage, registers every activity, loads deployment configs, deploys the packages in <code>SUTRA_DEPLOY_DIR</code> under a cluster-wide lock, starts the engine, the cluster beat, the gateway and the admin API, and wires change hooks (deploys rebuild routes, timers and listeners). Also the ordered <code>stop()</code>.'],
-      ['server/src/config.ts', 'Process settings from environment variables (mode, ports, folders, database, engine id, drain, heartbeat, retention, logs, tracing, tokens) and the product version from package.json. Everything else is stored in the database and edited in the studio.'],
-      ['server/src/lifecycle.ts', 'Liveness (<code>/health</code>) and readiness (<code>/ready</code>): storage answers, packages are deployed, the gateway listens, and the server is not draining.'],
+      ['server/src/config.ts', 'Process settings from environment variables (mode, environment, ports, folders, database with the password apart as SUTRA_DB_PASSWORD, engine id, drain, heartbeat, retention, logs, tracing, tokens) and the product version from package.json. Everything else is stored in the database and edited in the studio.'],
+      ['server/src/lifecycle.ts', 'Liveness (<code>/health</code>, with the version, mode, environment and the database in use) and readiness (<code>/ready</code>): storage answers, packages are deployed, the gateway listens, and the server is not draining.'],
       ['server/src/cluster.ts', 'Heartbeat row per engine, the leader lease, recovery of a dead engine\'s steps, the deploy generation number that makes every engine reload its routes, leadership hand-over on stop, and the engine status list.'],
       ['server/src/housekeeping.ts', 'Deletes finished runs older than <code>SUTRA_RUN_RETENTION_DAYS</code>, with their steps, in batches. Run by the leader about once a minute; waiting runs are never deleted.'],
       ['server/src/db.ts', 'The storage layer. <code>q</code> (get, all, run) and <code>tx</code> (transaction) on SQLite or PostgreSQL. Holds the table definitions, converts them for PostgreSQL (bigint, double precision, bigserial), converts <code>?</code> placeholders to <code>$n</code>, and takes an advisory lock for every PostgreSQL write transaction.'],
@@ -48,7 +50,7 @@ const FILES: Group[] = [
     id: 'engine', title: 'Engine', intro: 'The durable step runner and the types every activity follows.',
     files: [
       ['server/src/engine/engine.ts', 'The durable engine: start a run, claim tasks with an owner, run activities with settings (retries, time limit, loop), checkpoint output and next tasks in one transaction, route connections (ports, conditions, skip tokens, merges), waits (approvals, timers, sub-Sutras, replies from other engines), Error handler, stop options, debug pause, cancel, resubmit, drain, metrics and spans.'],
-      ['server/src/engine/types.ts', 'Types shared by the engine, palettes and studio: Sutra document (nodes, edges with label and condition), activity definition (fields, ports, output hint, execute), step settings, execution context and step result (port, output, wait, reply, call, result, stop).'],
+      ['server/src/engine/types.ts', 'Types shared by the engine, palettes and studio: Sutra document (nodes with descriptions, edges with label and condition), activity definition (fields, ports, output hint, design checks, execute), step settings, execution context and step result (port, output, wait, reply, call, result, stop).'],
     ],
   },
   {
@@ -58,7 +60,7 @@ const FILES: Group[] = [
       ['server/src/expr.ts', 'Formulas starting with <code>=</code>: functions (string, number, date, list, encoding), operators and predicates, plus hooks to read and write Project and Sengine variables. Also the function catalog shown in the mapper.'],
       ['server/src/values.ts', 'Path and value helpers shared by templates and formulas.'],
       ['server/src/mapping.ts', 'Structured Activity Input mapping: a target tree from a schema or ad-hoc paths, with For-Each, where, group by, sort, conditions and Choose.'],
-      ['server/src/design.ts', 'Design-time data shapes: what each step receives and returns before anything has run. Feeds the Process Data tree and the Output tab.'],
+      ['server/src/design.ts', 'Design-time data shapes: what each step receives and returns before anything has run, and the warnings of each step (unmapped required fields, schema problems, and the activity\'s own design checks). Feeds the Process Data tree, the Output tab and the canvas warnings.'],
       ['server/src/schemas.ts', 'Shared schemas of a project: JSON Schema, sample JSON, XSD and WSDL, all converted to one tree format for the mapper.'],
       ['server/src/settings.ts', 'Resolves Project and Sengine variables in plain settings (folders, URLs, queue names) and in connection settings.'],
     ],
@@ -66,8 +68,8 @@ const FILES: Group[] = [
   {
     id: 'projects', title: 'Projects, Sutras, connections and releases', intro: 'What a team edits and ships.',
     files: [
-      ['server/src/projects.ts', 'Projects: Project variables, logging, deployment (ops) configs with <code>${env:...}</code> values, runtime variable values, Sengine variables and the server policies (Sengine variables writable, scripts allowed, release activities allowed).'],
-      ['server/src/flows.ts', 'Sutras: draft, published versions, deploy and undeploy, validation (names, ports, connection conditions, Error handler, API paths, MCP skill names), the change hooks, and missing project variables per step (also through its connections).'],
+      ['server/src/projects.ts', 'Projects: Project variables, logging, deployment (ops) configs with <code>${env:...}</code> values, the project files folder (<code>${files}</code> = <code>&lt;data&gt;/files/&lt;project&gt;</code>), runtime variable values, Sengine variables and the server policies (Sengine variables writable, scripts allowed, release activities allowed).'],
+      ['server/src/flows.ts', 'Sutras: draft, published versions, deploy and undeploy, step descriptions kept, validation (names, ports, connection conditions, Error handler, API paths, MCP skill names, and the design checks of each activity, such as a missing Python, file or connection), the change hooks, and missing project variables per step (also through its connections).'],
       ['server/src/git/files.ts', 'A project as Git files and back: sutraflow.json, sutras, connections (secret names only), schemas, in folders; stable JSON; repository ids mapped to each workspace\'s own ids, references translated both ways.'],
       ['server/src/git/engine.ts', 'Git for workspaces: the git command (tokens through one-command environment settings, never on the command line) or isomorphic-git built in (content-compared status); init, clone, status, commit, push, fetch, pull with conflicts, branches, history, files at a commit.'],
       ['server/src/git/accounts.ts', 'Each person\'s Git accounts (GitHub, GitLab, Bitbucket, Azure DevOps, others): encrypted tokens used only for that person, author name and email.'],
@@ -75,11 +77,11 @@ const FILES: Group[] = [
       ['server/src/git/restricted.ts', 'Restricted mode: the steps that run code or commands from a repository, refused in an untrusted personal copy.'],
       ['server/src/folders.ts', 'Folders of the Project explorer for Sutras, Resources, Schemas and Service descriptors: a <code>folder</code> path on each item, empty folders in the <code>folders</code> table; rename and move take the contents along, remove lifts them one level, nothing is deleted.'],
       ['server/src/resources.ts', 'Connection types (HTTP, SOAP, security profiles, API policies, AI provider, MCP server and the connector kinds) with their fields and icons. Secret values are never stored here, only vault names.'],
-      ['server/src/resourceTest.ts', '"Test connection": tries the settings as they are on screen, with variables resolved, and reports the result in one sentence.'],
+      ['server/src/resourceTest.ts', '"Test connection": tries the settings as they are on screen, with variables resolved, and reports the result in one sentence; for every kind, including AI providers, knowledge bases, MCP, databases, SFTP and FTP, brokers, OAuth accounts (YouTube channel, Twitch user), Azure Data Factory, Databricks, Discord and Telegram.'],
       ['server/src/secrets.ts', 'The vault. AES-256-GCM with a key from <code>SUTRA_MASTER_KEY</code> or <code>data/master.key</code>. Values are never returned by the API and are masked in run history.'],
       ['server/src/samples.ts', 'The sample catalog offered in "New Sutra" (' + SAMPLES.length + ' samples covering every activity) and <code>addSamples()</code>: each goes to a <code>Samples/&lt;topic&gt;</code> folder, and every empty connection field it uses is set to a "Sample ..." connection made once in the project.'],
       ['server/src/channels.ts', 'Send to channel: starts every deployed Sutra of the project whose Channel trigger listens on that name. Reads deployments from the database, so it works across engines.'],
-      ['server/src/bundles.ts', 'Release zips for production: the package, a deployment config to fill in (connections, project variables, secrets needed) and a README; zip writer and reader; packages built from the Git files of a project without a server.'],
+      ['server/src/bundles.ts', 'Release zips: the package, a deployment config to fill in (connections, project variables, secrets needed), a README, the documentation (HTML and Markdown) and the project files (<code>files/</code>, written to the project files folder on deploy and import); zip writer and reader; packages built from the Git files of a project without a server.'],
       ['server/src/connectors/chat.ts', 'Discord (webhook or bot) and Telegram bots: messages, embeds and files, reading a channel, Test connection, and triggers for messages and commands (channel polling, Telegram long polling).'],
       ['server/src/connectors/azure.ts', 'Azure Data Factory and Databricks: Entra ID sign-in (service principal, managed identity, Azure CLI) and Databricks tokens or OAuth; run, wait for, rerun and cancel pipelines; the run-finished trigger; jobs, notebooks, code blocks and SQL; Test connection.'],
       ['server/src/python.ts', 'Python on the server: finding the interpreter (setting, SUTRA_PYTHON, py, python3, python), and checks before a run: syntax, missing files, virtual environments and packages.'],
@@ -87,13 +89,13 @@ const FILES: Group[] = [
       ['server/src/docs.ts', 'Documentation made from Sutras: triggers, steps in run order with their descriptions and settings (connections by name, secrets by name), next steps, error handling, connections and variables; Markdown and HTML, for one Sutra, a project or a package.'],
       ['server/src/sampledocs.ts', 'The documents of the RAG samples (a PDF, a Word document, a PowerPoint deck and a Markdown FAQ of a tea shop), made in code so they are always the same.'],
       ['server/src/packages.ts', 'Project packages: build (Sutras at their versions, connections, schemas, variables, a sha256 checksum), read, check, deploy (matched by name, prune or keep others, deployment config), history, rollback and test.'],
-      ['server/src/cli.ts', 'The <code>sutra</code> command: package, check, deploy, test, history, rollback, secret, status. Works on a remote server with a token or on the local data folder.'],
+      ['server/src/cli.ts', 'The <code>sutra</code> command, on a remote server with a token or on the local data folder. Commands (read from <code>sutra help</code> when this page is built): ' + CLI_COMMANDS + '.'],
     ],
   },
   {
     id: 'services', title: 'Admin API, gateway and triggers', intro: 'The two network faces of the server and the long-running starters.',
     files: [
-      ['server/src/api.ts', 'Admin API on port 4800 (Fastify): sign-in, projects, Sutras, runs, approvals, resources, secrets, packages, engine control, server settings, <code>/health</code>, <code>/ready</code>, <code>/metrics</code>, <code>/guide</code>, <code>/architecture</code> and the studio files. Bearer tokens for automation; a headless engine allows only a short list of routes.'],
+      ['server/src/api.ts', 'Admin API on port 4800 (Fastify): sign-in, projects, Sutras, runs, approvals, resources, secrets, packages and release zips, documentation, sample projects, Git, OAuth sign-in, engine control, server settings, Python, the database page and the move to PostgreSQL, <code>/health</code>, <code>/ready</code>, <code>/metrics</code>, <code>/guide</code>, <code>/architecture</code> and the studio files. Bearer tokens for automation; a headless engine allows only a short list of routes.'],
       ['server/src/access.ts', 'Users and system accounts (provision, disable, lockout, password rules, sign out everywhere), roles made of permissions, grants for all projects or one project, permission checks, API tokens of system accounts (stored as hashes), and Basic sign-in of system accounts at the gateway.'],
       ['server/src/guard.ts', 'The permission of every admin API route and the project it applies to. The server refuses to start when a route has no rule. Also writes each change and each refusal to the audit log, without passwords or secret values.'],
       ['server/src/console.ts', 'Data for the Admin Console: the overview (engines, deployed Sutras, runs of the last day, failures, approvals, gateway), deployed applications with their triggers and run counts, starting and stopping a deployed Sutra, and drain requests for any engine. Always limited to the projects the caller may see.'],
@@ -130,7 +132,7 @@ const FILES: Group[] = [
   {
     id: 'palettes', title: 'Palettes (activities)', intro: 'Each file defines activities: fields shown in the studio, ports, an output hint for mapping, and an <code>execute</code> function.',
     files: [
-      ['server/src/palettes/index.ts', 'Palette order and the list of all activities registered with the engine.'],
+      ['server/src/palettes/index.ts', 'Palette order (with Azure Data Factory &amp; Databricks, Apps and social, Scripts with Python) and the list of all activities registered with the engine; AI steps get a 10-minute time limit.'],
       ['server/src/palettes/common.ts', 'Field builders (<code>F</code>, <code>when</code>) and write options shared by file-like activities.'],
       ['server/src/palettes/core.ts', 'Triggers (Start, Timer, REST service, SOAP service), flow control (If, Switch, Router, For each, Merge, Wait, Approval, Set variable, Throw, End with stop options), data (Mapper, JSON, XML, CSV, filter, sort, aggregate, validate) and Log.'],
       ['server/src/palettes/process.ts', 'Call Sutra and Return, Error handler, No operation, channels (send and trigger) and Counter.'],
@@ -140,25 +142,25 @@ const FILES: Group[] = [
       ['server/src/palettes/file.ts', 'File trigger, read, list, write and move, confined to the configured folder. Write and Move always return file details.'],
       ['server/src/palettes/fileformat.ts', 'Encodings and formats for file content: text, base64, CSV, lines, JSON, XML, with schema-typed columns.'],
       ['server/src/palettes/code.ts', 'JavaScript code in a sandboxed worker (no host objects, time and memory limits) and HTML templates.'],
-      ['server/src/palettes/scripts.ts', 'PowerShell, shell scripts and programs, with output and errors captured; values arrive as environment variables and a JSON input file, never inside the script text. Off until allowed.'],
+      ['server/src/palettes/scripts.ts', 'PowerShell, shell scripts, Python (code or a .py file, arguments, parameters, virtual environment, printed JSON as result, design checks for Python, syntax, files and packages) and programs, with output and errors captured; values arrive as environment variables and JSON files, never inside the script text. Off until allowed.'],
       ['server/src/palettes/release.ts', 'Build package, Check package, Deploy package and Roll back, on this server or a remote engine. Off until allowed.'],
       ['server/src/palettes/ai.ts', 'AI prompt, classify, router, extract, summarize, translate, sentiment and the Ollama activity (all endpoints). JSON answers are read leniently with one stricter retry.'],
       ['server/src/palettes/mcp.ts', 'AI tool trigger (describes the tool for agents and MCP clients) and Reply to AI.'],
-      ['server/src/palettes/agent.ts', 'AI agent palette: AI agent, Ask a person, Hand off to agent, Load / Save / Clear memory, Read document text, Add / Search / Ask / Remove knowledge, AI embed, Call MCP tool, Agent channel, Agent reply, AI guard.'],
+      ['server/src/palettes/agent.ts', 'AI agent palette: AI agent, Ask a person, Hand off to agent, Load / Save / Clear memory, Read document text, Add to knowledge (skip unchanged), Search / Ask knowledge, Remove knowledge (a source, keep only listed sources, everything, rebuild vectors), AI embed, Call MCP tool, Agent channel, Agent reply, AI guard.'],
     ],
   },
   {
     id: 'connectors', title: 'Connectors', intro: 'Activities for outside systems and their connection kinds.',
     files: [
-      ['server/src/connectors/kinds.ts', 'Connection kinds for email, databases, service bus, Firebase and OAuth apps.'],
+      ['server/src/connectors/kinds.ts', 'Connection kinds for email, databases, service bus, Firebase, SFTP and FTP, and OAuth apps (with the scopes each service needs and an optional refresh token secret).'],
       ['server/src/connectors/remote.ts', 'SFTP / FTP palette: Remote file trigger, list, read, write and move / copy / delete over SFTP (ssh2-sftp-client, host key fingerprint check) or FTP / FTPS (basic-ftp). Paths are fenced into the base folder; each connection has connect and response time limits, attempts with a wait between them (sign-in and host key errors are not retried) and SFTP keep-alive.'],
       ['server/src/connectors/db.ts', 'DB Ops for PostgreSQL, MySQL, SQL Server, Oracle and SQLite: query, update, stored procedure, SQL script and transaction, with <code>:name</code> parameters always bound (no SQL injection), and connection pools.'],
       ['server/src/connectors/bus.ts', 'Service Bus for Kafka, RabbitMQ and AMQP 1.0 brokers: publish, subscribe and confirm, with message headers, acknowledge modes and reply queues.'],
       ['server/src/connectors/email.ts', 'Send email (SMTP) and the mailbox trigger (IMAP).'],
       ['server/src/connectors/firebase.ts', 'Firestore, Realtime Database and Cloud Messaging with a service account.'],
-      ['server/src/connectors/oauth.ts', 'OAuth 2.0 authorization-code connections with encrypted tokens and refresh.'],
+      ['server/src/connectors/oauth.ts', 'OAuth 2.0 connections (Google, Microsoft, Dropbox, Facebook, Twitch, custom): authorization-code sign-in, tokens encrypted and refreshed, a refresh token secret for servers without the studio (set by a pipeline), Twitch client id on every call, and streamed requests for large uploads and downloads.'],
       ['server/src/connectors/microsoft.ts', 'SharePoint document libraries and OneDrive through Microsoft Graph: list, read (as document text), search, upload, and a polling trigger for added, changed and removed files.'],
-      ['server/src/connectors/saas.ts', 'Google Sheets, Drive (and a Drive trigger), Dropbox, YouTube, Facebook Pages and any REST API of a connected account.'],
+      ['server/src/connectors/saas.ts', 'Google Sheets; Google Drive and Docs (list, upload, download or export, saving large files straight to a server file) and the Drive trigger; Dropbox; YouTube (videos, playlists, comments, channel and video statistics, Analytics reports, resumable streamed upload from a server file, update, thumbnail); Facebook Pages; Twitch (users, live status, channel, followers, videos, clips, schedule, update channel, clip, chat) and the Twitch live trigger; any REST API of a connected account.'],
     ],
   },
   {
@@ -167,7 +169,7 @@ const FILES: Group[] = [
       ['server/src/ai/engines.ts', 'The list of AI engines. Has no imports so any module can load it first.'],
       ['server/src/ai/agent.ts', 'The AI agent loop: one JSON step per model call (tool, answer or ask), tool Sutras run as called Sutras with the step resumed afterwards, progress saved per step in ai_agent_state, limits, small-model tolerance and a last plain answer at the step limit.'],
       ['server/src/ai/memory.ts', 'AI memory stores (built-in, a database table, a folder): turns with token estimates, fitting the context window, the running summary, encryption, retention, and the first-in-first-out queue per session.'],
-      ['server/src/ai/knowledge.ts', 'Knowledge bases: chunking, vectors from a model or built-in word vectors, stores (built-in, folder, pgvector, Qdrant, Chroma, Pinecone), search by meaning and shared words with folder and detail filters, replace, remove, rebuild.'],
+      ['server/src/ai/knowledge.ts', 'Knowledge bases: chunking, vectors from a model or built-in word vectors, stores (built-in, folder, pgvector, Qdrant, Chroma, Pinecone), search by meaning and shared words with folder and detail filters, add (skipping unchanged text by a content hash), replace, remove, keep only listed sources, list sources, rebuild.'],
       ['server/src/ai/documents.ts', 'Document text: a small zip reader for Word, PowerPoint, Excel and OpenDocument, PDF through unpdf, and HTML to text.'],
       ['server/src/ai/mcpClient.ts', 'MCP client over streamable HTTP (JSON or event-stream answers, session header) or a command on standard input and output: list and call tools.'],
       ['server/src/ai/guard.ts', 'AI guard rules: personal data patterns (with a card number checksum), hidden instruction phrases, blocked topics, length and JSON shape, and an optional model check.'],
@@ -181,22 +183,22 @@ const FILES: Group[] = [
       ['web/vite.config.ts', 'Vite build of two pages (designer and Admin Console) and the development proxy to the admin API.'],
       ['web/src/main.tsx', 'Mounts the React application.'],
       ['web/src/App.tsx', 'Top bar, sign-in, and the switch between Designer, Runs, Resources and Server.'],
-      ['web/src/NewProject.tsx', 'New project: empty, with chosen samples, from chosen Sutras of a package file, or a copy of chosen Sutras of a project; the searchable pick list also used for samples in New Sutra.'],
+      ['web/src/NewProject.tsx', 'New project: empty, with chosen samples, from chosen Sutras of a release zip or package file (with its files), from a sample project, or a copy of chosen Sutras of a project; the searchable pick list also used for samples in New Sutra.'],
       ['web/src/Auth.tsx', 'Sign-in, first administrator and password change, shared by the designer and the Admin Console.'],
       ['web/src/api.ts', 'Thin client for the admin API; changing calls carry the X-Sutra header.'],
       ['web/src/types.ts', 'Studio-side types of Sutras, activities, fields and runs.'],
       ['web/src/ui.tsx', 'Toasts and the catalog (current project, its connections and schemas, secret names).'],
-      ['web/src/Designer.tsx', 'The canvas: palette, drag and drop, connections with labels, undo and redo, Delete-key handling, test and debug runs, sample picker.'],
-      ['web/src/Inspector.tsx', 'Right panel for a step or a connection: General, Input, Output and Settings tabs, loop settings, connection name and condition.'],
+      ['web/src/Designer.tsx', 'The canvas: palette, drag and drop, connections with labels, step descriptions as tooltips (marked on the step), undo and redo, Delete-key handling, test and debug runs, sample picker.'],
+      ['web/src/Inspector.tsx', 'Right panel for a step or a connection: General (with the step description), Input, Output and Settings tabs, loop settings, connection name and condition; the Sutra\'s General tab with its documentation (HTML and Markdown) and the count of steps without a description.'],
       ['web/src/Fields.tsx', 'Field editors (text, select, secret, resource, schema, Sutra picker) that accept drops from the data tree.'],
       ['web/src/Mapper.tsx', 'Input mapping: Process Data on the left, Activity Input on the right with lines between them, the formula editor with function browser, preview, For-Each, If and Choose.'],
       ['web/src/DataTree.tsx', 'The data tree on the mapper\'s source side, from the last run or from output shapes.'],
-      ['web/src/Project.tsx', 'Project panel: Sutras, Resources with the + menu and Test connection, schemas and service descriptors, each as a folder tree (drag and drop, rename, move, remove), variables with the missing-variable warning, AI models, releases (packages and history).'],
+      ['web/src/Project.tsx', 'Project panel: Sutras, Resources with the + menu and Test connection, schemas and service descriptors, each as a folder tree (drag and drop, rename, move, remove), variables with the missing-variable warning, AI models, project log, releases (release zip or package download, deploying zips with their config and files, documentation, history).'],
       ['web/src/Git.tsx', 'The Git tab: initialize or clone, accounts, changes by item with diffs (steps added, removed, changed), commit, push, pull, sync, branches, conflicts, graph, trust.'],
       ['web/src/vars.ts', 'Which project variables a step or connection reads that the project does not define (the same rule as the server).'],
       ['web/src/Resources.tsx', 'Shared resources and the secret vault.'],
       ['web/src/Runs.tsx', 'Run history with steps, input and output, approvals, cancel and resubmit, and the engine that ran each run.'],
-      ['web/src/Server.tsx', 'Server & APIs: gateway ports, TLS, Sengine variables and their policy, scripts and release policies, MCP endpoints.'],
+      ['web/src/Server.tsx', 'Server &amp; APIs: gateway ports, TLS, Sengine variables and their policy, scripts and release policies, the Python in use (found or chosen), MCP endpoints.'],
       ['web/src/templates.ts', 'Starter Sutras offered by "New Sutra".'],
       ['web/src/styles.css', 'Studio styles.'],
       ['web/src/env.d.ts', 'Vite type declarations.'],
@@ -207,7 +209,7 @@ const FILES: Group[] = [
     files: [
       ['web/admin.html', 'Page shell of the Admin Console.'],
       ['web/admin/main.tsx', 'Mounts the console and applies the saved theme.'],
-      ['web/admin/Console.tsx', 'Sign-in (or, on a headless engine without users, how to add the first administrator), password change, navigation by permission, and the pages.'],
+      ['web/admin/Console.tsx', 'Sign-in (or, on a headless engine without users, how to add the first administrator), password change, navigation by permission, and the pages (Operate, Releases, Alerts, Gateway, Access, Records, Server &gt; Database).'],
       ['web/admin/shared.tsx', 'What the signed-in account may do, loading and refresh helpers, state labels, in-page confirmation, password generator.'],
       ['web/admin/Overview.tsx', 'Tiles for engines, deployed Sutras, runs of the last day, approvals, work queue and gateway; recent failures with Resubmit.'],
       ['web/admin/Apps.tsx', 'Deployed projects and Sutras: start and stop, runs with step results, resubmit and cancel, deploy an earlier version, package history and roll back. Also the side panel used by other pages.'],
@@ -253,7 +255,7 @@ const FILES: Group[] = [
       ['.dockerignore', 'Keeps data, node_modules and builds out of the image context.'],
       ['docker-compose.yml', 'One container: studio, engine and gateway.'],
       ['docker-compose.cluster.yml', 'PostgreSQL, a studio without workers and two headless engines sharing the database.'],
-      ['bin/sutraflow.mjs', 'The sutraflow launcher, the one place for every command on Windows and Linux: setup, start and stop (studio or engine, background or foreground, graceful drain), restart, status, logs, open, cli (the sutra command with the local admin token), db, service (systemd unit or Windows task), and docker and docker cluster (compose, with the token and master key made once into .env).'],
+      ['bin/sutraflow.mjs', 'The sutraflow launcher, the one place for every command on Windows and Linux: setup, start and stop (studio or engine, background or foreground, graceful drain), restart, status, logs, open, cli (the sutra command with the local admin token), db, service (systemd unit or Windows task), and docker and docker cluster (compose, with the token and master key made once into .env). Used by tools/migrate-to-postgres to stop and start SutraFlow.'],
       ['bin/sutraflow', 'Linux and macOS entry of the launcher; takes Node.js from SUTRA_NODE or sutraflow.env.'],
       ['bin/sutraflow.cmd', 'Windows entry of the launcher; takes Node.js from SUTRA_NODE or sutraflow.env.'],
       ['sutraflow.env.example', 'Launcher settings: data folder, ports of the studio and the engine, database, Node.js path; copied to sutraflow.env on first use.'],
@@ -295,6 +297,13 @@ for (const f of described) if (!fs.existsSync(path.join(root, f))) problems.push
 // ---------------------------------------------------------------------------------------------
 const tablesFromSchema = () => schemaTables(root);
 
+/** The commands of the sutra tool, from its own help, so this page cannot fall behind it. */
+function cliCommands() {
+  const r = spawnSync(process.execPath, ['--import', 'tsx', path.join(root, 'server', 'src', 'cli.ts'), 'help'], { cwd: root, encoding: 'utf8' });
+  const names = [...new Set(String(r.stdout || '').split(/\r?\n/).map(l => /^ {2}([a-z]+)\s/.exec(l)?.[1]).filter(Boolean))] as string[];
+  return names.map(n => `<code>${n}</code>`).join(', ');
+}
+
 function apiRoutes() {
   const routes = [...read('server/src/api.ts').matchAll(/app\.(get|post|put|delete|patch)\('([^']+)'/g)].map(m => ({ method: m[1].toUpperCase(), path: m[2] }));
   const area = (p: string) => p.startsWith('/api/') ? p.split('/')[2] : 'service';
@@ -304,6 +313,15 @@ function apiRoutes() {
 }
 
 const SETTINGS: [string, string, string][] = [
+  ['SUTRA_ENVIRONMENT', 'development (studio), production (engine)', '<code>development</code>, <code>test</code> or <code>production</code>: shown on log lines and audit entries; production refuses designer deploys and limits who may clear logs.'],
+  ['SUTRA_DB_PASSWORD', '(none)', 'The PostgreSQL password, kept apart from <code>SUTRA_DB</code> so the address can be shown and logged (written by the move to PostgreSQL).'],
+  ['SUTRA_PYTHON', '(found)', 'The Python that runs Python steps; else the setting in Server &amp; APIs, then <code>py</code>, <code>python3</code>, <code>python</code>.'],
+  ['SUTRA_GIT', '(git if installed)', '<code>system</code> or <code>builtin</code>: the Git used by the Git tab.'],
+  ['SUTRA_GIT_ALLOW_FILE', '(off)', '<code>1</code> allows <code>file://</code> repositories (tests, local mirrors).'],
+  ['SUTRA_GIT_TOKEN, SUTRA_GIT_LOGIN', '(none)', 'CLI only: the token (and login) for <code>sutra package --from-git</code> of a private repository.'],
+  ['SUTRA_NODE', 'node', 'Launcher and scripts: the Node.js program to use.'],
+  ['SUTRAFLOW_ENV', 'sutraflow.env', 'Launcher and scripts: another settings file.'],
+  ['STUDIO_PORT, STUDIO_GATEWAY_HTTP, STUDIO_GATEWAY_HTTPS, ENGINE_PORT, ENGINE_GATEWAY_HTTP, ENGINE_GATEWAY_HTTPS', '4800, 8080, 8443, 4801, 9080, 9443', 'Launcher (sutraflow.env): the ports of the studio and of a headless engine beside it.'],
   ['SUTRA_MODE', 'studio', '<code>studio</code>: studio, engine and gateway in one process. <code>engine</code>: headless, no studio and only the automation API with the admin token.'],
   ['SUTRA_DATA_DIR', './data', 'SQLite database, vault key file, log files and deployment configs.'],
   ['SUTRA_DB', '(SQLite)', '<code>postgres://user:pass@host/db</code> for clusters on several machines; <code>pglite:memory</code> in tests.'],
@@ -337,6 +355,13 @@ const pals = PALETTES.map(p => ({ ...p, acts: allActivities.filter(a => a.palett
 const tables = tablesFromSchema();
 const api = apiRoutes();
 for (const t of tables) if (!TABLE_TEXT[t.name]) problems.push(`no description for table ${t.name}`);
+// Every setting the code reads is listed under Settings.
+{
+  const listed = new Set(SETTINGS.flatMap(([k]) => k.split(/,\s*/)));
+  const sources = [...walk('server/src'), 'bin/sutraflow.mjs', 'tools/migrate-to-postgres.mjs'].filter(f => /\.(ts|mjs)$/.test(f));
+  const used = new Set(sources.flatMap(f => [...read(f).matchAll(/process\.env\.(SUTRA_[A-Z_]+)/g)].map(m => m[1])));
+  for (const k of used) if (!listed.has(k)) problems.push(`setting ${k} is read by the code but not listed under Settings`);
+}
 
 const S: { id: string; title: string; html: string }[] = [];
 const sec = (id: string, title: string, html: string) => S.push({ id, title, html });
@@ -368,7 +393,7 @@ ${DIAGRAMS.runtime}
 <li><strong>Gateway</strong> (ports 8080 and 8443) serves only what is deployed: REST paths, SOAP services with their WSDL, and MCP endpoints. It is separate from the admin port so the studio never has to face the internet.</li>
 <li><strong>Engine</strong> runs steps in worker slots (<code>SUTRA_WORKERS</code>, 16 by default). Slots take tasks from the database, never from memory.</li>
 <li><strong>Timers and listeners</strong> start runs from schedules, folders, mailboxes, queues and Drive. In a cluster they run on the leader only, so nothing starts twice.</li>
-<li><strong>Cluster beat</strong> writes this engine's heartbeat, holds or watches the leader lease, recovers dead engines' steps, and reloads routes after deploys elsewhere.</li>
+<li><strong>Cluster beat</strong> writes this engine\'s heartbeat, holds or watches the leader lease, recovers dead engines' steps, and reloads routes after deploys elsewhere.</li>
 <li><strong>Storage</strong> is SQLite in the data folder, or PostgreSQL for several machines. Sutras, runs, tasks, the vault, settings and cluster state all live there.</li>
 </ul>
 <h3 id="ports">Ports and addresses</h3>
@@ -388,16 +413,16 @@ ${DIAGRAMS.lifecycle}
 <li><strong>Start.</strong> A trigger (or a test run, the Run API, a channel, Call Sutra, an MCP call) calls <code>startRun</code>. It inserts the run row, which keeps a copy of the Sutra document it started with, and one pending task for the trigger step. Redeploying never changes a run in flight.</li>
 <li><strong>Queue.</strong> A deployed Sutra tuned with <em>Runs at once</em> starts extra runs as <code>queued</code>; they move to running, oldest first, when one of its runs ends (and the leader checks on each beat).</li>
 <li><strong>Claim.</strong> A free worker slot claims the next due task, highest Sutra priority first, with one atomic statement: <code>update tasks set status='running', owner=? where id = (select ... where status='pending' and not_before &lt;= now order by priority desc, id limit 1) and status='pending' returning *</code>. Two engines can never claim the same task.</li>
-<li><strong>Run the activity.</strong> The engine resolves the step's settings (templates, formulas, Project and Sengine variables, secrets) and its Input mapping, then calls the activity's <code>execute</code> with a context (logging, secrets, abort signal, time limit). Loop settings run it once per item of a list, or again while a condition holds, and collect the results.</li>
-<li><strong>Checkpoint.</strong> In one transaction the engine stores the step's output, marks the task done, and inserts tasks for the next steps. A crash before the commit leaves the task as it was; after the commit the next steps exist. Nothing is kept in memory between steps.</li>
-<li><strong>Route.</strong> The step's result names a port (out, error, ok, problems, approved, rejected...). Each connection from that port carries a live token or a skip token according to its condition. A merge waits for a token on every incoming connection.</li>
-<li><strong>Finish.</strong> When no tasks remain the run is done; a failure with no error path fails the run; End and stop options (this branch, Sutra success, Sutra error) finish early. The run's status, duration and steps go to metrics, traces and logs.</li>
+<li><strong>Run the activity.</strong> The engine resolves the step\'s settings (templates, formulas, Project and Sengine variables, secrets) and its Input mapping, then calls the activity\'s <code>execute</code> with a context (logging, secrets, abort signal, time limit). Loop settings run it once per item of a list, or again while a condition holds, and collect the results.</li>
+<li><strong>Checkpoint.</strong> In one transaction the engine stores the step\'s output, marks the task done, and inserts tasks for the next steps. A crash before the commit leaves the task as it was; after the commit the next steps exist. Nothing is kept in memory between steps.</li>
+<li><strong>Route.</strong> The step\'s result names a port (out, error, ok, problems, approved, rejected...). Each connection from that port carries a live token or a skip token according to its condition. A merge waits for a token on every incoming connection.</li>
+<li><strong>Finish.</strong> When no tasks remain the run is done; a failure with no error path fails the run; End and stop options (this branch, Sutra success, Sutra error) finish early. The run\'s status, duration and steps go to metrics, traces and logs.</li>
 </ol>
 <h3 id="task-states">Task states</h3>
 ${DIAGRAMS.states}
 <h3 id="conditions">Connections, conditions and merges</h3>
 ${DIAGRAMS.branches}
-<p>A connection can have a name (shown on the canvas) and a rule: <strong>always</strong> (the default), <strong>when</strong> a formula on the previous step's output is true (<code>{input.amount} &gt; 1000</code>), or <strong>otherwise</strong> (when no <em>when</em> connection from the same output was taken). Branches that are not taken send skip tokens downstream, so merges never wait forever (dead-path elimination).</p>
+<p>A connection can have a name (shown on the canvas) and a rule: <strong>always</strong> (the default), <strong>when</strong> a formula on the previous step\'s output is true (<code>{input.amount} &gt; 1000</code>), or <strong>otherwise</strong> (when no <em>when</em> connection from the same output was taken). Branches that are not taken send skip tokens downstream, so merges never wait forever (dead-path elimination).</p>
 <h3 id="waits">Waiting without holding anything</h3>
 <p>A step can return a wait instead of an output. The task becomes <code>waiting</code> with its wait details and costs nothing while it waits:</p>
 <ul>
@@ -407,30 +432,30 @@ ${DIAGRAMS.branches}
 <li><strong>Replies across engines</strong>: a gateway caller waits on the engine that took the request even when another engine runs the reply step; the waiting engine polls the run row.</li>
 </ul>
 <h3 id="errors">Errors, retries and the Error handler</h3>
-<p>Step settings give retries with a delay and a time limit. A failed attempt with retries left goes back to pending with a not-before time. When retries are spent, the step's <em>error</em> output is taken if it is connected; otherwise the Sutra's Error handler (an activity with no input) receives the error with the step name and message; otherwise the run fails. A failed run can be <strong>resubmitted</strong>: a new run starts with the same trigger input and the old run is marked resubmitted.</p>
+<p>Step settings give retries with a delay and a time limit. A failed attempt with retries left goes back to pending with a not-before time. When retries are spent, the step\'s <em>error</em> output is taken if it is connected; otherwise the Sutra\'s Error handler (an activity with no input) receives the error with the step name and message; otherwise the run fails. A failed run can be <strong>resubmitted</strong>: a new run starts with the same trigger input and the old run is marked resubmitted.</p>
 <h3 id="debug">Test and debug runs</h3>
 <p>A test run uses the draft, not the deployed version. A debug run pauses before each step (<code>paused</code> tasks) and continues one step at a time, so input and output can be checked in the studio.</p>`);
 
 sec('data', 'Data, mapping and expressions', `
-<p>Every step sees the same data: <code>trigger</code> (what started the run), <code>input</code> (the previous step's output), <code>nodes.&lt;Step name&gt;</code> (any earlier step), <code>vars</code> (Sutra variables), <code>gv</code> (Project variables), Sengine variables (read only), <code>secret</code> (vault, server side only, masked in history), <code>run</code>, and inside loops <code>item</code>, <code>index</code> and <code>iteration</code>.</p>
+<p>Every step sees the same data: <code>trigger</code> (what started the run), <code>input</code> (the previous step\'s output), <code>nodes.&lt;Step name&gt;</code> (any earlier step), <code>vars</code> (Sutra variables), <code>gv</code> (Project variables), Sengine variables (read only), <code>secret</code> (vault, server side only, masked in history), <code>run</code>, and inside loops <code>item</code>, <code>index</code> and <code>iteration</code>.</p>
 <ul>
 <li><strong>Templates</strong> (<code>template.ts</code>): <code>{{input.name | upper}}</code> inside text; a field that is only one template keeps the typed value (object, list, number).</li>
 <li><strong>Formulas</strong> (<code>expr.ts</code>): a value starting with <code>=</code>, such as <code>=concat({input.first}, ' ', {input.last})</code>. Parsed into a tree and evaluated by the engine; there is no <code>eval</code>.</li>
 <li><strong>Structured mapping</strong> (<code>mapping.ts</code>): the Activity Input tree from a shared schema or from paths, with For-Each on repeating nodes, where, group by, sort and conditions.</li>
-<li><strong>Shapes before running</strong> (<code>design.ts</code>, <code>schemas.ts</code>): each activity's output hint, schemas and earlier steps give the mapper a tree to drag from before any run exists.</li>
+<li><strong>Shapes before running</strong> (<code>design.ts</code>, <code>schemas.ts</code>): each activity\'s output hint, schemas and earlier steps give the mapper a tree to drag from before any run exists.</li>
 </ul>`);
 
 sec('gateway', 'Services: REST, SOAP and MCP', `
 ${DIAGRAMS.gateway}
-<p>When a Sutra with a REST service, SOAP service or MCP skill trigger is deployed, <code>rebuildRoutes</code> adds its path to the gateway's route table on every engine. A request is matched (method and path with parameters, SOAP action, MCP endpoint), checked against the service's API policy, and starts a run of the deployed version with the request as trigger input. The gateway then waits for the run's reply step (HTTP response, SOAP reply, Reply to AI) up to <code>SUTRA_REPLY_TIMEOUT_MS</code>.</p>
+<p>When a Sutra with a REST service, SOAP service or MCP skill trigger is deployed, <code>rebuildRoutes</code> adds its path to the gateway\'s route table on every engine. A request is matched (method and path with parameters, SOAP action, MCP endpoint), checked against the service\'s API policy, and starts a run of the deployed version with the request as trigger input. The gateway then waits for the run\'s reply step (HTTP response, SOAP reply, Reply to AI) up to <code>SUTRA_REPLY_TIMEOUT_MS</code>.</p>
 <ul>
-<li><strong>TLS</strong> (<code>tls.ts</code>): self-signed for testing, uploaded certificates, or Let's Encrypt with automatic renewal; a client CA turns on mutual TLS for services whose policy asks for it.</li>
+<li><strong>TLS</strong> (<code>tls.ts</code>): self-signed for testing, uploaded certificates, or Let\'s Encrypt with automatic renewal; a client CA turns on mutual TLS for services whose policy asks for it.</li>
 <li><strong>SOAP</strong>: the gateway publishes a WSDL for each SOAP service and wraps errors as SOAP faults; WS-Security headers are checked by policy.</li>
 <li><strong>MCP</strong> (<code>mcp.ts</code>): JSON-RPC over Streamable HTTP (protocol versions 2025-06-18, 2025-03-26 and 2024-11-05). <code>tools/list</code> returns every deployed MCP skill of that endpoint with its input schema; <code>tools/call</code> starts the Sutra and returns the Reply to AI content. An MCP server connection groups skills under their own path, such as <code>/mcp/orders</code>.</li>
-<li><strong>Tracing</strong>: a caller's W3C <code>traceparent</code> continues into the run's trace.</li>
+<li><strong>Tracing</strong>: a caller\'s W3C <code>traceparent</code> continues into the run\'s trace.</li>
 </ul>
 <h3 id="gateway-apps">Apps, plans, firewall and the request log</h3>
-<p>Before routing, the gateway checks its firewall (deny wins; an allow list admits only its addresses). An API security policy with <em>Gateway apps</em> accepts an app's key (<code>X-API-Key</code>, or <code>Authorization: Bearer sfk_...</code>) or an access token from <code>POST /oauth/token</code> (OAuth2 client credentials, an hour, signed with a key kept in settings). The app must hold the scopes the policy requires; its plan is then counted in <code>gw_usage</code> in one transaction, so every engine of a cluster shares the count, and a full window answers 429 with <code>Retry-After</code>; answers carry <code>X-RateLimit-*</code> headers. Every request is written to <code>gw_requests</code> when it ends, for the Traffic page (timeline, p50/p95/p99, busiest and slowest services, apps) and the request log; housekeeping deletes entries after the chosen number of days. OpenAPI 3.1 is generated from the deployed REST services, their path parameters, body schemas and security, for the console and, when chosen, at <code>/openapi.json</code> on the gateway.</p>`);
+<p>Before routing, the gateway checks its firewall (deny wins; an allow list admits only its addresses). An API security policy with <em>Gateway apps</em> accepts an app\'s key (<code>X-API-Key</code>, or <code>Authorization: Bearer sfk_...</code>) or an access token from <code>POST /oauth/token</code> (OAuth2 client credentials, an hour, signed with a key kept in settings). The app must hold the scopes the policy requires; its plan is then counted in <code>gw_usage</code> in one transaction, so every engine of a cluster shares the count, and a full window answers 429 with <code>Retry-After</code>; answers carry <code>X-RateLimit-*</code> headers. Every request is written to <code>gw_requests</code> when it ends, for the Traffic page (timeline, p50/p95/p99, busiest and slowest services, apps) and the request log; housekeeping deletes entries after the chosen number of days. OpenAPI 3.1 is generated from the deployed REST services, their path parameters, body schemas and security, for the console and, when chosen, at <code>/openapi.json</code> on the gateway.</p>`);
 
 sec('triggers', 'Timers, listeners and channels', `
 <p>Triggers that are not requests are started by the leader engine:</p>
@@ -443,7 +468,7 @@ sec('triggers', 'Timers, listeners and channels', `
 
 sec('storage', 'Storage', `
 ${DIAGRAMS.storage}
-<p>All code reads and writes through <code>q</code> and <code>tx</code> in <code>db.ts</code>. The default backend is SQLite built into Node (<code>node:sqlite</code>), in <code>data/sutra.db</code>, with WAL and a busy timeout so several engines on one host can share the file. With <code>SUTRA_DB=postgres://...</code> the same calls go to PostgreSQL: a worker thread (<code>pgworker.ts</code>) holds the connection, and the caller waits on a SharedArrayBuffer with <code>Atomics.wait</code>, so the storage API stays synchronous like SQLite's. Each write transaction takes a PostgreSQL advisory lock, giving the same one-writer guarantee as SQLite. The tests run the whole suite again on PGlite (PostgreSQL compiled to WebAssembly) to keep both backends equal.</p>
+<p>All code reads and writes through <code>q</code> and <code>tx</code> in <code>db.ts</code>. The default backend is SQLite built into Node (<code>node:sqlite</code>), in <code>data/sutra.db</code>, with WAL and a busy timeout so several engines on one host can share the file. With <code>SUTRA_DB=postgres://...</code> the same calls go to PostgreSQL: a worker thread (<code>pgworker.ts</code>) holds the connection, and the caller waits on a SharedArrayBuffer with <code>Atomics.wait</code>, so the storage API stays synchronous like SQLite\'s. Each write transaction takes a PostgreSQL advisory lock, giving the same one-writer guarantee as SQLite. The tests run the whole suite again on PGlite (PostgreSQL compiled to WebAssembly) to keep both backends equal.</p>
 <h3 id="tables">Tables</h3>
 ${tw(['Table', 'Holds', 'Columns'], tables.map(t => `<tr id="tbl-${t.name}"><td><code>${t.name}</code></td><td>${TABLE_TEXT[t.name] || ''}</td><td class="cols">${t.cols.map(c => esc(c)).join(', ')}</td></tr>`).join(''))}`);
 
@@ -464,12 +489,12 @@ ${DIAGRAMS.cluster}
 sec('deploy', 'Releases and deployment', `
 ${DIAGRAMS.release}
 <h3 id="packages">Project packages</h3>
-<p>A release is a <strong>project package</strong> (<code>packages.ts</code>): a JSON file with format <code>sutraflow-package</code> v1 holding every deployed Sutra at its version, the project's connections (secret names, never values), shared schemas and WSDLs, Project variables and logging, a manifest (Sutras, secrets needed, activity types used) and a sha256 checksum over a canonical form. The same file goes to test and production; differences come from each server's <strong>deployment config</strong> (variables, connection settings, logging, with <code>${'${env:NAME}'}</code> values).</p>
+<p>A release is a <strong>project package</strong> (<code>packages.ts</code>): a JSON file with format <code>sutraflow-package</code> v1 holding every deployed Sutra at its version, the project\'s connections (secret names, never values), shared schemas and WSDLs, Project variables and logging, a manifest (Sutras, secrets needed, activity types used) and a sha256 checksum over a canonical form. The same file goes to test and production; differences come from each server\'s <strong>deployment config</strong> (variables, connection settings, logging, with <code>${'${env:NAME}'}</code> values).</p>
 <ul>
 <li><strong>Check</strong>: the server knows every activity type, the secrets exist in its vault, and API paths and MCP skill names are not used by another project.</li>
 <li><strong>Deploy</strong>: Sutras are matched by name and created or updated as new versions (unchanged documents are left alone); Sutras not in the package are undeployed unless kept. Each deployment is stored in <code>package_deployments</code> with its report.</li>
 <li><strong>Roll back</strong>: deploys the package before the latest one, or a chosen one from history.</li>
-<li><strong>Test</strong>: deploys into a throw-away server and runs the package's Sutras.</li>
+<li><strong>Test</strong>: deploys into a throw-away server and runs the package\'s Sutras.</li>
 <li><strong>Import</strong>: a new project from chosen Sutras of a package, as drafts by default (no address clashes, missing secrets only warn), not recorded as a deployment. <strong>Copy</strong> builds a package of chosen Sutras of a project on the same server and imports it the same way.</li>
 </ul>
 <h3 id="cli">The sutra command</h3>
@@ -497,7 +522,7 @@ ${tw(['Strategy', 'How', 'When'], [
 <h3 id="headless">Headless engines</h3>
 <p>With <code>SUTRA_MODE=engine</code> the designer is not served and its API is closed. The engine keeps the Admin Console at <code>/admin</code> for its users, and the API the console and automation need: packages, deployed Sutras and their versions, runs, approvals, secrets, engines, access and audit, for signed-in users and API tokens. There is no first-start page; the first administrator is added on the server with <code>sutra user add</code>. Health, readiness and metrics stay available.</p>
 <h3 id="console">Admin Console</h3>
-<p>The console (<code>web/admin</code>, <code>server/src/console.ts</code>) is for what is deployed. Operators see the overview, start and stop deployed Sutras (their triggers stop starting runs while they stay deployed), look into runs and resubmit them, decide approvals, deploy an earlier version or roll a project back to an earlier package, and drain any engine: the request is stored on the engine's row and that engine drains on its next heartbeat. Administrators manage users, system accounts with their API tokens, roles, and read the audit log. Every page shows only the projects the signed-in account may see, and every action is checked again by the server.</p>
+<p>The console (<code>web/admin</code>, <code>server/src/console.ts</code>) is for what is deployed. Operators see the overview, start and stop deployed Sutras (their triggers stop starting runs while they stay deployed), look into runs and resubmit them, decide approvals, deploy an earlier version or roll a project back to an earlier package, and drain any engine: the request is stored on the engine\'s row and that engine drains on its next heartbeat. Administrators manage users, system accounts with their API tokens, roles, and read the audit log. Every page shows only the projects the signed-in account may see, and every action is checked again by the server.</p>
 <h3 id="docker">Docker</h3>
 <p>The Dockerfile builds in one stage and runs in a slim Node 24 image as the <code>node</code> user under tini, with a health check on <code>/ready</code>. Defaults: headless mode, data in <code>/data</code>, packages from <code>/deploy</code>, admin on 0.0.0.0, JSON logs. <code>docker-compose.yml</code> runs one server; <code>docker-compose.cluster.yml</code> runs PostgreSQL, a studio and two engines with a shared <code>SUTRA_MASTER_KEY</code> and a 45-second stop grace period.</p>`);
 
@@ -526,19 +551,19 @@ ${tw(['Signal', 'Where', 'Details'], [
 ].map(([a, b, c]) => `<tr><td><strong>${a}</strong></td><td>${b}</td><td>${c}</td></tr>`).join(''))}`);
 
 sec('alerts', 'Alerts', `
-<p>The cluster leader checks every enabled rule every six heartbeats (30 seconds by default), so a cluster alerts once however many engines it has. A check reads the database: failed or slow runs in a window, the gateway request log for error rate and p95 latency, engine heartbeats, pending steps older than a limit, waiting approvals, the gateway certificate, and the listeners of the leader. When a rule's condition holds and it has no open alert, an alert opens and every channel of the rule is told; while it holds, the alert is updated and, unless acknowledged, a reminder goes out every chosen number of minutes; when it clears, the alert resolves and the channels are told if the rule says so. Deliveries are recorded on the alert with their result. Channels: email through an SMTP connection; a webhook with a JSON body (<code>event</code>, <code>text</code>, <code>alert</code>) signed with an HMAC of a vault secret in <code>X-Sutra-Signature</code>; or a deployed Sutra started with the alert as its input. Resolved alerts are deleted after <code>SUTRA_AUDIT_RETENTION_DAYS</code>. <code>sutra alerts</code> exits with 1 while a critical alert is firing, for scripts and monitors.</p>`);
+<p>The cluster leader checks every enabled rule every six heartbeats (30 seconds by default), so a cluster alerts once however many engines it has. A check reads the database: failed or slow runs in a window, the gateway request log for error rate and p95 latency, engine heartbeats, pending steps older than a limit, waiting approvals, the gateway certificate, and the listeners of the leader. When a rule\'s condition holds and it has no open alert, an alert opens and every channel of the rule is told; while it holds, the alert is updated and, unless acknowledged, a reminder goes out every chosen number of minutes; when it clears, the alert resolves and the channels are told if the rule says so. Deliveries are recorded on the alert with their result. Channels: email through an SMTP connection; a webhook with a JSON body (<code>event</code>, <code>text</code>, <code>alert</code>) signed with an HMAC of a vault secret in <code>X-Sutra-Signature</code>; or a deployed Sutra started with the alert as its input. Resolved alerts are deleted after <code>SUTRA_AUDIT_RETENTION_DAYS</code>. <code>sutra alerts</code> exits with 1 while a critical alert is firing, for scripts and monitors.</p>`);
 
 sec('security', 'Security', `
 <ul>
 <li><strong>Studio</strong>: the first visit creates the administrator; signed session cookies that end when the account is disabled or signed out everywhere; changing requests need the X-Sutra header; the admin port listens on 127.0.0.1 unless set otherwise.</li>
-<li><strong>Accounts and roles</strong>: people and system accounts hold roles (Administrator, Developer, Deployer, Operator, Approver, Viewer, API caller, or custom ones) for all projects or one project. Every admin API route checks a permission for its project (<code>guard.ts</code>); lists show only the caller's projects. Five wrong passwords lock an account for 15 minutes; an administrator-set password must be changed at the next sign-in; at least one active administrator always remains.</li>
+<li><strong>Accounts and roles</strong>: people and system accounts hold roles (Administrator, Developer, Deployer, Operator, Approver, Viewer, API caller, or custom ones) for all projects or one project. Every admin API route checks a permission for its project (<code>guard.ts</code>); lists show only the caller\'s projects. Five wrong passwords lock an account for 15 minutes; an administrator-set password must be changed at the next sign-in; at least one active administrator always remains.</li>
 <li><strong>Automation</strong>: <code>SUTRA_ADMIN_TOKEN</code> acts as an administrator, compared in constant time. System accounts get their own API tokens (stored as hashes, with expiry) limited to their roles; headless engines accept only tokens.</li>
 <li><strong>Audit</strong>: every change, sign-in and refused request is recorded with who, when, from where and the result, searchable and exportable as CSV.</li>
 <li><strong>Vault</strong>: AES-256-GCM; values never leave the server through the API; masked in run history and logs.</li>
-<li><strong>Gateway</strong>: per-service API policies (API key, Basic with listed users or system accounts holding Call services on the project, JWT, mutual TLS, WS-Security); TLS with uploaded or Let's Encrypt certificates.</li>
+<li><strong>Gateway</strong>: per-service API policies (API key, Basic with listed users or system accounts holding Call services on the project, JWT, mutual TLS, WS-Security); TLS with uploaded or Let\'s Encrypt certificates.</li>
 <li><strong>Outbound</strong>: security profiles, client certificates, OAuth tokens stored encrypted, circuit breakers on HTTP connections.</li>
 <li><strong>Data never becomes code</strong>: SQL parameters are bound; formulas and templates are parsed, not evaluated; scripts receive values as environment variables and a JSON file; programs get arguments without a shell; file activities stay inside their folder; custom JavaScript runs in a sandboxed worker with limits.</li>
-<li><strong>Policies off by default</strong>: scripts, release activities and Sutras changing Sengine variables each need an administrator's switch in Server &amp; APIs.</li>
+<li><strong>Policies off by default</strong>: scripts, release activities and Sutras changing Sengine variables each need an administrator\'s switch in Server &amp; APIs.</li>
 </ul>`);
 
 sec('ai', 'AI and MCP', `
@@ -566,7 +591,7 @@ ${tw(['Palette', 'Activities'], pals.map(p => `<tr id="pal-${p.id}"><td><strong>
 <li>Applications: start, stop and restart deployed Sutras; runs with step results, resubmit and cancel; earlier versions; package history and roll back; per-Sutra tuning.</li>
 <li>Engines of the cluster with drain and engine tuning; approvals; users, system accounts with API tokens, roles; audit log with CSV export.</li>
 <li>Gateway: apps with keys, scopes and OAuth2 client credentials; plans with limits and quotas; firewall; traffic statistics and request log; APIs with OpenAPI.</li>
-<li>A Console panel with every action's output, and each action as a sutra command and an HTTP call for Windows PowerShell and Linux shells.</li>
+<li>A Console panel with every action\'s output, and each action as a sutra command and an HTTP call for Windows PowerShell and Linux shells.</li>
 <li>Alerts: rules of nine kinds, channels (email, webhook, Sutra), open alerts with acknowledge and resolve, reminders; the Overview with open alerts and charts of runs and gateway traffic.</li>
 </ul>`);
 
@@ -583,7 +608,7 @@ sec('settings', 'Environment settings', `
 ${tw(['Variable', 'Default', 'Meaning'], SETTINGS.map(([a, b, c]) => `<tr id="env-${slug(a)}"><td><code>${esc(a)}</code></td><td>${esc(b)}</td><td>${c}</td></tr>`).join(''))}`);
 
 sec('testing', 'Tests', `
-<p><code>npm test</code> compiles the server, then runs every suite with Node's test runner. Multi-process suites start real servers (headless engines, clusters on one database, drain and failover). The PostgreSQL suite runs the in-process suites again on PGlite with shifted ports. Three suites run only when their tools exist: the Docker image build, a real PostgreSQL server through <code>SUTRA_TEST_PG_URL</code>, and DB Ops against a real MySQL server through <code>SUTRA_TEST_MYSQL_URL</code> (for example Laragon's). A guard test fails if names of other products appear in the source or documents.</p>
+<p><code>npm test</code> compiles the server, then runs every suite with Node\'s test runner. Multi-process suites start real servers (headless engines, clusters on one database, drain and failover). The PostgreSQL suite runs the in-process suites again on PGlite with shifted ports. Three suites run only when their tools exist: the Docker image build, a real PostgreSQL server through <code>SUTRA_TEST_PG_URL</code>, and DB Ops against a real MySQL server through <code>SUTRA_TEST_MYSQL_URL</code> (for example Laragon\'s). A guard test fails if names of other products appear in the source or documents.</p>
 ${testFiles.map(f => `<h3 id="t-${slug(f)}">${esc(f)}</h3><ul class="tests">${testNames(f).map(n => `<li>${esc(n)}</li>`).join('')}</ul>`).join('')}`);
 
 // ---------------------------------------------------------------------------------------------
