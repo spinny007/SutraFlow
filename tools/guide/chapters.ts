@@ -387,12 +387,14 @@ export const CHAPTERS: Chapter[] = [
     id: 'documentation', title: 'Documenting Sutras',
     html: `
 <p>Every step has a <strong>Description</strong> in its General tab, below its name: what the step does and why, in your words. SutraFlow makes the documentation of a Sutra or a whole project from the steps, their descriptions and settings, so the documentation is always the design itself.</p>
+[[img:step-description|A step's General tab: its name, then its Description, used by the canvas and the documentation.]]
 <ul>
 <li>On the canvas, a described step shows &equiv; after its name; pointing at it shows the description.</li>
 <li>The Sutra's General tab (click the canvas background) counts the steps without a description and has <strong>Documentation</strong> (a page to read, print or share) and <strong>Markdown</strong> (for a repository or wiki).</li>
 <li>Releases has the documentation of the whole project, and every release zip carries it as <code>documentation.html</code> and <code>documentation.md</code>.</li>
 <li>From a shell or a pipeline: <code>sutra doc --project "Orders" --out orders.html</code>, <code>--sutra "Order lookup"</code> for one Sutra, <code>--format md</code> for Markdown, or <code>sutra doc release.zip</code> for a release.</li>
 </ul>
+[[img:sutra-documentation|The documentation of a Sutra: what starts it and its steps in run order, each with its description.]]
 <p class="h">What the documentation holds</p>
 <ul>
 <li>The Sutra's description, folder, version and whether it is deployed.</li>

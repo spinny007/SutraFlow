@@ -120,6 +120,25 @@ async function main() {
       const fl = await (await fetch('/api/flows?projectId=${gitDemo}')).json(); for (const f of fl) await fetch('/api/flows/' + f.id, { method: 'DELETE', headers: { 'x-sutra': '1' } });
       await fetch('/api/projects/${gitDemo}', { method: 'DELETE', headers: { 'x-sutra': '1' } }); localStorage.setItem('sutra.project', 'default'); })()`);
     await cdp('Page.reload', {}); await sleep(2500);
+    // Step descriptions and the documentation made from them: a throwaway project with the document sample.
+    const docDemo = await js(`
+      const api = async (m, u, b) => { const r = await fetch(u, { method: m, headers: { 'content-type': 'application/json', 'x-sutra': '1' }, body: b ? JSON.stringify(b) : undefined }); return r.json(); };
+      const p = await api('POST', '/api/projects', { name: 'Document assistant tour' });
+      await api('POST', '/api/projects/' + p.id + '/samples', { ids: ['agentdocs'] });
+      const f = (await api('GET', '/api/flows?projectId=' + p.id)).find(x => x.name === 'Sample: Document feed from a folder');
+      localStorage.setItem('sutra.project', p.id);
+      return { project: p.id, flow: f.id };`);
+    await cdp('Page.reload', {}); await sleep(2500);
+    await js(`${H} await openFlow('Sample: Document feed from a folder'); await wait(800);
+      node('Add the document')?.querySelector('.anode').click(); await wait(600); tab('General')?.click(); await wait(400);`);
+    await shot('step-description');
+    await cdp('Page.navigate', { url: `${BASE}/api/flows/${docDemo.flow}/documentation` }); await sleep(1500);
+    await shot('sutra-documentation');
+    await go('#designer');
+    await js(`await (async () => { const fl = await (await fetch('/api/flows?projectId=${docDemo.project}')).json(); for (const f of fl) await fetch('/api/flows/' + f.id, { method: 'DELETE', headers: { 'x-sutra': '1' } });
+      const rs = await (await fetch('/api/resources?projectId=${docDemo.project}')).json().catch(() => []); for (const r of (Array.isArray(rs) ? rs : [])) await fetch('/api/resources/' + r.id, { method: 'DELETE', headers: { 'x-sutra': '1' } });
+      await fetch('/api/projects/${docDemo.project}', { method: 'DELETE', headers: { 'x-sutra': '1' } }); localStorage.setItem('sutra.project', 'default'); })()`);
+    await cdp('Page.reload', {}); await sleep(2500);
     await js(`${H} [...document.querySelectorAll('.ltabs button')].find(b => b.textContent === 'Palettes').click(); document.querySelector('.react-flow__pane')?.click(); await wait(300);`);
 
     // 3. Mapper with formula editor (after a test run so values show).
