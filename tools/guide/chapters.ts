@@ -406,6 +406,204 @@ export const CHAPTERS: Chapter[] = [
 [[tip:Writing good descriptions|Say why, not only what: "Skips unchanged files so no vectors are made again" beats "Add to knowledge".<br>Name the business rule a step carries out and who owns it.<br>Describe triggers for the people who call them: address, input, who may call.]]`,
   },
   {
+    id: 'engine-inside', title: 'How a Sutra runs: inside the engine',
+    html: `
+<p>Knowing what the engine does with a Sutra explains most design choices: why a step should be safe to repeat, why large data should not travel from step to step, why waiting costs nothing, and how work spreads over engines. This chapter follows one run from its trigger to its end.</p>
+<p class="h">Runs, steps and the work queue</p>
+<p>A <strong>run</strong> is one row in the <code>runs</code> table: the Sutra as it was when the run started (a later deploy never changes a run in progress), its trigger input, its status, and its <strong>state</strong>: the output of every step so far (by step name), the Sutra variables, which paths are live, and the run's log. Each <strong>step execution</strong> is one row in the <code>tasks</code> table, which is also the work queue. Nothing about a run is held in memory between two steps: every step reads the run from the database and writes it back.</p>
+<p class="h">One run, step by step</p>
+<ol>
+<li><strong>Trigger.</strong> A deployed trigger fires: a REST call on the gateway, a timer, a new file, a queue message, a Drive or SharePoint change, an AI tool call, a chat message; or a person presses Test, or another Sutra calls this one. The engine writes the run row (status <em>running</em>) and a task for the trigger step (<em>pending</em>), in one transaction. When the Sutra's <em>Runs at once</em> limit is reached, the run is <em>queued</em> instead and starts when another one ends.</li>
+<li><strong>Claim.</strong> Every engine has a number of workers (<em>Steps at once</em>, 16 by default). A free worker takes the next due task in one database statement: highest Sutra priority first, then the oldest; due means its not-before time has passed. With several engines on one database, exactly one of them wins each task and records itself as its owner. Engines look for work every quarter of a second, and at once when a step ends.</li>
+<li><strong>Prepare.</strong> The step sees: <code>{input}</code> (what the previous step sent on the connection), <code>{nodes.Step name}</code> (any earlier step's output), <code>{trigger}</code>, <code>{vars}</code> (Sutra variables), <code>{gv}</code> (project variables with the deployment config applied), <code>{ev}</code> (Sengine variables), <code>{run}</code> and secrets by name. Settings and mappings are resolved now, not earlier.</li>
+<li><strong>Execute.</strong> The activity runs within its time limit (the step's Settings, else the activity's own: 2 minutes for most, 10 for AI steps, longer for data platform steps). A step set to loop runs here many times: <em>for each item</em> one after the other, <em>repeat while</em> until the condition is false.</li>
+<li><strong>Checkpoint.</strong> In one transaction the engine stores the step's output in the run state, marks the task done, and inserts tasks for the next steps. This is the checkpoint: if the engine stops after it, nothing is lost and nothing is repeated.</li>
+<li><strong>Route.</strong> The output goes out on one port (<em>out</em>, <em>true</em>, <em>error</em>, <em>approved</em> ...). Each connection from that port carries a <em>live</em> token, or a <em>skip</em> token when its condition is false or the port was not used. A step runs once for each live token that reaches it. A <strong>Merge</strong> step waits until every incoming connection has delivered a token (live or skip) and then runs once with the live ones; so a branch not taken never blocks it.</li>
+<li><strong>Wait.</strong> A step that waits (Approval, Ask a person, Call Sutra with wait, an AI agent waiting for a tool) stores what it waits for and its task becomes <em>waiting</em>: no worker, thread or memory is held, for a minute or a month. Wait (a delay) puts its task back as pending with a not-before time. When the answer comes, the step continues on whichever engine claims it.</li>
+<li><strong>Reply.</strong> For REST, SOAP and AI tool callers, the first reply step (Send HTTP response, SOAP reply, Reply to AI) answers the caller at once; the run may continue after it. A caller gets 504 if no reply comes within <em>Reply wait</em> (60 seconds by default).</li>
+<li><strong>End.</strong> When no task of the run is pending, running, paused or waiting, the run is <em>done</em>, or <em>failed</em> if a step failed without an error connection. An End step can stop the run at once (as success or as an error). The run's log, metrics (<code>/metrics</code>) and trace (OpenTelemetry) are written, a Call Sutra caller is resumed, and the next queued run of the Sutra starts.</li>
+</ol>
+<p class="h">When a step fails</p>
+<ol>
+<li><strong>Retries</strong> (the step's Settings, else the Sutra's tuning): the task goes back to the queue with a not-before time; the wait doubles each time (1 s, 2 s, 4 s ...). Other branches carry on meanwhile.</li>
+<li>Then the step's <strong>error output</strong>, when connected: it carries <code>{input.error.message}</code>, the step name and the input that failed; the run continues on that path.</li>
+<li>Else the Sutra's <strong>Error handler</strong>, when it has one: the other branches stop and the handler's path decides how the run ends.</li>
+<li>Else the run <strong>fails</strong>, with the step and the message. A failed run can be <strong>resubmitted</strong> (Runs, Admin Console, <code>sutra runs resubmit</code>): it runs again from the failed step with the same input, keeping everything before it.</li>
+</ol>
+<p class="h">Limits that protect the server</p>
+<table class="t"><thead><tr><th>Limit</th><th>Default</th><th>Set in</th></tr></thead><tbody>
+<tr><td>Steps at once, per engine</td><td>16</td><td>Admin Console &gt; Engines &gt; Tuning; <code>SUTRA_WORKERS</code></td></tr>
+<tr><td>Steps per run</td><td>10,000 (a loop that never ends is stopped)</td><td>Engine tuning; <code>SUTRA_MAX_STEPS</code></td></tr>
+<tr><td>Step time limit</td><td>2 minutes (AI 10 minutes)</td><td>The step's Settings tab</td></tr>
+<tr><td>Run time limit, runs at once, priority, retries</td><td>none</td><td>Sutra tuning (Admin Console &gt; Applications)</td></tr>
+<tr><td>Reply wait for callers</td><td>60 seconds</td><td>Engine tuning; <code>SUTRA_REPLY_TIMEOUT_MS</code></td></tr>
+<tr><td>Call Sutra depth</td><td>10 levels</td><td>Fixed</td></tr>
+<tr><td>Loop on a step</td><td>1,000 items (at most 10,000)</td><td>The step's Settings tab</td></tr>
+<tr><td>Run log</td><td>the last 500 lines in the run (the project log keeps everything)</td><td>Fixed</td></tr>
+</tbody></table>
+<p class="h">Engines and the cluster</p>
+<ul>
+<li>The <strong>studio</strong> is an engine with the designer; <strong>headless engines</strong> (<code>SUTRA_MODE=engine</code>) run Sutras only. All engines on one database share the work queue: add engines to run more steps at once.</li>
+<li>Every engine writes a <strong>heartbeat</strong> every 5 seconds. One engine holds the <strong>leader</strong> lease and runs what must happen once: timers, file, mailbox, queue and Drive listeners, alert checks and housekeeping. If the leader stops, another engine takes the lease within three beats.</li>
+<li>Every engine serves the <strong>gateway</strong>; a REST call may start a run on one engine whose steps then run on others.</li>
+<li>An engine silent for three beats is dead: the leader puts the steps it was running back in the queue, and another engine runs them again. <strong>Drain</strong> (Admin Console, <code>sutraflow stop</code>) lets running steps finish and hands the rest back without loss.</li>
+<li>A deploy raises a generation number; every engine notices on its next beat and reloads its routes; the leader restarts its listeners.</li>
+</ul>
+<p class="h">What follows for design</p>
+<ul>
+<li><strong>At least once.</strong> A step whose engine dies mid-step runs again on another. Steps that change things (insert an order, send money, post a message) should be safe to repeat: use the run id or a business key as an idempotency key, or check before writing.</li>
+<li><strong>Waiting is free.</strong> Approvals, people and long timers cost nothing while they wait; no need to avoid them.</li>
+<li><strong>State is rewritten each step.</strong> Every step's output stays in the run state for the rest of the run: large outputs make every later step slower and the database bigger (see <em>Designing Sutras</em>, large data).</li>
+<li><strong>Names are the keys.</strong> <code>{nodes.Step name}</code> holds the latest output of that step; in parallel branches (For each) read the item from <code>{input}</code>, or call a Sutra per item.</li>
+</ul>`,
+  },
+  {
+    id: 'design', title: 'Designing Sutras: patterns and good practice',
+    html: `
+<p>How to shape Sutras so they are correct, fast, cheap to run and easy to look after. It builds on <em>How a Sutra runs</em>.</p>
+<p class="h">Choose the pattern</p>
+<table class="t"><thead><tr><th>You need</th><th>Pattern</th><th>Build with</th></tr></thead><tbody>
+<tr><td>An answer within seconds (an API, a lookup)</td><td><strong>Request and reply</strong>: a short path to the reply step, nothing slow before it</td><td>[[restService]] or [[soapService]], work, [[httpResponse]]</td></tr>
+<tr><td>Accept now, work later (an order, a long job)</td><td><strong>Acknowledge, then work</strong>: reply 202 with an id at once, continue after the reply; the caller checks a status API or gets a callback</td><td>[[httpResponse]] early, then the work; or [[callProcess]] without waiting</td></tr>
+<tr><td>React to something happening</td><td><strong>Event driven</strong>: one Sutra per kind of event</td><td>[[fileTrigger]], [[busSubscribe]], [[googleDriveTrigger]], [[msFilesTrigger]], [[emailTrigger]], [[adfRunTrigger]]</td></tr>
+<tr><td>Work on a schedule, or many records</td><td><strong>Batch</strong>: a timer, read a page of records, process, mark done, repeat</td><td>[[timer]], [[dbQuery]] with paging, [[forEach]] or a called Sutra per record</td></tr>
+<tr><td>The same logic in several Sutras</td><td><strong>Sub-Sutra</strong>: one Sutra called by others</td><td>[[callProcess]] and [[return]]</td></tr>
+<tr><td>Decouple a fast producer from a slow consumer</td><td><strong>Queue</strong>: publish, and let a subscriber Sutra work at its own pace</td><td>[[busPublish]] and [[busSubscribe]], or channels</td></tr>
+<tr><td>A person decides</td><td><strong>Approval</strong> (below)</td><td>[[approval]], [[askPerson]]</td></tr>
+<tr><td>Language, documents, judgement</td><td><strong>AI step, RAG or agent</strong> (below and <em>AI concepts</em>)</td><td>The AI palette</td></tr>
+<tr><td>Heavy data work</td><td><strong>Orchestrate, do not carry</strong>: let the database or the data platform do the work, the Sutra starts and checks it</td><td>[[dbScript]], [[adfRun]], [[databricksRun]], [[databricksSql]]</td></tr>
+</tbody></table>
+<p class="h">Keep each Sutra small and named well</p>
+<ul>
+<li>One business purpose per Sutra; ten to thirty steps is a comfortable size. Split larger ones into sub-Sutras.</li>
+<li>Name steps by what they do (<em>Find the customer</em>, not <em>SQL query 2</em>): mappings, logs and the generated documentation use the names. Describe every step (General tab).</li>
+<li>Keep values that differ per environment in project variables and connections, never in steps; secrets only in the vault.</li>
+<li>Put Sutras in folders by business area; keep shared connections and schemas in the project, not copied.</li>
+</ul>
+<p class="h">Authentication and authorization at run time</p>
+<p>Every running Sutra has two identity questions: <strong>who is calling it</strong>, and <strong>who it is</strong> when it calls other systems. Decide both when you design it, not when it goes live.</p>
+<p><strong>Who may call (inbound)</strong>: every trigger on the gateway gets an API security policy (Resources). Choose by caller:</p>
+<table class="t"><thead><tr><th>Caller</th><th>Policy authentication</th></tr></thead><tbody>
+<tr><td>Another system of yours, few callers</td><td>API key (keys in the vault), or Basic</td></tr>
+<tr><td>Partners, apps, many callers with limits</td><td>Gateway apps: an app per caller with scopes and a plan; key or OAuth client-credentials token (<code>/oauth/token</code>)</td></tr>
+<tr><td>Your company's single sign-on (Entra ID, Okta, Keycloak, Auth0)</td><td>JWT: the identity provider issues tokens; the policy checks signature (JWKS), issuer, audience and scopes</td></tr>
+<tr><td>Machines in a closed network, banks, B2B</td><td>Mutual TLS (client certificates), with an IP allow list</td></tr>
+<tr><td>SOAP partners</td><td>WS-Security UsernameToken (with a time window and replay protection), or mutual TLS</td></tr>
+<tr><td>AI assistants (MCP) and agent chats</td><td>A policy on the MCP server resource and on each agent channel entry (chat, OpenAI-compatible, A2A)</td></tr>
+</tbody></table>
+<p>Add HTTPS-only, a rate limit and, for browsers, CORS origins. The designer and Deploy warn about a service without a policy.</p>
+<p><strong>Who the caller is, inside the Sutra</strong>: the trigger's output carries <code>{trigger.auth.method}</code>, <code>{trigger.auth.subject}</code> (the key's name, user, app or token subject) and, for JWT, <code>{trigger.auth.claims}</code>; and <code>{trigger.client.ip}</code>. Use them for <strong>authorization</strong>: a customer token may read only its own orders (<code>where customer_id = :sub</code>), a scope decides who may refund. Authentication says who; your Sutra decides what that caller may do.</p>
+<p><strong>Who the Sutra is (outbound)</strong>: each call to another system signs in with a connection, never with values typed into steps:</p>
+<table class="t"><thead><tr><th>Calling</th><th>Sign in with</th></tr></thead><tbody>
+<tr><td>REST and SOAP services</td><td>An HTTP connection with a security profile: Basic, bearer token, API key, OAuth2 client credentials (tokens fetched and refreshed for you), WS-Security (UsernameToken, SAML, X.509), client certificate</td></tr>
+<tr><td>Google, Microsoft 365, YouTube, Twitch, Dropbox, Facebook</td><td>An OAuth connection: an account connected once (Connect account, <code>sutra connect</code>, or a refresh token secret)</td></tr>
+<tr><td>Azure Data Factory, Databricks</td><td>A service principal or managed identity (or a Databricks token)</td></tr>
+<tr><td>Databases, SFTP, mail, queues</td><td>A user of their own for SutraFlow; SFTP with a key and the host fingerprint checked</td></tr>
+</tbody></table>
+<ul>
+<li><strong>Least rights</strong>: an account per purpose and environment, with only the rights the Sutras use (read-only where reading is enough).</li>
+<li><strong>Secrets only in the vault</strong>, named in connections; each environment has its own values. Rotate them by changing the secret: no Sutra changes.</li>
+<li><strong>Do not pass the caller's credentials on</strong>: call other systems as the Sutra's own identity, and send the caller's subject as data when the other system needs to know who asked.</li>
+<li><strong>People in the run</strong>: approvals and Ask a person are answered by signed-in users with the right role; the answer records who decided. Pipelines and scripts use system accounts with API tokens, never a person's password.</li>
+</ul>
+<p class="h">Errors and reliability</p>
+<ul>
+<li>Every step that talks to another system gets retries (Settings: 3 retries, 1 s first wait is a good start) and its <strong>error output</strong> connected where you can do something useful: a fallback, a message to the caller, a log with the input.</li>
+<li>Use an <strong>Error handler</strong> for what is common to every failure: log it, alert, reply 500 to an API caller.</li>
+<li>Make changing steps <strong>safe to repeat</strong>: an <code>insert ... on conflict do nothing</code> with a business key, an upsert, or a check first. Send the run id as an idempotency key to APIs that accept one.</li>
+<li>Set time limits that fit: a short one on calls that should be quick, so a stuck system fails fast; a <em>circuit breaker</em> on HTTP connections stops calling a system that keeps failing.</li>
+<li>Validate input at the door: a body schema on REST services, If steps with clear 400 replies.</li>
+</ul>
+<p class="h">Logging: what, when, where</p>
+<table class="t"><thead><tr><th>Level</th><th>Use for</th><th>Example</th></tr></thead><tbody>
+<tr><td>error</td><td>Something failed that a person must look at</td><td><em>Payment for A-1001 refused by the bank: card expired</em></td></tr>
+<tr><td>warn</td><td>Unexpected but handled; worth noticing if it repeats</td><td><em>Stock service slow (4.2 s); used the cached price</em></td></tr>
+<tr><td>info</td><td>Business milestones, one or two per run</td><td><em>Order A-1001 accepted: 3 lines, 2,450 INR</em></td></tr>
+<tr><td>debug</td><td>Details for finding a problem; switched on only while needed</td><td><em>Price rule matched: wholesale, 15%</em></td></tr>
+</tbody></table>
+<ul>
+<li>Log business keys (order number, customer id) so a line can be found from a support call; the run id is added for you.</li>
+<li>Never log secrets, passwords, card numbers or whole personal records; secret values are masked, other personal data is your care.</li>
+<li>Where it goes: the run's log (Runs), the <strong>project log</strong> file (Project &gt; Logging: file, level, size, rotation; JSON for log collectors) and, from the server, metrics and traces.</li>
+<li><em>Step data in history</em> (Sutra tuning): <em>all</em> while you build, <em>errors only</em> in production for busy Sutras, <em>none</em> for Sutras that handle sensitive data.</li>
+<li>Let alert rules watch for you (failed runs, slow runs, approvals waiting, gateway errors) instead of reading logs.</li>
+</ul>
+<p class="h">Database work</p>
+<ul>
+<li>Always <strong>parameters</strong> (<code>:name</code> or <code>?</code>), never values pasted into SQL: safe and faster (the database reuses the plan).</li>
+<li>Select only the columns you need, with a <code>where</code> on indexed columns; set <em>Maximum rows</em>.</li>
+<li>Many rows: page them (<code>order by id limit 500</code> after the last id), or let one SQL statement do the work (<code>insert ... select</code>, <code>update ... where</code>) instead of a step per row.</li>
+<li>Several changes that belong together: one [[dbTransaction]] (all or nothing), or a stored procedure ([[dbProcedure]]).</li>
+<li>Connections are pooled per connection resource; keep pool sizes within what the database allows when several engines run.</li>
+<li>Schema changes and setup scripts: [[dbScript]] in a release Sutra, not by hand.</li>
+</ul>
+<p class="h">Parallel work</p>
+<ul>
+<li>Steps run in parallel when the Sutra branches: two connections from one output start both steps at once, on free workers of any engine. A <strong>Merge</strong> waits for all of them.</li>
+<li>[[forEach]] sends every item down its <em>item</em> branch as its own task, so items run in parallel too (up to the free workers), and <em>done</em> follows with the whole list. For work per item with several steps, call a sub-Sutra per item: each item then has its own run, its own <code>{trigger}</code>, retries and history.</li>
+<li>A step's <em>Loop</em> setting runs the items one after the other, in order: for calls that must not overlap, or with a pause between them (rate-limited APIs).</li>
+<li>To limit how much runs at once: <em>Runs at once</em> per Sutra (extra runs queue), <em>Steps at once</em> per engine, plans for gateway callers. AI conversations are kept in order per session by themselves.</li>
+<li>To do more at once: raise <em>Steps at once</em> where steps mostly wait on other systems, or add engines on PostgreSQL.</li>
+</ul>
+<p class="h">Approval processes</p>
+<ol>
+<li>Prepare everything the approver needs first (amount, customer, history, a link), and put it in the question: the approver decides from the Approvals page or the Admin Console without opening other systems.</li>
+<li>[[approval]] for yes or no (outputs <em>approved</em>, <em>rejected</em>); [[askPerson]] when the answer is text (outputs <em>answered</em>, <em>declined</em>). Name an <em>assignee</em> (a person or a role) so it lands with the right people.</li>
+<li>Decide by rules first: an If before the approval sends small amounts straight through, so people see only what needs them.</li>
+<li>Several levels: approvals in a row (manager, then finance above a limit), each with its own assignee.</li>
+<li>Escalation: an alert rule <em>Approvals waiting</em> notifies when one waits too long; a run time limit on the Sutra ends approvals nobody answers.</li>
+<li>After the decision: record it (who, when, comment are in the output) in your system, and tell the requester.</li>
+</ol>
+<p>A waiting approval holds no resources, survives restarts and deploys, and is answered on any engine.</p>
+<p class="h">AI agents</p>
+<ul>
+<li>Use the smallest AI that does the job: a single AI step to classify or extract; [[knowledgeAsk]] to answer from documents; an agent only when the path to the answer is not known in advance.</li>
+<li>Rules stay in ordinary steps: refunds, limits, approvals are decided by If and Approval, never by the model.</li>
+<li>Few tools with clear names and descriptions; tools that change data are marked so, and checked inside the tool Sutra.</li>
+<li>[[aiGuard]] before the agent on public entry points; limits on steps, tokens and time; <em>needs a person</em> connected to [[askPerson]].</li>
+<li>Keep <em>Save steps</em> on so every answer can be explained; review a sample of conversations regularly.</li>
+</ul>
+<p class="h">Large data</p>
+<p>The run state is written after every step, and every step's output stays in it. So:</p>
+<ul>
+<li><strong>Carry references, not content</strong>: a file path, a row id, a blob address. Files: [[fileList]] without reading, then a sub-Sutra per file; save downloads to server files (Google Drive <em>Save to: server file</em>), not into outputs.</li>
+<li><strong>Stream large files</strong> with the steps that do (file copy and move, SFTP, Drive save, YouTube upload) rather than reading them into a step's output.</li>
+<li><strong>Page</strong> big queries and lists: 500 to 5,000 rows a page, one page per run or per sub-Sutra call.</li>
+<li><strong>Push the work down</strong>: SQL in the database, Spark in Databricks, copy activities in Data Factory; the Sutra orchestrates and checks.</li>
+<li>Keep step outputs under a few megabytes; history keeps at most about 1 MB per step (larger outputs are cut to a preview there). Set <em>Step data in history</em> to <em>errors only</em> or <em>none</em> for Sutras that move a lot of data.</li>
+<li>Use mappings to keep only the fields the next steps need.</li>
+</ul>
+<p class="h">Making a process faster</p>
+<ol>
+<li>Measure first: Runs shows each step's time; Admin Console &gt; Applications shows runs and failures per Sutra; Traffic shows gateway time per service; <code>/metrics</code> and traces give the details.</li>
+<li>Run independent calls in parallel branches with a Merge instead of one after the other.</li>
+<li>Reply to callers as early as possible; do the rest after the reply.</li>
+<li>Fewer, bigger operations: one SQL statement for many rows, bulk APIs, batches of messages.</li>
+<li>Avoid needless steps: a mapping can often replace several small transform steps.</li>
+<li>Cache what rarely changes (reference data in a project variable, a counter, or a small table read once).</li>
+<li>Keep step outputs small (large data, above).</li>
+</ol>
+<p class="h">Tuning a deployed app</p>
+<table class="t"><thead><tr><th>Symptom</th><th>Look at</th><th>Change</th></tr></thead><tbody>
+<tr><td>Work waits in the queue</td><td>Overview: work waiting; Engines: steps running</td><td>More <em>Steps at once</em> (steps mostly waiting on other systems), more engines (busy CPU), priorities for urgent Sutras</td></tr>
+<tr><td>A system you call is overloaded</td><td>Its errors and time in Runs</td><td><em>Runs at once</em> for the Sutra; a loop with a pause; a circuit breaker on the connection</td></tr>
+<tr><td>API callers get 504</td><td>Traffic: time per service</td><td>Reply earlier; make the work asynchronous; raise <em>Reply wait</em> only as a last resort</td></tr>
+<tr><td>The database grows</td><td>Database page row counts</td><td>Retention of runs, audit and the request log; <em>Step data</em> errors only; smaller outputs</td></tr>
+<tr><td>Runs hang</td><td>Runs with status waiting or running</td><td>Step time limits, a run time limit, alerts on slow runs and waiting approvals</td></tr>
+</tbody></table>
+<p class="h">Changes, versions and CI/CD</p>
+<ul>
+<li>Keep the project in Git (the Git tab): a branch per change, a review before merging to main, a version tag for each release (<code>v1.4.0</code>).</li>
+<li>Give every trigger realistic <strong>test data</strong> (test request, payload, test event): <code>sutra test</code> in the pipeline runs every Sutra with it, so a broken Sutra stops the release.</li>
+<li>Build the release zip once, from the tag, in the pipeline; promote the same zip to UAT and production with each environment's deployment config; never deploy to production from the designer (production refuses it).</li>
+<li>Change APIs so callers do not break: add fields rather than rename them; for a change that breaks callers, publish a new path (<code>/v2/orders</code>) beside the old one and retire the old one later.</li>
+<li>Schema and database changes travel as [[dbScript]] steps in a release Sutra, written to run twice safely (<code>create table if not exists</code>).</li>
+<li>Know the way back: <code>sutra rollback</code> or Releases &gt; Roll back; a run in progress finishes on the version it started with.</li>
+</ul>
+<p>The full pipeline, with GitHub Actions, GitLab, Azure DevOps and Jenkins examples, is in <em>CI/CD pipelines</em>.</p>
+[[tip:In short|Small Sutras with one purpose, steps named and described.<br>Retries and an error path on every call to another system; changes safe to repeat.<br>References instead of large data; the database and data platforms do the heavy work.<br>Rules decide, people approve, AI assists.<br>Every entry point has a policy; every connection its own least-rights identity.<br>Release from Git through the pipeline; the same zip everywhere.<br>Measure before tuning; alert rules watch so people do not have to.]]`,
+  },
+  {
     id: 'gateway', title: 'The API gateway',
     html: `
 <p>SutraFlow listens on two kinds of ports, each for its own people. The <strong>studio port</strong> is for the team that builds and runs SutraFlow. The <strong>gateway</strong> is the front door for everyone and everything that uses your Sutras: other systems, websites, partners, mobile apps, AI assistants.</p>
