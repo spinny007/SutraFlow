@@ -56,6 +56,11 @@ const HELP = `sutra <command> [options]
             then start it with SUTRA_DB set to the new address and the same master key.
   db        info
             Which database the server uses, and its row counts.
+  db        migrate [--url <postgres://...>] [--replace] [--write-env <sutraflow.env>]
+            Copies this server's SQLite data to the PostgreSQL connection saved on the Admin Console's
+            Database page (or --url), checks every table arrived, and with --write-env points that
+            settings file at PostgreSQL (old file kept). Stop the server first; the script
+            tools/migrate-to-postgres does the whole move, stop and start included.
   user      add <name> [--role administrator] [--project <name>] [--system] [--display "Name"] [--email e]
                 [--password <p> | --password-from-env <VAR>] [--keep-password]
             Adds a person (or a system account) with a role for all projects or one project. People
@@ -193,6 +198,76 @@ function printCheck(c: any) {
   for (const e of c.errors || []) out(`  error    ${e}`);
   for (const w of c.warnings || []) out(`  warning  ${w}`);
   for (const s of c.secrets || []) out(`  secret   ${s.name}: ${s.present ? 'present' : 'MISSING'}`);
+}
+
+/**
+ * sutra db migrate: SQLite to the saved (or given) PostgreSQL, every table counted on both sides, and
+ * sutraflow.env switched with the password apart (SUTRA_DB_PASSWORD). Prints RESULT {json} last.
+ */
+async function dbMigrate(a: Args) {
+  const { openDb, copyDatabase, dbKind, q, closeDb } = await import('./db.js');
+  openDb();
+  if (dbKind() !== 'sqlite') throw new Error('This data folder already uses PostgreSQL (SUTRA_DB is set)');
+  const m = await import('./dbmigrate.js');
+  let url = str(a, 'url') || '';
+  let shown = url.replace(/\/\/([^:@/]+):[^@/]*@/, '//$1:***@');
+  let user = '', password = '';
+  if (!url) {
+    const t = m.getTarget();
+    if (!t) throw new Error('No PostgreSQL connection saved: save one on the Admin Console\'s Database page, or give --url');
+    password = m.passwordOf();
+    url = m.targetUrl(t, password);
+    shown = m.targetUrl(t);
+    user = t.user;
+  } else {
+    const u = new URL(url);
+    user = decodeURIComponent(u.username); password = decodeURIComponent(u.password);
+  }
+  out(`From SQLite ${path.join((await import('./config.js')).config.dataDir, 'sutra.db')} to ${shown}`);
+  await ensurePgDatabase(url);
+  const r = copyDatabase(url, { replace: !!a.replace, log: msg => out(`  ${msg}`) });
+  // Every table: the same number of rows on both sides.
+  const { default: pg } = await import('pg');
+  const c = new pg.Client({ connectionString: url });
+  await c.connect();
+  const wrong: string[] = [];
+  try {
+    for (const t of r.tables) {
+      const src = Number(q.get<any>(`select count(*) as n from ${t.table}`)?.n ?? 0);
+      const dst = Number((await c.query(`select count(*) as n from ${t.table}`)).rows[0]?.n ?? 0);
+      if (src !== dst) wrong.push(`${t.table}: ${src} in SQLite, ${dst} in PostgreSQL`);
+    }
+  } finally { await c.end(); }
+  if (wrong.length) throw new Error(`Row counts differ after the copy:\n  ${wrong.join('\n  ')}`);
+  out(`Checked ${r.tables.length} tables: the row counts match`);
+  closeDb();
+  let backup = '';
+  const envFile = str(a, 'write-env');
+  if (envFile) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    backup = `${envFile}.sqlite-${stamp}`;
+    const text = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf8') : '';
+    fs.writeFileSync(backup, text);
+    const eol = text.includes('\r\n') ? '\r\n' : '\n';
+    const noPw = (() => { const u = new URL(url); u.password = ''; return u.toString(); })();
+    // The settings reader trims values and takes off one pair of quotes: quote values that need it.
+    const envValue = (v: string) => (/^\s|\s$|^["']|["']$/.test(v) ? `"${v}"` : v);
+    const set: Record<string, string> = { SUTRA_DB: noPw, ...(password ? { SUTRA_DB_PASSWORD: envValue(password) } : {}) };
+    const lines = text.split(/\r?\n/).filter((l, i, all) => !(i === all.length - 1 && l === ''));
+    const done = new Set<string>();
+    const outLines = lines.map(l => {
+      const k = /^\s*#?\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(l)?.[1];
+      if (k && k in set && !done.has(k)) { done.add(k); return `${k}=${set[k]}`; }
+      return l;
+    });
+    for (const [k, v] of Object.entries(set)) if (!done.has(k)) outLines.push(`${k}=${v}`);
+    if (!password) outLines.push('# SUTRA_DB_PASSWORD is not set: PostgreSQL signs in without a password (trust or peer)');
+    fs.writeFileSync(envFile, outLines.join(eol) + eol);
+    if (process.platform !== 'win32') { try { fs.chmodSync(envFile, 0o600); } catch { /* not the owner */ } }
+    out(`${envFile} now uses PostgreSQL${user ? ` as ${user}` : ''}; the previous file is ${backup}`);
+  }
+  out(`RESULT ${JSON.stringify({ rows: r.rows, tables: r.tables.length, url: shown, backup })}`);
+  return 0;
 }
 
 /** Creates the PostgreSQL database of an address when it does not exist yet. */
@@ -439,7 +514,8 @@ async function main(argv: string[]) {
         table([['TABLE', 'ROWS'], ...counts]);
         return 0;
       }
-      if (a._[1] !== 'copy') throw new Usage('Use: sutra db copy --to <address> [--replace] | sutra db info');
+      if (a._[1] === 'migrate') return dbMigrate(a);
+      if (a._[1] !== 'copy') throw new Usage('Use: sutra db copy --to <address> [--replace] | sutra db migrate [--replace] [--write-env <file>] | sutra db info');
       const to = need(a, 'to');
       if (/^postgres(ql)?:/.test(to)) await ensurePgDatabase(to);
       openDb();

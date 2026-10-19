@@ -98,14 +98,14 @@ test('an agent uses a tool Sutra, answers, and remembers the conversation', asyn
 test('messages of one session are handled one at a time, in arrival order; other sessions run alongside', async () => {
   calls.length = 0;
   delayMs = 50;
-  // msg1 holds its session for 4 s at the model: msg2 and msg3 must wait, msg9 (another session) must not.
+  // msg1 holds its session for 8 s at the model: msg2 and msg3 must wait, msg9 (another session) must not.
   // (Generous: the PostgreSQL pass runs every suite at once on one in-process database.)
-  delayFor = p => (/Now:\nuser: msg1\b/.test(p) ? 4000 : 0);
+  delayFor = p => (/Now:\nuser: msg1\b/.test(p) ? 8000 : 0);
   script = p => ({ answer: `answer to ${/user: (msg\d)/.exec(p.split('Now:')[1] || '')?.[1]}` });
   const doc = agentDoc({ tools: 'none' });
   const ids = ['msg1', 'msg2', 'msg3'].map(m => engine.startRun({ doc, projectId: pid, input: { message: m, sessionId: 'queue-1' } }));
   const other = engine.startRun({ doc, projectId: pid, input: { message: 'msg9', sessionId: 'queue-2' } });
-  for (const id of [...ids, other]) await engine.waitFor(id, 30000);
+  for (const id of [...ids, other]) await engine.waitFor(id, 60000);
   delayMs = 0;
   delayFor = () => 0;
   const { getResource } = await import('../server/src/resources.js');

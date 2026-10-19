@@ -1,5 +1,5 @@
 import { config, version } from './config.js';
-import { q } from './db.js';
+import { q, dbKind } from './db.js';
 import { gatewayStatus } from './gateway/gateway.js';
 
 /**
@@ -19,7 +19,7 @@ export const lifecycle = {
 };
 
 export function health() {
-  return { ok: true, version, mode: config.mode, environment: config.environment, engine: config.engineId, startedAt: lifecycle.startedAt };
+  return { ok: true, version, mode: config.mode, environment: config.environment, engine: config.engineId, database: dbKind(), startedAt: lifecycle.startedAt };
 }
 
 export function readiness() {

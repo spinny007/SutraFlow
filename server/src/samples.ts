@@ -68,6 +68,8 @@ export const SAMPLES: { id: string; name: string; desc: string; palettes: string
   { id: 'python', name: 'Python scripts', palettes: 'Scripts', desc: 'Python written in the step and a .py file from the project files, with arguments, parameters and the previous output, printing JSON for the next step.', needs: 'Python 3 on the server; scripts allowed in Server & APIs' },
   { id: 'youtube', name: 'YouTube: publish from Google Drive, weekly analytics', palettes: 'Apps and social', desc: 'New videos in a Drive folder are saved to the server and uploaded to YouTube; every week the channel\'s analytics go to a Google Sheet.', needs: 'a Google OAuth app with the Drive, YouTube and Sheets scopes' },
   { id: 'twitch', name: 'Twitch: going live', palettes: 'Apps and social', desc: 'When the channel goes live, a welcome in the chat; after the stream, the follower count.', needs: 'a Twitch application (dev.twitch.tv)' },
+  { id: 'discord', name: 'Discord: order status bot', palettes: 'Apps and social', desc: 'A bot answers !status <order> in a channel with an embed.', needs: 'a Discord bot token' },
+  { id: 'telegram', name: 'Telegram: order status bot and alerts', palettes: 'Apps and social', desc: 'A bot answers /status <order> in any chat; an alert Sutra other Sutras call posts to the team chat.', needs: 'a Telegram bot token from @BotFather' },
   { id: 'skills', name: 'MCP skills: Write CSV file, Post to Facebook page', palettes: 'Triggers, AI, Files, Apps', desc: 'Two Sutras that AI assistants call as tools, on a sample MCP server.', needs: 'a security policy on the MCP server; a Facebook connection for posting' },
 ];
 
@@ -1138,6 +1140,44 @@ export function addSamples(projectId: string, ids?: string[]) {
     edges: [E('t', 'c', 'live'), E('c', 'l'), E('t', 'f', 'offline'), E('f', 'g')],
   });
 
+
+  const dcC = want('discord') ? conn('discord', 'Sample Discord', { mode: 'bot', webhookSecret: '', botTokenSecret: 'DISCORD_BOT_TOKEN', channelId: '', apiBase: 'https://discord.com/api/v10' }) : null;
+  const dcBot = dcC && save({
+    name: 'Sample: Discord order status bot',
+    description: 'While deployed, answers !status <order number> in a Discord channel with the order\'s status, and posts a notice with an embed. Make a bot at discord.com/developers, keep its token as the secret DISCORD_BOT_TOKEN, invite it to your server, turn on Message Content Intent, and set the channel id on the Sample Discord connection.',
+    nodes: [
+      D(N('t', 'discordTrigger', 'Message in the channel', 60, 240, { connection: dcC.id, channelId: '', prefix: '!', pollSeconds: 10 }), 'Checks the channel every 10 seconds; messages starting with ! are commands, such as !status A-1001.'),
+      D(N('i', 'if', 'Is it status', 360, 160, { left: '{{input.command}}', op: 'equals', right: 'status' }), 'Only the status command is answered here; add a Switch for more commands.'),
+      D(N('j', 'jsonata', 'Look up the order', 660, 100, { source: '{{input}}', expression: '(\n  $orders := { "A-1001": "shipped with Blue Dart", "A-1002": "being packed", "A-1003": "delivered" };\n  $s := $lookup($orders, $trim(args));\n  { "orderId": $trim(args), "status": $s ? $s : "not found" }\n)' }), 'Stands in for your order system: replace it with a REST call or SQL query.'),
+      D(N('d', 'discord', 'Answer in the channel', 960, 100, { connection: dcC.id, op: 'send message', channelId: '{{trigger.channelId}}', content: '', embedTitle: 'Order {{input.orderId}}', embedText: 'Status: {{input.status}}', embedUrl: '', embedColor: '#2f6fd8', files: '' }), 'Answers in the same channel with an embed; mentions are switched off so nobody is pinged.'),
+      D(N('h', 'discord', 'Explain the commands', 660, 300, { connection: dcC.id, op: 'send message', channelId: '{{trigger.channelId}}', content: 'Try `!status A-1001`.', embedTitle: '', embedText: '', embedUrl: '', embedColor: '', files: '' }), 'Any other command gets a short help line.'),
+    ],
+    edges: [E('t', 'i', 'command'), E('i', 'j', 'true'), E('i', 'h', 'false'), E('j', 'd')],
+  });
+  const tgC = want('telegram') ? conn('telegram', 'Sample Telegram bot', { botTokenSecret: 'TELEGRAM_BOT_TOKEN', chatId: '', apiBase: 'https://api.telegram.org' }) : null;
+  const tgBot = tgC && save({
+    name: 'Sample: Telegram order status bot',
+    description: 'While deployed, answers /status <order number> sent to your Telegram bot, replying to the message in the same chat; other messages get a help line. Create the bot with @BotFather and keep its token as the secret TELEGRAM_BOT_TOKEN. No public address is needed.',
+    nodes: [
+      D(N('t', 'telegramTrigger', 'Message to the bot', 60, 240, { connection: tgC.id, onlyChats: '' }), 'Receives every message sent to the bot (long polling); /commands go to the command output.'),
+      D(N('i', 'if', 'Is it status', 360, 160, { left: '{{input.command}}', op: 'equals', right: 'status' }), 'Only /status is answered here; add a Switch for more commands.'),
+      D(N('j', 'jsonata', 'Look up the order', 660, 100, { source: '{{input}}', expression: '(\n  $orders := { "A-1001": "shipped with Blue Dart", "A-1002": "being packed", "A-1003": "delivered" };\n  $s := $lookup($orders, $trim(args));\n  { "orderId": $trim(args), "status": $s ? $s : "not found" }\n)' }), 'Stands in for your order system: replace it with a REST call or SQL query.'),
+      D(N('r', 'telegram', 'Reply with the status', 960, 100, { connection: tgC.id, op: 'send message', chatId: '{{trigger.chatId}}', text: '<b>Order {{input.orderId}}</b>: {{input.status}}', format: 'HTML', replyTo: '{{trigger.messageId}}', preview: false, silent: false }), 'Replies to the message in the same chat, with the order number in bold.'),
+      D(N('h', 'telegram', 'Help', 660, 340, { connection: tgC.id, op: 'send message', chatId: '{{trigger.chatId}}', text: 'Send /status followed by your order number, for example /status A-1001.', format: 'plain', replyTo: '', preview: false, silent: false }), 'Anything else gets a short help line.'),
+    ],
+    edges: [E('t', 'i', 'command'), E('t', 'h', 'message'), E('i', 'j', 'true'), E('i', 'h', 'false'), E('j', 'r')],
+  });
+  const tgNotify = tgC && save({
+    name: 'Sample: Telegram team alerts',
+    description: 'A Sutra other Sutras call (Call Sutra) to alert a team in its Telegram chat: a title in bold, the text and a link. Set the default chat id on the Sample Telegram bot; for Discord, add a Discord step the same way.',
+    nodes: [
+      D(N('s', 'start', 'Alert', 60, 240, { payload: JSON.stringify({ title: 'Nightly load failed', text: 'CopySalesToLake failed at Load mart: Violation of PRIMARY KEY constraint', link: 'https://adf.azure.com/' }, null, 2) }), 'The alert: a title, a text and an optional link. Call Sutra passes them.'),
+      D(N('t', 'telegram', 'To Telegram', 360, 160, { connection: tgC.id, op: 'send message', chatId: '', text: '<b>{{input.title}}</b>\n{{input.text}}\n{{input.link}}', format: 'HTML', replyTo: '', preview: false, silent: false }), 'Posts the alert to the team chat (the default chat of the connection).'),
+      D(N('r', 'return', 'Done', 660, 240, { source: 'value', value: '{"sent": true}' }), 'Tells the calling Sutra the alert went out.'),
+    ],
+    edges: [E('s', 't'), E('t', 'r')],
+  });
+
   linkConnections(projectId, made, conn);
   for (const m of made) setFlowFolder(m.id, folderOf(m.sample));
   // Connections made for the samples go to a Samples folder of Resources.
@@ -1145,7 +1185,7 @@ export function addSamples(projectId: string, ids?: string[]) {
 
   return [forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, release, localAi, email, queue, timer, fileTrig, textFormats, dbUpd, dbProc, soapCall, emailIn, firebase, google, apps, aiMore,
     soapPublic, soapMock, soapMockCall, msCustomers, msStock, msOrders, sqlInstall, sqlService, ...sftp, ...ftp,
-    toolOrder, toolStock, desk, ragWeb, ragSp, ragAsk, queueAgent, team, mcpAgent, docOne, docFeed, docApi, docTool, docAgent, adfRunS, adfAlert, dbxNb, dbxSql, pyInline, pyFile, ytPublish, ytReport, twLive]
+    toolOrder, toolStock, desk, ragWeb, ragSp, ragAsk, queueAgent, team, mcpAgent, docOne, docFeed, docApi, docTool, docAgent, adfRunS, adfAlert, dbxNb, dbxSql, pyInline, pyFile, ytPublish, ytReport, twLive, dcBot, tgBot, tgNotify]
     .filter((f): f is NonNullable<typeof f> & { id: string; name: string } => !!f)
     .map(f => ({ id: f.id, name: f.name, folder: folderOf(made.find(m => m.id === f.id)?.sample || '') }));
 }
@@ -1167,7 +1207,7 @@ const FOLDERS: Record<string, string[]> = {
   'AI agents': ['agentdesk', 'agentrag', 'agentqueue', 'agentteam', 'agentmcp', 'agentdocs'],
   'Azure and Databricks': ['adf', 'databricks'],
   'Python': ['python'],
-  'Social media': ['youtube', 'twitch'],
+  'Social media': ['youtube', 'twitch', 'discord', 'telegram'],
 };
 const folderOf = (sample: string) => { const t = Object.entries(FOLDERS).find(([, ids]) => ids.includes(sample)); return t ? `Samples/${t[0]}` : 'Samples'; };
 for (const s of SAMPLES) s.folder = folderOf(s.id);
@@ -1189,7 +1229,7 @@ export const SAMPLE_SUTRAS: Record<string, string[]> = {
   'Samples/AI agents': ['AI tool order status', 'AI tool stock check', 'Order desk agent', 'Knowledge feed from web pages', 'Knowledge feed from SharePoint', 'Policy assistant', 'Agent fed by a queue', 'Supervisor agent', 'Agent with outside MCP tools', 'Add one document to knowledge', 'Document feed from a folder', 'Document questions API', 'AI tool search documents', 'Document assistant'],
   'Samples/Azure and Databricks': ['ADF run pipeline and wait', 'ADF alert on failed runs', 'Databricks notebook with parameters', 'Databricks SQL and code block'],
   'Samples/Python': ['Python script with parameters', 'Python script file'],
-  'Samples/Social media': ['Publish Drive videos to YouTube', 'YouTube weekly analytics to Google Sheets', 'Twitch going live announcement'],
+  'Samples/Social media': ['Publish Drive videos to YouTube', 'YouTube weekly analytics to Google Sheets', 'Twitch going live announcement', 'Discord order status bot', 'Telegram order status bot', 'Telegram team alerts'],
 };
 /** Letters and digits only, without "Sample:" and a " 2" suffix, so renamed punctuation still matches. */
 const sampleKey = (name: string) => name.replace(/^Sample:\s*/i, '').replace(/\s+\d+$/, '').toLowerCase().replace(/[^a-z0-9]/g, '');

@@ -11,6 +11,7 @@ import { testRemote } from './connectors/remote.js';
 import { testFirebase } from './connectors/firebase.js';
 import { connectionStatus, accessToken, apiCall } from './connectors/oauth.js';
 import { testAzure } from './connectors/azure.js';
+import { testChat } from './connectors/chat.js';
 
 /**
  * "Test connection" in the resource editor: tries the settings as they are on screen (saved or not),
@@ -99,6 +100,9 @@ async function run(r: Resource, secret: (n: string, w?: string) => string): Prom
     case 'azureDataFactory':
     case 'databricks':
       return testAzure(r, secret);
+    case 'discord':
+    case 'telegram':
+      return testChat(r, secret);
     case 'oauthApp': {
       if (!r.id || r.id.startsWith('test-')) throw new Error('Save the connection, then use Connect account to sign in');
       if (r.config.refreshTokenSecret) secret(r.config.refreshTokenSecret, 'Refresh token');

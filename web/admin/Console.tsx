@@ -11,6 +11,7 @@ import { People } from './People';
 import { Roles } from './Roles';
 import { Audit } from './Audit';
 import { Releases } from './Releases';
+import { Database } from './Database';
 import { Traffic, GwApps, Plans, Firewall, Apis } from './Gateway';
 import { AlertsPage, RulesPage, ChannelsPage } from './Alerts';
 import { ConsolePanel, useEntries } from './log';
@@ -19,7 +20,7 @@ import { ConsolePanel, useEntries } from './log';
  * Admin Console: manages what is deployed (projects, Sutras, runs, approvals), the engines, people,
  * system accounts, roles and the audit log. Design work stays in the designer.
  */
-type Page = 'overview' | 'apps' | 'approvals' | 'engines' | 'alerts' | 'rules' | 'channels' | 'traffic' | 'gwapps' | 'plans' | 'firewall' | 'apis' | 'people' | 'systems' | 'roles' | 'audit' | 'releases';
+type Page = 'overview' | 'apps' | 'approvals' | 'engines' | 'alerts' | 'rules' | 'channels' | 'traffic' | 'gwapps' | 'plans' | 'firewall' | 'apis' | 'people' | 'systems' | 'roles' | 'audit' | 'releases' | 'database';
 
 const NAV: { group: string; items: { id: Page; label: string; perm?: string }[] }[] = [
   { group: 'Operate', items: [{ id: 'overview', label: 'Overview' }, { id: 'apps', label: 'Applications' }, { id: 'approvals', label: 'Approvals' }, { id: 'releases', label: 'Releases', perm: 'view' }, { id: 'engines', label: 'Engines' }] },
@@ -27,6 +28,7 @@ const NAV: { group: string; items: { id: Page; label: string; perm?: string }[] 
   { group: 'Gateway', items: [{ id: 'traffic', label: 'Traffic', perm: 'gateway' }, { id: 'gwapps', label: 'Apps and keys', perm: 'gateway' }, { id: 'plans', label: 'Plans', perm: 'gateway' }, { id: 'firewall', label: 'Firewall', perm: 'gateway' }, { id: 'apis', label: 'APIs', perm: 'gateway' }] },
   { group: 'Access', items: [{ id: 'people', label: 'Users', perm: 'users' }, { id: 'systems', label: 'System accounts', perm: 'users' }, { id: 'roles', label: 'Roles', perm: 'users' }] },
   { group: 'Records', items: [{ id: 'audit', label: 'Audit log', perm: 'audit' }] },
+  { group: 'Server', items: [{ id: 'database', label: 'Database', perm: 'server' }] },
 ];
 
 export function Console() {
@@ -138,6 +140,7 @@ export function Console() {
               {current === 'systems' && <People kind="system" />}
               {current === 'roles' && <Roles />}
               {current === 'audit' && <Audit />}
+              {current === 'database' && <Database />}
             </div>
             {panel && <ConsolePanel onClose={() => setPanel(false)} />}
           </main>

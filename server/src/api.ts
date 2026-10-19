@@ -139,7 +139,7 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   // Headless engines: what the Admin Console and automation need (packages, deployed Sutras, runs,
   // approvals, secrets, engines, access, audit); no designer API.
   const ENGINE_API = [/^\/api\/packages\//, /^\/api\/projects\/?$/, /^\/api\/projects\/[^/]+\/(packages|rollback)$/, /^\/api\/engine\//, /^\/api\/runs/, /^\/api\/secrets/, /^\/api\/meta$/,
-    /^\/api\/access\//, /^\/api\/audit/, /^\/api\/auth\//, /^\/api\/console\//, /^\/api\/gateway\//, /^\/api\/alerts/, /^\/api\/approvals/, /^\/api\/flows\/[^/]+\/(versions|deploy)$/, /^\/api\/oauth\//, /^\/api\/scripts\/python$/, /^\/api\/resources(\?|$)/];
+    /^\/api\/access\//, /^\/api\/audit/, /^\/api\/auth\//, /^\/api\/console\//, /^\/api\/gateway\//, /^\/api\/alerts/, /^\/api\/approvals/, /^\/api\/flows\/[^/]+\/(versions|deploy)$/, /^\/api\/oauth\//, /^\/api\/scripts\/python$/, /^\/api\/server\/database/, /^\/api\/resources(\?|$)/];
   const sameToken = (a: string, b: string) => !!a && !!b && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
   /** The caller: the admin token (everything), a system account token, or a signed-in person. */
   const identify = (req: FastifyRequest): Caller | null => {
@@ -513,6 +513,11 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     return { allowed: projects.releasesAllowed() };
   });
   app.get('/api/scripts/policy', async () => ({ allowed: projects.scriptsAllowed() }));
+  // ---------- the server's own database: SQLite to PostgreSQL (dbmigrate.ts, tools/migrate-to-postgres) ----------
+  app.get('/api/server/database', async () => (await import('./dbmigrate.js')).databaseInfo());
+  app.put('/api/server/database/target', async (req: any) => { try { return (await import('./dbmigrate.js')).saveTarget(req.body); } catch (e: any) { throw bad(e.message); } });
+  app.post('/api/server/database/test', async (req: any) => { try { return await (await import('./dbmigrate.js')).testTarget(req.body); } catch (e: any) { return { ok: false, message: e.message, notes: [] }; } });
+  app.post('/api/server/database/migrate', async (req: any) => { try { return (await import('./dbmigrate.js')).startMigration({ replace: !!req.body?.replace, by: req.user?.u }); } catch (e: any) { throw bad(e.message); } });
   /** Which Python runs Python steps here, and the path an administrator set. */
   app.get('/api/scripts/python', async () => { const { findPython, forgetPython } = await import('./python.js'); forgetPython(); return { ...findPython(), configured: getSetting<string>('pythonPath', ''), fromEnv: process.env.SUTRA_PYTHON || '' }; });
   app.put('/api/scripts/python', async (req: any) => {

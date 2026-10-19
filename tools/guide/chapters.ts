@@ -816,7 +816,7 @@ print(json.dumps({"total": 42}))                              # the last line, a
   {
     id: 'social', title: 'YouTube, Twitch and social media',
     html: `
-<p>The Apps and social palette works with YouTube ([[youtube]]), Twitch ([[twitch]], [[twitchLiveTrigger]]), Facebook Pages ([[facebookPage]]), Google Drive and Sheets, Dropbox, and any other service with OAuth through [[oauthRequest]].</p>
+<p>The Apps and social palette works with YouTube ([[youtube]]), Twitch ([[twitch]], [[twitchLiveTrigger]]), Discord ([[discord]], [[discordTrigger]]), Telegram ([[telegram]], [[telegramTrigger]]), Facebook Pages ([[facebookPage]]), Google Drive and Sheets, Dropbox, and any other service with OAuth through [[oauthRequest]].</p>
 <p class="h">Accounts: OAuth, not passwords</p>
 <p>These services do not accept a user name and password from other programs; an account is connected once with OAuth, and SutraFlow keeps its tokens encrypted and refreshes them. For each service:</p>
 <ol>
@@ -825,10 +825,12 @@ print(json.dumps({"total": 42}))                              # the last line, a
 <li>Add an <strong>OAuth connection</strong>: the service, the client id, the client secret (as a vault secret), and the scopes.</li>
 <li>Sign in: <strong>Connect account</strong> in the studio. <strong>Test connection</strong> then names the account, YouTube channel or Twitch user.</li>
 </ol>
+<p class="h">Discord and Telegram</p>
+<p>These use keys, not OAuth. <strong>Discord</strong>: a webhook address (Channel settings &gt; Integrations &gt; Webhooks) posts to one channel with nothing to install; a bot (discord.com/developers &gt; Applications &gt; Bot) sends to any channel it is invited to and, with Message Content Intent on, lets [[discordTrigger]] answer commands such as <code>!status A-1001</code>. <strong>Telegram</strong>: @BotFather's <code>/newbot</code> gives a token; [[telegramTrigger]] receives messages by long polling, so the server needs no public address. Keep the webhook address and bot tokens as secrets: on production, set them in that server's vault.</p>
 <p class="h">Videos from Google Drive to YouTube</p>
 <p>YouTube uploads a file on the server. For videos kept in Google Drive, put [[googleDrive]] first with <em>download</em> and <em>Save to: server file</em> (streamed, so large videos are fine), then [[youtube]] <em>upload video</em> with <code>{{input.path}}</code>. The sample <em>Publish Drive videos to YouTube</em> does it for every new video in a Drive folder and removes the server copy afterwards. Upload as private, check, then publish with <em>update video</em> or <em>Publish at</em>.</p>
 <p class="h">Templates</p>
-<p><em>YouTube: publish from Google Drive, weekly analytics</em> and <em>Twitch: going live</em> in New Sutra &rarr; Samples (folder Samples/Social media).</p>`,
+<p><em>YouTube: publish from Google Drive, weekly analytics</em>, <em>Twitch: going live</em>, <em>Discord: order status bot</em> and <em>Telegram: order status bot and alerts</em> in New Sutra &rarr; Samples (folder Samples/Social media).</p>`,
   },
   {
     id: 'prod-connections', title: 'Connections on production servers',
@@ -1186,6 +1188,48 @@ sutra gateway stats --period 24h</pre>
 <pre>sutra user add admin --role administrator --password-from-env ADMIN_PASSWORD
 sutra user add ci-orders --system --role deployer --project "Orders"
 sutra user list</pre>`,
+  },
+  {
+    id: 'move-postgres', title: 'Moving to PostgreSQL',
+    html: `
+<p>SutraFlow keeps its own data (projects, Sutras, runs, people, the vault) in SQLite until you move it to PostgreSQL. PostgreSQL lets several engines share the data and holds more. The move takes a minute and is one button in the Admin Console, or one script on Windows and Linux.</p>
+<p class="h">1. Prepare PostgreSQL</p>
+<ul>
+<li>On this machine (Laragon includes PostgreSQL), on another server, or hosted: Azure Database for PostgreSQL, Amazon RDS, Google Cloud SQL. Version 14 or later.</li>
+<li>A user for SutraFlow with a password. Either an empty database it owns (<code>CREATE DATABASE sutraflow OWNER sutra;</code>), or <code>CREATEDB</code>, so the move makes the database.</li>
+<li><strong>Remote servers</strong>: PostgreSQL must listen on the network (<code>listen_addresses</code>), its <code>pg_hba.conf</code> must accept the SutraFlow machine (for example <code>hostssl sutraflow sutra 10.0.0.15/32 scram-sha-256</code>), and the firewall or network security group must open port 5432 to it. Hosted services do this in their portal.</li>
+<li>Knowledge bases stored in PostgreSQL also need pgvector; SutraFlow's own data does not.</li>
+</ul>
+<p class="h">2. Save and test the connection</p>
+[[img:console-database|The Database page: the database in use, the PostgreSQL connection with Test connection, and Migrate now.]]
+<p><strong>Admin Console &rarr; Server &rarr; Database</strong> shows the database in use. Fill in host, port, database, user, password and SSL:</p>
+<table class="t"><thead><tr><th>SSL</th><th>Use for</th></tr></thead><tbody>
+<tr><td>off</td><td>PostgreSQL on this machine or a trusted private network</td></tr>
+<tr><td>require</td><td>Encrypted; the server's certificate is not checked. Servers with their own (self-signed) certificate</td></tr>
+<tr><td>verify</td><td>Encrypted and the certificate checked against the host name. Hosted PostgreSQL (Azure, AWS, Google Cloud)</td></tr>
+</tbody></table>
+<p><strong>Test connection</strong> signs in and reports the PostgreSQL version, whether it signed in with the password and over SSL, whether the database exists or will be made, pgvector, and SutraFlow tables already there. Its messages say what to fix: a refused password, a host name that cannot be found, a port a firewall blocks, a server that does not accept this machine (pg_hba.conf) or wants SSL, a certificate that cannot be checked. <strong>Save</strong> keeps the connection; the password goes to the vault and never comes back to the page. A changed connection must be tested again before it can be used.</p>
+<p class="h">3. Migrate</p>
+<p><strong>Migrate now</strong> runs <code>tools/migrate-to-postgres</code>. The page shows each step and waits while SutraFlow restarts:</p>
+<ol>
+<li>SutraFlow stops gracefully: no new work, running steps finish. Triggers and APIs pause for about a minute.</li>
+<li>Every table is copied to PostgreSQL (the database is made when missing), and the rows of every table are counted on both sides.</li>
+<li><code>sutraflow.env</code> gets <code>SUTRA_DB=postgres://user@host:5432/sutraflow</code> and the password apart as <code>SUTRA_DB_PASSWORD</code> (so the address can be shown and logged); the old file is kept beside it; on Linux the file is made readable only by its owner.</li>
+<li>SutraFlow starts again (and the engine, when it was running) and must answer on PostgreSQL.</li>
+<li>If the copy or the start fails, the old <code>sutraflow.env</code> is put back and SutraFlow starts on SQLite again. The SQLite file is never changed, so it stays as a backup.</li>
+</ol>
+<p>Tick <em>Replace SutraFlow tables already in the target database</em> only to overwrite an earlier copy.</p>
+<p class="h">By hand, or on a server without the Admin Console</p>
+<pre>tools\\migrate-to-postgres.cmd                         (Windows)
+tools/migrate-to-postgres.sh                          (Linux, macOS)
+tools/migrate-to-postgres.sh --url "postgres://sutra:password@db.example.com:5432/sutraflow?sslmode=verify-full"</pre>
+<p>Without <code>--url</code> the script uses the connection saved on the Database page. It needs SutraFlow started with the launcher (<code>sutraflow start</code>, the Laragon Procfile, the Windows task or the systemd unit), because it stops and starts it. With a systemd unit, stop the service first, run the script, then start the service again. Progress goes to the console and to <code>&lt;data&gt;/migration/status.json</code>; the full output is in <code>&lt;data&gt;/migration/migration.log</code>.</p>
+<p class="h">Afterwards</p>
+<ul>
+<li>Back up PostgreSQL (<code>pg_dump</code>, or the hosted service's backups); the master key in the data folder still decrypts the vault and must be kept with the backups.</li>
+<li>More engines on other machines use the same <code>SUTRA_DB</code>, <code>SUTRA_DB_PASSWORD</code> and master key (see <em>Running in production</em>).</li>
+<li>To go back to SQLite: stop SutraFlow, put the kept <code>sutraflow.env.sqlite-...</code> file back, start it (changes made on PostgreSQL stay there).</li>
+</ul>`,
   },
   {
     id: 'production', title: 'Running in production: engines, Docker, clusters',

@@ -34,6 +34,8 @@ const HELP = `sutraflow <command>
                              for example: sutraflow cli sutras list
   db info | db copy --to <postgres://...> [--replace]
                              Which database is in use; copies the data to PostgreSQL (stop first).
+                             To move to PostgreSQL in one go (stop, copy, switch, start, check):
+                             tools/migrate-to-postgres, or Admin Console > Database > Migrate now.
   service                    How to start SutraFlow with the machine (systemd unit or Windows task).
   docker up | down | status | logs [service] | build
                              The studio and an engine in Docker (docker-compose.yml).

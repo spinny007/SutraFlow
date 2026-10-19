@@ -18,6 +18,7 @@ import { saasActivities } from '../connectors/saas.js';
 import { microsoftActivities } from '../connectors/microsoft.js';
 import { remoteActivities } from '../connectors/remote.js';
 import { azureActivities } from '../connectors/azure.js';
+import { chatActivities } from '../connectors/chat.js';
 
 /** Palette order in the studio. New palettes (connectors) register here. */
 export const PALETTES = [
@@ -32,7 +33,7 @@ export const PALETTES = [
   { id: 'bus', name: 'Service Bus', color: 'flow' },
   { id: 'email', name: 'Email', color: 'general' },
   { id: 'firebase', name: 'Firebase', color: 'ai' },
-  { id: 'apps', name: 'Apps and social (Google, YouTube, Twitch, Dropbox, Facebook)', color: 'auto' },
+  { id: 'apps', name: 'Apps and social (Google, YouTube, Twitch, Discord, Telegram, Dropbox, Facebook)', color: 'auto' },
   { id: 'azure', name: 'Azure Data Factory & Databricks', color: 'data' },
   { id: 'custom', name: 'Custom code', color: 'general' },
   { id: 'scripts', name: 'Scripts (PowerShell, shell, Python)', color: 'general' },
@@ -43,7 +44,7 @@ export const PALETTES = [
 
 export const allActivities = [
   ...coreActivities, ...processActivities, ...transformActivities, ...httpActivities, ...soapActivities, ...fileActivities, ...remoteActivities, ...dbActivities, ...busActivities,
-  ...emailActivities, ...firebaseActivities, ...saasActivities, ...azureActivities, ...microsoftActivities, ...codeActivities, ...scriptActivities, ...releaseActivities, ...aiActivities, ...agentActivities, ...mcpActivities,
+  ...emailActivities, ...firebaseActivities, ...saasActivities, ...chatActivities, ...azureActivities, ...microsoftActivities, ...codeActivities, ...scriptActivities, ...releaseActivities, ...aiActivities, ...agentActivities, ...mcpActivities,
 ];
 
 // Models often take 10 to 60 seconds to answer, and local models or long texts longer: AI steps allow

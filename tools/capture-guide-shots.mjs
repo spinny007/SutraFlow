@@ -204,6 +204,11 @@ async function main() {
       node('Error handler').querySelector('.anode').click(); await wait(400); tab('Output').click(); await wait(600);`);
     await shot('sample-trycatch');
 
+    // Admin Console: the Database page (where the move to PostgreSQL starts).
+    await cdp('Page.navigate', { url: `${BASE}/admin#database` }); await sleep(2500);
+    await js(`[...document.querySelectorAll('.c-nav a')].find(a => a.textContent.trim() === 'Database')?.click(); await new Promise(r => setTimeout(r, 1500));`);
+    await shot('console-database');
+
     ws.close();
   } finally {
     proc.kill();

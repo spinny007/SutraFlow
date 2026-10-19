@@ -1,0 +1,163 @@
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { getSetting, setSetting, dbKind, q } from './db.js';
+import { config, rootDir } from './config.js';
+import { getSecret, setSecret } from './secrets.js';
+
+/**
+ * Moving the server's own data from SQLite to PostgreSQL, from the Admin Console: an administrator
+ * saves and tests the PostgreSQL connection, then one button runs tools/migrate-to-postgres (the
+ * same script works by hand on Windows and Linux). The script stops SutraFlow gracefully, copies
+ * every table, points sutraflow.env at PostgreSQL (the password apart, as SUTRA_DB_PASSWORD), starts
+ * SutraFlow again and checks it; if anything fails, it puts the SQLite settings back. The SQLite
+ * file is never changed, so it stays as a backup.
+ */
+/**
+ * SSL: off (local or trusted networks), require (encrypted, the certificate is not checked: servers
+ * with their own certificates), verify (encrypted and the certificate checked: Azure, AWS, Google
+ * Cloud and other hosted PostgreSQL). Test connection and the server use the same setting.
+ */
+export const SSL_MODES = ['off', 'require', 'verify'] as const;
+export type SslMode = typeof SSL_MODES[number];
+export interface DbTarget { host: string; port: number; database: string; user: string; sslMode: SslMode; savedAt?: string; testedAt?: string; testedOk?: boolean }
+export const PASSWORD_SECRET = 'SUTRA_POSTGRES_PASSWORD';
+const KEY = 'db.migrationTarget';
+
+export const migrationDir = () => path.join(config.dataDir, 'migration');
+export const statusFile = () => path.join(migrationDir(), 'status.json');
+export const envFile = () => process.env.SUTRAFLOW_ENV || path.join(rootDir, 'sutraflow.env');
+
+export function getTarget(): DbTarget | null { return getSetting<DbTarget | null>(KEY, null); }
+
+const clean = (t: any): DbTarget => {
+  const host = String(t?.host || '').trim(), database = String(t?.database || '').trim(), user = String(t?.user || '').trim();
+  const port = Number(t?.port) || 5432;
+  if (!host || /[\s/@?#]/.test(host)) throw new Error('Give the host name or address of the PostgreSQL server');
+  if (!/^[A-Za-z_][\w$-]{0,62}$/.test(database)) throw new Error('The database name may use letters, digits, _ and - (it is made when missing)');
+  if (!user || /[\s:@/]/.test(user)) throw new Error('Give the PostgreSQL user');
+  if (port < 1 || port > 65535) throw new Error('The port must be between 1 and 65535');
+  const sslMode: SslMode = SSL_MODES.includes(t?.sslMode) ? t.sslMode : t?.ssl ? 'require' : 'off';
+  return { host, port, database, user, sslMode };
+};
+/** The node-postgres ssl option of a mode. */
+export const sslOption = (m: SslMode) => (m === 'off' ? undefined : { rejectUnauthorized: m === 'verify' });
+
+/** Plain words for the errors people meet with remote servers. */
+export function pgProblem(e: any, t: { host: string; port: number; user: string; database: string; sslMode: SslMode }) {
+  const m = String(e?.message || e);
+  if (e?.code === '28P01') return `PostgreSQL refused the password of ${t.user}`;
+  if (e?.code === '28000' && /pg_hba|no entry/i.test(m)) return `The server does not accept ${t.user} from this machine (${m.replace(/^.*?:\s*/, '')}). Add a line for this machine's address to pg_hba.conf on the server${t.sslMode === 'off' ? ', or turn SSL on: many hosted servers accept only SSL' : ''}, then reload PostgreSQL`;
+  if (e?.code === 'ENOTFOUND' || e?.code === 'EAI_AGAIN') return `The name ${t.host} cannot be found: check the host name, or use the IP address`;
+  if (e?.code === 'ECONNREFUSED') return `Nothing answers at ${t.host}:${t.port}: is PostgreSQL running there, listening on that address (listen_addresses), and is the port open?`;
+  if (e?.code === 'ETIMEDOUT' || /timeout/i.test(m)) return `No answer from ${t.host}:${t.port} in time: a firewall or network security group probably blocks the port, or the address is wrong`;
+  if (/does not support SSL|SSL off/i.test(m)) return `The server does not offer SSL: set SSL to off, or turn SSL on in PostgreSQL`;
+  if (/self.signed|certificate|unable to verify|altnames/i.test(m)) return `The server's certificate could not be checked (${m}). Use SSL require for a server with its own certificate, or give the host name the certificate is for`;
+  return `PostgreSQL at ${t.host}:${t.port}: ${m}`;
+}
+
+/** Saves the connection; the password goes to the vault (kept when not given again). */
+export function saveTarget(input: any) {
+  const t: DbTarget = { ...clean(input), savedAt: new Date().toISOString(), testedOk: false };
+  if (typeof input?.password === 'string' && input.password) setSecret(PASSWORD_SECRET, input.password);
+  setSetting(KEY, t);
+  return publicTarget();
+}
+
+export function publicTarget() {
+  const t = getTarget();
+  return t ? { ...t, hasPassword: getSecret(PASSWORD_SECRET) !== undefined } : null;
+}
+
+/** The PostgreSQL address; with the password only for the copy, never written with it. */
+export function targetUrl(t: DbTarget, password?: string) {
+  const auth = encodeURIComponent(t.user) + (password ? `:${encodeURIComponent(password)}` : '');
+  const mode = t.sslMode || ((t as any).ssl ? 'require' : 'off');
+  return `postgres://${auth}@${t.host.includes(':') ? `[${t.host}]` : t.host}:${t.port}/${encodeURIComponent(t.database)}${mode === 'require' ? '?sslmode=no-verify' : mode === 'verify' ? '?sslmode=verify-full' : ''}`;
+}
+export const passwordOf = () => getSecret(PASSWORD_SECRET) ?? '';
+
+/**
+ * Tries the connection: the server answers, the user signs in, the database exists (or can be made),
+ * pgvector is there for knowledge bases, and whether SutraFlow tables are already in it.
+ */
+export async function testTarget(input: any) {
+  const t = clean(input);
+  const password = typeof input?.password === 'string' && input.password ? input.password : passwordOf();
+  const { default: pg } = await import('pg');
+  const connect = async (database: string) => {
+    const c = new pg.Client({ host: t.host, port: t.port, user: t.user, password, database, ssl: sslOption(t.sslMode), connectionTimeoutMillis: 10000 });
+    await c.connect();
+    return c;
+  };
+  const notes: string[] = [];
+  let c: any;
+  let exists = true;
+  try {
+    c = await connect(t.database);
+  } catch (e: any) {
+    if (e.code !== '3D000') throw new Error(pgProblem(e, t));
+    exists = false;
+    try { c = await connect('postgres'); } catch (e2: any) { throw new Error(`The database ${t.database} does not exist, and the maintenance database postgres cannot be reached to make it (${pgProblem(e2, t)}). Create ${t.database} on the server first`); }
+    const can = (await c.query('select rolcreatedb or rolsuper as ok from pg_roles where rolname = current_user')).rows[0]?.ok;
+    if (!can) { await c.end(); throw new Error(`The database ${t.database} does not exist and ${t.user} may not create databases: create it, or give ${t.user} CREATEDB`); }
+    notes.push(`The database ${t.database} does not exist yet; it will be made`);
+  }
+  try {
+    const version = String((await c.query('show server_version')).rows[0]?.server_version || '');
+    if (Number(version.split('.')[0]) < 12) notes.push(`PostgreSQL ${version} is old; 14 or later is advised`);
+    const vec = (await c.query("select installed_version, default_version from pg_available_extensions where name = 'vector'")).rows[0];
+    notes.push(vec ? `pgvector ${vec.installed_version || vec.default_version} is available for knowledge bases` : 'pgvector is not installed (only needed for knowledge bases stored in PostgreSQL)');
+    let sutraTables = 0;
+    if (exists) sutraTables = Number((await c.query("select count(*) as n from information_schema.tables where table_schema = current_schema() and table_name in ('projects','flows','settings','runs')")).rows[0]?.n || 0);
+    if (sutraTables) notes.push('SutraFlow tables are already in this database: tick Replace to overwrite them');
+    const ssl = t.sslMode === 'off' ? 'without SSL' : (await c.query('select ssl from pg_stat_ssl where pid = pg_backend_pid()').catch(() => ({ rows: [] }))).rows[0]?.ssl ? `over SSL${t.sslMode === 'verify' ? ' (certificate checked)' : ''}` : 'over SSL';
+    notes.unshift(`Signed in ${password ? 'with the password' : 'without a password'}, ${ssl}`);
+    const t2 = { ...t, testedAt: new Date().toISOString(), testedOk: true };
+    const saved = getTarget();
+    if (saved && saved.host === t.host && saved.port === t.port && saved.database === t.database && saved.user === t.user && saved.sslMode === t.sslMode) setSetting(KEY, { ...saved, testedAt: t2.testedAt, testedOk: true });
+    return { ok: true, version, exists, sutraTables, notes, message: `Connected to PostgreSQL ${version} at ${t.host}:${t.port} as ${t.user}` };
+  } finally { await c.end().catch(() => {}); }
+}
+
+export interface MigrationStatus { state: 'idle' | 'starting' | 'stopping' | 'copying' | 'switching' | 'restarting' | 'checking' | 'done' | 'failed' | 'rolled back'; at: string; startedAt?: string; message?: string; log: string[]; rows?: number; tables?: number; target?: string; envBackup?: string }
+
+export function readStatus(): MigrationStatus {
+  try { return JSON.parse(fs.readFileSync(statusFile(), 'utf8')); } catch { return { state: 'idle', at: '', log: [] }; }
+}
+
+/** What the Database page shows: the database in use, its main row counts, the saved target, the last migration. */
+export function databaseInfo() {
+  const kind = dbKind();
+  const counts = Object.fromEntries(['projects', 'flows', 'resources', 'runs', 'users', 'secrets'].map(t => { try { return [t, Number(q.get<any>(`select count(*) as n from ${t}`)?.n ?? 0)]; } catch { return [t, null]; } }));
+  const where = kind === 'postgres' ? config.dbUrl.replace(/\/\/([^:@/]+):[^@/]*@/, '//$1:***@') : path.join(config.dataDir, 'sutra.db');
+  const scripts = { windows: path.join(rootDir, 'tools', 'migrate-to-postgres.cmd'), linux: path.join(rootDir, 'tools', 'migrate-to-postgres.sh') };
+  return { kind, where, counts, target: publicTarget(), status: readStatus(), envFile: envFile(), scripts, launcher: fs.existsSync(path.join(rootDir, 'bin', 'sutraflow.mjs')) };
+}
+
+/**
+ * Starts the migration script, detached so it outlives this server: it is the one that stops and
+ * starts SutraFlow. Refused unless the server uses SQLite and a tested connection is saved.
+ */
+export function startMigration(o: { replace?: boolean; by?: string }) {
+  if (dbKind() !== 'sqlite') throw new Error('This server already uses PostgreSQL');
+  const t = getTarget();
+  if (!t) throw new Error('Save the PostgreSQL connection first');
+  if (!t.testedOk) throw new Error('Test the PostgreSQL connection first');
+  const cur = readStatus();
+  if (['starting', 'stopping', 'copying', 'switching', 'restarting', 'checking'].includes(cur.state) && Date.now() - Date.parse(cur.at) < 15 * 60000) throw new Error('A migration is already running');
+  const script = path.join(rootDir, 'tools', 'migrate-to-postgres.mjs');
+  if (!fs.existsSync(script)) throw new Error(`The migration script is missing: ${script}`);
+  fs.mkdirSync(migrationDir(), { recursive: true });
+  const status: MigrationStatus = { state: 'starting', at: new Date().toISOString(), startedAt: new Date().toISOString(), log: [`Started from the Admin Console by ${o.by || 'an administrator'}`], target: targetUrl(t) };
+  fs.writeFileSync(statusFile(), JSON.stringify(status, null, 2));
+  const logPath = path.join(migrationDir(), 'migration.log');
+  const fd = fs.openSync(logPath, 'a');
+  const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', script, '--env', envFile(), '--data', config.dataDir, ...(o.replace ? ['--replace'] : [])], {
+    cwd: rootDir, detached: true, stdio: ['ignore', fd, fd], windowsHide: true,
+    env: { ...process.env, SUTRA_NODE: process.execPath },
+  });
+  child.unref();
+  fs.closeSync(fd);
+  return { started: true, pid: child.pid, log: logPath };
+}

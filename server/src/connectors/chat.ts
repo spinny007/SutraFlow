@@ -1,0 +1,316 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import type { Activity, ExecCtx, ResourceKind } from '../engine/types.js';
+import { requireResource, type Resource } from '../resources.js';
+import { registerListener } from '../listeners.js';
+import { httpCall } from '../security/outbound.js';
+import { getSecret } from '../secrets.js';
+import { F, when } from '../palettes/common.js';
+
+/**
+ * Discord and Telegram: messages to channels and chats, from webhooks or bots, and triggers for
+ * messages and commands people send. Bot tokens and webhook addresses are secrets: a deployed
+ * project names them and each server keeps its own values.
+ */
+type Secret = (name: string, what?: string) => string;
+const DISCORD_API = 'https://discord.com/api/v10';
+const TELEGRAM_API = 'https://api.telegram.org';
+
+export const CHAT_KINDS: ResourceKind[] = [
+  {
+    kind: 'discord', name: 'Discord', desc: 'A Discord webhook (posts to one channel, nothing to install) or a bot (sends and reads messages in the channels it is invited to).',
+    fields: [
+      F('mode', 'Connect with', 'select', 'webhook', { options: ['webhook', 'bot'], help: 'webhook: Channel settings > Integrations > Webhooks > New, copy its address. bot: discord.com/developers > Applications > Bot, copy the token, invite the bot with Send Messages and Read Message History (and turn on Message Content Intent to read messages).' }),
+      F('webhookSecret', 'Webhook address (secret)', 'secret', '', { ...when('mode', 'webhook'), help: 'The webhook address is a key: anyone who has it can post. Keep it as a secret.' }),
+      F('botTokenSecret', 'Bot token (secret)', 'secret', '', when('mode', 'bot')),
+      F('channelId', 'Default channel id', 'text', '', { ...when('mode', 'bot'), help: 'Turn on Developer Mode in Discord, then right-click the channel > Copy Channel ID.' }),
+      F('apiBase', 'API address', 'text', DISCORD_API, { help: 'Leave as it is.' }),
+    ],
+  },
+  {
+    kind: 'telegram', name: 'Telegram bot', desc: 'A Telegram bot that sends messages, photos, documents and videos to chats, groups and channels, and receives messages and commands.',
+    fields: [
+      F('botTokenSecret', 'Bot token (secret)', 'secret', '', { help: 'From @BotFather: /newbot gives the token. Add the bot to a group or channel to post there.' }),
+      F('chatId', 'Default chat id', 'text', '', { help: 'A chat, group (-100...) or @channelusername. The trigger shows the chat id of every message.' }),
+      F('apiBase', 'API address', 'text', TELEGRAM_API, { help: 'Leave as it is, unless you run your own Bot API server.' }),
+    ],
+  },
+];
+
+const secretOf = (c: ExecCtx): Secret => (n, what) => { const v = c.secret(n); if (v === undefined || v === null) throw new Error(`${what || 'Secret'}: secret "${n}" does not exist`); return v; };
+const plainSecret: Secret = (n, what) => { if (!n) throw new Error(`${what || 'Secret'} is not set`); const v = getSecret(n); if (v === undefined) throw new Error(`${what || 'Secret'}: secret "${n}" does not exist`); return v; };
+/** Never show a token or webhook key in a message. */
+const hide = (s: string, ...keys: string[]) => keys.filter(k => k && k.length > 6).reduce((t, k) => t.split(k).join('***'), s);
+
+// ---------- Discord ----------
+export function discordClient(r: Resource, secret: Secret, signal?: AbortSignal) {
+  const api = String(r.config.apiBase || DISCORD_API).replace(/\/+$/, '');
+  const bot = r.config.mode === 'bot';
+  const key = bot ? secret(r.config.botTokenSecret, 'Bot token') : secret(r.config.webhookSecret, 'Webhook address');
+  if (!bot && !/^https?:\/\//.test(key)) throw new Error('The webhook secret must hold the webhook address (https://discord.com/api/webhooks/...)');
+  const call = async (method: string, url: string, body?: unknown, files: { name: string; data: Buffer }[] = []) => {
+    const full = url.startsWith('http') ? url : `${api}${url}`;
+    const headers: Record<string, string> = bot ? { authorization: `Bot ${key}` } : {};
+    let res: { status: number; body: any; text?: string };
+    if (files.length) {
+      const form = new FormData();
+      form.append('payload_json', JSON.stringify(body ?? {}));
+      files.forEach((f, i) => form.append(`files[${i}]`, new Blob([new Uint8Array(f.data)]), f.name));
+      const r = await fetch(full, { method, headers, body: form, signal });
+      const text = await r.text();
+      let j: any = text; try { j = JSON.parse(text); } catch { /* text */ }
+      res = { status: r.status, body: j, text };
+    } else {
+      res = await httpCall({ method, url: full, headers: { ...headers, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body), timeoutMs: 30000, signal, parse: 'json' });
+    }
+    if (res.status >= 400) throw new Error(hide(`Discord ${method} failed (${res.status}): ${res.body?.message || res.text || ''}${res.body?.retry_after ? ` (try again in ${res.body.retry_after} s)` : ''}`, key));
+    return res.body;
+  };
+  return { call, bot, webhook: bot ? '' : key };
+}
+
+const fileList = (c: ExecCtx, k: string) => String(c.v(k) || '').split(/\r?\n|,/).map(s => s.trim()).filter(Boolean).map(f => {
+  if (!fs.existsSync(f)) throw new Error(`File not found on this server: ${f}`);
+  return { name: path.basename(f), data: fs.readFileSync(f) };
+});
+const colorOf = (v: unknown) => { const s = String(v || '').trim().replace(/^#/, ''); return /^[0-9a-f]{6}$/i.test(s) ? parseInt(s, 16) : undefined; };
+const shapeDiscord = (m: any) => ({ id: m.id, channelId: m.channel_id, author: m.author?.username || '', authorId: m.author?.id || '', content: m.content || '', at: m.timestamp, attachments: (m.attachments || []).map((a: any) => ({ name: a.filename, url: a.url, size: a.size })) });
+
+// ---------- Telegram ----------
+export function telegramClient(r: Resource, secret: Secret, signal?: AbortSignal) {
+  const token = secret(r.config.botTokenSecret, 'Bot token');
+  const api = `${String(r.config.apiBase || TELEGRAM_API).replace(/\/+$/, '')}/bot${token}`;
+  const call = async (method: string, body: Record<string, unknown> = {}, file?: { field: string; name: string; data: Buffer }, timeoutMs = 30000) => {
+    let status: number, j: any;
+    try {
+      if (file) {
+        const form = new FormData();
+        for (const [k, v] of Object.entries(body)) if (v !== undefined && v !== '') form.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+        form.append(file.field, new Blob([new Uint8Array(file.data)]), file.name);
+        const res = await fetch(`${api}/${method}`, { method: 'POST', body: form, signal });
+        status = res.status; j = await res.json().catch(() => ({}));
+      } else {
+        const res = await httpCall({ method: 'POST', url: `${api}/${method}`, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), timeoutMs, signal, parse: 'json' });
+        status = res.status; j = res.body;
+      }
+    } catch (e: any) { throw new Error(hide(`Telegram ${method}: ${e.message}`, token)); }
+    if (!j?.ok) throw new Error(hide(`Telegram ${method} failed (${status}): ${j?.description || 'no answer'}`, token));
+    return j.result;
+  };
+  return { call };
+}
+const shapeTelegram = (m: any) => ({
+  messageId: m.message_id, chatId: m.chat?.id, chatType: m.chat?.type, chatTitle: m.chat?.title || '', from: m.from?.username || m.from?.first_name || '', fromId: m.from?.id,
+  text: m.text || m.caption || '', command: /^\/(\w+)/.exec(m.text || '')?.[1] || '', args: (m.text || '').startsWith('/') ? (m.text || '').replace(/^\/\S+\s*/, '') : '', at: m.date ? new Date(m.date * 1000).toISOString() : '',
+  photo: m.photo ? m.photo[m.photo.length - 1]?.file_id : undefined, document: m.document ? { name: m.document.file_name, fileId: m.document.file_id } : undefined,
+});
+
+const discordConn = F('connection', 'Discord connection', 'resource', '', { resourceKind: 'discord' });
+const telegramConn = F('connection', 'Telegram bot', 'resource', '', { resourceKind: 'telegram' });
+
+export const chatActivities: Activity[] = [
+  {
+    type: 'discord', palette: 'apps', name: 'Discord', glyph: '◙', ports: ['out'],
+    desc: 'Posts a message to Discord, with an optional embed (title, text, link, colour) and files from the server; with a bot, also reads the latest messages of a channel. A webhook posts to its own channel; a bot to any channel it is in.',
+    fields: [
+      discordConn,
+      F('op', 'Operation', 'select', 'send message', { options: ['send message', 'read messages'] }),
+      F('channelId', 'Channel id (bot)', 'text', '', { tpl: true, help: 'Empty = the default channel of the connection. Webhooks always post to their own channel.' }),
+      F('content', 'Message', 'textarea', 'Order {{input.orderId}} has shipped.', { tpl: true, ...when('op', 'send message'), help: 'Up to 2000 characters; Discord markdown works (**bold**, `code`).' }),
+      F('username', 'Post as (webhook)', 'text', '', { tpl: true, ...when('op', 'send message'), help: 'Optional name shown for a webhook message.' }),
+      F('embedTitle', 'Embed title', 'text', '', { tpl: true, ...when('op', 'send message') }),
+      F('embedText', 'Embed text', 'textarea', '', { tpl: true, ...when('op', 'send message') }),
+      F('embedUrl', 'Embed link', 'text', '', { tpl: true, ...when('op', 'send message') }),
+      F('embedColor', 'Embed colour', 'text', '#2f6fd8', when('op', 'send message')),
+      F('files', 'Files to attach', 'textarea', '', { tpl: true, ...when('op', 'send message'), help: 'Paths of files on the server, one per line (up to 25 MB in total).' }),
+      F('limit', 'Messages', 'number', 20, when('op', 'read messages')),
+    ],
+    outputHint: { id: '', channelId: '', content: '', items: [{ id: '', author: '', content: '', at: '' }], count: 0 },
+    designCheck: cfg => (cfg.connection ? [] : ['Choose the Discord connection']),
+    execute: async c => {
+      const r = requireResource(c.raw('connection'), 'discord', 'Discord connection');
+      const d = discordClient(r, secretOf(c), c.signal);
+      const channel = String(c.v('channelId') || r.config.channelId || '').trim();
+      if (c.raw('op') === 'read messages') {
+        if (!d.bot) throw new Error('Reading messages needs a bot connection; a webhook can only post');
+        if (!channel) throw new Error('Channel id is not set');
+        const list = await d.call('GET', `/channels/${encodeURIComponent(channel)}/messages?limit=${Math.min(100, Math.max(1, Number(c.raw('limit')) || 20))}`);
+        const items = (list || []).map(shapeDiscord).reverse();
+        return { out: { items, count: items.length } };
+      }
+      const content = String(c.v('content') ?? '').slice(0, 2000);
+      const embed = c.v('embedTitle') || c.v('embedText') ? { title: String(c.v('embedTitle') || '').slice(0, 256) || undefined, description: String(c.v('embedText') || '').slice(0, 4096) || undefined, url: String(c.v('embedUrl') || '') || undefined, color: colorOf(c.raw('embedColor')) } : null;
+      const files = fileList(c, 'files');
+      if (!content && !embed && !files.length) throw new Error('Nothing to send: write a message, an embed or attach a file');
+      const body: any = { content: content || undefined, ...(embed ? { embeds: [embed] } : {}), allowed_mentions: { parse: [] } };
+      let m: any;
+      if (d.bot) {
+        if (!channel) throw new Error('Channel id is not set');
+        m = await d.call('POST', `/channels/${encodeURIComponent(channel)}/messages`, body, files);
+      } else {
+        if (c.v('username')) body.username = String(c.v('username')).slice(0, 80);
+        m = await d.call('POST', `${d.webhook}${d.webhook.includes('?') ? '&' : '?'}wait=true`, body, files);
+      }
+      return { out: shapeDiscord(m) };
+    },
+  },
+  {
+    type: 'discordTrigger', palette: 'apps', name: 'Discord trigger', glyph: '◙', trigger: true, ports: ['message', 'command'],
+    desc: 'Starts the Sutra for each new message in a Discord channel (a bot connection). Messages that start with the command prefix, such as !status A-1001, go to command with the command and its text apart. Messages of bots are left out. Polls while deployed.',
+    fields: [
+      discordConn,
+      F('channelId', 'Channel id', 'text', '', { help: 'Empty = the default channel of the connection.' }),
+      F('prefix', 'Command prefix', 'text', '!'),
+      F('pollSeconds', 'Check every (seconds)', 'number', 10),
+      F('testEvent', 'Test event (JSON)', 'code', JSON.stringify({ id: '1300000000000000001', channelId: '1290000000000000000', author: 'meera', authorId: '1100000000000000000', content: '!status A-1001', command: 'status', args: 'A-1001', at: '2026-10-19T10:00:00Z', attachments: [] }, null, 2)),
+    ],
+    outputHint: { id: '', channelId: '', author: '', authorId: '', content: '', command: '', args: '', at: '', attachments: [] },
+    designCheck: cfg => (cfg.connection ? [] : ['Choose the Discord connection (a bot)']),
+    execute: c => { const e = c.input ?? JSON.parse(c.raw('testEvent') || '{}'); return { port: e.command ? 'command' : 'message', out: e }; },
+  },
+  {
+    type: 'telegram', palette: 'apps', name: 'Telegram', glyph: '➤', ports: ['out'],
+    desc: 'Sends a message, photo, document or video from your Telegram bot to a chat, group or channel (text with HTML or Markdown, a reply to a message, link previews on or off), or reads what the bot knows about a chat.',
+    fields: [
+      telegramConn,
+      F('op', 'Operation', 'select', 'send message', { options: ['send message', 'send photo', 'send document', 'send video', 'chat info'] }),
+      F('chatId', 'Chat id', 'text', '{{trigger.chatId}}', { tpl: true, help: 'Empty = the default chat of the connection. A Telegram trigger gives {{trigger.chatId}} to answer in the same chat.' }),
+      F('text', 'Message', 'textarea', 'Order {{input.orderId}} has shipped.', { tpl: true, ...when('op', 'send message'), help: 'Up to 4096 characters.' }),
+      F('format', 'Text format', 'select', 'plain', { options: ['plain', 'HTML', 'MarkdownV2'], ...when('op', 'send message', 'send photo', 'send document', 'send video'), help: 'HTML: <b>bold</b>, <i>italic</i>, <a href="...">link</a>, <code>code</code>.' }),
+      F('file', 'File', 'text', '{{input.path}}', { tpl: true, ...when('op', 'send photo', 'send document', 'send video'), help: 'A file on the server, or an https address Telegram fetches itself.' }),
+      F('caption', 'Caption', 'textarea', '', { tpl: true, ...when('op', 'send photo', 'send document', 'send video') }),
+      F('replyTo', 'Reply to message id', 'text', '', { tpl: true, help: 'Optional; {{trigger.messageId}} answers the message that started the Sutra.' }),
+      F('preview', 'Show link previews', 'bool', true, when('op', 'send message')),
+      F('silent', 'Send silently', 'bool', false),
+    ],
+    outputHint: { messageId: 0, chatId: 0, text: '', title: '', type: '' },
+    designCheck: cfg => (cfg.connection ? [] : ['Choose the Telegram bot']),
+    execute: async c => {
+      const r = requireResource(c.raw('connection'), 'telegram', 'Telegram bot');
+      const t = telegramClient(r, secretOf(c), c.signal);
+      const chat = String(c.v('chatId') || r.config.chatId || '').trim();
+      if (!chat) throw new Error('Chat id is not set');
+      const op = c.raw('op') || 'send message';
+      if (op === 'chat info') {
+        const ch = await t.call('getChat', { chat_id: chat });
+        return { out: { chatId: ch.id, type: ch.type, title: ch.title || [ch.first_name, ch.last_name].filter(Boolean).join(' '), username: ch.username || '', description: ch.description || '' } };
+      }
+      const fmt = c.raw('format') === 'HTML' ? 'HTML' : c.raw('format') === 'MarkdownV2' ? 'MarkdownV2' : undefined;
+      const common: Record<string, unknown> = { chat_id: chat, ...(fmt ? { parse_mode: fmt } : {}), ...(c.raw('silent') ? { disable_notification: true } : {}), ...(String(c.v('replyTo') || '').trim() ? { reply_parameters: { message_id: Number(c.v('replyTo')), allow_sending_without_reply: true } } : {}) };
+      let m: any;
+      if (op === 'send message') {
+        const text = String(c.v('text') ?? '');
+        if (!text.trim()) throw new Error('The message is empty');
+        m = await t.call('sendMessage', { ...common, text: text.slice(0, 4096), ...(c.raw('preview') === false ? { link_preview_options: { is_disabled: true } } : {}) });
+      } else {
+        const kind = op === 'send photo' ? 'photo' : op === 'send video' ? 'video' : 'document';
+        const method = kind === 'photo' ? 'sendPhoto' : kind === 'video' ? 'sendVideo' : 'sendDocument';
+        const f = String(c.v('file') || '').trim();
+        const caption = String(c.v('caption') || '').slice(0, 1024);
+        if (/^https:\/\//.test(f)) m = await t.call(method, { ...common, [kind]: f, ...(caption ? { caption } : {}) });
+        else {
+          if (!f || !fs.existsSync(f)) throw new Error(`File not found on this server: ${f || '(empty)'}`);
+          m = await t.call(method, { ...common, ...(caption ? { caption } : {}) }, { field: kind, name: path.basename(f), data: fs.readFileSync(f) });
+        }
+      }
+      return { out: shapeTelegram(m) };
+    },
+  },
+  {
+    type: 'telegramTrigger', palette: 'apps', name: 'Telegram trigger', glyph: '➤', trigger: true, ports: ['message', 'command'],
+    desc: 'Starts the Sutra for each message people send your Telegram bot (in a private chat, or in a group when addressed to it). /commands such as /status A-1001 go to command with the command and its text apart. Uses long polling while deployed, so no public address is needed.',
+    fields: [
+      telegramConn,
+      F('onlyChats', 'Only these chat ids', 'text', '', { help: 'Comma separated; empty = any chat. Limit who can use a bot that does real work.' }),
+      F('testEvent', 'Test event (JSON)', 'code', JSON.stringify({ messageId: 42, chatId: 123456789, chatType: 'private', chatTitle: '', from: 'meera', fromId: 123456789, text: '/status A-1001', command: 'status', args: 'A-1001', at: '2026-10-19T10:00:00Z' }, null, 2)),
+    ],
+    outputHint: { messageId: 0, chatId: 0, chatType: '', chatTitle: '', from: '', fromId: 0, text: '', command: '', args: '', at: '' },
+    designCheck: cfg => (cfg.connection ? [] : ['Choose the Telegram bot']),
+    execute: c => { const e = c.input ?? JSON.parse(c.raw('testEvent') || '{}'); return { port: e.command ? 'command' : 'message', out: e }; },
+  },
+];
+
+/** Test connection: who the webhook or bot is, and that it can see its channel or chat. */
+export async function testChat(r: Resource, secret: Secret) {
+  if (r.kind === 'discord') {
+    const d = discordClient(r, secret);
+    if (!d.bot) { const w = await d.call('GET', d.webhook); return `Webhook "${w.name}" posts to channel ${w.channel_id}`; }
+    const me = await d.call('GET', '/users/@me');
+    let ch = '';
+    if (r.config.channelId) { const c = await d.call('GET', `/channels/${encodeURIComponent(r.config.channelId)}`); ch = `; can see #${c.name}`; }
+    return `Signed in as the bot ${me.username}${ch}`;
+  }
+  const t = telegramClient(r, secret);
+  const me = await t.call('getMe');
+  let chat = '';
+  if (r.config.chatId) { const c = await t.call('getChat', { chat_id: r.config.chatId }); chat = `; can reach ${c.title || c.username || c.first_name || c.id}`; }
+  return `Bot @${me.username} (${me.first_name})${chat}`;
+}
+
+// ---------- triggers ----------
+registerListener('discordTrigger', c => {
+  const cfg = c.node.config;
+  const every = Math.max(5, Number(cfg.pollSeconds) || 10) * 1000;
+  const prefix = String(cfg.prefix ?? '!');
+  let last: string | null = null;
+  const tick = async () => {
+    try {
+      const r = requireResource(cfg.connection, 'discord', 'Discord connection');
+      const d = discordClient(r, plainSecret);
+      if (!d.bot) throw new Error('The Discord trigger needs a bot connection; a webhook can only post');
+      const channel = String(cfg.channelId || r.config.channelId || '').trim();
+      if (!channel) throw new Error('Channel id is not set');
+      const list: any[] = await d.call('GET', `/channels/${encodeURIComponent(channel)}/messages?limit=50${last ? `&after=${last}` : ''}`);
+      const sorted = [...(list || [])].sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
+      if (last === null) { last = sorted.length ? sorted[sorted.length - 1].id : '0'; c.status('ok', `Watching channel ${channel}`); return; }
+      for (const m of sorted) {
+        last = m.id;
+        if (m.author?.bot) continue;
+        const e = shapeDiscord(m);
+        const isCmd = prefix && e.content.startsWith(prefix);
+        c.fire({ ...e, command: isCmd ? e.content.slice(prefix.length).split(/\s+/)[0] : '', args: isCmd ? e.content.slice(prefix.length).replace(/^\S+\s*/, '') : '' });
+      }
+      c.status('ok', `Watching channel ${channel}`);
+    } catch (e: any) { c.status('error', e.message); }
+  };
+  tick();
+  const t = setInterval(tick, every);
+  return () => clearInterval(t);
+});
+
+registerListener('telegramTrigger', c => {
+  const cfg = c.node.config;
+  const only = new Set(String(cfg.onlyChats || '').split(',').map(s => s.trim()).filter(Boolean));
+  let offset = 0, stopped = false;
+  const ctl = new AbortController();
+  const loop = async () => {
+    // Skip what was sent while the Sutra was not deployed.
+    try {
+      const r = requireResource(cfg.connection, 'telegram', 'Telegram bot');
+      const old = await telegramClient(r, plainSecret, ctl.signal).call('getUpdates', { offset: -1, timeout: 0 });
+      if (old?.length) offset = old[old.length - 1].update_id + 1;
+    } catch { /* reported below */ }
+    while (!stopped) {
+      try {
+        const r = requireResource(cfg.connection, 'telegram', 'Telegram bot');
+        const t = telegramClient(r, plainSecret, ctl.signal);
+        c.status('ok', 'Listening for messages');
+        const updates = await t.call('getUpdates', { offset, timeout: 25, allowed_updates: ['message', 'channel_post'] }, undefined, 35000);
+        for (const u of updates || []) {
+          offset = u.update_id + 1;
+          const m = u.message || u.channel_post;
+          if (!m) continue;
+          const e = shapeTelegram(m);
+          if (only.size && !only.has(String(e.chatId))) continue;
+          c.fire(e);
+        }
+      } catch (e: any) {
+        if (stopped) return;
+        c.status('error', /409/.test(e.message) ? 'Another program reads this bot\'s messages (a webhook or a second listener); only one can' : e.message);
+        await new Promise(res => setTimeout(res, 10000));
+      }
+    }
+  };
+  loop();
+  return () => { stopped = true; ctl.abort(); };
+});

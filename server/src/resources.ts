@@ -4,6 +4,7 @@ import { applyResourceOverrides, effectiveVariables, engineVariableValues } from
 import { resolveResourceConfig } from './settings.js';
 import { CONNECTOR_KINDS } from './connectors/kinds.js';
 import { AZURE_KINDS } from './connectors/azure.js';
+import { CHAT_KINDS } from './connectors/chat.js';
 import { AI_ENGINES } from './ai/engines.js';
 import type { Field, ResourceKind } from './engine/types.js';
 
@@ -176,12 +177,13 @@ export const RESOURCE_KINDS: ResourceKind[] = [
   },
   ...CONNECTOR_KINDS,
   ...AZURE_KINDS,
+  ...CHAT_KINDS,
 ];
 
 /** Explorer symbols, in the same plain style as the activity symbols. */
 const ICONS: Record<string, string> = {
   httpConnection: '⇄', outboundAuth: '⚿', inboundPolicy: '⛨', aiProvider: '✦', smtp: '✉', imap: '⇩', sftp: '⇅', ftp: '⇵',
-  azureDataFactory: '⛁', databricks: '◆', database: '⛁', kafka: '≋', rabbitmq: '⇶', amqp1: '⇉', firebase: '◭', oauthApp: '⚇', mcpServer: '✧', aiMemory: '❖', aiKnowledge: '❏', mcpClient: '⧉',
+  discord: '◙', telegram: '➤', azureDataFactory: '⛁', databricks: '◆', database: '⛁', kafka: '≋', rabbitmq: '⇶', amqp1: '⇉', firebase: '◭', oauthApp: '⚇', mcpServer: '✧', aiMemory: '❖', aiKnowledge: '❏', mcpClient: '⧉',
 };
 for (const k of RESOURCE_KINDS) k.icon ||= ICONS[k.kind] || '⚙';
 

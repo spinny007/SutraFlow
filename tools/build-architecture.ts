@@ -79,8 +79,10 @@ const FILES: Group[] = [
       ['server/src/samples.ts', 'The sample catalog offered in "New Sutra" (' + SAMPLES.length + ' samples covering every activity) and <code>addSamples()</code>: each goes to a <code>Samples/&lt;topic&gt;</code> folder, and every empty connection field it uses is set to a "Sample ..." connection made once in the project.'],
       ['server/src/channels.ts', 'Send to channel: starts every deployed Sutra of the project whose Channel trigger listens on that name. Reads deployments from the database, so it works across engines.'],
       ['server/src/bundles.ts', 'Release zips for production: the package, a deployment config to fill in (connections, project variables, secrets needed) and a README; zip writer and reader; packages built from the Git files of a project without a server.'],
+      ['server/src/connectors/chat.ts', 'Discord (webhook or bot) and Telegram bots: messages, embeds and files, reading a channel, Test connection, and triggers for messages and commands (channel polling, Telegram long polling).'],
       ['server/src/connectors/azure.ts', 'Azure Data Factory and Databricks: Entra ID sign-in (service principal, managed identity, Azure CLI) and Databricks tokens or OAuth; run, wait for, rerun and cancel pipelines; the run-finished trigger; jobs, notebooks, code blocks and SQL; Test connection.'],
       ['server/src/python.ts', 'Python on the server: finding the interpreter (setting, SUTRA_PYTHON, py, python3, python), and checks before a run: syntax, missing files, virtual environments and packages.'],
+      ['server/src/dbmigrate.ts', 'Moving the server\'s own data from SQLite to PostgreSQL: the saved connection (password in the vault), Test connection with plain-word errors for remote servers, SSL modes, the migration status, and starting tools/migrate-to-postgres from the Admin Console.'],
       ['server/src/docs.ts', 'Documentation made from Sutras: triggers, steps in run order with their descriptions and settings (connections by name, secrets by name), next steps, error handling, connections and variables; Markdown and HTML, for one Sutra, a project or a package.'],
       ['server/src/sampledocs.ts', 'The documents of the RAG samples (a PDF, a Word document, a PowerPoint deck and a Markdown FAQ of a tea shop), made in code so they are always the same.'],
       ['server/src/packages.ts', 'Project packages: build (Sutras at their versions, connections, schemas, variables, a sha256 checksum), read, check, deploy (matched by name, prune or keep others, deployment config), history, rollback and test.'],
@@ -217,6 +219,7 @@ const FILES: Group[] = [
       ['web/admin/Engines.tsx', 'Engines of the cluster: alive, leader, load, heartbeat; drain and stop one; delete old runs now.'],
       ['web/admin/People.tsx', 'Users and system accounts: add, roles per project, disable, unlock, passwords, sign out everywhere, delete; API tokens shown once.'],
       ['web/admin/Roles.tsx', 'Permission matrix of all roles; custom roles.'],
+      ['web/admin/Database.tsx', 'Database page: the database in use, the PostgreSQL connection with Test connection, Migrate now, and the progress through the restart.'],
       ['web/admin/Releases.tsx', 'Releases: upload a release zip, see its check (Sutras, secrets, source, config), deploy it; the package history of each project with rollback.'],
       ['web/admin/Audit.tsx', 'Audit log with filters, plain-word actions, details and CSV export.'],
       ['web/admin/console.css', 'Console layout on the studio colour tokens, light and dark, one column on phones.'],
@@ -225,6 +228,9 @@ const FILES: Group[] = [
   {
     id: 'tools', title: 'Documentation tools', intro: 'Pages built from the code, so they stay accurate.',
     files: [
+      ['tools/migrate-to-postgres.mjs', 'The SQLite to PostgreSQL move for Windows (.cmd) and Linux (.sh): stops SutraFlow with the launcher, copies and counts every table (sutra db migrate), switches sutraflow.env, starts SutraFlow, checks it, and puts SQLite back on any failure.'],
+      ['tools/migrate-to-postgres.cmd', 'Windows wrapper of migrate-to-postgres.mjs: finds Node.js from sutraflow.env and passes the settings file.'],
+      ['tools/migrate-to-postgres.sh', 'Linux and macOS wrapper of migrate-to-postgres.mjs: finds Node.js from sutraflow.env and passes the settings file.'],
       ['tools/build-sample-projects.ts', 'Builds the sample project zips in samples/ (<code>npm run samples</code>): whole projects as release zips with their files, listed in samples/index.json for New project.'],
       ['tools/build-user-guide.ts', 'Builds docs/sutraflow-user-guide.html (<code>npm run guide</code>): chapters, every activity with its settings table, connection types, functions, pipes and samples, read from the server code.'],
       ['tools/guide/chapters.ts', 'User guide chapters.'],

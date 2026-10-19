@@ -36,7 +36,8 @@ export const config = {
   /** Folder of .sutra packages deployed when the server starts (headless engines, container images). */
   deployDir: process.env.SUTRA_DEPLOY_DIR || '',
   /** Storage: empty = SQLite in the data folder; postgres://... for PostgreSQL (several engines); pglite: for tests. */
-  dbUrl: process.env.SUTRA_DB || '',
+  // The PostgreSQL password may be kept apart as SUTRA_DB_PASSWORD, so the address can be shown and logged.
+  dbUrl: ((u: string, pw?: string) => (pw && /^postgres(ql)?:\/\/[^:@/]+@/.test(u) ? u.replace(/^(postgres(?:ql)?:\/\/[^:@/]+)@/, (_m, a) => `${a}:${encodeURIComponent(pw)}@`) : u))(process.env.SUTRA_DB || '', process.env.SUTRA_DB_PASSWORD),
   /** This engine's name in a cluster. */
   engineId: process.env.SUTRA_ENGINE_ID || `${os.hostname()}-${process.pid}`,
   /** On shutdown, how long running steps may finish before they are handed back for another engine. */
