@@ -41,7 +41,7 @@ const HELP = `sutraflow <command>
                              PostgreSQL, a studio and two engines (docker-compose.cluster.yml).
   version                    The SutraFlow version.
 
-Settings: ${path.join(HOME, 'sutraflow.env')}  (ports, data folder, SUTRA_DB, Node path)`;
+Settings: sutraflow.env in the SutraFlow folder (ports, data folder, SUTRA_DB, Node path); SUTRAFLOW_ENV names another file.`;
 
 // ---------- settings ----------
 function readEnvFile(file) {
@@ -302,10 +302,10 @@ const argv = process.argv.slice(2);
 const flag = f => argv.includes(f);
 const pos = argv.filter(x => !x.startsWith('--'));
 const [cmd, arg] = pos;
+if (!cmd || cmd === 'help') { out(HELP); process.exit(0); }
+if (cmd === 'version') { out(version()); process.exit(0); }
 const cfg = settings();
 switch (cmd) {
-  case undefined: case 'help': out(HELP); break;
-  case 'version': out(version()); break;
   case 'setup': setup(cfg); break;
   case 'start': await start(cfg, roleOf(cfg, arg), flag('--foreground')); break;
   case 'stop':

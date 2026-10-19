@@ -6,6 +6,7 @@
  *   npm run guide            (screenshots: node tools/capture-guide-shots.mjs with the server running)
  */
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { allActivities, PALETTES } from '../server/src/palettes/index.js';
@@ -34,9 +35,50 @@ function link(type: string) {
   return `<a href="#${actId(type)}">${esc(a.name)}</a>`;
 }
 
+/**
+ * The help text of a command line tool as a table, read from the tool itself so the guide always
+ * matches it. Lines "  name  usage  description" start a command; deeper lines continue its usage
+ * (when they start with [, -- or () or its description; lines ending in ":" are group headings.
+ */
+function helpText(args: string[]) {
+  const r = spawnSync(process.execPath, args, { cwd: root, encoding: 'utf8' });
+  if (r.status !== 0 || !r.stdout) { missing.push(`help of ${args.join(' ')}`); return ''; }
+  return r.stdout;
+}
+function commandTable(text: string, tool: string) {
+  const rows: { group?: string; cmd?: string; usage: string; desc: string; note?: string }[] = [];
+  const notes: string[] = [];
+  let cur: (typeof rows)[number] | null = null;
+  for (const line of text.split(/\r?\n/).slice(1)) {
+    if (!line.trim()) { cur = null; continue; }
+    const indent = line.length - line.trimStart().length;
+    const t = line.trim();
+    if (indent <= 2 && /^(Remote|Exit code|Settings):?/.test(t)) { notes.push(t); cur = null; continue; }
+    if (indent <= 2 && t.endsWith(':')) { rows.push({ group: t.slice(0, -1), usage: '', desc: '' }); cur = null; continue; }
+    if (indent <= 2) {
+      const m = /^(\S+)\s+(.*)$/.exec(t) || [t, t, ''];
+      // A description starts with a capital letter; options and sub-commands do not.
+      const parts = m[2].split(/\s{2,}/);
+      const at = parts.findIndex(x => /^[A-Z]/.test(x));
+      cur = { cmd: m[1], usage: parts.slice(0, at < 0 ? parts.length : at).join(' ').trim(), desc: at < 0 ? '' : parts.slice(at).join(' ').trim() };
+      rows.push(cur);
+      continue;
+    }
+    if (cur && !cur.desc && /^[[\-(|]/.test(t)) cur.usage += ` ${t}`;
+    else if (cur) cur.desc += `${cur.desc ? ' ' : ''}${t}`;
+    else if (notes.length) notes[notes.length - 1] += ` ${t}`;
+  }
+  const body = rows.map(r => (r.group
+    ? `<tr><td colspan="2"><strong>${esc(r.group)}</strong></td></tr>`
+    : `<tr><td><code>${esc(`${tool} ${r.cmd}${r.usage ? ` ${r.usage}` : ''}`)}</code></td><td>${esc(r.desc)}</td></tr>`)).join('');
+  return `<table class="t cmds"><thead><tr><th>Command</th><th>What it does</th></tr></thead><tbody>${body}</tbody></table>${notes.map(n => `<p class="cmdnote">${esc(n)}</p>`).join('')}`;
+}
+
 /** Expands [[img:..]], [[note:..]], [[tip:..]] and [[type]] markers. */
 function expand(html: string): string {
   return html
+    .replace('[[commands:sutraflow]]', () => commandTable(helpText([path.join(root, 'bin', 'sutraflow.mjs'), 'help']), 'sutraflow'))
+    .replace('[[commands:sutra]]', () => commandTable(helpText(['--import', 'tsx', path.join(root, 'server', 'src', 'cli.ts'), 'help']), 'sutra'))
     .replace('[[samples]]', () => `<table class="t"><thead><tr><th>Sample</th><th>What it shows</th><th>Palettes</th></tr></thead><tbody>${SAMPLES.map(x => `<tr><td><strong>${esc(x.name)}</strong></td><td>${esc(x.desc)}${x.needs ? ` <span class="cond">Needs ${esc(x.needs)}.</span>` : ''}</td><td>${esc(x.palettes)}</td></tr>`).join('')}</tbody></table>`)
     .replace(/\[\[img:([\w-]+)\|([^\]]*)\]\]/g, (_m, name, cap) => {
       const f = path.join(IMG, `${name}.jpg`);
@@ -194,7 +236,7 @@ ul,ol{padding-left:22px}li{margin:3px 0}
 .note p,.tip p{margin:6px 0 0}.tip ul{margin:6px 0 4px}
 table.t{width:100%;border-collapse:separate;border-spacing:0;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.05);margin:6px 0 14px;font-size:.95em}
 table.t th{text-align:left;border-bottom:1px solid var(--line);padding:10px 12px;font-size:.76em;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);background:color-mix(in srgb,var(--card) 92%,var(--ink))}
-table.t td{border-bottom:1px solid var(--line);padding:9px 12px;vertical-align:top}table.t tr:last-child td{border-bottom:0}
+table.t td{border-bottom:1px solid var(--line);padding:9px 12px;vertical-align:top}table.cmds td:first-child{width:52%}table.cmds code{white-space:pre-wrap;word-break:break-word}.cmdnote{color:var(--muted);font-size:.9em;margin:4px 2px 12px}table.t tr:last-child td{border-bottom:0}
 table.s td:first-child{width:24%}table.fn td:first-child{width:34%}
 .cond{display:block;color:var(--muted);font-size:.82em;font-weight:400}
 .tabname{margin:12px 0 2px}

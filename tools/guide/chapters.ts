@@ -555,6 +555,32 @@ sutra rollback --project "Orders" --server https://engine:4800 --token $TOKEN</p
 <p>The <strong>Release</strong> palette does the same steps inside a Sutra, so a release can itself be a Sutra: on a timer or a REST call, [[releasePackage]], [[releaseDeploy]] to a test engine, [[approval]], [[releaseDeploy]] to production, then [[emailSend]] the result. [[releaseCheck]] and [[releaseRollback]] complete it. These activities are off until an administrator allows them in Server &amp; APIs.</p>`,
   },
   {
+    id: 'commands', title: 'Command reference',
+    html: `
+<p>SutraFlow has two command line tools. Both lists below are read from the tools themselves when this guide is built, so they always match the version you have; <code>sutraflow help</code> and <code>sutra help</code> print the same.</p>
+<ul>
+<li><strong>sutraflow</strong> runs SutraFlow on this machine: install, start, stop, status, logs, Docker. Windows: <code>bin\\sutraflow.cmd</code>; Linux and macOS: <code>bin/sutraflow</code>; <code>sutraflow</code> after <code>npm install -g</code>.</li>
+<li><strong>sutra</strong> works with what is in SutraFlow: packages and releases, users, secrets, deployed Sutras, runs, approvals, engines, alerts and the gateway. It works on the data folder directly, or on a running server with <code>--server</code> and <code>--token</code>. <code>sutraflow cli &lt;command&gt;</code> runs it against the local studio, already signed in; on its own it is <code>npm run sutra -- &lt;command&gt;</code> or <code>sutra</code> after <code>npm install -g</code>.</li>
+</ul>
+<p class="h">sutraflow: running SutraFlow</p>
+[[commands:sutraflow]]
+<p class="h">sutra: releases, people and operations</p>
+[[commands:sutra]]
+<p class="h">Examples</p>
+<pre>sutraflow setup                               install and build
+sutraflow start                               the studio, in the background
+sutraflow start engine                        a second engine on the same database
+sutraflow status                              what runs, where, on which database
+sutraflow cli sutras list                     deployed Sutras with their runs today
+sutraflow cli runs list --status failed       failed runs
+sutraflow cli user add meera --role developer --password-from-env NEW_PASSWORD
+sutraflow db copy --to postgres://postgres@127.0.0.1:5432/sutraflow
+sutraflow stop all                            graceful: running steps finish first
+sutra package --project Shop --version 1.4.0 --out shop-1.4.0.sutra
+sutra deploy shop-1.4.0.sutra --server https://prod:4800 --token $SUTRA_TOKEN</pre>
+[[tip:Guidelines|Run sutraflow stop before db copy, so nothing changes while the data is copied.<br>Give scripts a system account and its API token (sutra user add --system, sutra token create) rather than the local admin token.]]`,
+  },
+  {
     id: 'console', title: 'The Admin Console',
     html: `
 <p>The Admin Console manages what is deployed: running projects and Sutras, approvals, engines, people, system accounts, roles and the audit log. Designing stays in the designer. Open it with <strong>Admin Console</strong> in the designer's top bar, or at <code>/admin</code> on the admin port (<code>http://127.0.0.1:4800/admin</code>). Headless engines serve the console too, without the designer.</p>

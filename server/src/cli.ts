@@ -14,6 +14,7 @@ import crypto from 'node:crypto';
 
 const HELP = `sutra <command> [options]
 
+  Releases:
   package   --project <name> [--version 1.0.0] [--note text] [--sutras "A,B"] [--out file.sutra]
             Builds a package of a project: every deployed Sutra at its deployed version.
   check     <file.sutra> [--project <name>]
@@ -22,50 +23,80 @@ const HELP = `sutra <command> [options]
             Deploys a package; Sutras of the project not in it are undeployed unless --keep-others.
   test      <file.sutra> [--skip "A,B"] [--secret NAME=value ...] [--secrets-from-env]
             Installs the package in a throw-away server and runs every Sutra with its test data.
-  history   --project <name>              Deployments of packages to a project.
-  rollback  --project <name> [--to <id>]  Deploys the package before the current one.
+  history   --project <name>
+            Deployments of packages to a project.
+  rollback  --project <name> [--to <id>]
+            Deploys the package before the current one, or the deployment with that id.
+
+  Server, data and people:
+  status
+            Server health, readiness and engines.
   secret    set <NAME> (--value <v> | --from-env <VAR>)
+            Saves a secret in the vault (encrypted); Sutras and connections use it by name.
   db        copy --to <postgres://user:pass@host/db | file.db> [--replace]
             Copies this server's data (SUTRA_DATA_DIR or SUTRA_DB) to another database, for example
             from SQLite to PostgreSQL. A missing PostgreSQL database is created. Stop the server first;
             then start it with SUTRA_DB set to the new address and the same master key.
-  db        info                          Which database the server uses, and its row counts.
-  status                                  Server health, readiness and engines.
+  db        info
+            Which database the server uses, and its row counts.
   user      add <name> [--role administrator] [--project <name>] [--system] [--display "Name"] [--email e]
                 [--password <p> | --password-from-env <VAR>] [--keep-password]
             Adds a person (or a system account) with a role for all projects or one project. People
             choose a new password at their first sign-in unless --keep-password. This is how a headless
             engine gets its first administrator.
-  user      list                          People and system accounts with their roles.
+  user      list
+            People and system accounts with their roles.
   user      password <name> (--password <p> | --password-from-env <VAR>)
+            Sets a new password; the person chooses their own at the next sign-in.
   user      disable | enable | unlock | sign-out | delete <name>
+            Blocks or allows sign-in, clears a lock after wrong passwords, ends all sessions, or deletes.
 
   Operating deployed Sutras (the same actions as the Admin Console; need --server):
   sutras    list [--project <name>]
+            Deployed Sutras with their state and runs of the last 24 hours.
   sutras    start | stop | restart <sutra> --project <name>
+            Starts or stops a deployed Sutra's triggers; restart does both.
   sutras    deploy <sutra> --project <name> --version <n>
+            Deploys a published version of a Sutra (an earlier one to go back).
   sutras    tune <sutra> --project <name> [--max-runs n] [--priority n] [--run-timeout-min n]
                 [--retries n] [--retry-delay-ms n] [--step-data all|errors-only|none] [--retention-days n]
+            Tuning of one Sutra: runs at a time, priority, time limit, retries, what runs keep and how long.
   runs      list [--sutra <name> --project <name>] [--status failed] [--limit 50]
+            Recent runs, newest first.
   runs      show | resubmit | cancel <run id>
+            One run step by step; runs it again from its failed steps; or cancels it.
   approvals list | approve <id> [--comment text] | reject <id> [--comment text]
+            Steps waiting for a person, and the decision on one.
   engines   list | drain <engine> | housekeeping
+            Engines of the cluster; stops one gracefully; deletes runs and audit entries past retention.
   engines   tune [--engine <id>] [--workers n] [--max-steps n] [--reply-timeout-ms n]
                 [--retention-days n] [--audit-retention-days n] [--trace-sampling 0..1]
+            Engine tuning, for every engine or one: workers, limits, retention, trace sampling.
   token     create <system account> [--name text] [--expires-days n] | list <account> | revoke <account> <id>
+            API tokens of a system account, for scripts and pipelines.
   audit     [--actor name] [--outcome ok|failed|denied] [--from 2026-10-01] [--csv]
+            Who did what, when, and with what outcome.
 
   Alerts (need --server):
   alerts    [list | history] | ack <id> | resolve <id> | check | rules | channels | test <channel>
+            Open and past alerts, acknowledging and resolving them, checking now, the rules and channels,
+            and a test message to a channel.
 
   Gateway (apps, keys, plans, firewall, traffic; need --server):
   gateway   apps | plans | stats [--period 1h|24h|7d|30d] | log [--status errors|refused|ok] [--limit n]
+            Apps, plans, traffic statistics and the request log.
   gateway   app add <name> [--scopes "orders:read orders:write"] [--plan <name>] [--contact text]
+            Adds an app that calls your APIs, with its scopes and plan.
   gateway   app disable | enable | delete <name>
+            Blocks, allows or deletes an app.
   gateway   key create <app> [--name text] [--expires-days n] | key revoke <app> <key id>
+            Makes an API key for an app (shown once) or revokes one.
   gateway   plan set <name> [--per-minute n] [--per-hour n] [--per-day n] [--per-month n] | plan delete <name>
-  gateway   firewall [--allow "10.0.0.0/8,192.168.1.5"] [--deny "203.0.113.9"]   (no options: show)
-  gateway   openapi                       OpenAPI of the deployed services (JSON)
+            Request limits of a plan.
+  gateway   firewall [--allow "10.0.0.0/8,192.168.1.5"] [--deny "203.0.113.9"]
+            Addresses allowed and refused; with no options, shows them.
+  gateway   openapi
+            OpenAPI of the deployed services (JSON).
 
   Remote: --server <url> --token <token>  (or SUTRA_SERVER, SUTRA_ADMIN_TOKEN). The token is a system
           account's API token (limited to its roles) or the server's SUTRA_ADMIN_TOKEN.
