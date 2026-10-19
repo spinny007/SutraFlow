@@ -347,7 +347,7 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     scope: ['Calling a stored procedure with named parameters.'],
     outScope: ['OUT parameters on every database: check your driver.'],
     use: ['Business logic that already lives in the database.'],
-    steps: ['Pick the connection, enter the procedure name and its parameters.'],
+    steps: ['Pick the connection, enter the procedure name and its parameters in the order the procedure declares them.', 'PostgreSQL output parameters (INOUT): give them the value <code>=null</code>; their values come back as the first row of <code>rows</code>.'],
     output: ['<code>rows</code> of the first result set and the driver\'s result.'],
   },
   dbScript: {

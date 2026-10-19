@@ -2156,7 +2156,7 @@ WHERE id = :id</code></td></tr><tr><td><strong>Maximum rows</strong></td><td></t
 <div class="scope"><div class="in"><strong>In scope</strong><ul><li>Calling a stored procedure with named parameters.</li></ul></div><div class="out"><strong>Out of scope</strong><ul><li>OUT parameters on every database: check your driver.</li></ul></div></div>
 <p class="h">When to use it</p><ul><li>Business logic that already lives in the database.</li></ul>
 
-<p class="h">Procedure</p><ol><li>Pick the connection, enter the procedure name and its parameters.</li></ol>
+<p class="h">Procedure</p><ol><li>Pick the connection, enter the procedure name and its parameters in the order the procedure declares them.</li><li>PostgreSQL output parameters (INOUT): give them the value <code>=null</code>; their values come back as the first row of <code>rows</code>.</li></ol>
 <p class="h">Output</p><ul><li><code>rows</code> of the first result set and the driver's result.</li></ul>
 
 <p class="h">Outputs (ports)</p><p><code>out</code> <code class="err">error</code></p>

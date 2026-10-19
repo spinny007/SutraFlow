@@ -175,7 +175,11 @@ test/                   the test suites
 
 ## Testing
 
-`npm test` runs 272 tests: real HTTP, SOAP with WS-Security, TLS, SMTP, AMQP 1.0, SFTP and FTP servers, SQLite, Python, multi-process clusters, the launcher and the command-line tool, and every in-process suite again on PostgreSQL (PGlite). With the environment set, they also run against a real PostgreSQL (`SUTRA_TEST_PG_URL`, including pgvector and the move from SQLite, and `SUTRA_TEST_PG_BIN` for a password- and SSL-protected server) and MySQL (`SUTRA_TEST_MYSQL_URL`).
+`npm test` discovers 272 tests. A normal local run executes 262 and skips 10 that need external infrastructure. The suite uses real child processes and network calls for HTTP, SOAP with WS-Security, TLS, SMTP, AMQP 1.0, SFTP and FTP servers, SQLite, Python, multi-process clusters, the launcher and the command-line tool. It also runs every in-process suite again through PostgreSQL compatibility using PGlite.
+
+The process-level tests exercise the central durability claims directly: engines share work without duplicating completed steps, elect and replace a leader, recover work from an engine killed mid-step, hand work back during drain, persist approvals and long waits without holding a worker, and deploy and call packages through both local and remote CLI paths.
+
+Optional tests use a real PostgreSQL server for database migration and cluster behavior (`SUTRA_TEST_PG_URL`), PostgreSQL tools for password- and SSL-protected migration (`SUTRA_TEST_PG_BIN`), and a real MySQL server (`SUTRA_TEST_MYSQL_URL`). The pgvector storage path is covered with a protocol-compatible test server; run an additional deployment test against the intended PostgreSQL/pgvector version before relying on it in production.
 
 Tested against stand-in services that answer like the real ones, but not yet against the real services: SQL Server, Oracle, Kafka, RabbitMQ, IMAP, Let's Encrypt, Qdrant, Chroma, Pinecone, and the Google, Microsoft, Dropbox, YouTube, Twitch, Discord, Telegram, Facebook, Azure Data Factory and Databricks APIs.
 
