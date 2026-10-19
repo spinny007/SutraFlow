@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Please report security problems **privately**, not in a public issue: use GitHub's **Report a vulnerability** (Security tab of the repository, private vulnerability reporting), or contact the maintainer through the details on their GitHub profile.
+Please report security problems **privately**, not in a public issue: use GitHub's **Report a vulnerability** (Security tab of the repository, private vulnerability reporting), or contact the maintainer through [mixagile.com](https://mixagile.com).
 
 Include what is affected (version, component), how to reproduce it, and the impact you see. You will get an answer within a few working days; once a fix is released, the report can be made public with credit to you if you wish.
 

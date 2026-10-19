@@ -28,7 +28,7 @@ You need a commercial licence when you want to use SutraFlow **without** meeting
 
 A commercial licence releases you from the AGPL's obligations for the scope agreed (for example a number of servers or engines, an organisation, a product), and may include support, maintenance and updates. Terms and price are agreed per customer.
 
-**To ask for a commercial licence**, contact the copyright holder through [the project's GitHub page](https://github.com/spinny007/SutraFlow) (open an issue titled *Commercial licence*, or use the contact details on the maintainer's profile).
+**To ask for a commercial licence**, contact the copyright holder through [mixagile.com](https://mixagile.com), or open an issue titled *Commercial licence* on [the project's GitHub page](https://github.com/spinny007/SutraFlow).
 
 ## What you build with SutraFlow is yours
 
