@@ -31,3 +31,14 @@ export function readiness() {
   reasons.push(...lifecycle.problems);
   return { ready: !reasons.length, reasons };
 }
+
+/**
+ * Closes a server: no new connections, idle ones at once, and after a short grace also connections a
+ * client keeps open (keep-alive lasts a minute, which would hold a stopped server open that long).
+ */
+export async function closeServer(app: { close(): Promise<unknown>; server: { closeAllConnections?(): void } } | null | undefined, graceMs = 2000) {
+  if (!app) return;
+  const t = setTimeout(() => app.server.closeAllConnections?.(), graceMs);
+  t.unref?.();
+  try { await app.close(); } finally { clearTimeout(t); }
+}

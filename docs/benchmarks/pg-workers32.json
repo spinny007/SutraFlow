@@ -1,0 +1,56 @@
+{
+  "label": "32 workers",
+  "at": "2026-10-19T13:23:22.931Z",
+  "database": "PostgreSQL",
+  "node": "v24.21.0",
+  "settings": {},
+  "scenarios": [
+    {
+      "engines": 1,
+      "kb": 0.1,
+      "exec": "durable",
+      "kill": false,
+      "runs": 300,
+      "steps": 10,
+      "workers": 32,
+      "cpus": null,
+      "mem": null,
+      "seconds": 27.9,
+      "startSeconds": 27.7,
+      "runsPerSec": 10.8,
+      "stepsPerSec": 118.3,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 3300
+      },
+      "startErrors": 0,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 2,
+        "p95": 3,
+        "p99": 4
+      },
+      "queueMs": {
+        "p50": 2,
+        "p95": 3,
+        "p99": 4
+      },
+      "runMs": {
+        "p50": 81,
+        "p95": 103,
+        "p99": 118
+      },
+      "engineCpuCores": 0.56,
+      "engineMaxMemMb": 266,
+      "db": {
+        "maxConns": 3,
+        "maxLockWaits": 0,
+        "avgLockWaits": 0,
+        "maxTxSeconds": 0.004,
+        "avgTps": 870
+      },
+      "dbMb": 12.5
+    }
+  ]
+}

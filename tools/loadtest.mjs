@@ -1,0 +1,332 @@
+#!/usr/bin/env node
+/**
+ * SutraFlow load test: how many steps a server or cluster completes per second, how long steps wait
+ * in the queue and take, what the database does meanwhile, and whether killing an engine under load
+ * loses or repeats work. Each scenario gets a database of its own (made and dropped here) and its own
+ * engine processes on ports 21500 and up; nothing else is touched.
+ *
+ *   node tools/loadtest.mjs --pg postgres://postgres@127.0.0.1:5432/postgres [options]
+ *   node tools/loadtest.mjs --sqlite [options]
+ *
+ * Options
+ *   --engines 1,2,4      engine counts to measure (the first process is a studio, the rest engines)
+ *   --runs 400           runs per scenario         --steps 10       steps per run (after the trigger)
+ *   --payload 0.1,64     KB each step outputs (a list = one scenario per size)
+ *   --workers 16         steps at once per engine  --start 32       runs started in parallel by this tool
+ *   --cpus 1 --mem 512   limit each engine to N CPU cores and an old-space of MB (small-server emulation)
+ *   --kill               kill one engine (the last) when a third of the runs are done, then check recovery
+ *   --soak 10            a soak test of N minutes (timers, waits, failures, retries, a redeploy) instead
+ *   --label text         name of this machine or profile in the report
+ *   --out file.json      write the results (a Markdown table is printed too)
+ *   --set key=value      engine settings for every engine (SUTRA_ env without the prefix), e.g. --set POLL_MS=100
+ *   --execution durable,memory   how the benchmark Sutra runs (its Execution tuning); a list = one scenario each
+ *   --spread             call the benchmark as a REST service on every engine's gateway in turn (as behind a
+ *                        load balancer); each call waits for its run to end. Without it, runs start on the studio
+ *   --main path          the server to measure (default dist/server/main.js), e.g. an older build to compare
+ */
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { spawn, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+
+const HOME = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const require = createRequire(import.meta.url);
+const argv = process.argv.slice(2);
+const opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : d; };
+const flag = k => argv.includes(`--${k}`);
+const list = (k, d) => String(opt(k, d)).split(',').map(Number).filter(n => n >= 0);
+const PG = opt('pg'), SQLITE = flag('sqlite');
+if (!PG && !SQLITE) { console.error('Give --pg <postgres admin url> or --sqlite'); process.exit(2); }
+const RUNS = Number(opt('runs', 400)), STEPS = Number(opt('steps', 10)), WORKERS = Number(opt('workers', 16)), START = Number(opt('start', 32));
+const CPUS = Number(opt('cpus', 0)), MEM = Number(opt('mem', 0));
+const SETS = argv.flatMap((a, i) => (a === '--set' ? [argv[i + 1]] : [])).filter(Boolean).map(s => s.split('=')).map(([k, v]) => [`SUTRA_${k}`, v]);
+const TOKEN = crypto.randomBytes(16).toString('hex');
+const KEY = crypto.randomBytes(32).toString('base64');
+const MAIN = path.resolve(opt('main', path.join(HOME, 'dist', 'server', 'main.js')));
+if (!fs.existsSync(MAIN)) { console.error('Build first: npm run build'); process.exit(2); }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const pct = (a, p) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))]; };
+
+// ---------- the database of a scenario ----------
+async function makeDb(name) {
+  if (SQLITE) return { url: '', drop: async () => {} };
+  const { default: pg } = await import('pg');
+  const admin = new pg.Client({ connectionString: PG });
+  admin.on('error', () => {});
+  await admin.connect();
+  await admin.query(`CREATE DATABASE ${name}`);
+  const u = new URL(PG); u.pathname = `/${name}`;
+  return { url: u.toString(), admin, drop: async () => { await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`).catch(() => {}); await admin.end(); } };
+}
+/** Queries on the scenario database: the PostgreSQL client, or SQLite read-only from the data folder. */
+async function dbClient(url, dataDir) {
+  if (url) { const { default: pg } = await import('pg'); const c = new pg.Client({ connectionString: url }); c.on('error', () => {}); await c.connect(); return { all: async (sql, p = []) => (await c.query(sql.replace(/\?/g, (() => { let i = 0; return () => `$${++i}`; })()), p)).rows, end: () => c.end() }; }
+  const { DatabaseSync } = await import('node:sqlite');
+  const d = new DatabaseSync(path.join(dataDir, 'sutra.db'), { readOnly: true });
+  return { all: async (sql, p = []) => d.prepare(sql).all(...p), end: async () => d.close() };
+}
+
+// ---------- engine processes ----------
+const children = new Set();
+/** A process killed by a signal keeps exitCode null: signalCode says it is gone. */
+const alive = e => e.p.exitCode === null && e.p.signalCode === null;
+// Engines never outlive this tool, also when it is stopped or fails.
+for (const sig of ['exit', 'SIGINT', 'SIGTERM']) process.on(sig, () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } if (sig !== 'exit') process.exit(1); });
+async function portFree(port) {
+  try { await fetch(`http://127.0.0.1:${port}/ready`, { signal: AbortSignal.timeout(1000) }); return false; } catch { return true; }
+}
+function startEngine(i, url, dataDir) {
+  const port = 21500 + i, http = 21600 + i * 2;
+  const env = {
+    ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('SUTRA_'))),
+    SUTRA_DATA_DIR: dataDir, SUTRA_MASTER_KEY: KEY, SUTRA_ADMIN_TOKEN: TOKEN, SUTRA_MODE: i === 0 ? 'studio' : 'engine',
+    SUTRA_ADMIN_PORT: String(port), SUTRA_GATEWAY_HTTP_PORT: String(http), SUTRA_GATEWAY_HTTPS_PORT: String(http + 1),
+    SUTRA_ENGINE_ID: `load-${i}`, SUTRA_WORKERS: String(WORKERS), SUTRA_ENVIRONMENT: 'test', SUTRA_RUN_RETENTION_DAYS: '0',
+    ...(url ? { SUTRA_DB: url } : {}), ...Object.fromEntries(SETS),
+  };
+  const args = ['--disable-warning=ExperimentalWarning', ...(MEM ? [`--max-old-space-size=${MEM}`] : []), MAIN];
+  const log = fs.openSync(path.join(dataDir, `engine-${i}.log`), 'a');
+  const p = spawn(process.execPath, args, { cwd: HOME, env, stdio: ['ignore', log, log], windowsHide: true });
+  children.add(p); p.on('exit', () => children.delete(p));
+  if (CPUS) limitCpus(p.pid, CPUS);
+  return { i, p, port, gateway: `http://127.0.0.1:${http}`, base: `http://127.0.0.1:${port}`, log: path.join(dataDir, `engine-${i}.log`) };
+}
+/** Pins a process to N cores: the closest a laptop gets to a small server. */
+function limitCpus(pid, n) {
+  const mask = (2 ** n) - 1;
+  if (process.platform === 'win32') spawnSync('powershell', ['-NoProfile', '-Command', `(Get-Process -Id ${pid}).ProcessorAffinity = ${mask}`], { windowsHide: true });
+  else spawnSync('taskset', ['-p', mask.toString(16), String(pid)]);
+}
+async function ready(e, ms = 60000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) { try { const r = await fetch(`${e.base}/ready`); if (r.ok) return; } catch { /* starting */ } await sleep(300); }
+  throw new Error(`engine ${e.i} not ready: ${fs.readFileSync(e.log, 'utf8').slice(-800)}`);
+}
+const api = async (e, method, p, body) => {
+  const r = await fetch(e.base + p, { method, headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const t = await r.text(); let j; try { j = JSON.parse(t); } catch { j = t; }
+  if (!r.ok) throw new Error(`${method} ${p}: ${r.status} ${typeof j === 'string' ? j : j.error}`);
+  return j;
+};
+/** CPU seconds and memory of a process (Windows: Get-Process; Linux: /proc). */
+function usage(pid) {
+  try {
+    if (process.platform === 'win32') {
+      const r = spawnSync('powershell', ['-NoProfile', '-Command', `$p=Get-Process -Id ${pid}; "$($p.TotalProcessorTime.TotalSeconds) $($p.WorkingSet64)"`], { encoding: 'utf8', windowsHide: true });
+      const [cpu, mem] = r.stdout.trim().split(/\s+/).map(Number); return { cpu, mem };
+    }
+    const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8').split(' '); const tick = 100;
+    return { cpu: (Number(st[13]) + Number(st[14])) / tick, mem: Number(fs.readFileSync(`/proc/${pid}/statm`, 'utf8').split(' ')[1]) * 4096 };
+  } catch { return { cpu: 0, mem: 0 }; }
+}
+
+// ---------- the benchmark Sutra ----------
+function benchDoc(steps, kb, rest = false) {
+  const nodes = [rest
+    ? { id: 's', type: 'restService', name: 'Bench API', x: 0, y: 0, config: { method: 'POST', path: '/bench' } }
+    : { id: 's', type: 'start', name: 'Start', x: 0, y: 0, config: { payload: '{"order":"A-1"}' } }];
+  const edges = [];
+  let prev = 's';
+  for (let i = 1; i <= steps; i++) {
+    const id = `j${i}`;
+    // Each step computes a little and outputs about kb kilobytes.
+    nodes.push({ id, type: 'jsonata', name: `Step ${i}`, x: i * 200, y: 0, config: { source: '{{input}}', expression: `{ "i": ${i}, "order": "A-1", "total": $sum([1..50]), "data": $pad("", ${Math.round(kb * 1024)}, "x") }` } });
+    edges.push({ id: `e${i}`, from: prev, port: 'out', to: id });
+    prev = id;
+  }
+  return { name: `Load ${steps}x${kb}KB`, nodes, edges };
+}
+
+// ---------- one throughput scenario ----------
+async function scenario({ engines, kb, kill, exec = 'durable' }) {
+  for (let i = 0; i < engines; i++) if (!(await portFree(21500 + i))) throw new Error(`Port ${21500 + i} is in use (an engine of an earlier load test?). Stop it first.`);
+  const name = `sutra_load_${Date.now()}`;
+  const db = await makeDb(name);
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-load-'));
+  const procs = [];
+  try {
+    procs.push(startEngine(0, db.url, dataDir));
+    await ready(procs[0]);
+    for (let i = 1; i < engines; i++) { procs.push(startEngine(i, db.url, fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-load-')))); }
+    for (const e of procs) await ready(e);
+    const studio = procs[0];
+    const p = await api(studio, 'POST', '/api/projects', { name: 'Load' });
+    const f = await api(studio, 'POST', '/api/flows', { doc: benchDoc(STEPS, kb, flag('spread')), projectId: p.id });
+    await api(studio, 'POST', `/api/flows/${f.id}/deploy`, {});
+    if (exec === 'memory') await api(studio, 'PUT', `/api/console/sutras/${f.id}/tuning`, { values: { execution: 'in memory' } });
+    // Other engines pick up the deploy (and tuning) on their next beat.
+    await sleep(engines > 1 ? 6000 : 800);
+    const q = await dbClient(db.url, dataDir);
+    const cpu0 = procs.map(e => usage(e.p.pid));
+    // DB sampler: connections, lock waits, commits.
+    const samples = [];
+    let sampling = true;
+    const sampler = (async () => {
+      if (!db.url) return;
+      let last = null;
+      while (sampling) {
+        try {
+          const [a] = await q.all(`select count(*) filter (where datname = current_database()) conns, count(*) filter (where datname = current_database() and wait_event_type = 'Lock') lockwaits,
+            coalesce(max(extract(epoch from now() - xact_start)) filter (where datname = current_database() and state <> 'idle'), 0) longest_tx from pg_stat_activity`);
+          const [c] = await q.all('select xact_commit from pg_stat_database where datname = current_database()');
+          const now = Date.now();
+          if (last) samples.push({ conns: Number(a.conns), lockwaits: Number(a.lockwaits), longestTx: Number(a.longest_tx), tps: (Number(c.xact_commit) - last.c) / ((now - last.t) / 1000) });
+          last = { c: Number(c.xact_commit), t: now };
+        } catch { /* busy */ }
+        await sleep(500);
+      }
+    })();
+    // Start the runs, START at a time.
+    const t0 = Date.now();
+    let started = 0;
+    // A start that fails (a refused connection under load, say) is tried again; the errors are reported.
+    let startErrors = 0, lost = 0;
+    const starter = async () => {
+      while (started < RUNS) {
+        const n = ++started;
+        for (let attempt = 0; ; attempt++) {
+          const up = procs.filter(alive);
+          const on = flag('spread') ? up[n % up.length] : studio;
+          try {
+            if (flag('spread')) {
+              const r = await fetch(`${on.gateway}/bench`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ n }) });
+              await r.arrayBuffer();
+              if (r.status >= 500) throw new Error(`gateway ${r.status}`);
+            } else await api(on, 'POST', `/api/flows/${f.id}/run`, { input: { n } });
+            break;
+          } catch (e) {
+            startErrors++;
+            if (startErrors <= 3) console.error(`  start ${n} on engine ${on.i} failed (tried again): ${e.message}${e.cause ? ` (${e.cause.code || e.cause.message})` : ''}`);
+            if (attempt === 4) { lost++; console.error(`start ${n}: ${e.message}${e.cause ? ` (${e.cause.code || e.cause.message})` : ''}`); break; }
+            await sleep(100 * 2 ** attempt);
+          }
+        }
+      }
+    };
+    // --kill: one engine is killed while runs are still starting and running, a third of the way in.
+    let killed = false;
+    const killer = (async () => {
+      if (!kill || procs.length < 2) return;
+      while (!killed) {
+        const [r] = await q.all("select count(*) n from runs where status in ('done', 'failed', 'cancelled')");
+        if (Number(r.n) >= RUNS / 3) { killed = true; procs[procs.length - 1].p.kill('SIGKILL'); console.log(`  killed engine ${procs.length - 1} at ${r.n} runs done`); break; }
+        await sleep(50);
+      }
+    })();
+    await Promise.all(Array.from({ length: Math.min(START, RUNS) }, starter));
+    const tStarted = Date.now();
+    // Wait for every run to end (and kill an engine on the way when asked).
+    let done = 0;
+    for (;;) {
+      const [r] = await q.all("select count(*) n from runs where status in ('done', 'failed', 'cancelled')");
+      done = Number(r.n);
+      if (done >= RUNS - lost) break;
+      // An engine that stopped by itself ends the scenario at once, with the end of its log.
+      const dead = procs.find((e, i) => !alive(e) && !(killed && i === procs.length - 1));
+      if (dead) throw new Error(`engine ${dead.i} stopped: ${fs.readFileSync(dead.log, 'utf8').slice(-600)}`);
+      if (Date.now() - t0 > 30 * 60000) throw new Error('scenario did not finish within 30 minutes');
+      await sleep(200);
+    }
+    killed = true; await killer;
+    const elapsed = (Date.now() - t0) / 1000;
+    sampling = false; await sampler;
+    const cpu1 = procs.map(e => (alive(e) ? usage(e.p.pid) : null));
+    const runs = await q.all('select status, started_at, finished_at from runs');
+    // select *: builds before queued_at existed are measured too (without queue wait).
+    const tasks = await q.all('select * from tasks');
+    const failed = runs.filter(r => r.status !== 'done').length;
+    const doneTasks = tasks.filter(t => t.status === 'done');
+    const stepMs = doneTasks.map(t => Number(t.ms) || 0);
+    const waitMs = doneTasks.filter(t => t.queued_at && t.started_at).map(t => Math.max(0, Date.parse(t.started_at) - Number(t.queued_at)));
+    const runMs = runs.filter(r => r.finished_at).map(r => Date.parse(r.finished_at) - Date.parse(r.started_at));
+    const seen = new Map(); for (const t of doneTasks) { const k = `${t.run_id}/${t.node_id}`; seen.set(k, (seen.get(k) || 0) + 1); }
+    const repeated = [...seen.values()].filter(n => n > 1).length;
+    const byEngine = {}; for (const t of doneTasks) byEngine[t.owner || '?'] = (byEngine[t.owner || '?'] || 0) + 1;
+    const cpuSec = procs.reduce((a, e, i) => a + (cpu1[i] ? cpu1[i].cpu - cpu0[i].cpu : 0), 0);
+    const mem = Math.max(...procs.map((e, i) => (cpu1[i] ? cpu1[i].mem : 0)));
+    const [size] = db.url ? await q.all('select pg_database_size(current_database()) b') : [{ b: fs.statSync(path.join(dataDir, 'sutra.db')).size }];
+    await q.end();
+    return {
+      engines, kb, exec, kill: !!kill, spread: flag('spread'), runs: RUNS, steps: STEPS, workers: WORKERS, cpus: CPUS || null, mem: MEM || null,
+      seconds: Math.round(elapsed * 10) / 10, startSeconds: Math.round((tStarted - t0) / 100) / 10,
+      runsPerSec: Math.round((RUNS / elapsed) * 10) / 10, stepsPerSec: Math.round((doneTasks.length / elapsed) * 10) / 10,
+      failed, repeated, byEngine, startErrors, startsLost: lost,
+      stepMs: { p50: pct(stepMs, 50), p95: pct(stepMs, 95), p99: pct(stepMs, 99) },
+      queueMs: { p50: pct(waitMs, 50), p95: pct(waitMs, 95), p99: pct(waitMs, 99) },
+      runMs: { p50: pct(runMs, 50), p95: pct(runMs, 95), p99: pct(runMs, 99) },
+      engineCpuCores: Math.round((cpuSec / elapsed) * 100) / 100, engineMaxMemMb: Math.round(mem / 1048576),
+      db: samples.length ? { maxConns: Math.max(...samples.map(s => s.conns)), maxLockWaits: Math.max(...samples.map(s => s.lockwaits)), avgLockWaits: Math.round((samples.reduce((a, s) => a + s.lockwaits, 0) / samples.length) * 10) / 10, maxTxSeconds: Math.round(Math.max(...samples.map(s => s.longestTx)) * 1000) / 1000, avgTps: Math.round(samples.reduce((a, s) => a + s.tps, 0) / samples.length) } : null,
+      dbMb: Math.round(Number(size.b) / 1048576 * 10) / 10,
+    };
+  } finally {
+    for (const e of procs) { try { e.p.kill(); } catch { /* gone */ } }
+    await sleep(1500);
+    await db.drop();
+  }
+}
+
+// ---------- soak: timers, waits, failures, retries and a redeploy for N minutes ----------
+async function soak(minutes) {
+  const name = `sutra_soak_${Date.now()}`;
+  const db = await makeDb(name);
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-soak-'));
+  const procs = [startEngine(0, db.url, dataDir)];
+  try {
+    await ready(procs[0]);
+    const engines = Number(opt('engines', '2').split(',').pop());
+    for (let i = 1; i < engines; i++) procs.push(startEngine(i, db.url, fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-soak-'))));
+    for (const e of procs) await ready(e);
+    const studio = procs[0];
+    const p = await api(studio, 'POST', '/api/projects', { name: 'Soak' });
+    // A timer every 5 s; a Sutra that waits 2 s; one that fails half the time with retries; the load chain.
+    const timer = { name: 'Soak timer', nodes: [{ id: 't', type: 'timer', name: 'Tick', x: 0, y: 0, config: { mode: 'interval', every: 5, payload: '{}' } }, { id: 'l', type: 'log', name: 'Log', x: 200, y: 0, config: { level: 'info', message: 'tick' } }], edges: [{ id: 'e', from: 't', port: 'out', to: 'l' }] };
+    const waiter = { name: 'Soak wait', nodes: [{ id: 's', type: 'start', name: 'Start', x: 0, y: 0, config: {} }, { id: 'w', type: 'wait', name: 'Wait', x: 200, y: 0, config: { ms: 2000 } }], edges: [{ id: 'e', from: 's', port: 'out', to: 'w' }] };
+    const flaky = { name: 'Soak flaky', nodes: [{ id: 's', type: 'start', name: 'Start', x: 0, y: 0, config: {} }, { id: 'x', type: 'jsonCode', name: 'Maybe fail', x: 200, y: 0, config: {} , settings: { retries: 2, retryDelayMs: 200 } }], edges: [{ id: 'e', from: 's', port: 'out', to: 'x' }] };
+    flaky.nodes[1] = { id: 'x', type: 'throw', name: 'Maybe fail', x: 200, y: 0, config: { message: 'flaky' }, settings: { retries: 2, retryDelayMs: 200 } };
+    const ids = {};
+    for (const d of [timer, waiter, flaky, benchDoc(5, 1)]) { const f = await api(studio, 'POST', '/api/flows', { doc: d, projectId: p.id }); await api(studio, 'POST', `/api/flows/${f.id}/deploy`, {}); ids[d.name] = f.id; }
+    const until = Date.now() + minutes * 60000;
+    const q = await dbClient(db.url, dataDir);
+    const mem0 = procs.map(e => usage(e.p.pid).mem);
+    let redeployed = false, n = 0;
+    while (Date.now() < until) {
+      for (const k of ['Soak wait', 'Soak flaky', 'Load 5x1KB']) { await api(studio, 'POST', `/api/flows/${ids[k]}/run`, { input: { n: ++n } }).catch(() => {}); }
+      if (!redeployed && Date.now() > until - (minutes * 60000) / 2) { redeployed = true; await api(studio, 'POST', `/api/flows/${ids['Load 5x1KB']}/deploy`, {}); }
+      await sleep(250);
+    }
+    await sleep(8000);
+    const rows = await q.all('select flow_name, status, count(*) n from runs group by flow_name, status order by flow_name, status');
+    const stuck = await q.all("select count(*) n from runs where status in ('running', 'waiting') and flow_name <> 'Soak timer'");
+    const mem1 = procs.map(e => usage(e.p.pid).mem);
+    await q.end();
+    return { soakMinutes: minutes, engines: procs.length, started: n, byStatus: rows.map(r => `${r.flow_name}: ${r.status} ${r.n}`), stillOpen: Number(stuck[0].n), memStartMb: mem0.map(m => Math.round(m / 1048576)), memEndMb: mem1.map(m => Math.round(m / 1048576)) };
+  } finally {
+    for (const e of procs) { try { e.p.kill(); } catch { /* gone */ } }
+    await sleep(1500);
+    await db.drop();
+  }
+}
+
+// ---------- main ----------
+const label = opt('label', `${os.cpus()[0].model.trim()}, ${os.cpus().length} threads, ${Math.round(os.totalmem() / 1073741824)} GB`);
+const results = { label, at: new Date().toISOString(), database: SQLITE ? 'SQLite' : 'PostgreSQL', node: process.version, settings: Object.fromEntries(SETS), scenarios: [] };
+if (opt('soak')) {
+  console.log(`Soak for ${opt('soak')} minutes ...`);
+  results.soak = await soak(Number(opt('soak')));
+  console.log(JSON.stringify(results.soak, null, 2));
+} else {
+  for (const exec of String(opt('execution', 'durable')).split(',')) for (const kb of list('payload', '0.1')) for (const engines of list('engines', SQLITE ? '1' : '1,2,4')) {
+    process.stdout.write(`${exec}, ${engines} engine(s), ${kb} KB outputs${flag('kill') ? ', kill one' : ''}${CPUS ? `, ${CPUS} core(s)` : ''}${MEM ? `, ${MEM} MB` : ''} ... `);
+    const r = await scenario({ engines, kb, exec, kill: flag('kill') && engines > 1 });
+    results.scenarios.push(r);
+    console.log(`${r.stepsPerSec} steps/s, ${r.runsPerSec} runs/s, step p95 ${r.stepMs.p95} ms, queue p95 ${r.queueMs.p95} ms, failed ${r.failed}, repeated ${r.repeated}`);
+  }
+  console.log(`\n| Execution | Engines | Output | Steps/s | Runs/s | Step p50/p95/p99 ms | Queue wait p50/p95/p99 ms | Run p95 ms | Engine CPU cores | Max lock waits | DB tx/s | Failed | Repeated |`);
+  console.log('|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+  for (const r of results.scenarios) console.log(`| ${r.exec} | ${r.engines} | ${r.kb} KB | ${r.stepsPerSec} | ${r.runsPerSec} | ${r.stepMs.p50}/${r.stepMs.p95}/${r.stepMs.p99} | ${r.queueMs.p50}/${r.queueMs.p95}/${r.queueMs.p99} | ${r.runMs.p95} | ${r.engineCpuCores} | ${r.db ? r.db.maxLockWaits : '-'} | ${r.db ? r.db.avgTps : '-'} | ${r.failed} | ${r.repeated} |`);
+}
+if (opt('out')) { fs.mkdirSync(path.dirname(path.resolve(opt('out'))), { recursive: true }); fs.writeFileSync(opt('out'), JSON.stringify(results, null, 2)); console.log(`\nWrote ${opt('out')}`); }
+process.exit(0);

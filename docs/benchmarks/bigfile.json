@@ -1,0 +1,13 @@
+{
+  "fileMb": 1000,
+  "heapLimitMb": 384,
+  "batchRows": 5000,
+  "workers": 4,
+  "status": "done",
+  "seconds": 153,
+  "mbPerSec": 6.5,
+  "rssStartMb": 144,
+  "rssPeakMb": 270,
+  "steps": 3729,
+  "dbMb": 4
+}

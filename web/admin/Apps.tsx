@@ -212,13 +212,14 @@ function SutraDrawer({ project, sutra, initialTab, onClose, onChanged }: { proje
 }
 
 /** What an empty field means, shown greyed. */
-const SUTRA_DEFAULTS = { maxRuns: '0 (no limit)', priority: '0', runTimeoutMin: '0 (none)', retries: '0', retryDelayMs: '1000', stepData: 'all', retentionDays: 'engine setting' };
+const SUTRA_DEFAULTS = { execution: 'durable', maxRuns: '0 (no limit)', priority: '0', runTimeoutMin: '0 (none)', retries: '0', retryDelayMs: '1000', stepData: 'all', retentionDays: 'engine setting' };
 
 const SUTRA_FLAGS: Record<string, string> = { maxRuns: 'max-runs', priority: 'priority', runTimeoutMin: 'run-timeout-min', retries: 'retries', retryDelayMs: 'retry-delay-ms', retentionDays: 'retention-days' };
 function sutraFlags(values: Record<string, unknown>) {
   const out: string[] = [];
   for (const [k, flag] of Object.entries(SUTRA_FLAGS)) if (values[k] !== undefined && values[k] !== '') out.push(`--${flag}`, String(values[k]));
   if (values.stepData) out.push('--step-data', String(values.stepData).replace(' ', '-'));
+  if (values.execution) out.push('--execution', String(values.execution).replace(' ', '-'));
   return out;
 }
 

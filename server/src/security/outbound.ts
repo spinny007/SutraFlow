@@ -196,21 +196,34 @@ export async function httpCall(o: {
   timeoutMs: number;
   signal?: AbortSignal;
   parse?: string;
+  /**
+   * Send once more when the connection is reset before any answer. A server closes an idle
+   * keep-alive connection while a request is on its way more often than one would think. On by
+   * default for methods that are safe to repeat; callers set it for POSTs that are (a model call).
+   */
+  retryReset?: boolean;
 }): Promise<HttpResult> {
   const t = Date.now();
   const signals = [AbortSignal.timeout(o.timeoutMs)];
   if (o.signal) signals.push(o.signal);
+  const signal = AbortSignal.any(signals);
+  const send = () => request(o.url, {
+    method: o.method as any,
+    headers: o.headers,
+    body: o.body,
+    dispatcher: o.dispatcher,
+    signal,
+    headersTimeout: o.timeoutMs,
+    bodyTimeout: o.timeoutMs,
+  });
+  const again = o.retryReset ?? ['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE'].includes(o.method.toUpperCase());
   let r;
   try {
-    r = await request(o.url, {
-      method: o.method as any,
-      headers: o.headers,
-      body: o.body,
-      dispatcher: o.dispatcher,
-      signal: AbortSignal.any(signals),
-      headersTimeout: o.timeoutMs,
-      bodyTimeout: o.timeoutMs,
-    });
+    try { r = await send(); } catch (e: any) {
+      const code = e?.cause?.code || e?.code;
+      if (!again || signal.aborted || !['ECONNRESET', 'UND_ERR_SOCKET', 'EPIPE'].includes(code)) throw e;
+      r = await send();
+    }
   } catch (e: any) {
     const cause = e?.cause?.code || e?.code;
     if (e?.name === 'TimeoutError' || e?.name === 'AbortError') throw new Error(`${o.method} ${o.url} timed out or was cancelled after ${Date.now() - t} ms`);

@@ -243,7 +243,11 @@ Give the orchestrator more grace time than `SUTRA_DRAIN_MS` (compose: `stop_grac
 | `SUTRA_ADMIN_TOKEN` | (none) | Bearer token for the command-line tool and automation; acts as an administrator. Prefer system account tokens, limited by their roles |
 | `SUTRA_DEPLOY_DIR` | (none) | Folder of `.sutra` packages deployed at start |
 | `SUTRA_ENGINE_ID` | host-pid | This engine's name in a cluster |
-| `SUTRA_WORKERS` | 16 | Steps run at once; 0 = serve only |
+| `SUTRA_WORKERS` | by machine | Steps run at once (4 on 1 vCPU / 1 GB up to 32 on 8 cores); 0 = serve only |
+| `SUTRA_MEMORY_WORKERS` | 0 | Steps at once for Sutras that run in memory; 0 = as `SUTRA_WORKERS` |
+| `SUTRA_POLL_MS` | by machine | How often an idle engine looks for due steps (200 to 500 ms) |
+| `SUTRA_SETTINGS_REFRESH_MS` | by machine | How long an engine keeps project and Sengine variables; 0 = every step |
+| `SUTRA_KEEPALIVE_MS` | 65000 | Idle connections kept by the admin and gateway servers; keep it above the idle time of a load balancer in front |
 | `SUTRA_HEARTBEAT_MS` | 5000 | Heartbeat; dead after three missed |
 | `SUTRA_DRAIN_MS` | 30000 | Time running steps get on shutdown |
 | `SUTRA_RUN_RETENTION_DAYS` | 30 | Delete finished runs after this many days; 0 = keep |

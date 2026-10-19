@@ -279,3 +279,24 @@ test('an activity link inside a guide tip ended the tip box early and showed raw
   const bad = [...src.matchAll(/\[\[tip:([^\]]*?)\[\[[A-Za-z]+\]\]/g)].map(m => m[1].slice(0, 40));
   assert.deepEqual(bad, []);
 });
+
+test('guide links to chapters used the chapter id without its ch- prefix and went nowhere', () => {
+  const html = fs.readFileSync(path.join(root, 'docs', 'sutraflow-user-guide.html'), 'utf8');
+  const ids = new Set([...html.matchAll(/\sid="([^"]+)"/g)].map(m => m[1]));
+  // Links written into the page (href="#ch-x"), not ones its script builds ('#'+id).
+  const bad = [...new Set([...html.matchAll(/href="#([\w-]+)"/g)].map(m => m[1]))].filter(h => !ids.has(h));
+  assert.deepEqual(bad, []);
+});
+
+test('a model call failed with ECONNRESET when the server closed an idle keep-alive connection as the call went out; it is sent once more', async () => {
+  const { httpCall } = await import('../server/src/security/outbound.js');
+  let n = 0;
+  const srv = http.createServer((req, res) => { n++; if (n % 2 === 1) { req.socket.destroy(); return; } res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}'); });
+  await new Promise<void>(r => srv.listen(0, '127.0.0.1', () => r()));
+  const url = `http://127.0.0.1:${(srv.address() as any).port}/x`;
+  try {
+    assert.equal((await httpCall({ method: 'GET', url, headers: {}, timeoutMs: 5000, parse: 'json' })).body.ok, true, 'a GET is sent again');
+    assert.equal((await httpCall({ method: 'POST', url, headers: {}, body: '{}', timeoutMs: 5000, parse: 'json', retryReset: true })).body.ok, true, 'a POST marked safe is sent again');
+    await assert.rejects(httpCall({ method: 'POST', url, headers: {}, body: '{}', timeoutMs: 5000, parse: 'json' }), /ECONNRESET|socket|closed/i, 'another POST is not repeated');
+  } finally { srv.close(); }
+});

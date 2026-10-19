@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import { lifecycle, closeServer } from '../lifecycle.js';
 import { XMLBuilder } from 'fast-xml-parser';
 import { config } from '../config.js';
 import { getSetting, setSetting } from '../db.js';
@@ -470,12 +471,15 @@ async function handleMcp(req: FastifyRequest, reply: FastifyReply, secure: boole
 
 function build(https?: any): FastifyInstance {
   // Idle keep-alive connections are closed on shutdown (not waited for), so a draining engine stops promptly.
-  const app = Fastify({ https, trustProxy: false, bodyLimit: 50 * 1024 * 1024, logger: false, forceCloseConnections: 'idle', keepAliveTimeout: 5000 });
+  const app = Fastify({ https, trustProxy: false, bodyLimit: 50 * 1024 * 1024, logger: false, forceCloseConnections: 'idle', keepAliveTimeout: config.keepAliveMs });
   app.removeAllContentTypeParsers();
   app.addContentTypeParser('*', { parseAs: 'string' }, (_req, body, done) => done(null, body));
   const secure = !!https;
   // Every answer carries the run's trace context, and is counted by kind and status.
   app.addHook('onSend', async (_req, reply, payload) => {
+    // Stopping: the client closes this connection after the answer, so the server is not held open
+    // until the keep-alive time runs out.
+    if (lifecycle.draining) reply.header('connection', 'close');
     const run = reply.getHeader('x-sutra-run');
     if (run && !reply.getHeader('traceparent')) reply.header('traceparent', engine.traceparentOf(String(run)));
     return payload;
@@ -552,6 +556,6 @@ export function reloadTls() {
 }
 
 export async function stopGateway() {
-  await Promise.all([httpApp?.close(), httpsApp?.close()]);
+  await Promise.all([closeServer(httpApp), closeServer(httpsApp)]);
   httpApp = httpsApp = null;
 }

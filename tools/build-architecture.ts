@@ -42,14 +42,14 @@ const FILES: Group[] = [
       ['server/src/lifecycle.ts', 'Liveness (<code>/health</code>, with the version, mode, environment and the database in use) and readiness (<code>/ready</code>): storage answers, packages are deployed, the gateway listens, and the server is not draining.'],
       ['server/src/cluster.ts', 'Heartbeat row per engine, the leader lease, recovery of a dead engine\'s steps, the deploy generation number that makes every engine reload its routes, leadership hand-over on stop, and the engine status list.'],
       ['server/src/housekeeping.ts', 'Deletes finished runs older than <code>SUTRA_RUN_RETENTION_DAYS</code>, with their steps, in batches. Run by the leader about once a minute; waiting runs are never deleted.'],
-      ['server/src/db.ts', 'The storage layer. <code>q</code> (get, all, run) and <code>tx</code> (transaction) on SQLite or PostgreSQL. Holds the table definitions, converts them for PostgreSQL (bigint, double precision, bigserial), converts <code>?</code> placeholders to <code>$n</code>, and takes an advisory lock for every PostgreSQL write transaction.'],
-      ['server/src/pgworker.ts', 'Worker thread that owns the PostgreSQL connection (<code>pg</code>, or PGlite for <code>pglite:</code> addresses). The main thread posts a statement and waits on a shared flag for the answer, which keeps the storage API synchronous.'],
+      ['server/src/db.ts', 'The storage layer. <code>q</code> (get, all, run) and <code>tx</code> (transaction) on SQLite or PostgreSQL. Holds the table definitions, converts them for PostgreSQL (bigint, double precision, bigserial), converts <code>?</code> placeholders to <code>$n</code>, and takes an advisory lock for each PostgreSQL write transaction: one per run or Sutra queue (<code>tx(fn, key)</code>), so engines save different runs at the same time, and one shared lock for other writes. <code>memoryStore</code> gives the private in-memory database of runs that run in memory.'],
+      ['server/src/pgworker.ts', 'Worker thread that owns the PostgreSQL connection (<code>pg</code>, or PGlite for <code>pglite:</code> addresses). The main thread posts a numbered statement and waits on a shared flag for the answer with the same number, which keeps the storage API synchronous.'],
     ],
   },
   {
     id: 'engine', title: 'Engine', intro: 'The durable step runner and the types every activity follows.',
     files: [
-      ['server/src/engine/engine.ts', 'The durable engine: start a run, claim tasks with an owner, run activities with settings (retries, time limit, loop), checkpoint output and next tasks in one transaction, route connections (ports, conditions, skip tokens, merges), waits (approvals, timers, sub-Sutras, replies from other engines), Error handler, stop options, debug pause, cancel, resubmit, drain, metrics and spans.'],
+      ['server/src/engine/engine.ts', 'The durable engine: start a run, claim tasks with an owner, run activities with settings (retries, time limit, loop), checkpoint output and next tasks in one transaction, route connections (ports, conditions, skip tokens, merges), outputs sent while a step goes on (streamed batches), waits (approvals, timers, sub-Sutras, replies from other engines), Error handler, stop options, debug pause, cancel, resubmit, drain, metrics and spans. Its in-memory twin runs Sutras tuned to run in memory and saves each run when it ends.'],
       ['server/src/engine/types.ts', 'Types shared by the engine, palettes and studio: Sutra document (nodes with descriptions, edges with label and condition), activity definition (fields, ports, output hint, design checks, execute), step settings, execution context and step result (port, output, wait, reply, call, result, stop).'],
     ],
   },
@@ -99,7 +99,8 @@ const FILES: Group[] = [
       ['server/src/access.ts', 'Users and system accounts (provision, disable, lockout, password rules, sign out everywhere), roles made of permissions, grants for all projects or one project, permission checks, API tokens of system accounts (stored as hashes), and Basic sign-in of system accounts at the gateway.'],
       ['server/src/guard.ts', 'The permission of every admin API route and the project it applies to. The server refuses to start when a route has no rule. Also writes each change and each refusal to the audit log, without passwords or secret values.'],
       ['server/src/console.ts', 'Data for the Admin Console: the overview (engines, deployed Sutras, runs of the last day, failures, approvals, gateway), deployed applications with their triggers and run counts, starting and stopping a deployed Sutra, and drain requests for any engine. Always limited to the projects the caller may see.'],
-      ['server/src/tuning.ts', 'Tuning parameters: engine values for the cluster or one engine (steps at once, steps per run, reply wait, retention, trace sampling) and per deployed Sutra (runs at once, priority, run time limit, default retries, step data in history, retention). Stored in settings and deployments, applied by every engine on the next beat.'],
+      ['server/src/tuning.ts', 'Tuning parameters: engine values for the cluster or one engine (steps at once, in memory too, steps per run, reply wait, retention, trace sampling, queue check, settings refresh) and per deployed Sutra (execution durable or in memory, runs at once, priority, run time limit, default retries, step data in history, retention). Stored in settings and deployments, applied by every engine on the next beat. Refuses in memory for Sutras with steps that wait.'],
+      ['server/src/sizing.ts', 'Machine profiles from 1 vCPU / 1 GB up, measured with tools/loadtest.mjs: steps at once, queue check, settings refresh, engines per machine, Node memory, files read whole, rows per streamed batch, database. Engine defaults and the Admin Console panel This machine come from here.'],
       ['server/src/alerts.ts', 'Alerts: channels (email, signed webhook, a Sutra), rules of nine kinds checked by the cluster leader every 30 seconds, alerts that open, remind, are acknowledged and resolve, delivery records, and the runs timeline of the Overview.'],
       ['server/src/audit.ts', 'The audit log: record, search, CSV export, and deletion after <code>SUTRA_AUDIT_RETENTION_DAYS</code>.'],
       ['server/src/auth.ts', 'Studio sign-in: the first visit creates the administrator, sessions are signed cookies, and changing requests need the X-Sutra header (a cross-site form cannot send it).'],
@@ -139,8 +140,8 @@ const FILES: Group[] = [
       ['server/src/palettes/transform.ts', 'JSONata transform.'],
       ['server/src/palettes/http.ts', 'HTTP request (with connection, security profile and circuit breaker) and HTTP response.'],
       ['server/src/palettes/soap.ts', 'SOAP call from a WSDL (operation picker) and SOAP reply.'],
-      ['server/src/palettes/file.ts', 'File trigger, read, list, write and move, confined to the configured folder. Write and Move always return file details.'],
-      ['server/src/palettes/fileformat.ts', 'Encodings and formats for file content: text, base64, CSV, lines, JSON, XML, with schema-typed columns.'],
+      ['server/src/palettes/file.ts', 'File trigger, read, list, write and move, confined to the configured folder. Write and Move always return file details. Read and List can stream big CSV and line files in batches on a batch port.'],
+      ['server/src/palettes/fileformat.ts', 'Encodings and formats for file content: text, base64, CSV, lines, JSON, XML, with schema-typed columns. A CSV parser that takes text in pieces, and the streaming reader that hands rows over in batches with back pressure.'],
       ['server/src/palettes/code.ts', 'JavaScript code in a sandboxed worker (no host objects, time and memory limits) and HTML templates.'],
       ['server/src/palettes/scripts.ts', 'PowerShell, shell scripts, Python (code or a .py file, arguments, parameters, virtual environment, printed JSON as result, design checks for Python, syntax, files and packages) and programs, with output and errors captured; values arrive as environment variables and JSON files, never inside the script text. Off until allowed.'],
       ['server/src/palettes/release.ts', 'Build package, Check package, Deploy package and Roll back, on this server or a remote engine. Off until allowed.'],
@@ -234,11 +235,14 @@ const FILES: Group[] = [
       ['tools/migrate-to-postgres.mjs', 'The SQLite to PostgreSQL move for Windows (.cmd) and Linux (.sh): stops SutraFlow with the launcher, copies and counts every table (sutra db migrate), switches sutraflow.env, starts SutraFlow, checks it, and puts SQLite back on any failure.'],
       ['tools/migrate-to-postgres.cmd', 'Windows wrapper of migrate-to-postgres.mjs: finds Node.js from sutraflow.env and passes the settings file.'],
       ['tools/migrate-to-postgres.sh', 'Linux and macOS wrapper of migrate-to-postgres.mjs: finds Node.js from sutraflow.env and passes the settings file.'],
+      ['tools/loadtest.mjs', 'Load test: starts a studio and engines on their own temporary database, runs a benchmark Sutra (durable or in memory, small or big outputs), and reports steps and runs per second, queue wait and step time percentiles, database lock waits and transactions, CPU and memory; can kill an engine to check recovery, limit cores and memory, or soak. Results in docs/benchmarks.'],
+      ['tools/bigfiletest.mjs', 'Big file test: one engine with a small memory limit streams a generated CSV file of any size through a Sutra (Read file, Stream in batches) and reports the time and the peak memory of the process.'],
       ['tools/build-sample-projects.ts', 'Builds the sample project zips in samples/ (<code>npm run samples</code>): whole projects as release zips with their files, listed in samples/index.json for New project.'],
       ['tools/build-user-guide.ts', 'Builds docs/sutraflow-user-guide.html (<code>npm run guide</code>): chapters, every activity with its settings table, connection types, functions, pipes and samples, read from the server code.'],
       ['tools/guide/tables.ts', 'The tables of SutraFlow itself, for the guide and this page: what each holds, groups, what is encrypted or grows, and the columns read from db.ts (the schema and the columns later versions add).'],
       ['tools/guide/chapters.ts', 'User guide chapters.'],
       ['tools/guide/activities.ts', 'Advice text for every activity in the user guide.'],
+      ['tools/guide/benchmarks.ts', 'Guide tables made from measurements: the machine profiles of sizing.ts and the load test results in docs/benchmarks.'],
       ['tools/guide/logo.ts', 'The SutraFlow mark used by both pages.'],
       ['tools/capture-guide-shots.mjs', 'Takes the user guide screenshots with headless Edge while the server runs (<code>npm run guide:shots</code>).'],
       ['tools/build-architecture.ts', 'Builds this page (<code>npm run architecture</code>) and fails when a source file has no description.'],
@@ -330,9 +334,13 @@ const SETTINGS: [string, string, string][] = [
   ['SUTRA_DEPLOY_DIR', '(none)', 'Folder of .sutra packages deployed at start (containers, headless engines).'],
   ['SUTRA_CONFIG_DIR', 'data/config', 'Deployment config files loaded at start.'],
   ['SUTRA_ENGINE_ID', 'host-pid', 'This engine\'s name in the cluster and on metrics.'],
-  ['SUTRA_WORKERS', '16', 'Steps run at the same time. 0 = serve only (a studio in a cluster).'],
+  ['SUTRA_WORKERS', 'by machine', 'Steps run at the same time (4 on 1 vCPU / 1 GB up to 32 on 8 cores, see sizing.ts). 0 = serve only (a studio in a cluster).'],
+  ['SUTRA_MEMORY_WORKERS', '0', 'Steps at once for Sutras that run in memory; 0 = the same as SUTRA_WORKERS.'],
+  ['SUTRA_POLL_MS', 'by machine', 'How often an idle engine looks for due steps (500 ms on the smallest machines, 200 to 250 ms otherwise).'],
+  ['SUTRA_SETTINGS_REFRESH_MS', 'by machine', 'How long an engine keeps project and Sengine variables before reading them again; 0 reads them on every step.'],
   ['SUTRA_MAX_STEPS', '10000', 'Safety limit of steps per run.'],
   ['SUTRA_REPLY_TIMEOUT_MS', '60000', 'How long REST and SOAP callers wait for a reply step.'],
+  ['SUTRA_KEEPALIVE_MS', '65000', 'How long the admin and gateway servers keep an idle connection; longer than the idle time of a load balancer in front.'],
   ['SUTRA_HEARTBEAT_MS', '5000', 'Heartbeat interval; an engine silent for three beats is dead.'],
   ['SUTRA_DRAIN_MS', '30000', 'Time running steps get to finish on a graceful stop.'],
   ['SUTRA_RUN_RETENTION_DAYS', '30', 'Finished runs older than this are deleted; 0 keeps them.'],
@@ -391,7 +399,7 @@ ${DIAGRAMS.runtime}
 <ul>
 <li><strong>Admin API</strong> (Fastify, port 4800, 127.0.0.1 by default) serves the studio, the user guide, this page, and every editing and operations route. People sign in with a session cookie; automation uses <code>Authorization: Bearer &lt;SUTRA_ADMIN_TOKEN&gt;</code>.</li>
 <li><strong>Gateway</strong> (ports 8080 and 8443) serves only what is deployed: REST paths, SOAP services with their WSDL, and MCP endpoints. It is separate from the admin port so the studio never has to face the internet.</li>
-<li><strong>Engine</strong> runs steps in worker slots (<code>SUTRA_WORKERS</code>, 16 by default). Slots take tasks from the database, never from memory.</li>
+<li><strong>Engine</strong> runs steps in worker slots (<code>SUTRA_WORKERS</code>, set by the machine size by default). Slots take tasks from the database. Sutras tuned to run <em>in memory</em> go to a second engine in the same process whose runs live in a private in-memory database and are written to the database in one transaction when they end.</li>
 <li><strong>Timers and listeners</strong> start runs from schedules, folders, mailboxes, queues and Drive. In a cluster they run on the leader only, so nothing starts twice.</li>
 <li><strong>Cluster beat</strong> writes this engine\'s heartbeat, holds or watches the leader lease, recovers dead engines' steps, and reloads routes after deploys elsewhere.</li>
 <li><strong>Storage</strong> is SQLite in the data folder, or PostgreSQL for several machines. Sutras, runs, tasks, the vault, settings and cluster state all live there.</li>

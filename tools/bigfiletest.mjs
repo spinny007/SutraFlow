@@ -1,0 +1,94 @@
+#!/usr/bin/env node
+/**
+ * Big file test: one engine with a small memory limit streams a large CSV file through a Sutra
+ * (Read file, Stream in batches, a step per batch) and the peak memory of the process is measured.
+ * Uses its own data folder, port 21700 and a generated file in the temp folder; nothing else is touched.
+ *
+ *   node tools/bigfiletest.mjs [--mb 500] [--mem 384] [--batch 5000] [--workers 4] [--out file.json]
+ */
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { spawn, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const HOME = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const argv = process.argv.slice(2);
+const opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : d; };
+const MB = Number(opt('mb', 500)), MEM = Number(opt('mem', 384)), BATCH = Number(opt('batch', 5000)), WORKERS = Number(opt('workers', 4));
+const MAIN = path.join(HOME, 'dist', 'server', 'main.js');
+const TOKEN = crypto.randomBytes(16).toString('hex');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-big-'));
+const inbox = path.join(dir, 'inbox'); fs.mkdirSync(inbox);
+const file = path.join(inbox, 'big.csv');
+
+// ---------- the file: about MB megabytes of orders ----------
+console.log(`Writing ${MB} MB of CSV ...`);
+{
+  const fd = fs.openSync(file, 'w');
+  fs.writeSync(fd, 'id,customer,city,amount,note\n');
+  let size = 0, id = 0;
+  while (size < MB * 1048576) {
+    let chunk = '';
+    for (let i = 0; i < 10000; i++) { id++; chunk += `${id},C-${id % 9973},"City ${id % 97}",${(id % 1000) / 10},"order ${id} note text"\n`; }
+    fs.writeSync(fd, chunk); size += Buffer.byteLength(chunk);
+  }
+  fs.closeSync(fd);
+  console.log(`${id} rows, ${Math.round(fs.statSync(file).size / 1048576)} MB`);
+}
+
+// ---------- the engine ----------
+const env = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('SUTRA_'))), SUTRA_DATA_DIR: dir, SUTRA_MASTER_KEY: crypto.randomBytes(32).toString('base64'), SUTRA_ADMIN_TOKEN: TOKEN, SUTRA_ADMIN_PORT: '21700', SUTRA_GATEWAY_HTTP_PORT: '21701', SUTRA_GATEWAY_HTTPS_PORT: '21702', SUTRA_WORKERS: String(WORKERS), SUTRA_ENVIRONMENT: 'test', SUTRA_MAX_STEPS: '1000000' };
+const log = fs.openSync(path.join(dir, 'engine.log'), 'a');
+const p = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', `--max-old-space-size=${MEM}`, ...(argv.includes('--profile') ? ['--cpu-prof', `--cpu-prof-dir=${path.join(HOME, 'docs', 'benchmarks', 'profiles')}`] : []), MAIN], { cwd: HOME, env, stdio: ['ignore', log, log], windowsHide: true });
+process.on('exit', () => { try { p.kill('SIGKILL'); } catch { /* gone */ } });
+const base = 'http://127.0.0.1:21700';
+const api = async (method, u, body) => { const r = await fetch(base + u, { method, headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }); const j = await r.json().catch(() => null); if (!r.ok) throw new Error(`${method} ${u}: ${r.status} ${j?.error}`); return j; };
+for (let i = 0; ; i++) { try { if ((await fetch(base + '/ready')).ok) break; } catch { /* starting */ } if (i > 200) throw new Error('engine did not start'); await sleep(300); }
+const rss = () => {
+  if (process.platform === 'win32') return Number(spawnSync('powershell', ['-NoProfile', '-Command', `(Get-Process -Id ${p.pid}).WorkingSet64`], { encoding: 'utf8', windowsHide: true }).stdout.trim());
+  return Number(fs.readFileSync(`/proc/${p.pid}/statm`, 'utf8').split(' ')[1]) * 4096;
+};
+
+const nodes = [
+  { id: 's', type: 'start', name: 'Start', x: 0, y: 0, config: {} },
+  { id: 'r', type: 'fileRead', name: 'Read orders', x: 200, y: 0, config: { folder: inbox, path: 'big.csv', format: 'CSV rows', stream: true, batchSize: BATCH } },
+  { id: 'b', type: 'jsonata', name: 'Sum batch', x: 400, y: 0, config: { source: '{{input}}', expression: '{ "batch": batch, "rows": count, "amount": $sum(rows.amount) }' } },
+  { id: 'd', type: 'jsonata', name: 'Totals', x: 400, y: 200, config: { source: '{{input}}', expression: '{ "rows": count, "batches": batches }' } },
+];
+const edges = [{ id: 'e1', from: 's', port: 'out', to: 'r' }, { id: 'e2', from: 'r', port: 'batch', to: 'b' }, { id: 'e3', from: 'r', port: 'out', to: 'd' }];
+const pr = await api('POST', '/api/projects', { name: 'Big file' });
+const f = await api('POST', '/api/flows', { doc: { name: 'Big file', nodes, edges }, projectId: pr.id });
+await api('POST', `/api/flows/${f.id}/deploy`, {});
+await api('PUT', `/api/console/sutras/${f.id}/tuning`, { values: { stepData: 'none' } });
+const rss0 = rss();
+const t0 = Date.now();
+const run = await api('POST', `/api/flows/${f.id}/run`, { input: {} });
+// The run's status straight from the database: the run API would load every batch into the server.
+const { DatabaseSync } = await import('node:sqlite');
+const db = new DatabaseSync(path.join(dir, 'sutra.db'), { readOnly: true });
+const runId = run.id;
+const row = () => { try { return db.prepare('select status, steps from runs where id = ?').get(runId) || {}; } catch { return {}; } };
+let peak = rss0, status = 'running';
+while (status === 'running') {
+  await sleep(1000);
+  peak = Math.max(peak, rss());
+  status = row().status || 'running';
+  if (p.exitCode !== null) { status = 'engine stopped'; break; }
+  if (Date.now() - t0 > 60 * 60000) { status = 'timed out'; break; }
+}
+const seconds = (Date.now() - t0) / 1000;
+const r = row();
+db.close();
+const result = { fileMb: Math.round(fs.statSync(file).size / 1048576), heapLimitMb: MEM, batchRows: BATCH, workers: WORKERS, status, seconds: Math.round(seconds), mbPerSec: Math.round((fs.statSync(file).size / 1048576 / seconds) * 10) / 10, rssStartMb: Math.round(rss0 / 1048576), rssPeakMb: Math.round(peak / 1048576), steps: r.steps ?? null, dbMb: Math.round(fs.statSync(path.join(dir, 'sutra.db')).size / 1048576) };
+console.log(JSON.stringify(result, null, 2));
+if (status !== 'done') console.log(fs.readFileSync(path.join(dir, 'engine.log'), 'utf8').slice(-1500));
+if (opt('out')) fs.writeFileSync(opt('out'), JSON.stringify(result, null, 2));
+// --profile: a CPU profile of the engine (written to the data folder's parent on a graceful stop).
+if (argv.includes('--profile')) { await api('POST', '/api/engine/drain', {}).catch(() => {}); for (let i = 0; i < 100 && p.exitCode === null; i++) await sleep(200); }
+p.kill();
+await sleep(1500);
+fs.rmSync(dir, { recursive: true, force: true });
+process.exit(status === 'done' ? 0 : 1);

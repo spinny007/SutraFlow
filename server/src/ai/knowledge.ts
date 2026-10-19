@@ -68,7 +68,7 @@ export async function embedWith(p: Resource, secret: Secret, model: string, text
   const m = model || String(p.config.model || '');
   const key = () => secret(p.config.apiKeySecret, `${engine} API key`);
   const post = async (url: string, headers: Record<string, string>, body: unknown) => {
-    const res = await httpCall({ method: 'POST', url, headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body), timeoutMs: 300000, signal, parse: 'json' });
+    const res = await httpCall({ method: 'POST', url, headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body), timeoutMs: 300000, signal, parse: 'json', retryReset: true });
     if (res.status >= 400) throw new Error(`${engine} vectors error ${res.status}: ${String(res.body?.error?.message || res.body?.error || JSON.stringify(res.body)).slice(0, 300)}`);
     return res.body;
   };

@@ -8,18 +8,19 @@ import { rebuildSchedules, stopSchedules } from './scheduler.js';
 import { rebuildRoutes, startGateway, stopGateway, reloadTls } from './gateway/gateway.js';
 import { startRenewal } from './gateway/tls.js';
 import { buildAdmin } from './api.js';
-import { loadOpsFiles, onProjectChange, effectiveVariables, setRuntimeVariable, engineVariableValues, setEngineVariable } from './projects.js';
+import { loadOpsFiles, onProjectChange, effectiveVariables, setRuntimeVariable, engineVariableValues, setEngineVariable, forgetCachedSettings } from './projects.js';
 import { setVariableHooks } from './expr.js';
 import { rebuildListeners, stopListeners } from './listeners.js';
 import { closeBusPublishers } from './connectors/bus.js';
 import { closeDbPools } from './connectors/db.js';
 import { config } from './config.js';
-import { lifecycle } from './lifecycle.js';
+import { lifecycle, closeServer } from './lifecycle.js';
 import { startCluster, stopCluster, bumpDeployGen, leaveLeadership, cluster } from './cluster.js';
 import { housekeeping } from './housekeeping.js';
 import { ensureBuiltins } from './access.js';
 import { evaluate as evaluateAlerts } from './alerts.js';
-import { applyTuning, onTuningChange, onWorkersChange } from './tuning.js';
+import { applyTuning, onTuningChange, onWorkersChange, onPollChange } from './tuning.js';
+import { onMemoryRunProject } from './guard.js';
 import { flushTracing } from './tracing.js';
 import { deployPackage, readPackage, packageHistory } from './packages.js';
 import { listProjects } from './projects.js';
@@ -89,6 +90,8 @@ export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gatew
   lifecycle.packagesDeployed = true;
   // Tuning from the Admin Console: applied now and whenever any engine changes it.
   onWorkersChange(n => { engine.concurrency = n; engine.pump(); });
+  onPollChange(ms => engine.setPollMs(ms));
+  onMemoryRunProject(id => engine.memoryRun(id)?.project_id ?? undefined);
   onTuningChange(bumpDeployGen);
   applyTuning();
   engine.start();
@@ -101,7 +104,7 @@ export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gatew
   startCluster({
     becameLeader: () => { rebuildSchedules(); rebuildListeners().catch(e => console.error('Listeners:', e)); },
     lostLeader: () => { stopSchedules(); stopListeners().catch(() => {}); },
-    deploymentsChanged: () => { applyTuning(); rebuildRoutes(); reschedule(); relisten(); },
+    deploymentsChanged: () => { forgetCachedSettings(); applyTuning(); rebuildRoutes(); reschedule(); relisten(); },
     housekeeping: () => { try { housekeeping(); } catch (e) { console.error('Housekeeping:', e); } },
     alerts: () => { evaluateAlerts().catch(e => console.error('Alerts:', e)); },
     drainRequested: () => { console.log('Drain requested from the Admin Console'); lifecycle.shutdown?.().finally(() => { if (opts.exitOnDrain) process.exit(0); }); },
@@ -130,7 +133,7 @@ export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gatew
     engine.stop();
     await flushTracing();
     stopCluster();
-    await admin.close();
+    await closeServer(admin);
   })());
   lifecycle.shutdown = stop;
   return { admin, stop };

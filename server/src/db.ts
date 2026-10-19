@@ -18,7 +18,7 @@ interface Backend {
   all(sql: string, args: any[]): any[];
   run(sql: string, args: any[]): { changes: number };
   exec(sql: string): void;
-  begin(): void;
+  begin(key?: string): void;
   commit(): void;
   rollback(): void;
   close(): void;
@@ -28,7 +28,16 @@ let db: Backend | null = null;
 function sqliteBackend(file: string): Backend {
   const d = new DatabaseSync(file);
   // busy_timeout: several engines on one host may share the file; a writer waits briefly instead of failing.
-  d.exec('pragma journal_mode = wal; pragma synchronous = normal; pragma foreign_keys = on; pragma busy_timeout = 10000;');
+  d.exec('pragma busy_timeout = 10000');
+  // Switching a new file to WAL does not always wait for another engine setting up the same file
+  // (SQLite answers "database is locked" at once): try again for a while.
+  const nap = new Int32Array(new SharedArrayBuffer(4));
+  for (let i = 0; ; i++) {
+    try { d.exec('pragma journal_mode = wal; pragma synchronous = normal; pragma foreign_keys = on;'); break; } catch (e: any) {
+      if (!/locked|busy/i.test(String(e?.message)) || i >= 200) throw e;
+      Atomics.wait(nap, 0, 0, 50);
+    }
+  }
   return {
     kind: 'sqlite',
     get: (sql, a) => d.prepare(sql).get(...a),
@@ -53,6 +62,13 @@ function toPg(sql: string) {
   return out;
 }
 
+/** A 63-bit-safe lock number for a key (FNV-1a), never the shared lock's number. */
+export function lockId(key: string) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return 1000000 + h;
+}
+
 function postgresBackend(url: string): Backend {
   const ctrl = new SharedArrayBuffer(4);
   const flag = new Int32Array(ctrl);
@@ -61,11 +77,22 @@ function postgresBackend(url: string): Backend {
   const file = new URL(here.endsWith('.ts') ? './pgworker.ts' : './pgworker.js', here);
   const worker = new Worker(file, { workerData: { url, ctrl, port: port2 }, transferList: [port2 as unknown as MessagePort] });
   worker.unref();
+  const nap = new Int32Array(new SharedArrayBuffer(4));
+  let seq = 0;
   const call = (sql: string, params: any[], mode: string) => {
+    const id = ++seq;
     Atomics.store(flag, 0, 0);
-    port1.postMessage({ sql: mode === 'exec' ? sql : toPg(sql), params: params.map(v => (typeof v === 'boolean' ? (v ? 1 : 0) : v === undefined ? null : v)), mode });
+    port1.postMessage({ id, sql: mode === 'exec' ? sql : toPg(sql), params: params.map(v => (typeof v === 'boolean' ? (v ? 1 : 0) : v === undefined ? null : v)), mode });
     if (Atomics.wait(flag, 0, 0, 120000) === 'timed-out') throw new Error('PostgreSQL did not answer within 120 seconds');
-    const m = receiveMessageOnPort(port1)?.message as any;
+    // The flag can be set a moment before the answer reaches this port (seen under heavy load): wait for
+    // it briefly, and skip any answer that is not for this statement.
+    let m: any;
+    for (let i = 0; i < 5000; i++) {
+      m = receiveMessageOnPort(port1)?.message;
+      if (m && m.id === id) break;
+      m = undefined;
+      Atomics.wait(nap, 0, 0, 1);
+    }
     if (!m) throw new Error('PostgreSQL bridge: no answer');
     if (!m.ok) throw Object.assign(new Error(m.error), { code: m.code });
     return m as { rows: any[]; changes: number };
@@ -76,8 +103,10 @@ function postgresBackend(url: string): Backend {
     all: (sql, a) => call(sql, a, 'all').rows,
     run: (sql, a) => ({ changes: call(sql, a, 'run').changes }),
     exec: sql => { call(sql, [], 'exec'); },
-    // One write transaction at a time across all engines, like SQLite's begin immediate.
-    begin: () => { call('begin', [], 'run'); call('select pg_advisory_xact_lock(424242)', [], 'run'); },
+    // A transaction about one run (or one Sutra's queue) locks only that key, so engines save different
+    // runs at the same time; other write transactions (deploys, settings) take one shared lock, like
+    // SQLite's begin immediate. Begin and the lock are one round trip.
+    begin: (key?: string) => { call(`begin; select pg_advisory_xact_lock(${key ? lockId(key) : 424242})`, [], 'exec'); },
     commit: () => { call('commit', [], 'run'); },
     rollback: () => { call('rollback', [], 'run'); },
     close: () => { port1.close(); void worker.terminate(); },
@@ -200,17 +229,20 @@ export function openDb(file?: string) {
     const f = file || path.join(config.dataDir, 'sutra.db');
     if (f !== ':memory:') ensureDataDir();
     db = sqliteBackend(f);
-    db.exec(SCHEMA);
+    // Engines starting together on one file would add the same new columns at once: one at a time
+    // (begin immediate waits for the other, then sees what it added).
+    for (let i = 0; ; i++) {
+      try { db.exec('begin immediate'); break; } catch (e: any) { if (!/locked|busy/i.test(String(e?.message)) || i >= 200) throw e; Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50); }
+    }
+    try { db.exec(SCHEMA); migrate(); db.exec('commit'); } catch (e) { try { db.exec('rollback'); } catch { /* none open */ } throw e; }
   }
-  migrate();
   return db;
 }
 
 export const dbKind = () => getDb().kind;
 
 /** Adds columns introduced after the first release, so existing installs upgrade in place. */
-function migrate() {
-  const d = getDb();
+function migrate(d = getDb()) {
   const cols = (t: string) => d.kind === 'sqlite'
     ? (d.all(`pragma table_info(${t})`, []) as any[]).map(c => c.name)
     : (d.all(`select column_name as name from information_schema.columns where table_name = ?`, [t]) as any[]).map(c => c.name);
@@ -244,6 +276,7 @@ function migrate() {
   add('deployments', 'tuning', 'tuning text');
   add('runs', 'priority', 'priority integer not null default 0');
   add('tasks', 'priority', 'priority integer not null default 0');
+  add('tasks', 'queued_at', 'queued_at integer');
   add('engines', 'drain_requested', 'drain_requested integer not null default 0');
   add('users', 'kind', "kind text not null default 'user'");
   add('users', 'display_name', 'display_name text');
@@ -258,6 +291,12 @@ function migrate() {
   d.exec('create index if not exists flows_project on flows(project_id)');
   d.exec('create index if not exists resources_project on resources(project_id)');
   d.exec('create index if not exists tasks_owner on tasks(owner, status)');
+  // Covering indexes: the queries that count a run's steps by status, claim the next step and check a
+  // step's status read only the index, never the row (in SQLite, status and priority come after the
+  // input column, so reading them walks through a big input).
+  d.exec('create index if not exists tasks_run_status on tasks(run_id, status)');
+  d.exec('create index if not exists tasks_claim on tasks(status, priority desc, id, not_before)');
+  d.exec('create index if not exists tasks_status on tasks(id, status)');
   // Everything created before projects existed goes into a default project.
   const hasOrphans = d.get('select 1 as x from flows where project_id is null union select 1 as x from resources where project_id is null limit 1', []);
   let def = d.get(`select id from projects order by updated_at limit 1`, []) as any;
@@ -290,11 +329,16 @@ export const q = {
 
 /** Runs fn inside one write transaction; storage calls are synchronous, so nothing else interleaves here. */
 let txDepth = 0;
-export function tx<T>(fn: () => T): T {
+/**
+ * A write transaction. With a key ("run:<id>", "flow:<id>"), PostgreSQL locks only that key, so
+ * transactions about other runs go on at the same time; without one, the shared lock serialises it
+ * against every other keyless transaction.
+ */
+export function tx<T>(fn: () => T, key?: string): T {
   // Inside a transaction already (a whole pull, say, that deletes Sutras): the inner work joins it.
   if (txDepth > 0) return fn();
   const d = getDb();
-  d.begin();
+  d.begin(key);
   txDepth++;
   try {
     const r = fn();
@@ -306,6 +350,33 @@ export function tx<T>(fn: () => T): T {
     d.rollback();
     throw e;
   }
+}
+
+/** Storage calls of one engine: the database, or an in-memory one for Sutras that run in memory. */
+export interface Store { q: typeof q; tx: typeof tx; kind: 'database' | 'memory' }
+export const databaseStore: Store = { q, tx, kind: 'database' };
+
+/**
+ * A private in-memory SQLite database with the full schema, for runs of Sutras set to run in memory:
+ * their run and step rows live here while they run (no disk, no network), and are written to the
+ * database in one transaction when the run ends.
+ */
+export function memoryStore(): Store {
+  const d = sqliteBackend(':memory:');
+  d.exec(SCHEMA);
+  migrate(d);
+  let depth = 0;
+  const mq: typeof q = {
+    get: (sql: string, ...a: any[]) => d.get(sql, a),
+    all: (sql: string, ...a: any[]) => d.all(sql, a),
+    run: (sql: string, ...a: any[]) => d.run(sql, a),
+  } as typeof q;
+  const mtx = (<T>(fn: () => T): T => {
+    if (depth > 0) return fn();
+    d.begin(); depth++;
+    try { const r = fn(); depth--; d.commit(); return r; } catch (e) { depth = 0; d.rollback(); throw e; }
+  }) as typeof tx;
+  return { q: mq, tx: mtx, kind: 'memory' };
 }
 
 /**

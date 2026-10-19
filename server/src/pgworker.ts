@@ -10,7 +10,7 @@ const require = createRequire(import.meta.url);
 const { url, ctrl, port } = workerData as { url: string; ctrl: SharedArrayBuffer; port: MessagePort };
 const flag = new Int32Array(ctrl);
 
-type Q = { sql: string; params: unknown[]; mode: 'get' | 'all' | 'run' | 'exec' };
+type Q = { id: number; sql: string; params: unknown[]; mode: 'get' | 'all' | 'run' | 'exec' };
 let query: (sql: string, params: unknown[], exec: boolean) => Promise<{ rows: any[]; changes: number }>;
 
 const plain = (v: any): any => (typeof v === 'bigint' ? Number(v) : v instanceof Date ? v.toISOString() : v);
@@ -48,9 +48,9 @@ port.on('message', async (q: Q) => {
   try {
     await ready;
     const r = await query(q.sql, q.params, q.mode === 'exec');
-    reply = { ok: true, rows: r.rows, changes: r.changes };
+    reply = { id: q.id, ok: true, rows: r.rows, changes: r.changes };
   } catch (e: any) {
-    reply = { ok: false, error: e?.message || String(e), code: e?.code };
+    reply = { id: q.id, ok: false, error: e?.message || String(e), code: e?.code };
   }
   port.postMessage(reply);
   Atomics.store(flag, 0, 1);

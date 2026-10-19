@@ -110,7 +110,8 @@ test('messages of one session are handled one at a time, in arrival order; other
   delayFor = () => 0;
   const { getResource } = await import('../server/src/resources.js');
   const turns = (await memory.loadSession(getResource(mem)!, () => '', 'queue-1')).turns.map(t => t.content);
-  assert.deepEqual(turns, ['msg1', 'answer to msg1', 'msg2', 'answer to msg2', 'msg3', 'answer to msg3'], 'strictly one after the other, first come first served');
+  const how = JSON.stringify([...ids, other].map(id => q.get<any>('select status, error from runs where id = ?', id)));
+  assert.deepEqual(turns, ['msg1', 'answer to msg1', 'msg2', 'answer to msg2', 'msg3', 'answer to msg3'], `strictly one after the other, first come first served ${how}`);
   const byMsg = Object.fromEntries(calls.map(c => [/user: (msg\d)/.exec(c.prompt.split('Now:')[1])![1], c as any]));
   const times = JSON.stringify(Object.fromEntries(Object.entries(byMsg).map(([k, v]: [string, any]) => [k, [v.at - byMsg.msg1.at, (v.end ?? 0) - byMsg.msg1.at]])));
   assert.ok(byMsg.msg9.at < byMsg.msg1.end, `another session reaches the model while this session is busy ${times}`);

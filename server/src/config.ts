@@ -1,4 +1,5 @@
 import os from 'node:os';
+import { profileFor } from './sizing.js';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -20,7 +21,18 @@ export const config = {
   gatewayHttpPort: Number(process.env.SUTRA_GATEWAY_HTTP_PORT || 8080),
   gatewayHttpsPort: Number(process.env.SUTRA_GATEWAY_HTTPS_PORT || 8443),
   /** Steps executed at the same time across all runs. */
-  workerConcurrency: Number(process.env.SUTRA_WORKERS || 16),
+  /** Steps at once: SUTRA_WORKERS, or the recommendation for this machine (sizing.ts). */
+  workerConcurrency: Number(process.env.SUTRA_WORKERS || profileFor().workers),
+  /** Steps at once for Sutras that run in memory (0 = the same as SUTRA_WORKERS). */
+  memoryWorkers: Number(process.env.SUTRA_MEMORY_WORKERS || 0),
+  /**
+   * How long the admin and gateway servers keep an idle connection open, in ms. Longer than the idle
+   * time of a load balancer in front (60 s on most), so it never sends a request on a connection the
+   * server is closing (a reset, or a 502 from the load balancer).
+   */
+  keepAliveMs: Math.max(1000, Number(process.env.SUTRA_KEEPALIVE_MS || 65000)),
+  /** How often an idle engine looks for due steps in the queue, in ms. */
+  pollMs: Math.max(20, Number(process.env.SUTRA_POLL_MS || profileFor().pollMs)),
   /** Safety cap on steps per run (protects against accidental loops). */
   maxStepsPerRun: Number(process.env.SUTRA_MAX_STEPS || 10000),
   /** Default time a REST/SOAP caller waits for the flow to reply. */

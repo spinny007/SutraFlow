@@ -1,0 +1,173 @@
+{
+  "label": "SQLite",
+  "at": "2026-10-19T13:20:07.387Z",
+  "database": "SQLite",
+  "node": "v24.21.0",
+  "settings": {},
+  "scenarios": [
+    {
+      "engines": 1,
+      "kb": 0.1,
+      "exec": "durable",
+      "kill": false,
+      "runs": 300,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 6.3,
+      "startSeconds": 6.1,
+      "runsPerSec": 47.4,
+      "stepsPerSec": 521.2,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 3300
+      },
+      "startErrors": 0,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 0,
+        "p95": 1,
+        "p99": 1
+      },
+      "queueMs": {
+        "p50": 0,
+        "p95": 1,
+        "p99": 2
+      },
+      "runMs": {
+        "p50": 15,
+        "p95": 23,
+        "p99": 47
+      },
+      "engineCpuCores": 0.94,
+      "engineMaxMemMb": 264,
+      "db": null,
+      "dbMb": 4.5
+    },
+    {
+      "engines": 1,
+      "kb": 64,
+      "exec": "durable",
+      "kill": false,
+      "runs": 300,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 37.3,
+      "startSeconds": 37.1,
+      "runsPerSec": 8,
+      "stepsPerSec": 88.4,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 3300
+      },
+      "startErrors": 0,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 1,
+        "p95": 3,
+        "p99": 14
+      },
+      "queueMs": {
+        "p50": 4,
+        "p95": 17,
+        "p99": 20
+      },
+      "runMs": {
+        "p50": 111,
+        "p95": 137,
+        "p99": 147
+      },
+      "engineCpuCores": 0.99,
+      "engineMaxMemMb": 468,
+      "db": null,
+      "dbMb": 567.2
+    },
+    {
+      "engines": 1,
+      "kb": 0.1,
+      "exec": "memory",
+      "kill": false,
+      "runs": 300,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 4.8,
+      "startSeconds": 4.6,
+      "runsPerSec": 61.9,
+      "stepsPerSec": 680.8,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 3300
+      },
+      "startErrors": 0,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 0,
+        "p95": 1,
+        "p99": 1
+      },
+      "queueMs": {
+        "p50": 0,
+        "p95": 1,
+        "p99": 1
+      },
+      "runMs": {
+        "p50": 11,
+        "p95": 15,
+        "p99": 48
+      },
+      "engineCpuCores": 0.99,
+      "engineMaxMemMb": 278,
+      "db": null,
+      "dbMb": 3.3
+    },
+    {
+      "engines": 1,
+      "kb": 64,
+      "exec": "memory",
+      "kill": false,
+      "runs": 300,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 25.2,
+      "startSeconds": 25,
+      "runsPerSec": 11.9,
+      "stepsPerSec": 130.8,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 3300
+      },
+      "startErrors": 0,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 1,
+        "p95": 2,
+        "p99": 10
+      },
+      "queueMs": {
+        "p50": 1,
+        "p95": 2,
+        "p99": 3
+      },
+      "runMs": {
+        "p50": 53,
+        "p95": 71,
+        "p99": 90
+      },
+      "engineCpuCores": 1.01,
+      "engineMaxMemMb": 485,
+      "db": null,
+      "dbMb": 566.3
+    }
+  ]
+}

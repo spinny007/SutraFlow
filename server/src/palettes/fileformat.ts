@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { XMLBuilder } from 'fast-xml-parser';
 import type { Field } from '../engine/types.js';
 import { xmlParser } from '../security/outbound.js';
@@ -70,25 +71,54 @@ export function encode(text: string, encoding = 'utf-8'): Buffer {
 
 // ---------- CSV ----------
 export function parseCsvRows(text: string, d: string): string[][] {
-  const rows: string[][] = [];
+  const p = csvParser(d);
+  return [...p.push(text), ...p.end()];
+}
+
+/**
+ * CSV parsing that takes the text in pieces of any size (a file read as a stream): push gives the rows
+ * completed so far, end the last one. Rows of blanks only are left out.
+ */
+export function csvParser(d: string) {
   let row: string[] = [], f = '', q = false, quotedField = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (q) {
-      if (ch === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += ch;
-      continue;
-    }
-    if (ch === '"' && f === '' && !quotedField) { q = true; quotedField = true; continue; }
-    if (ch === d) { row.push(f); f = ''; quotedField = false; continue; }
-    if (ch === '\n' || ch === '\r') {
-      if (ch === '\r' && text[i + 1] === '\n') i++;
-      row.push(f); rows.push(row); row = []; f = ''; quotedField = false;
-      continue;
-    }
-    f += ch;
-  }
-  if (f !== '' || row.length) { row.push(f); rows.push(row); }
-  return rows.filter(r => r.some(x => x.trim() !== ''));
+  // A quote at the end of a piece inside quotes ("" or the closing one), and a \r at the end of a piece.
+  let quoteAtEnd = false, crAtEnd = false;
+  const keep = (rows: string[][]) => rows.filter(r => r.some(x => x.trim() !== ''));
+  return {
+    push(text: string): string[][] {
+      const rows: string[][] = [];
+      if (!text) return rows;
+      let i = 0;
+      if (quoteAtEnd) { quoteAtEnd = false; if (text[0] === '"') { f += '"'; i = 1; } else q = false; }
+      if (crAtEnd) { crAtEnd = false; if (text[0] === '\n' && i === 0) i = 1; }
+      for (; i < text.length; i++) {
+        const ch = text[i];
+        if (q) {
+          if (ch === '"') {
+            if (i + 1 === text.length) { quoteAtEnd = true; break; }
+            if (text[i + 1] === '"') { f += '"'; i++; } else q = false;
+          } else f += ch;
+          continue;
+        }
+        if (ch === '"' && f === '' && !quotedField) { q = true; quotedField = true; continue; }
+        if (ch === d) { row.push(f); f = ''; quotedField = false; continue; }
+        if (ch === '\n' || ch === '\r') {
+          if (ch === '\r') { if (i + 1 === text.length) crAtEnd = true; else if (text[i + 1] === '\n') i++; }
+          row.push(f); rows.push(row); row = []; f = ''; quotedField = false;
+          continue;
+        }
+        f += ch;
+      }
+      return keep(rows);
+    },
+    end(): string[][] {
+      if (quoteAtEnd) { quoteAtEnd = false; q = false; }
+      const rows: string[][] = [];
+      if (f !== '' || row.length) { row.push(f); rows.push(row); }
+      row = []; f = '';
+      return keep(rows);
+    },
+  };
 }
 
 /** Column definitions from a schema: a repeating node's children, or the root's children. */
@@ -115,19 +145,77 @@ function typed(v: string, type: string | undefined, decimal = '.') {
   }
 }
 
-export function csvToRows(text: string, o: { delimiter?: string; header?: boolean; skipRows?: number; trim?: boolean; schema?: SNode | null; decimal?: string }) {
+type CsvOptions = { delimiter?: string; header?: boolean; skipRows?: number; trim?: boolean; schema?: SNode | null; decimal?: string };
+export function csvToRows(text: string, o: CsvOptions) {
   const d = o.delimiter === 'tab' ? '\t' : o.delimiter || ',';
-  let raw = parseCsvRows(text, d).slice(Math.max(0, Number(o.skipRows) || 0));
+  const rows = csvRowMaker(o);
+  return parseCsvRows(text, d).map(rows).filter(r => r !== null);
+}
+
+/** Turns raw CSV rows, one at a time and in order, into objects: skips rows, takes the header, types values. */
+function csvRowMaker(o: CsvOptions) {
+  let skip = Math.max(0, Number(o.skipRows) || 0);
   const cols = columnsOf(o.schema ?? null);
-  let names: string[];
-  if (o.header !== false && raw.length) { names = raw[0].map(h => h.trim()); raw = raw.slice(1); }
-  else names = cols ? cols.map(c => c.name) : (raw[0] || []).map((_, i) => `col${i + 1}`);
   const types = new Map(cols?.map(c => [c.name, c.type]));
-  return raw.map((r, ri) => Object.fromEntries(names.map((n, i) => {
-    let v = r[i] ?? '';
-    if (o.trim !== false) v = v.trim();
-    try { return [n, cols ? typed(v, types.get(n), o.decimal) : o.decimal === ',' && /^-?\d+,\d+$/.test(v) ? Number(v.replace(',', '.')) : autoType(v)]; } catch (e: any) { throw new Error(`Row ${ri + 1}, column ${n}: ${e.message}`); }
-  })));
+  let names: string[] | null = o.header !== false ? null : cols ? cols.map(c => c.name) : null;
+  let ri = 0;
+  return (r: string[]): Record<string, any> | null => {
+    if (skip > 0) { skip--; return null; }
+    if (!names) {
+      if (o.header !== false) { names = r.map(h => h.trim()); return null; }
+      names = r.map((_, i) => `col${i + 1}`);
+    }
+    ri++;
+    return Object.fromEntries(names.map((n, i) => {
+      let v = r[i] ?? '';
+      if (o.trim !== false) v = v.trim();
+      try { return [n, cols ? typed(v, types.get(n), o.decimal) : o.decimal === ',' && /^-?\d+,\d+$/.test(v) ? Number(v.replace(',', '.')) : autoType(v)]; } catch (e: any) { throw new Error(`Row ${ri}, column ${n}: ${e.message}`); }
+    }));
+  };
+}
+
+/** Formats that can be read as a stream in batches of rows. */
+export const STREAM_FORMATS = ['CSV rows', 'lines'];
+
+/**
+ * Reads a CSV or line file as a stream and hands its rows over in batches, so a file of any size needs
+ * only one batch in memory. onBatch may be async: reading waits for it (back pressure).
+ */
+export async function streamRows(file: string, cfg: Record<string, any>, schema: SNode | null, batchSize: number, onBatch: (rows: any[], batch: number) => void | Promise<void>, signal?: AbortSignal) {
+  const fmt = cfg.format || 'text';
+  if (!STREAM_FORMATS.includes(fmt)) throw new Error(`Streaming reads CSV rows or lines, not ${fmt}`);
+  const enc = String(cfg.encoding || 'utf-8').toLowerCase();
+  const label = enc === 'utf-8 with bom' || enc === 'utf8' ? 'utf-8' : enc === 'iso-8859-1' ? 'latin1' : enc;
+  let decoder: TextDecoder;
+  try { decoder = new TextDecoder(label === 'latin1' ? 'iso-8859-1' : label); } catch { throw new Error(`Encoding "${cfg.encoding}" is not supported`); }
+  const size = Math.max(1, Math.min(100000, Number(batchSize) || 1000));
+  let batch: any[] = [], batches = 0, count = 0, first = true;
+  const flush = async () => { if (!batch.length) return; const b = batch; batch = []; batches++; await onBatch(b, batches); };
+  const add = async (row: any) => { if (row === null) return; batch.push(row); count++; if (batch.length >= size) await flush(); };
+  // CSV: the state machine above; lines: split on line breaks, the last piece waits for the next chunk.
+  const csv = fmt === 'CSV rows' ? csvParser(cfg.delimiter === 'tab' ? '\t' : cfg.delimiter || ',') : null;
+  const makeRow = csv ? csvRowMaker({ delimiter: cfg.delimiter, header: cfg.header !== false, skipRows: cfg.skipRows, trim: cfg.trimValues !== false, schema, decimal: cfg.decimal }) : null;
+  let skip = Math.max(0, Number(cfg.skipRows) || 0), rest = '', line = 0;
+  const takeText = async (text: string, last: boolean) => {
+    if (first) { text = text.replace(/^\uFEFF/, ''); first = false; }
+    if (csv) {
+      for (const r of csv.push(text)) await add(makeRow!(r));
+      if (last) for (const r of csv.end()) await add(makeRow!(r));
+      return;
+    }
+    const parts = (rest + text).split(/\r?\n/);
+    rest = last ? '' : parts.pop()!;
+    if (last && parts.length && parts[parts.length - 1] === '') parts.pop();
+    for (const l of parts) {
+      if (skip > 0) { skip--; continue; }
+      await add({ number: ++line, line: l.endsWith('\r') && !last ? l.slice(0, -1) : l });
+    }
+  };
+  const stream = fs.createReadStream(file, { highWaterMark: 256 * 1024, signal });
+  for await (const chunk of stream) await takeText(decoder.decode(chunk as Buffer, { stream: true }), false);
+  await takeText(decoder.decode(), true);
+  await flush();
+  return { count, batches };
 }
 
 export function rowsToCsv(rows: any[], o: { delimiter?: string; header?: boolean; schema?: SNode | null; eol?: string }) {

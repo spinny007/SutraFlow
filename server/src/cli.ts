@@ -82,7 +82,9 @@ const HELP = `sutra <command> [options]
             Deploys a published version of a Sutra (an earlier one to go back).
   sutras    tune <sutra> --project <name> [--max-runs n] [--priority n] [--run-timeout-min n]
                 [--retries n] [--retry-delay-ms n] [--step-data all|errors-only|none] [--retention-days n]
-            Tuning of one Sutra: runs at a time, priority, time limit, retries, what runs keep and how long.
+                [--execution durable|in-memory]
+            Tuning of one Sutra: runs at a time, priority, time limit, retries, what runs keep and how long,
+            and whether it runs durable or in memory.
   runs      list [--sutra <name> --project <name>] [--status failed] [--limit 50]
             Recent runs, newest first.
   runs      show | resubmit | cancel <run id>
@@ -93,7 +95,10 @@ const HELP = `sutra <command> [options]
             Engines of the cluster; stops one gracefully; deletes runs and audit entries past retention.
   engines   tune [--engine <id>] [--workers n] [--max-steps n] [--reply-timeout-ms n]
                 [--retention-days n] [--audit-retention-days n] [--trace-sampling 0..1]
-            Engine tuning, for every engine or one: workers, limits, retention, trace sampling.
+                [--memory-workers n] [--poll-ms n] [--settings-refresh-ms n]
+            Engine tuning, for every engine or one: workers, limits, retention, trace sampling, queue check.
+  engines   machine
+            This machine's cores and memory, and the settings recommended for it.
   token     create <system account> [--name text] [--expires-days n] | list <account> | revoke <account> <id>
             API tokens of a system account, for scripts and pipelines.
   audit     [--actor name] [--outcome ok|failed|denied] [--from 2026-10-01] [--csv]
@@ -634,6 +639,7 @@ async function operate(cmd: string, a: Args, call: Call): Promise<number> {
       const map: Record<string, string> = { 'max-runs': 'maxRuns', priority: 'priority', 'run-timeout-min': 'runTimeoutMin', retries: 'retries', 'retry-delay-ms': 'retryDelayMs', 'retention-days': 'retentionDays' };
       for (const [flag, k] of Object.entries(map)) if (str(a, flag) === '') delete values[k]; else if (str(a, flag) !== undefined) values[k] = num(a, flag);
       if (str(a, 'step-data')) values.stepData = str(a, 'step-data')!.replace('errors-only', 'errors only');
+      if (str(a, 'execution') === '') delete values.execution; else if (str(a, 'execution')) values.execution = str(a, 'execution')!.replace('in-memory', 'in memory');
       const r = await call('PUT', `/api/console/sutras/${sutra.id}/tuning`, { values });
       out(`${sutra.name} tuning: ${JSON.stringify(r.values)}`);
       return 0;
@@ -665,13 +671,21 @@ async function operate(cmd: string, a: Args, call: Call): Promise<number> {
       table([['ENGINE', 'STATE', 'LEADER', 'STEPS', 'HOST', 'VERSION'], ...st.engines.map((e: any) => [e.id, !e.alive ? 'silent' : e.draining ? 'draining' : 'alive', e.leader ? 'yes' : '', `${e.running}/${e.workers}`, e.host, e.version])]);
       return 0;
     }
+    case 'engines machine': {
+      const m = await call('GET', '/api/console/machine');
+      const r = m.recommended;
+      out(`${m.engine}: ${m.cpus} cores (${m.cpuModel}), ${m.memoryGb} GB memory, ${m.database}`);
+      out(`Recommended (${r.name}, ${r.machine}): --workers ${r.workers} --memory-workers ${r.memoryWorkers} --poll-ms ${r.pollMs} --settings-refresh-ms ${r.settingsRefreshMs}`);
+      out(`Engines on this machine: ${r.engines}; Node memory per engine: ${r.nodeMemoryMb} MB; read files whole up to ${r.readWholeMb} MB, stream bigger ones in batches of ${r.batchRows} rows; database: ${r.database}`);
+      return 0;
+    }
     case 'engines drain': { if (!arg) throw new Usage('Give the engine name'); await call('POST', `/api/console/engines/${encodeURIComponent(arg)}/drain`); out(`${arg} drains and stops on its next heartbeat`); return 0; }
     case 'engines housekeeping': { const r = await call('POST', '/api/engine/housekeeping', {}); out(`${r.deletedRuns} runs and ${r.deletedAudit ?? 0} audit entries deleted`); return 0; }
     case 'engines tune': {
       const cur = await call('GET', '/api/console/tuning');
       const engineId = str(a, 'engine');
       const values: Record<string, unknown> = { ...(engineId ? cur.perEngine[engineId] || {} : cur.cluster) };
-      const map: Record<string, string> = { workers: 'workers', 'max-steps': 'maxStepsPerRun', 'reply-timeout-ms': 'replyTimeoutMs', 'retention-days': 'runRetentionDays', 'audit-retention-days': 'auditRetentionDays', 'trace-sampling': 'traceSampling' };
+      const map: Record<string, string> = { workers: 'workers', 'max-steps': 'maxStepsPerRun', 'reply-timeout-ms': 'replyTimeoutMs', 'retention-days': 'runRetentionDays', 'audit-retention-days': 'auditRetentionDays', 'trace-sampling': 'traceSampling', 'memory-workers': 'memoryWorkers', 'poll-ms': 'pollMs', 'settings-refresh-ms': 'settingsRefreshMs' };
       for (const [flag, k] of Object.entries(map)) if (str(a, flag) === '') delete values[k]; else if (str(a, flag) !== undefined) values[k] = num(a, flag);
       const r = await call('PUT', engineId ? `/api/console/tuning/engines/${encodeURIComponent(engineId)}` : '/api/console/tuning/engine', { values });
       out(`${engineId || 'All engines'}: ${JSON.stringify(engineId ? r.perEngine[engineId] || {} : r.cluster)}`);

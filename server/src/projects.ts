@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { profileFor } from './sizing.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { q, tx, now, getSetting, setSetting } from './db.js';
@@ -194,16 +195,39 @@ export function substituteEnv(v: unknown): any {
 
 export interface EffectiveVars { values: Record<string, any>; secrets: string[] }
 
+// ---------- settings read on every step, cached per engine ----------
+/**
+ * Every step reads its project's variables and the Sengine variables. They change rarely, so each
+ * engine keeps them for a moment (the "Settings refresh" tuning, 1 s by default) instead of reading
+ * the database each step. A change on this engine clears the cache at once; other engines see it
+ * within the refresh time, or at once with the next deploy signal. Values set at run time with
+ * set-project-variable() are always read fresh.
+ */
+export const settingsCache = { ms: Number(process.env.SUTRA_SETTINGS_REFRESH_MS ?? profileFor().settingsRefreshMs) };
+const projectCache = new Map<string, { at: number; p: Project | undefined; ops: OpsConfig }>();
+let engineVarCache: { at: number; values: Record<string, string> } | null = null;
+export function forgetCachedSettings(projectId?: string) {
+  if (projectId) projectCache.delete(projectId); else projectCache.clear();
+  engineVarCache = null;
+}
+onProjectChange.push(id => forgetCachedSettings(id));
+function projectAndOps(projectId: string) {
+  const c = projectCache.get(projectId);
+  if (c && Date.now() - c.at < settingsCache.ms) return c;
+  const fresh = { at: Date.now(), p: getProject(projectId), ops: getOps(projectId) };
+  if (settingsCache.ms > 0) projectCache.set(projectId, fresh);
+  return fresh;
+}
+
 /** Project variables with ops overrides applied, typed. Secret variables resolve through the vault. */
 export function effectiveVariables(projectId: string | null | undefined): EffectiveVars {
   if (!projectId) return { values: {}, secrets: [] };
-  const p = getProject(projectId);
+  const { p, ops } = projectAndOps(projectId);
   if (!p) return { values: {}, secrets: [] };
-  const ops = getOps(projectId);
   const values: Record<string, any> = {};
   const secrets: string[] = [];
+  const rt = p.config.variables.length ? getSetting<Record<string, string>>(`runtimeVars:${projectId}`, {}) : {};
   for (const v of p.config.variables) {
-    const rt = getSetting<Record<string, string>>(`runtimeVars:${projectId}`, {});
     let raw = substituteEnv(rt[v.name] ?? ops.variables[v.name] ?? v.value);
     if (typeof raw === 'string' && raw.includes('${files}')) raw = raw.split('${files}').join(projectFilesDir(p.name));
     if (v.type === 'number') values[v.name] = Number(raw);
@@ -242,10 +266,14 @@ export function saveEngineVariables(vars: EngineVariable[]) {
     seen.add(v.name);
   }
   setSetting('engineVars', clean);
+  engineVarCache = null;
   return clean;
 }
 export function engineVariableValues() {
-  return Object.fromEntries(listEngineVariables().map(v => [v.name, substituteEnv(v.value)]));
+  if (engineVarCache && Date.now() - engineVarCache.at < settingsCache.ms) return engineVarCache.values;
+  const values = Object.fromEntries(listEngineVariables().map(v => [v.name, substituteEnv(v.value)]));
+  if (settingsCache.ms > 0) engineVarCache = { at: Date.now(), values };
+  return values;
 }
 /** Sutras read Sengine variables; changing them from a Sutra needs the administrator's permission. */
 export function sutrasMayChangeSengine() { return getSetting<boolean>('sengineWritable', false); }

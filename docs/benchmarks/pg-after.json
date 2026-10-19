@@ -1,0 +1,581 @@
+{
+  "label": "after",
+  "at": "2026-10-19T13:07:18.257Z",
+  "database": "PostgreSQL",
+  "node": "v24.21.0",
+  "settings": {},
+  "scenarios": [
+    {
+      "engines": 1,
+      "kb": 0.1,
+      "exec": "durable",
+      "kill": false,
+      "runs": 300,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 26.6,
+      "startSeconds": 26.4,
+      "runsPerSec": 11.3,
+      "stepsPerSec": 123.9,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 3300
+      },
+      "startErrors": 0,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 2,
+        "p95": 3,
+        "p99": 4
+      },
+      "queueMs": {
+        "p50": 2,
+        "p95": 3,
+        "p99": 4
+      },
+      "runMs": {
+        "p50": 77,
+        "p95": 94,
+        "p99": 118
+      },
+      "engineCpuCores": 0.53,
+      "engineMaxMemMb": 322,
+      "db": {
+        "maxConns": 2,
+        "maxLockWaits": 0,
+        "avgLockWaits": 0,
+        "maxTxSeconds": 0.002,
+        "avgTps": 906
+      },
+      "dbMb": 12.4
+    },
+    {
+      "engines": 2,
+      "kb": 0.1,
+      "exec": "durable",
+      "kill": false,
+      "runs": 300,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 25.1,
+      "startSeconds": 24.8,
+      "runsPerSec": 12,
+      "stepsPerSec": 131.7,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-1": 322,
+        "load-0": 2978
+      },
+      "startErrors": 0,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 2,
+        "p95": 17,
+        "p99": 77
+      },
+      "queueMs": {
+        "p50": 2,
+        "p95": 4,
+        "p99": 8
+      },
+      "runMs": {
+        "p50": 82,
+        "p95": 293,
+        "p99": 669
+      },
+      "engineCpuCores": 0.6,
+      "engineMaxMemMb": 250,
+      "db": {
+        "maxConns": 3,
+        "maxLockWaits": 0,
+        "avgLockWaits": 0,
+        "maxTxSeconds": 0.002,
+        "avgTps": 935
+      },
+      "dbMb": 12.9
+    },
+    {
+      "engines": 4,
+      "kb": 0.1,
+      "exec": "durable",
+      "kill": false,
+      "runs": 300,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 21.6,
+      "startSeconds": 21,
+      "runsPerSec": 13.9,
+      "stepsPerSec": 152.8,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 2534,
+        "load-1": 341,
+        "load-2": 287,
+        "load-3": 138
+      },
+      "startErrors": 0,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 2,
+        "p95": 61,
+        "p99": 84
+      },
+      "queueMs": {
+        "p50": 2,
+        "p95": 5,
+        "p99": 9
+      },
+      "runMs": {
+        "p50": 84,
+        "p95": 519,
+        "p99": 707
+      },
+      "engineCpuCores": 0.8,
+      "engineMaxMemMb": 247,
+      "db": {
+        "maxConns": 5,
+        "maxLockWaits": 0,
+        "avgLockWaits": 0,
+        "maxTxSeconds": 0.003,
+        "avgTps": 1176
+      },
+      "dbMb": 12.6
+    },
+    {
+      "engines": 1,
+      "kb": 64,
+      "exec": "durable",
+      "kill": false,
+      "runs": 300,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 70.3,
+      "startSeconds": 69.8,
+      "runsPerSec": 4.3,
+      "stepsPerSec": 47,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 3300
+      },
+      "startErrors": 34,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 3,
+        "p95": 5,
+        "p99": 10
+      },
+      "queueMs": {
+        "p50": 7,
+        "p95": 14,
+        "p99": 28
+      },
+      "runMs": {
+        "p50": 220,
+        "p95": 263,
+        "p99": 279
+      },
+      "engineCpuCores": 0.53,
+      "engineMaxMemMb": 535,
+      "db": {
+        "maxConns": 3,
+        "maxLockWaits": 0,
+        "avgLockWaits": 0,
+        "maxTxSeconds": 0.023,
+        "avgTps": 355
+      },
+      "dbMb": 29.7
+    },
+    {
+      "engines": 2,
+      "kb": 64,
+      "exec": "durable",
+      "kill": false,
+      "runs": 300,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 64.7,
+      "startSeconds": 64.3,
+      "runsPerSec": 4.6,
+      "stepsPerSec": 51,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 2944,
+        "load-1": 356
+      },
+      "startErrors": 25,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 3,
+        "p95": 67,
+        "p99": 96
+      },
+      "queueMs": {
+        "p50": 7,
+        "p95": 18,
+        "p99": 29
+      },
+      "runMs": {
+        "p50": 231,
+        "p95": 793,
+        "p99": 1068
+      },
+      "engineCpuCores": 0.61,
+      "engineMaxMemMb": 559,
+      "db": {
+        "maxConns": 4,
+        "maxLockWaits": 0,
+        "avgLockWaits": 0,
+        "maxTxSeconds": 0.325,
+        "avgTps": 395
+      },
+      "dbMb": 32.3
+    },
+    {
+      "engines": 4,
+      "kb": 64,
+      "exec": "durable",
+      "kill": false,
+      "runs": 300,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 58.6,
+      "startSeconds": 58.2,
+      "runsPerSec": 5.1,
+      "stepsPerSec": 56.3,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 2584,
+        "load-1": 230,
+        "load-2": 261,
+        "load-3": 225
+      },
+      "startErrors": 16,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 4,
+        "p95": 53,
+        "p99": 93
+      },
+      "queueMs": {
+        "p50": 8,
+        "p95": 21,
+        "p99": 31
+      },
+      "runMs": {
+        "p50": 255,
+        "p95": 641,
+        "p99": 947
+      },
+      "engineCpuCores": 0.79,
+      "engineMaxMemMb": 583,
+      "db": {
+        "maxConns": 5,
+        "maxLockWaits": 0,
+        "avgLockWaits": 0,
+        "maxTxSeconds": 0.024,
+        "avgTps": 462
+      },
+      "dbMb": 32.4
+    },
+    {
+      "engines": 1,
+      "kb": 0.1,
+      "exec": "memory",
+      "kill": false,
+      "runs": 300,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 7.2,
+      "startSeconds": 7,
+      "runsPerSec": 41.4,
+      "stepsPerSec": 455.4,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 3300
+      },
+      "startErrors": 0,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 0,
+        "p95": 1,
+        "p99": 1
+      },
+      "queueMs": {
+        "p50": 0,
+        "p95": 2,
+        "p99": 2
+      },
+      "runMs": {
+        "p50": 12,
+        "p95": 17,
+        "p99": 51
+      },
+      "engineCpuCores": 0.8,
+      "engineMaxMemMb": 332,
+      "db": {
+        "maxConns": 2,
+        "maxLockWaits": 0,
+        "avgLockWaits": 0,
+        "maxTxSeconds": 0.001,
+        "avgTps": 276
+      },
+      "dbMb": 11.6
+    },
+    {
+      "engines": 2,
+      "kb": 0.1,
+      "exec": "memory",
+      "kill": false,
+      "runs": 300,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 6.9,
+      "startSeconds": 6.7,
+      "runsPerSec": 43.3,
+      "stepsPerSec": 476,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 3300
+      },
+      "startErrors": 0,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 0,
+        "p95": 1,
+        "p99": 1
+      },
+      "queueMs": {
+        "p50": 0,
+        "p95": 2,
+        "p99": 2
+      },
+      "runMs": {
+        "p50": 11,
+        "p95": 19,
+        "p99": 40
+      },
+      "engineCpuCores": 0.9,
+      "engineMaxMemMb": 221,
+      "db": {
+        "maxConns": 4,
+        "maxLockWaits": 0,
+        "avgLockWaits": 0,
+        "maxTxSeconds": 0.008,
+        "avgTps": 293
+      },
+      "dbMb": 11.8
+    },
+    {
+      "engines": 4,
+      "kb": 0.1,
+      "exec": "memory",
+      "kill": false,
+      "runs": 300,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 6.9,
+      "startSeconds": 6.7,
+      "runsPerSec": 43.7,
+      "stepsPerSec": 480.8,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 3300
+      },
+      "startErrors": 0,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 0,
+        "p95": 1,
+        "p99": 1
+      },
+      "queueMs": {
+        "p50": 0,
+        "p95": 2,
+        "p99": 2
+      },
+      "runMs": {
+        "p50": 11,
+        "p95": 19,
+        "p99": 36
+      },
+      "engineCpuCores": 0.9,
+      "engineMaxMemMb": 232,
+      "db": {
+        "maxConns": 5,
+        "maxLockWaits": 0,
+        "avgLockWaits": 0,
+        "maxTxSeconds": 0,
+        "avgTps": 323
+      },
+      "dbMb": 11.8
+    },
+    {
+      "engines": 1,
+      "kb": 64,
+      "exec": "memory",
+      "kill": false,
+      "runs": 300,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 29.6,
+      "startSeconds": 29.4,
+      "runsPerSec": 10.1,
+      "stepsPerSec": 111.5,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 3300
+      },
+      "startErrors": 0,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 1,
+        "p95": 2,
+        "p99": 10
+      },
+      "queueMs": {
+        "p50": 1,
+        "p95": 2,
+        "p99": 3
+      },
+      "runMs": {
+        "p50": 55,
+        "p95": 74,
+        "p99": 89
+      },
+      "engineCpuCores": 0.75,
+      "engineMaxMemMb": 639,
+      "db": {
+        "maxConns": 2,
+        "maxLockWaits": 0,
+        "avgLockWaits": 0,
+        "maxTxSeconds": 0.046,
+        "avgTps": 80
+      },
+      "dbMb": 19
+    },
+    {
+      "engines": 2,
+      "kb": 64,
+      "exec": "memory",
+      "kill": false,
+      "runs": 300,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 29.2,
+      "startSeconds": 29,
+      "runsPerSec": 10.3,
+      "stepsPerSec": 112.9,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 3300
+      },
+      "startErrors": 0,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 1,
+        "p95": 2,
+        "p99": 4
+      },
+      "queueMs": {
+        "p50": 1,
+        "p95": 2,
+        "p99": 3
+      },
+      "runMs": {
+        "p50": 54,
+        "p95": 72,
+        "p99": 84
+      },
+      "engineCpuCores": 0.8,
+      "engineMaxMemMb": 583,
+      "db": {
+        "maxConns": 3,
+        "maxLockWaits": 0,
+        "avgLockWaits": 0,
+        "maxTxSeconds": 0.049,
+        "avgTps": 91
+      },
+      "dbMb": 19
+    },
+    {
+      "engines": 4,
+      "kb": 64,
+      "exec": "memory",
+      "kill": false,
+      "runs": 300,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 29.5,
+      "startSeconds": 29.3,
+      "runsPerSec": 10.2,
+      "stepsPerSec": 112,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 3300
+      },
+      "startErrors": 0,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 1,
+        "p95": 2,
+        "p99": 3
+      },
+      "queueMs": {
+        "p50": 1,
+        "p95": 2,
+        "p99": 3
+      },
+      "runMs": {
+        "p50": 54,
+        "p95": 74,
+        "p99": 86
+      },
+      "engineCpuCores": 0.8,
+      "engineMaxMemMb": 593,
+      "db": {
+        "maxConns": 5,
+        "maxLockWaits": 0,
+        "avgLockWaits": 0,
+        "maxTxSeconds": 0.04,
+        "avgTps": 112
+      },
+      "dbMb": 19
+    }
+  ]
+}

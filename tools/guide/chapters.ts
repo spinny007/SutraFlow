@@ -51,7 +51,7 @@ export const CHAPTERS: Chapter[] = [
 <tr><td><code>SUTRA_MASTER_KEY</code></td><td>the key file</td><td>The vault key, 32 bytes in base64.</td></tr>
 <tr><td><code>SUTRA_ADMIN_HOST</code>, <code>SUTRA_ADMIN_PORT</code></td><td>127.0.0.1, 4800</td><td>Where the studio listens.</td></tr>
 <tr><td><code>SUTRA_GATEWAY_HTTP_PORT</code>, <code>SUTRA_GATEWAY_HTTPS_PORT</code></td><td>8080, 8443</td><td>Gateway ports until changed in Server &amp; APIs.</td></tr>
-<tr><td><code>SUTRA_WORKERS</code></td><td>16</td><td>Steps that run at the same time.</td></tr>
+<tr><td><code>SUTRA_WORKERS</code></td><td>by machine</td><td>Steps that run at the same time: 4 on 1 vCPU / 1 GB, up to 32 on 8 cores (see <a href="#ch-sizing">Sizing and performance</a>).</td></tr>
 <tr><td><code>SUTRA_MAX_STEPS</code></td><td>10000</td><td>Safety limit of steps per run.</td></tr>
 <tr><td><code>SUTRA_REPLY_TIMEOUT_MS</code></td><td>60000</td><td>How long an API caller waits for the reply step.</td></tr>
 <tr><td><code>SUTRA_DB</code></td><td>SQLite in the data folder</td><td><code>postgres://user:pass@host/db</code> to keep everything in PostgreSQL.</td></tr>
@@ -432,7 +432,7 @@ export const CHAPTERS: Chapter[] = [
 </ol>
 <p class="h">Limits that protect the server</p>
 <table class="t"><thead><tr><th>Limit</th><th>Default</th><th>Set in</th></tr></thead><tbody>
-<tr><td>Steps at once, per engine</td><td>16</td><td>Admin Console &gt; Engines &gt; Tuning; <code>SUTRA_WORKERS</code></td></tr>
+<tr><td>Steps at once, per engine</td><td>by machine size (4 to 32)</td><td>Admin Console &gt; Engines &gt; Tuning; <code>SUTRA_WORKERS</code></td></tr>
 <tr><td>Steps per run</td><td>10,000 (a loop that never ends is stopped)</td><td>Engine tuning; <code>SUTRA_MAX_STEPS</code></td></tr>
 <tr><td>Step time limit</td><td>2 minutes (AI 10 minutes)</td><td>The step's Settings tab</td></tr>
 <tr><td>Run time limit, runs at once, priority, retries</td><td>none</td><td>Sutra tuning (Admin Console &gt; Applications)</td></tr>
@@ -721,6 +721,19 @@ curl http://127.0.0.1:8080/orders/A-1001 -H "Authorization: Bearer ACCESS_TOKEN"
 <li>[[fileList]] takes wildcards: <code>C:\\in\\*.csv</code>, or <code>=concat({gv.DIR}, '\\*.csv')</code>.</li>
 <li>[[fileWrite]] appends or overwrites, and always returns the file's name, path, size and what it did.</li>
 <li>[[fileTrigger]] reacts to added, modified and removed files; move processed files away with [[fileMove]].</li>
+</ul>
+<p class="h">Big files: Stream in batches</p>
+<p>A file read whole is held in memory, as text and again as rows, so [[fileRead]] refuses files over its <em>Maximum size</em> (50 MB by default). CSV and line files of any size can be <strong>streamed</strong> instead: tick <em>Stream in batches</em> on [[fileRead]] or [[fileList]].</p>
+<ul>
+<li>The file is read piece by piece. Every <em>Rows per batch</em> rows (1,000 by default) go out on the <strong>batch</strong> port as <code>{input.rows}</code>, with <code>{input.batch}</code> (1, 2, 3 ...), <code>{input.count}</code> and <code>{input.file}</code>. The steps connected to batch start at once, while reading goes on.</li>
+<li>When the whole file is read, <strong>out</strong> gives the file details with <code>{input.count}</code> (rows) and <code>{input.batches}</code>: connect the steps that should run once, at the end, there.</li>
+<li>Only a few batches are in memory or in the work queue at a time: when more wait than the engine runs at once, reading pauses until they are taken (back pressure). Memory and disk use stay the same for a 10 MB file and a 10 GB one.</li>
+<li>The time limit of a streaming step counts from its last batch, so a long file is not cut off while it keeps sending batches.</li>
+<li>The run keeps a summary of each batch in <code>{nodes.Read orders}</code> (number, count, file), not its rows: map the rows from <code>{input.rows}</code> in the step on the batch port.</li>
+<li>Each batch is a step of its own, and counts towards <em>Steps per run</em> (10,000 by default): for 10 million rows, use batches of 5,000 or more, or raise the limit.</li>
+<li>Set <em>Step data in history</em> to <strong>none</strong> for such Sutras: each batch step then keeps no input or output once it is done, and the database stays small. With <em>all</em> or <em>errors only</em>, every batch is kept until the run ends, so the database grows by about twice the file for a while. Measured: a 1 GB CSV file (18.6 million rows) on a 384 MB heap took about 2.5 minutes, the engine peaked at 270 MB, and the database ended at 4 MB with <em>none</em>, against 1.8 GB when every batch was kept until the end.</li>
+<li>When the read step fails halfway and is retried, it starts the file again: make the batch steps safe to repeat (an upsert rather than an insert).</li>
+<li>Stream big files in <em>durable</em> Sutras. In a Sutra that runs in memory, batches waiting for a worker are held in memory too.</li>
 </ul>
 <p class="h">SFTP and FTP servers</p>
 <p>The <strong>SFTP / FTP</strong> palette works with files on another server: [[remoteTrigger]], [[remoteList]], [[remoteRead]], [[remoteWrite]] and [[remoteMove]]. Each step names the protocol and an <em>SFTP server</em> or <em>FTP server</em> connection.</p>
@@ -1562,6 +1575,89 @@ docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=...
 <li>Back up the database (or the <code>data</code> folder).</li>
 </ol>
 <p>The full operations guide is <code>docs/deployment.md</code> in the SutraFlow folder.</p>`,
+  },
+  {
+    id: 'sizing', title: 'Sizing and performance',
+    html: `
+<p>How much work a server takes, what to run on which machine, and the settings that change it. Every number here was measured with the load test that comes with SutraFlow (<code>tools/loadtest.mjs</code>), on the machine named under each table; run it on your own servers before you size production.</p>
+
+<p class="h">What a step costs</p>
+<p>A Sutra runs <strong>durable</strong> by default: before a step starts, it is a row in the work queue, and when it ends, its output, the run state and the next steps are written in one database transaction. That is why a run survives a crash, a restart or a redeploy, and why it can wait for days for an approval. The price is a few database round trips per step. For most integrations this does not matter: a step that calls an API or a database takes 20 to 500 ms, and the engine's own work is 2 to 5 ms of it.</p>
+<p>It matters when a Sutra has many tiny steps and must answer fast, such as a REST service that maps a request, checks it and replies in 30 ms. For those, a Sutra can run <strong>in memory</strong>.</p>
+
+<p class="h">Durable or in memory</p>
+<table class="t"><thead><tr><th></th><th>Durable (default)</th><th>In memory</th></tr></thead><tbody>
+<tr><td>Where the steps live while the run is open</td><td>The database</td><td>A private in-memory database of the engine</td></tr>
+<tr><td>Written to the database</td><td>Every step</td><td>Once, when the run ends: the run and all its steps</td></tr>
+<tr><td>A restart or crash while the run is open</td><td>The run carries on, on this engine or another</td><td>The run is lost (the caller gets an error or no answer)</td></tr>
+<tr><td>Waits: approvals, Ask a person, Call Sutra with wait</td><td>Yes</td><td>No: the tuning is refused, or the step fails with the reason</td></tr>
+<tr><td>Wait steps, timers, retries with a delay</td><td>Yes</td><td>Yes, within the engine</td></tr>
+<tr><td>Run history, logs, resubmit</td><td>Yes</td><td>Yes, once the run has ended</td></tr>
+<tr><td>Seen in Runs while open, cancel</td><td>Yes</td><td>Cancel yes; the run shows up in Runs when it ends</td></tr>
+<tr><td>Small steps per second, one engine (measured below)</td><td>about 120 on PostgreSQL, 520 on SQLite</td><td>about 460 on PostgreSQL, 680 on SQLite</td></tr>
+<tr><td>Which engine runs it</td><td>Any engine of the cluster takes the next step</td><td>The engine that started it runs all its steps: spread the callers over the engines (a load balancer in front of the gateways)</td></tr>
+</tbody></table>
+<p>Set it per deployed Sutra: <em>Admin Console &gt; Applications &gt; the Sutra &gt; Tuning &gt; Execution</em>, or <code>sutra sutras tune "Quote API" --project Shop --execution in-memory</code>. Tests and debugging in the designer always run durable.</p>
+[[tip:Choosing|In memory suits short request-reply Sutras (REST, SOAP and MCP services, lookups, mappings, validations) where a lost run is simply retried by the caller. Keep durable everything that moves money or data one way (orders, payments, file transfers, queue consumers that acknowledge), everything that waits, and every long run.]]
+
+<p class="h">Machine profiles</p>
+<p>When the environment does not set them, an engine takes its <em>Steps at once</em>, <em>Queue check</em> and <em>Settings refresh</em> from the profile of the machine it runs on: the smaller of what its cores and its memory allow. <em>Admin Console &gt; Engines &gt; Tuning &gt; This machine</em> shows the profile of the server, with <strong>Apply recommended tuning</strong>; <code>sutra engines machine</code> prints it.</p>
+[[img:console-machine|Admin Console, Engines: the profile of this machine and its recommended tuning]]
+[[profiles]]
+<ul>
+<li><strong>Steps at once</strong> is more than the cores because most steps wait for a network or a database, and an engine runs other steps meanwhile. It does not speed up steps that only compute: in the measurements below, 32 steps at once did no better than 16. Raise it for Sutras that mostly wait (APIs, AI); lower it when steps compute (big mappings, scripts) and the engine CPU is near 1 core.</li>
+<li>One engine is one Node.js process and uses about one core for its own work. To use more cores, run <strong>more engines</strong> on the same machine against PostgreSQL (the launcher starts them: <code>sutraflow start engine</code>), not more steps at once.</li>
+<li><strong>Node memory</strong> is the heap limit to give each engine: <code>NODE_OPTIONS=--max-old-space-size=384</code> on the smallest machines, so the operating system and the database keep the rest.</li>
+<li><strong>SQLite is the fastest database for one server</strong>: it runs inside the engine, with no network in between, and measured about four times the steps per second of PostgreSQL on the same machine. Use it on small machines (a PostgreSQL server needs its own few hundred MB) and for any single server. Use <strong>PostgreSQL</strong> for several engines or machines, for failover, or when the database must be managed apart, ideally on a machine (or a managed service) of its own.</li>
+</ul>
+
+<p class="h">What to run on which machine</p>
+<table class="t"><thead><tr><th>Machine</th><th>Good for</th><th>Avoid</th></tr></thead><tbody>
+<tr><td><strong>1 vCPU, 1 GB</strong><br>(a small cloud VM, a Raspberry Pi class box)</td><td>Timers and file moves, a few REST or SOAP services, webhooks, email and chat notifications, SFTP transfers, CSV files of any size streamed in batches. Measured on one core with 512 MB and SQLite: 365 small durable steps a second (1.3 million an hour), 750 in memory. Real steps that call APIs take longer, so plan for tens of thousands of runs a day.</td><td>Local AI models, Python steps that load big libraries, files read whole over 10 MB, a database server on the same machine, many Sutras with Runs at once above 20.</td></tr>
+<tr><td><strong>2 vCPU, 2 to 4 GB</strong></td><td>A department's integrations: tens of Sutras, REST APIs with in-memory Sutras for the fast ones, AI agents that call a cloud model, RAG over a folder with the built-in store, files read whole up to 25 MB.</td><td>Local models above 3B parameters, PostgreSQL on the same machine with heavy runs.</td></tr>
+<tr><td><strong>4 vCPU, 8 GB</strong></td><td>Production for a company: two engines and PostgreSQL, hundreds of Sutras, queue consumers (Kafka, RabbitMQ), databases, Databricks and Data Factory orchestration, small local models (Ollama phi4-mini class) for light use.</td><td>Many local-model calls at once.</td></tr>
+<tr><td><strong>8 vCPU, 16 GB</strong></td><td>Heavy traffic: four engines, high-volume APIs, large file and data movements, local models of 7 to 8B parameters, vector stores (pgvector).</td><td>Running the model, the database and the engines all on one machine at peak load.</td></tr>
+<tr><td><strong>16 vCPU and more</strong></td><td>A cluster member, or several engines plus a gateway; PostgreSQL on its own machine.</td><td>A single engine: it would use only a fraction of the machine.</td></tr>
+</tbody></table>
+
+<p class="h">Files: what size to read whole</p>
+<ul>
+<li>A file read whole is held in memory several times over (bytes, text, rows, the step output), about <strong>5 to 8 times its size</strong> for CSV. Keep <em>Maximum size</em> of [[fileRead]] at or below the profile's <em>Read files whole up to</em>.</li>
+<li>Bigger CSV and line files: tick <strong>Stream in batches</strong> (see <a href="#ch-files">Files</a>). Memory then depends on the batch, not the file: a batch of 1,000 rows of 200 bytes is about 1 MB as data.</li>
+<li>JSON and XML are read whole. For very big ones, ask the source for paged or line-delimited output (one JSON document per line, read as lines and streamed).</li>
+<li>Binary files (base64) grow by a third in memory as text; move big binary files with [[fileMove]] or SFTP, which stream, rather than reading them.</li>
+<li>Each step output is kept in the run history up to 1 MB (bigger ones are cut to a preview). For Sutras that handle big data, set <em>Step data in history</em> to <em>errors only</em> or <em>none</em>.</li>
+</ul>
+
+<p class="h">Settings that change throughput</p>
+<table class="t"><thead><tr><th>Setting</th><th>Where</th><th>Effect</th></tr></thead><tbody>
+<tr><td>Steps at once</td><td>Engine tuning; <code>SUTRA_WORKERS</code></td><td>Steps one engine runs together. Too low: steps wait in the queue (see Queue wait in the Overview). Too high: memory and the database get busy.</td></tr>
+<tr><td>Steps at once in memory</td><td>Engine tuning; <code>SUTRA_MEMORY_WORKERS</code></td><td>The same for Sutras that run in memory; 0 = as Steps at once.</td></tr>
+<tr><td>Queue check</td><td>Engine tuning; <code>SUTRA_POLL_MS</code></td><td>How often an idle engine looks for due steps. Steps queued on the same engine start at once anyway; this only delays steps queued by another engine and retries. Lower answers sooner, higher saves database reads on small machines.</td></tr>
+<tr><td>Settings refresh</td><td>Engine tuning; <code>SUTRA_SETTINGS_REFRESH_MS</code></td><td>How long an engine keeps project and Sengine variables before reading them again (a change on the same engine applies at once, a deploy on any engine too).</td></tr>
+<tr><td>Execution</td><td>Sutra tuning</td><td>Durable or in memory (above).</td></tr>
+<tr><td>Runs at once, Priority</td><td>Sutra tuning</td><td>Protect a slow back end; let urgent Sutras go first.</td></tr>
+<tr><td>Step data in history</td><td>Sutra tuning</td><td><em>none</em> or <em>errors only</em> keeps the database small for busy Sutras.</td></tr>
+<tr><td>Keep finished runs</td><td>Engine and Sutra tuning</td><td>Fewer days, smaller database, faster history.</td></tr>
+</tbody></table>
+
+<p class="h">Measurements</p>
+<p>The load test starts a studio and engines on a database of their own and runs a benchmark Sutra: a trigger and ten Transform steps, each computing a little and putting out the size of data shown. It counts finished steps per second, the time steps waited in the queue and took, what the database did, and the CPU and memory of the engines. Engines and PostgreSQL ran on the <strong>same</strong> machine, so the database took cores from the engines: a real cluster with PostgreSQL on its own server does better with several engines.</p>
+[[benchmarks]]
+<ul>
+<li><strong>What changed in this release.</strong> Engines used to take one lock for every write in the cluster, so a second engine added nothing (82 steps a second with one engine or two); each run now has its own lock, and engines claim steps with <em>skip locked</em>. Project and Sengine variables are cached for the settings refresh time instead of read for every step; the run state, step count and status are saved in one statement. Database transactions per step went from 14 to 7, and one engine went from 82 to about 120 steps a second. In memory, a step costs less than one transaction.</li>
+<li><strong>More engines</strong> scale when callers reach all of them, as behind a load balancer: with REST calls spread over the gateways, four engines did about three times the durable steps of one (352 against 116 a second), and in memory 1,660 against 540. When every run starts on one engine (a single timer, say), the others only help with the following steps, and in-memory runs not at all.</li>
+<li><strong>Bigger outputs cost more</strong>, because each step writes the run state with the outputs of earlier steps. For steps that pass large data along, keep the data in a file or a table and pass its name, or stream it.</li>
+<li>No run failed and none was lost in any scenario, including the one where an engine was killed.</li>
+</ul>
+
+<p class="h">Run the load test on your own servers</p>
+<pre class="code">node tools/loadtest.mjs --pg postgres://user:pass@db:5432/postgres --engines 1,2,4 --payload 0.1,64 --out results.json
+node tools/loadtest.mjs --sqlite --cpus 1 --mem 512 --workers 4 --execution durable,memory
+node tools/loadtest.mjs --pg ... --engines 2 --kill        # kill one engine under load, check nothing is lost
+node tools/loadtest.mjs --pg ... --soak 60                 # an hour of timers, waits, failures and a redeploy
+node tools/bigfiletest.mjs --mb 1000 --mem 384             # stream a 1 GB file with a 384 MB heap</pre>
+<p>The PostgreSQL address is an administrator connection: the test makes a database of its own for each scenario and drops it afterwards. <code>--cpus</code> and <code>--mem</code> hold each engine to that many cores and that heap, the closest a big machine gets to a small server. Compare <em>Queue wait</em>: when it grows, the engines are full; add steps at once (I/O-bound work) or engines (CPU-bound work).</p>`,
   },
   {
     id: 'trouble', title: 'Troubleshooting',

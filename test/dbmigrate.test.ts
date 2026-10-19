@@ -186,9 +186,13 @@ test('a password-protected PostgreSQL that requires SSL: wrong password, no SSL,
       assert.equal((await api('PUT', '/api/server/database/target', target)).status, 200);
       assert.equal((await api('POST', '/api/server/database/test', { ...target, password: undefined })).body.ok, true, 'the saved password is used');
       assert.equal((await api('POST', '/api/server/database/migrate', {})).status, 200);
+      // Wait for the migration tool to finish (it checks the new start itself) before looking or stopping.
+      const stPath = path.join(sdir, 'data', 'migration', 'status.json');
+      let st: any = {};
+      for (let i = 0; i < 300 && !['done', 'rolled back', 'failed'].includes(st.state); i++) { await new Promise(r => setTimeout(r, 1000)); try { st = JSON.parse(fs.readFileSync(stPath, 'utf8')); } catch { /* being written */ } }
+      assert.equal(st.state, 'done', (st.log || []).join('\n'));
       let h: any = null;
-      for (let i = 0; i < 180 && h?.database !== 'postgres'; i++) { await new Promise(r => setTimeout(r, 1000)); try { h = await (await fetch(`${web}/health`)).json(); } catch { h = null; } }
-      const st = JSON.parse(fs.readFileSync(path.join(sdir, 'data', 'migration', 'status.json'), 'utf8'));
+      try { h = await (await fetch(`${web}/health`)).json(); } catch { h = null; }
       assert.equal(h?.database, 'postgres', st.log.join('\n'));
       const env = fs.readFileSync(envFile, 'utf8');
       assert.match(env, new RegExp(`^SUTRA_DB=postgres://sutra_owner@127\.0\.0\.1:${pgPort}/sutraflow[?]sslmode=no-verify$`, 'm'));

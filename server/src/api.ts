@@ -9,7 +9,7 @@ import fastifyStatic from '@fastify/static';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { q, getSetting, setSetting } from './db.js';
+import { q, getSetting, setSetting, dbKind } from './db.js';
 import { engine } from './engine/engine.js';
 import * as flows from './flows.js';
 import { PALETTES } from './palettes/index.js';
@@ -27,6 +27,7 @@ import * as gwa from './gateway/apps.js';
 import * as alerts from './alerts.js';
 import { apiRoutes as gatewayRoutes, refreshFirewall } from './gateway/gateway.js';
 import { ENGINE_FIELDS, SUTRA_FIELDS, engineTuning, setEngineTuning, setSutraTuning, sutraTuning } from './tuning.js';
+import { machineInfo } from './sizing.js';
 import { gatewayStatus, getGatewaySettings, setGatewaySettings, listRoutes, startGateway, reloadTls } from './gateway/gateway.js';
 import { acmeStatus, certInfo, getTls, setTls, makeSelfSigned, storeCert, requestAcme } from './gateway/tls.js';
 import { schedulerErrors } from './scheduler.js';
@@ -87,7 +88,12 @@ function activityMeta() {
 
 function runDetail(id: string) {
   const r = q.get<any>('select * from runs where id = ?', id);
-  if (!r) throw new HttpError(404, 'Run not found');
+  if (!r) {
+    // A run in memory is written to the database when it ends; until then only its status is known.
+    const m = engine.memoryRun(id);
+    if (m) return { id: m.id, flowId: m.flow_id, flowName: m.flow_name, version: m.version, status: m.status, source: m.source, triggerNode: m.trigger_node, error: m.error, steps: m.steps, startedAt: m.started_at, finishedAt: m.finished_at, inMemory: true, tasks: [] };
+    throw new HttpError(404, 'Run not found');
+  }
   const tasks = q.all<any>('select id, node_id, status, attempt, port, input, output, error, ms, wait, started_at, finished_at, owner from tasks where run_id = ? order by id', id)
     .map(t => ({ ...t, input: t.input ? JSON.parse(t.input) : null, output: t.output ? JSON.parse(t.output) : null, wait: t.wait ? JSON.parse(t.wait) : null }));
   const state = JSON.parse(r.state);
@@ -100,8 +106,10 @@ function runDetail(id: string) {
 }
 
 export async function buildAdmin(): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false, bodyLimit: 20 * 1024 * 1024, forceCloseConnections: 'idle', keepAliveTimeout: 5000 });
+  const app = Fastify({ logger: false, bodyLimit: 20 * 1024 * 1024, forceCloseConnections: 'idle', keepAliveTimeout: config.keepAliveMs });
 
+  // Stopping: the client closes this connection after the answer (see the gateway).
+  app.addHook('onSend', async (_req, reply, payload) => { if (lifecycle.draining) reply.header('connection', 'close'); return payload; });
   app.setErrorHandler((err: any, _req, reply) => {
     const status = err instanceof HttpError ? err.status : err.statusCode && err.statusCode < 500 ? err.statusCode : 500;
     reply.code(status).send({ error: err.message || String(err), ...(err.check ? { check: err.check } : {}) });
@@ -317,6 +325,8 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.post('/api/console/sutras/:id/restart', async (req: any) => { try { return restartSutra(req.params.id); } catch (e: any) { throw bad(e.message); } });
   // Tuning: engine values for the cluster or one engine, and per deployed Sutra.
   app.get('/api/console/tuning', async () => ({ fields: { engine: ENGINE_FIELDS, sutra: SUTRA_FIELDS }, ...engineTuning() }));
+  // This machine and the settings recommended for it (sizing.ts).
+  app.get('/api/console/machine', async () => ({ ...machineInfo(), engine: config.engineId, database: dbKind(), memoryRuns: engine.memoryRuns, running: engine.running }));
   app.put('/api/console/tuning/engine', async (req: any) => { try { setEngineTuning(req.body?.values || {}); return engineTuning(); } catch (e: any) { throw bad(e.message); } });
   app.put('/api/console/tuning/engines/:id', async (req: any) => { try { setEngineTuning(req.body?.values || {}, req.params.id); return engineTuning(req.params.id); } catch (e: any) { throw bad(e.message); } });
   app.get('/api/console/sutras/:id/tuning', async (req: any) => ({ fields: SUTRA_FIELDS, values: sutraTuning(req.params.id) }));

@@ -64,7 +64,8 @@ const launcher = (...args) => {
   return r.status ?? 1;
 };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-async function health() { try { const r = await fetch(`${studioUrl}/health`, { signal: AbortSignal.timeout(3000) }); return r.ok ? await r.json() : null; } catch { return null; } }
+// A new connection each time: a kept one may still lead to the SutraFlow that was stopped before the copy.
+async function health() { try { const r = await fetch(`${studioUrl}/health`, { headers: { connection: 'close' }, signal: AbortSignal.timeout(3000) }); return r.ok ? await r.json() : null; } catch { return null; } }
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
 const enginePid = () => { try { const p = Number(fs.readFileSync(path.join(dataDir, 'run', 'engine.pid'), 'utf8')); return p && alive(p) ? p : 0; } catch { return 0; } };
 

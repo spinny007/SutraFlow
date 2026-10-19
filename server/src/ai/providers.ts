@@ -77,7 +77,8 @@ export async function aiCall(r: Resource, secret: Secret, q: AiRequest): Promise
   });
   const key = (what: string) => secret(r.config.apiKeySecret, `${what} API key`);
   const http = async (url: string, headers: Record<string, string>, body: unknown) => {
-    const res = await httpCall({ method: 'POST', url, headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body), timeoutMs: 600000, signal: q.signal, parse: 'json' });
+    // A model call is safe to send again after a reset connection (it only costs tokens).
+    const res = await httpCall({ method: 'POST', url, headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body), timeoutMs: 600000, signal: q.signal, parse: 'json', retryReset: true });
     if (res.status >= 400) {
       const msg = res.body?.error?.message || res.body?.error || (typeof res.body === 'string' ? res.body : JSON.stringify(res.body));
       throw new Error(`${engine} error ${res.status}: ${String(msg).slice(0, 300)}`);

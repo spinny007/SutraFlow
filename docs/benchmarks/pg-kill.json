@@ -1,0 +1,58 @@
+{
+  "label": "kill one of two",
+  "at": "2026-10-19T13:51:11.243Z",
+  "database": "PostgreSQL",
+  "node": "v24.21.0",
+  "settings": {},
+  "scenarios": [
+    {
+      "engines": 2,
+      "kb": 1,
+      "exec": "durable",
+      "kill": true,
+      "spread": true,
+      "runs": 600,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 48.2,
+      "startSeconds": 48.2,
+      "runsPerSec": 12.5,
+      "stepsPerSec": 138.9,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 5527,
+        "load-1": 1161
+      },
+      "startErrors": 24,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 2,
+        "p95": 12,
+        "p99": 20
+      },
+      "queueMs": {
+        "p50": 2,
+        "p95": 3,
+        "p99": 6
+      },
+      "runMs": {
+        "p50": 85,
+        "p95": 189,
+        "p99": 242
+      },
+      "engineCpuCores": 0.48,
+      "engineMaxMemMb": 406,
+      "db": {
+        "maxConns": 3,
+        "maxLockWaits": 0,
+        "avgLockWaits": 0,
+        "maxTxSeconds": 0.003,
+        "avgTps": 995
+      },
+      "dbMb": 31.1
+    }
+  ]
+}

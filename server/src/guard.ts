@@ -60,6 +60,7 @@ export const RULES: Record<string, Rule> = {
 
   'GET /api/engine/status': R(null),
   'POST /api/engine/drain': R('engines'),
+  'GET /api/console/machine': R('engines'),
   'POST /api/engine/housekeeping': R('engines'),
   'GET /api/releases/policy': R(null),
   'PUT /api/releases/policy': R('server'),
@@ -236,12 +237,16 @@ const SERVER_PERMS = new Set(PERMISSIONS.filter(p => p.scope === 'server').map(p
 const projectOf = (table: string, id: unknown) => q.get<any>(`select project_id from ${table} where id = ?`, String(id ?? ''))?.project_id as string | undefined;
 
 /** The project a request applies to: an id, '' for all projects, or undefined for any project. */
+/** The project of a run still open in memory (index.ts connects the engine), so the run API checks it too. */
+export let memoryRunProject: (runId: string) => string | undefined = () => undefined;
+export function onMemoryRunProject(fn: (runId: string) => string | undefined) { memoryRunProject = fn; }
+
 export function requestProject(rule: Rule, req: any): string | undefined {
   const p = req.params || {}, b = req.body || {}, qs = req.query || {};
   switch (rule.on) {
     case 'project': return String(p.id);
     case 'flow': return projectOf('flows', p.id);
-    case 'run': return projectOf('runs', p.id);
+    case 'run': return projectOf('runs', p.id) ?? memoryRunProject(String(p.id));
     case 'resource': return projectOf('resources', p.id);
     case 'schema': return projectOf('schemas', p.id);
     case 'task': return q.get<any>('select r.project_id from tasks t join runs r on r.id = t.run_id where t.id = ?', Number(p.id))?.project_id;

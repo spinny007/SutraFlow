@@ -64,9 +64,14 @@ Results a step can return:
 | `emits[]` | several outputs, e.g. For each sends one per item, then `done` |
 | `wait` (approval) | task status waiting; no worker is held; `POST /api/approvals/:id` completes it |
 | `deferUntil` | task goes back to pending with `not_before`, as a durable timer; it runs again with `phase = resume` |
+| `emit(port, out)` while running | sends one output now (a streamed file batch); the connected steps start while the step goes on |
 | throws | retry with exponential backoff (`retries`, `retryDelayMs`); then the **error** port if connected, otherwise the run fails and its open tasks are cancelled |
 
 **Crash recovery.** At startup, tasks left as running go back to pending. Because a step can therefore run twice, steps with side effects should be idempotent: pass an idempotency key such as `{{run.id}}` to the target API.
+
+**Locks on PostgreSQL.** Each write transaction about a run takes an advisory lock for that run (`run:<id>`), or for a Sutra's queue when it has a Runs at once limit; other writes take one shared lock. Engines therefore save different runs at the same time. Engines claim tasks with `for update skip locked`.
+
+**In memory.** A Sutra tuned to run in memory goes to a second engine in the same process, whose runs and tasks live in a private in-memory SQLite database. The run row and its task rows are written to the database in one transaction when the run ends. Steps cost no database writes, but a run open when the process stops is lost, and steps that wait (approvals, Call Sutra with wait) are refused. Tests and debugging always run durable.
 
 **Request/reply.** The gateway registers a reply handle for the run. The first Send HTTP response or SOAP reply step answers the caller, and the Sutra may continue afterwards. If the run ends without a reply step, the caller receives the last output (200) or the error (500 or a SOAP fault). Callers wait at most `SUTRA_REPLY_TIMEOUT_MS`; the run itself continues after that.
 

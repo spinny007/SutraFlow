@@ -6,6 +6,7 @@
  *   npm run guide            (screenshots: node tools/capture-guide-shots.mjs with the server running)
  */
 import fs from 'node:fs';
+import { profilesTable, benchmarksSection } from './guide/benchmarks.js';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -98,6 +99,8 @@ function expand(html: string): string {
     .replace('[[commands:sutraflow]]', () => commandTable(helpText([path.join(root, 'bin', 'sutraflow.mjs'), 'help']), 'sutraflow'))
     .replace('[[commands:sutra]]', () => commandTable(helpText(['--import', 'tsx', path.join(root, 'server', 'src', 'cli.ts'), 'help']), 'sutra'))
     .replace('[[tables]]', () => tablesSection())
+    .replace('[[profiles]]', () => profilesTable())
+    .replace('[[benchmarks]]', () => benchmarksSection(root))
     .replace('[[samples]]', () => `<table class="t"><thead><tr><th>Sample</th><th>What it shows</th><th>Palettes</th></tr></thead><tbody>${SAMPLES.map(x => `<tr><td><strong>${esc(x.name)}</strong></td><td>${esc(x.desc)}${x.needs ? ` <span class="cond">Needs ${esc(x.needs)}.</span>` : ''}</td><td>${esc(x.palettes)}</td></tr>`).join('')}</tbody></table>`)
     .replace(/\[\[img:([\w-]+)\|([^\]]*)\]\]/g, (_m, name, cap) => {
       const f = path.join(IMG, `${name}.jpg`);

@@ -209,6 +209,11 @@ async function main() {
     await js(`[...document.querySelectorAll('.c-nav a')].find(a => a.textContent.trim() === 'Database')?.click(); await new Promise(r => setTimeout(r, 1500));`);
     await shot('console-database');
 
+    // Admin Console: Engines > Tuning > This machine (the profile and its recommended settings).
+    await js(`[...document.querySelectorAll('.c-nav a')].find(a => a.textContent.trim() === 'Engines')?.click(); await new Promise(r => setTimeout(r, 2000));
+      const m = document.querySelector('.c-machine'); m?.scrollIntoView({ block: 'start' }); let sc = m?.parentElement; while (sc && sc.scrollHeight <= sc.clientHeight) sc = sc.parentElement; (sc || window).scrollBy(0, -90); await new Promise(r => setTimeout(r, 500));`);
+    await shot('console-machine');
+
     ws.close();
   } finally {
     proc.kill();

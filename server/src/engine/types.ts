@@ -130,6 +130,13 @@ export interface ExecCtx {
   /** Send the reply for request/response triggers (REST, SOAP). */
   reply(r: ReplyPayload): void;
   setVar(name: string, value: any): void;
+  /**
+   * Sends one output on a port now, while the step goes on (streaming a big file in batches): the steps
+   * connected to that port start with it at once. The step's own result still ends it as usual.
+   * Await it: while more outputs wait in the queue than the engine can take, it waits (back pressure).
+   * The run state keeps only a summary of an emitted output (its fields that are not lists).
+   */
+  emit(port: string, out: any): Promise<void>;
   /** Evaluates a mapping field against its target schema. */
   mapping(k: string): any;
   /** Tree of a schema field (or null when none is chosen). */
