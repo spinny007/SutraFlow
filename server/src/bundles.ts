@@ -1,0 +1,141 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import zlib from 'node:zlib';
+import { unzip } from './ai/documents.js';
+import { readPackage, buildPackage, type Package } from './packages.js';
+
+/**
+ * Release bundles: what a production team receives. One zip holding the package (package.sutra),
+ * a deployment config to fill in for the target environment (deployment-config.json: every
+ * connection with its settings, every project variable, the vault secrets to add) and a README.
+ * Built by the designer (Releases), by `sutra package --zip`, or by a CI pipeline straight from the
+ * Git repository with `sutra package --from-git`; uploaded with `sutra deploy release.zip` or the
+ * Admin Console (Releases).
+ */
+export const BUNDLE_PACKAGE = 'package.sutra';
+export const BUNDLE_CONFIG = 'deployment-config.json';
+
+/** A zip of the given files (deflated), readable by any zip tool. */
+export function zipFiles(files: [string, string | Buffer][]): Buffer {
+  const parts: Buffer[] = [], central: Buffer[] = [];
+  let off = 0;
+  const t = new Date(), dosTime = (t.getHours() << 11) | (t.getMinutes() << 5) | (t.getSeconds() >> 1), dosDate = ((t.getFullYear() - 1980) << 9) | ((t.getMonth() + 1) << 5) | t.getDate();
+  for (const [name, content] of files) {
+    const data = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8');
+    const packed = zlib.deflateRawSync(data), nm = Buffer.from(name, 'utf8'), crc = zlib.crc32(data);
+    const l = Buffer.alloc(30);
+    l.writeUInt32LE(0x04034b50, 0); l.writeUInt16LE(20, 4); l.writeUInt16LE(0x0800, 6); l.writeUInt16LE(8, 8); l.writeUInt16LE(dosTime, 10); l.writeUInt16LE(dosDate, 12);
+    l.writeUInt32LE(crc, 14); l.writeUInt32LE(packed.length, 18); l.writeUInt32LE(data.length, 22); l.writeUInt16LE(nm.length, 26);
+    const c = Buffer.alloc(46);
+    c.writeUInt32LE(0x02014b50, 0); c.writeUInt16LE(20, 4); c.writeUInt16LE(20, 6); c.writeUInt16LE(0x0800, 8); c.writeUInt16LE(8, 10); c.writeUInt16LE(dosTime, 12); c.writeUInt16LE(dosDate, 14);
+    c.writeUInt32LE(crc, 16); c.writeUInt32LE(packed.length, 20); c.writeUInt32LE(data.length, 24); c.writeUInt16LE(nm.length, 28); c.writeUInt32LE(off, 42);
+    parts.push(l, nm, packed); central.push(c, nm);
+    off += 30 + nm.length + packed.length;
+  }
+  const cd = Buffer.concat(central), end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(files.length, 8); end.writeUInt16LE(files.length, 10); end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(off, 16);
+  return Buffer.concat([...parts, cd, end]);
+}
+
+/**
+ * The deployment config of a package, to fill in for one environment: the same file as the
+ * designer's Deployment config export, made from the package alone (no server needed). Values are
+ * the package's own; operations change hosts, folders, users and secret names here.
+ */
+export function configTemplate(p: Package) {
+  return {
+    $comment: 'SutraFlow deployment config. Change values for this environment; ${env:NAME} reads an environment variable. Secret variables and *Secret fields hold names of vault secrets, not the secrets. Add each secret under "secrets" to the vault of the target server before deploying.',
+    project: p.project.name,
+    package: `${p.name} ${p.version}`,
+    secrets: p.manifest.secrets,
+    variables: Object.fromEntries((p.project.variables || []).map((v: any) => [v.name, v.value ?? ''])),
+    resources: Object.fromEntries(p.resources.map(r => [r.name, { kind: r.kind, ...r.config }])),
+    logging: p.project.logging || {},
+  };
+}
+
+function readme(p: Package) {
+  const src = p.source ? `\nBuilt from ${p.source.repository || 'a Git folder'}${p.source.ref ? ` at ${p.source.ref}` : ''}${p.source.commit ? ` (commit ${p.source.commit.slice(0, 12)})` : ''}.\n` : '';
+  return `SutraFlow release ${p.name} ${p.version}
+${p.note ? `\n${p.note}\n` : ''}${src}
+Made ${p.createdAt} with SutraFlow ${p.createdWith}. Checksum ${p.checksum}.
+
+Contents
+  ${BUNDLE_PACKAGE}            the package: ${p.sutras.length} Sutras, ${p.resources.length} connections, ${p.schemas.length} schemas
+  ${BUNDLE_CONFIG}   the deployment config: fill it in for the target environment
+
+Sutras
+${p.manifest.sutras.map(s => `  ${s.name} v${s.version}${s.exposes.length ? `  (${s.exposes.join(', ')})` : ''}`).join('\n') || '  none'}
+
+Secrets the target server needs in its vault
+${p.manifest.secrets.map(s => `  ${s}`).join('\n') || '  none'}
+
+Deploying
+  1. Add the secrets:   sutra secret set NAME --from-env NAME --server https://prod:4800 --token ...
+  2. Edit ${BUNDLE_CONFIG} for this environment (hosts, folders, users, secret names).
+  3. Check:             sutra check release.zip --server https://prod:4800 --token ...
+  4. Deploy:            sutra deploy release.zip --server https://prod:4800 --token ...
+     or upload the zip in the Admin Console under Releases.
+  Roll back:            sutra rollback --project "${p.project.name}" --server ... --token ...
+`;
+}
+
+/** The release zip of a package: package, deployment config template, README. */
+export function buildBundle(p: Package, config?: unknown): Buffer {
+  return zipFiles([
+    [BUNDLE_PACKAGE, JSON.stringify(p, null, 2)],
+    [BUNDLE_CONFIG, JSON.stringify(config ?? configTemplate(p), null, 2)],
+    ['README.txt', readme(p).replace(/\n/g, '\r\n')],
+  ]);
+}
+
+export const isZip = (b: Buffer) => b.length > 4 && b.readUInt32LE(0) === 0x04034b50;
+
+/** A release zip or a package file: the package, and the zip's deployment config when it has one. */
+export function readBundle(input: Buffer | string): { package: Package; config?: any } {
+  const buf = Buffer.isBuffer(input) ? input : Buffer.from(input, 'utf8');
+  if (!isZip(buf)) return { package: readPackage(buf.toString('utf8')) };
+  let z: Map<string, Buffer>;
+  try { z = unzip(buf); } catch (e: any) { throw new Error(`The zip cannot be read: ${e.message}`); }
+  const name = z.has(BUNDLE_PACKAGE) ? BUNDLE_PACKAGE : [...z.keys()].find(k => /\.sutra$/i.test(k));
+  if (!name) throw new Error(`The zip has no ${BUNDLE_PACKAGE}`);
+  const pkg = readPackage(z.get(name)!.toString('utf8'));
+  const cfgName = z.has(BUNDLE_CONFIG) ? BUNDLE_CONFIG : [...z.keys()].find(k => /deployment-config\.json$/i.test(k));
+  let config: any;
+  if (cfgName) { try { config = JSON.parse(z.get(cfgName)!.toString('utf8')); } catch (e: any) { throw new Error(`${cfgName} is not valid JSON: ${e.message}`); } }
+  return { package: pkg, config };
+}
+
+/**
+ * The deployment config to apply when a bundle is deployed into a project: the given config, else
+ * the zip's own. Only variables, connections and logging are applied; the secrets list is for people.
+ * A config written for the package's project also fits the project it is deployed under.
+ */
+export function configFor(p: Package, config: any, project?: string) {
+  if (!config || typeof config !== 'object') return undefined;
+  const { $comment: _c, package: _p, secrets: _s, ...rest } = config;
+  if (project && (!rest.project || rest.project === p.project.name)) rest.project = project;
+  return rest;
+}
+
+/** Hides credentials in a repository address before it is written into a package. */
+export const cleanUrl = (u: string) => u.replace(/(\w+:\/\/)[^@/\s]+@/, '$1');
+
+/**
+ * Builds a package from a project's Git files (a working copy or a fresh clone), without a running
+ * server: the files are read into the current database (a throw-away one from the command line),
+ * and every Sutra, or the chosen ones, goes into the package as deployed.
+ */
+export function packageFromFolder(dir: string, o: { version?: string; note?: string; sutras?: string[]; source?: Package['source'] }, deps: {
+  saveProject: (p: any) => { id: string }; readWorkingTree: (dir: string, projectId: string, workspaceId: string) => { sutras: number; problems: string[] };
+}) {
+  const file = path.join(dir, 'sutraflow.json');
+  if (!fs.existsSync(file)) throw new Error(`${dir} is not a SutraFlow project in Git (no sutraflow.json)`);
+  const meta = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const name = String(meta.name || path.basename(path.resolve(dir)));
+  const project = deps.saveProject({ name, description: meta.description || '', config: { variables: meta.variables || [], logging: meta.logging } });
+  const r = deps.readWorkingTree(dir, project.id, `package-build-${project.id}`);
+  if (r.problems.length) throw new Error(`Some files could not be read:\n- ${r.problems.join('\n- ')}`);
+  if (!r.sutras) throw new Error('The repository has no Sutras');
+  return buildPackage(project.id, { version: o.version, note: o.note, sutras: o.sutras, allDeployed: true, source: o.source });
+}

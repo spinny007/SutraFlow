@@ -15,13 +15,21 @@ import crypto from 'node:crypto';
 const HELP = `sutra <command> [options]
 
   Releases:
-  package   --project <name> [--version 1.0.0] [--note text] [--sutras "A,B"] [--out file.sutra]
-            Builds a package of a project: every deployed Sutra at its deployed version.
-  check     <file.sutra> [--project <name>]
+  package   --project <name> [--version 1.0.0] [--note text] [--sutras "A,B"] [--zip] [--out file]
+            Builds a package of a project: every deployed Sutra at its deployed version. With --zip or
+            an --out ending in .zip, a release zip: the package, a deployment config to fill in for
+            the target (connections, project variables, secrets needed) and a README.
+  package   --from-git <repository address | folder> [--ref <tag|branch|commit>] [--version 1.0.0]
+                [--note text] [--sutras "A,B"] [--out release.zip]
+            Builds a release zip from the project's files in Git, with no server or database, for
+            CI/CD pipelines. Every Sutra in the repository (or the chosen ones) is deployed by it.
+            A private repository reads its token from SUTRA_GIT_TOKEN (login SUTRA_GIT_LOGIN).
+  check     <release.zip | file.sutra> [--project <name>]
             Checks a package against a server: activities, secrets, addresses in use.
-  deploy    <file.sutra> [--project <name>] [--config ops.json] [--keep-others]
-            Deploys a package; Sutras of the project not in it are undeployed unless --keep-others.
-  test      <file.sutra> [--skip "A,B"] [--secret NAME=value ...] [--secrets-from-env]
+  deploy    <release.zip | file.sutra> [--project <name>] [--config deployment-config.json] [--keep-others]
+            Deploys a package with its deployment config (the zip's own, or --config); Sutras of the
+            project not in it are undeployed unless --keep-others.
+  test      <release.zip | file.sutra> [--skip "A,B"] [--secret NAME=value ...] [--secrets-from-env]
             Installs the package in a throw-away server and runs every Sutra with its test data.
   history   --project <name>
             Deployments of packages to a project.
@@ -164,6 +172,12 @@ const projectId = async (a: Args, call: ReturnType<typeof remote>) => {
   return p.id as string;
 };
 
+/** A release zip or a package file: the package and the zip's deployment config. */
+const readRelease = async (f: string | undefined) => {
+  if (!f) throw new Usage('Give the release zip or package file');
+  if (!fs.existsSync(f)) throw new Error(`File not found: ${f}`);
+  return (await import('./bundles.js')).readBundle(fs.readFileSync(f));
+};
 const readFile = (f: string | undefined) => { if (!f) throw new Usage('Give the package file'); if (!fs.existsSync(f)) throw new Error(`File not found: ${f}`); return fs.readFileSync(f, 'utf8'); };
 
 function printCheck(c: any) {
@@ -188,6 +202,45 @@ async function ensurePgDatabase(url: string) {
   try { await admin.query(`CREATE DATABASE "${name}"`); out(`Created the database ${name}`); } finally { await admin.end(); }
 }
 
+/**
+ * A package from a project's Git files, in a throw-away data folder: a repository address is cloned
+ * (token from SUTRA_GIT_TOKEN), a folder is read as it is, or at --ref through a local clone.
+ */
+async function packageFromGit(src: string, o: { ref?: string; version?: string; note?: string; sutras?: string[] }) {
+  const isUrl = /^(https?|ssh|git|file):\/\/|^[\w.-]+@[\w.-]+:/.test(src);
+  if (!isUrl && !fs.existsSync(src)) throw new Error(`No folder or repository address: ${src}`);
+  // The settings are read when the server modules load, so the throw-away data folder comes first.
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-build-')), data = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-build-data-'));
+  process.env.SUTRA_DATA_DIR = data;
+  delete process.env.SUTRA_DB;
+  process.env.SUTRA_MASTER_KEY = crypto.randomBytes(32).toString('base64');
+  const b = await import('./bundles.js');
+  const { gitEngine } = await import('./git/engine.js');
+  const g = gitEngine();
+  try {
+    let dir = src, commit: string | undefined;
+    if (isUrl || o.ref) {
+      const token = process.env.SUTRA_GIT_TOKEN;
+      dir = path.join(work, 'repo');
+      await g.clone(isUrl ? src : path.resolve(src), dir, undefined, token ? { login: process.env.SUTRA_GIT_LOGIN || 'git', token } : undefined);
+      if (o.ref) await g.checkout(dir, o.ref);
+    }
+    try { commit = await g.head(dir); } catch { /* a folder that is not a repository */ }
+    const { openDb, closeDb } = await import('./db.js');
+    const { engine } = await import('./engine/engine.js');
+    const { allActivities } = await import('./palettes/index.js');
+    openDb();
+    engine.register(allActivities);
+    try {
+      const { saveProject } = await import('./projects.js');
+      const { readWorkingTree } = await import('./git/files.js');
+      return b.packageFromFolder(dir, { version: o.version, note: o.note, sutras: o.sutras, source: { repository: isUrl ? b.cleanUrl(src) : undefined, ref: o.ref, commit } }, { saveProject, readWorkingTree });
+    } finally { closeDb(); }
+  } finally {
+    for (const d of [work, data]) try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* files in use */ }
+  }
+}
+
 async function main(argv: string[]) {
   const a = parse(argv);
   const cmd = a._[0];
@@ -197,35 +250,44 @@ async function main(argv: string[]) {
   switch (cmd) {
     case 'package': {
       const sutras = str(a, 'sutras');
+      const pick = sutras ? sutras.split(',').map(s => s.trim()).filter(Boolean) : undefined;
+      const fromGit = a['from-git'] !== undefined;
       let pkg: any;
-      if (call) {
+      if (fromGit) {
+        pkg = await packageFromGit(need(a, 'from-git'), { ref: str(a, 'ref'), version: str(a, 'version'), note: str(a, 'note'), sutras: pick });
+      } else if (call) {
         const id = await projectId(a, call);
         const qs = new URLSearchParams({ ...(str(a, 'version') ? { version: str(a, 'version')! } : {}), ...(str(a, 'note') ? { note: str(a, 'note')! } : {}), ...(sutras ? { sutras } : {}) });
         pkg = await call('GET', `/api/projects/${id}/package?${qs}`);
       } else {
         const l = await local();
-        pkg = l.packages.buildPackage(await projectId(a, null), { version: str(a, 'version'), note: str(a, 'note'), sutras: sutras ? sutras.split(',').map(s => s.trim()).filter(Boolean) : undefined });
+        pkg = l.packages.buildPackage(await projectId(a, null), { version: str(a, 'version'), note: str(a, 'note'), sutras: pick });
       }
-      const file = str(a, 'out') || `${pkg.name.replace(/[^\w.-]+/g, '-')}-${pkg.version}.sutra`;
-      fs.writeFileSync(file, JSON.stringify(pkg, null, 2));
+      const b = await import('./bundles.js');
+      const o = str(a, 'out') || '';
+      const zip = !!a.zip || /\.zip$/i.test(o) || (fromGit && !/\.sutra$/i.test(o));
+      const file = o || `${pkg.name.replace(/[^\w.-]+/g, '-')}-${pkg.version}${zip ? '.zip' : '.sutra'}`;
+      fs.writeFileSync(file, zip ? b.buildBundle(pkg) : JSON.stringify(pkg, null, 2));
       out(`Wrote ${file}: ${pkg.name} ${pkg.version}, ${pkg.sutras.length} Sutras, ${pkg.manifest.secrets.length} secrets needed, ${pkg.checksum}`);
+      if (pkg.source?.commit) out(`  from ${pkg.source.repository || 'Git'}${pkg.source.ref ? ` ${pkg.source.ref}` : ''}, commit ${pkg.source.commit.slice(0, 12)}`);
       return 0;
     }
     case 'check': {
-      const text = readFile(a._[1]);
-      const c = call ? await call('POST', '/api/packages/check', { package: JSON.parse(text), project: str(a, 'project') })
-        : (await local()).packages.checkPackage((await local()).packages.readPackage(text), { project: str(a, 'project') });
+      const rel = await readRelease(a._[1]);
+      const c = call ? await call('POST', '/api/packages/check', { package: rel.package, project: str(a, 'project') })
+        : (await local()).packages.checkPackage(rel.package, { project: str(a, 'project') });
       out(c.ok ? 'Package can be deployed.' : 'Package cannot be deployed:');
       printCheck(c);
       return c.ok ? 0 : 1;
     }
     case 'deploy': {
-      const text = readFile(a._[1]);
-      const ops = str(a, 'config') ? JSON.parse(readFile(str(a, 'config'))) : undefined;
+      const rel = await readRelease(a._[1]);
+      const { configFor } = await import('./bundles.js');
+      const ops = configFor(rel.package, str(a, 'config') ? JSON.parse(readFile(str(a, 'config'))) : rel.config, str(a, 'project'));
       let r: any;
       try {
-        r = call ? await call('POST', '/api/packages/deploy', { package: JSON.parse(text), project: str(a, 'project'), ops, keepOthers: !!a['keep-others'] })
-          : (await local()).packages.deployPackage(text, { project: str(a, 'project'), ops, keepOthers: !!a['keep-others'], by: `cli ${os.userInfo().username}` });
+        r = call ? await call('POST', '/api/packages/deploy', { package: rel.package, project: str(a, 'project'), ops, keepOthers: !!a['keep-others'] })
+          : (await local()).packages.deployPackage(rel.package, { project: str(a, 'project'), ops, keepOthers: !!a['keep-others'], by: `cli ${os.userInfo().username}` });
       } catch (e: any) { out(e.message); if (e.check) printCheck(e.check); return 1; }
       out(`Deployed ${r.package.name} ${r.package.version} to ${r.project.name}${r.project.created ? ' (new project)' : ''}${r.unchanged ? ': nothing changed' : ''}`);
       for (const s of r.sutras) out(`  ${s.action.padEnd(9)} ${s.name} v${s.version}${s.deployed ? '' : ' (not deployed)'}`);
@@ -234,11 +296,15 @@ async function main(argv: string[]) {
       return 0;
     }
     case 'test': {
-      const text = readFile(a._[1]);
-      // A throw-away server: its own data folder and vault key, no gateway or listeners.
+      const f = a._[1];
+      if (!f) throw new Usage('Give the release zip or package file');
+      if (!fs.existsSync(f)) throw new Error(`File not found: ${f}`);
+      // A throw-away server: its own data folder and vault key, no gateway or listeners. Set before
+      // any server module loads, as they read the settings when loaded.
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-test-'));
       process.env.SUTRA_DATA_DIR = dir;
       process.env.SUTRA_MASTER_KEY = crypto.randomBytes(32).toString('base64');
+      const text = JSON.stringify((await readRelease(f)).package);
       const { boot } = await import('./index.js');
       const srv = await boot({ listenAdmin: false, gateway: false });
       try {

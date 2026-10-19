@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1
 # SutraFlow: one image for the studio and for headless engines (SUTRA_MODE=studio | engine).
 #
-#   docker build -t sutraflow:1.0.0 .
-#   docker run -p 4800:4800 -p 8080:8080 -v sutra-data:/data sutraflow:1.0.0
-#   docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:1.0.0
+#   docker build -t sutraflow:1.5.0 .
+#   docker run -p 4800:4800 -p 8080:8080 -v sutra-data:/data sutraflow:1.5.0
+#   docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:1.5.0
 
 FROM node:24-bookworm-slim AS build
 WORKDIR /app

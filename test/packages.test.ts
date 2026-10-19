@@ -217,7 +217,7 @@ test('command line: package, check, deploy, history, rollback, test, usage error
   assert.equal(r.status, 1);
   r = cli('deploy');
   assert.equal(r.status, 2);
-  assert.match(r.stderr, /Usage: Give the package file/);
+  assert.match(r.stderr, /Usage: Give the release zip or package file/);
   r = cli('frobnicate');
   assert.equal(r.status, 2);
   r = cli('help');

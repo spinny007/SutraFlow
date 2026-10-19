@@ -59,7 +59,8 @@ test('metrics: runs, steps by outcome, retries and durations; gauges read when s
   assert.ok(value(text, /^sutra_step_duration_seconds_count\{activity="log"\}/) >= 2);
   assert.match(text, /sutra_run_duration_seconds_bucket\{le="\+Inf",status="done",sutra="Metric ok"\} 1/);
   assert.equal(value(text, /^sutra_engine_leader /), 1);
-  assert.match(text, /sutra_info\{engine="[^"]+",mode="studio",version="1\.0\.0"\} 1/);
+  const { version } = await import('../server/src/config.js');
+  assert.ok(new RegExp('sutra_info\{engine="[^"]+",mode="studio",version="([^"]+)"\} 1').exec(text)?.[1] === version, 'sutra_info carries the product version');
   assert.match(text, /^sutra_tasks\{status="pending"\} \d+/m);
   for (const line of text.split('\n').filter(Boolean)) {
     assert.match(line, /^(# (HELP|TYPE) [a-z_]+ .+|[a-z_]+(\{[a-z_]+="[^"\n]*"(,[a-z_]+="[^"\n]*")*\})? -?[\d.e+]+)$/, `bad metrics line: ${line}`);

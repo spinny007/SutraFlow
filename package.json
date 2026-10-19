@@ -1,6 +1,6 @@
 {
   "name": "sutraflow",
-  "version": "1.0.0",
+  "version": "1.5.0",
   "description": "SutraFlow: visual integration designer and engine (palettes, mapping, SOAP/WS-Security, REST, exposed secured APIs, TLS/Let's Encrypt).",
   "private": true,
   "type": "module",

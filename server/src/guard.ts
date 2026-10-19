@@ -48,6 +48,8 @@ export const RULES: Record<string, Rule> = {
   'POST /api/packages/deploy': R('deploy', 'package'),
   'POST /api/packages/test': R('deploy', undefined, true),
   'GET /api/projects/:id/packages': R('view', 'project'),
+  'GET /api/projects/:id/release': R('view', 'project'),
+  'POST /api/packages/open': R('deploy', undefined, true),
   'POST /api/projects/:id/rollback': R('deploy', 'project'),
   'POST /api/projects/import': R('design', 'all'),
   'POST /api/projects/:id/copy': R('design', 'all'),

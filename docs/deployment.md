@@ -36,12 +36,26 @@ The same file goes from test to UAT to production. Each environment keeps its ow
 
 In the studio: **Project → Configuration → Releases (packages)**.
 
+**Release zips for production**
+
+A production team receives a release as one zip:
+
+| File | Holds |
+|---|---|
+| `package.sutra` | The package, with its checksum |
+| `deployment-config.json` | The deployment config to fill in for the target: every connection with its settings, every project variable, logging, and the vault secrets the server needs |
+| `README.txt` | Sutras and their addresses, secrets, where it was built from (repository, ref, commit), deploy and rollback commands |
+
+Development and system test servers deploy from the designer. A server with `SUTRA_ENVIRONMENT=production` refuses designer deploys: it gets Sutras only from packages, uploaded with `sutra deploy release.zip` or in the Admin Console under **Releases** (check, deploy, history, rollback).
+
 ## 2. The sutra command-line tool
 
 ```
 sutra package  --project "Orders" --version 1.4.0 --note "Faster lookup" --out orders-1.4.0.sutra
-sutra check    orders-1.4.0.sutra
-sutra deploy   orders-1.4.0.sutra [--config prod-ops.json] [--keep-others]
+sutra package  --project "Orders" --version 1.4.0 --zip                 # release zip: package + config + README
+sutra package  --from-git <repository | folder> [--ref v1.4.0] --version 1.4.0 --out orders-1.4.0.zip
+sutra check    orders-1.4.0.zip
+sutra deploy   orders-1.4.0.zip [--config prod-config.json] [--keep-others]
 sutra test     orders-1.4.0.sutra [--secret NAME=value] [--secrets-from-env]
 sutra history  --project "Orders"
 sutra rollback --project "Orders" [--to <deployment id>]
@@ -52,16 +66,18 @@ sutra status   --server https://engine-1:4800
 - **Remote**: add `--server <url> --token <token>`, or set `SUTRA_SERVER` and `SUTRA_ADMIN_TOKEN`. The token is the server's `SUTRA_ADMIN_TOKEN`.
 - **Local**: without `--server`, the tool works on the data folder (`SUTRA_DATA_DIR`) or the database (`SUTRA_DB`) directly. Use it when building container images.
 - **`sutra test`** installs the package in a throw-away server and runs every Sutra with its trigger's test data. A Sutra passes when its run ends done. Give secrets the tests need with `--secret` or `--secrets-from-env`.
+- **`--from-git`** builds the release from the project's files in Git with no server or database (a throw-away one is used). Every Sutra in the repository, or those in `--sutras`, is deployed by it. A private repository reads its token from `SUTRA_GIT_TOKEN` (login `SUTRA_GIT_LOGIN`); the repository address is recorded without credentials.
+- **`deploy`** applies the zip's own `deployment-config.json`, or the file given with `--config`.
 - Exit codes: 0 success, 1 failure (check failed, test failed, deploy refused), 2 wrong usage. CI pipelines can rely on them.
 
 A pipeline, for example:
 
 ```
-sutra package --project Orders --version $VERSION --server $STUDIO --token $TOKEN --out orders.sutra
-sutra test orders.sutra --secrets-from-env
-sutra deploy orders.sutra --server $UAT_ENGINE --token $UAT_TOKEN
+sutra package --from-git . --ref $TAG --version $VERSION --out orders.zip
+sutra test orders.zip --secrets-from-env
+sutra deploy orders.zip --server $UAT_ENGINE --token $UAT_TOKEN --config uat-config.json
 # after approval
-sutra deploy orders.sutra --server $PROD_ENGINE --token $PROD_TOKEN
+sutra deploy orders.zip --server $PROD_ENGINE --token $PROD_TOKEN --config prod-config.json
 ```
 
 ## 3. Headless engines
@@ -137,10 +153,10 @@ Laragon's MySQL works as a DB Ops connection (driver mysql, host 127.0.0.1, port
 One image serves both roles:
 
 ```
-docker build -t sutraflow:1.0.0 .
-docker run -p 4800:4800 -p 8080:8080 -v sutra-data:/data sutraflow:1.0.0                    # studio
+docker build -t sutraflow:1.5.0 .
+docker run -p 4800:4800 -p 8080:8080 -v sutra-data:/data sutraflow:1.5.0                    # studio
 docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=... \
-           -v ./deploy:/deploy:ro -p 8080:8080 -p 8443:8443 sutraflow:1.0.0                  # engine
+           -v ./deploy:/deploy:ro -p 8080:8080 -p 8443:8443 sutraflow:1.5.0                  # engine
 ```
 
 - Runs as the non-root `node` user, with `tini` as init so `docker stop` drains running steps.
@@ -148,7 +164,7 @@ docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=...
 - JSON logs on standard output.
 - `docker-compose.yml`: a studio and an engine. `docker-compose.cluster.yml`: PostgreSQL, a studio and two engines.
 
-**Immutable releases**: `FROM sutraflow:1.0.0` + `COPY orders-1.4.0.sutra /deploy/` makes each release one image.
+**Immutable releases**: `FROM sutraflow:1.5.0` + `COPY orders-1.4.0.sutra /deploy/` makes each release one image.
 
 Keep `SUTRA_MASTER_KEY` in your secret store: it decrypts the vault. With it set, the vault survives replacing containers. Without it, the key file in `/data` must be kept.
 

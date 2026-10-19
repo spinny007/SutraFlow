@@ -46,6 +46,7 @@ import { clusterStatus } from './cluster.js';
 import { prometheusText } from './metrics.js';
 import { tracingStats } from './tracing.js';
 import { housekeeping, clearTestRuns } from './housekeeping.js';
+import { buildBundle, readBundle, configFor } from './bundles.js';
 import { buildPackage, checkPackage, deployPackage, packageHistory, readPackage, rollbackPackage, testPackage, importPackage, copyProject } from './packages.js';
 
 const COOKIE = 'sutra_session';
@@ -415,6 +416,21 @@ export async function buildAdmin(): Promise<FastifyInstance> {
       return p;
     } catch (e: any) { throw bad(e.message); }
   });
+  /** The release zip: package, deployment config to fill in, README. */
+  app.get('/api/projects/:id/release', async (req: any, reply) => {
+    projects.requireProject(req.params.id);
+    let p;
+    try { p = buildPackage(req.params.id, { version: req.query?.version, note: req.query?.note, sutras: req.query?.sutras ? String(req.query.sutras).split(',').map((x: string) => x.trim()).filter(Boolean) : undefined }); } catch (e: any) { throw bad(e.message); }
+    reply.header('content-type', 'application/zip').header('content-disposition', `attachment; filename="${p.name.replace(/[^\w.-]+/g, '-')}-${p.version}.zip"`);
+    return reply.send(buildBundle(p));
+  });
+  /** Opens an uploaded release zip (base64) or package: the package, its check here, and the config to apply. */
+  app.post('/api/packages/open', async (req: any) => {
+    try {
+      const b = req.body?.zip ? readBundle(Buffer.from(String(req.body.zip), 'base64')) : readBundle(JSON.stringify(req.body?.package));
+      return { package: b.package, config: configFor(b.package, b.config, req.body?.project) ?? null, check: checkPackage(b.package, { project: req.body?.project }) };
+    } catch (e: any) { throw bad(e.message); }
+  });
   app.post('/api/packages/check', async (req: any) => {
     try { return checkPackage(readPackage(req.body?.package), { project: req.body?.project }); } catch (e: any) { throw bad(e.message); }
   });
@@ -540,7 +556,10 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.delete('/api/flows/:id', async (req: any) => { flows.deleteFlow(req.params.id); return { ok: true }; });
   app.post('/api/flows/validate', async (req: any) => flows.validateDoc(flows.normalizeDoc(req.body), req.query?.projectId ? String(req.query.projectId) : undefined));
   app.get('/api/flows/:id/versions', async (req: any) => flows.versions(req.params.id));
-  app.post('/api/flows/:id/deploy', async (req: any) => flows.deploy(req.params.id, req.body?.version ? Number(req.body.version) : undefined, req.body?.note));
+  app.post('/api/flows/:id/deploy', async (req: any) => {
+    if (config.environment === 'production') throw new HttpError(403, 'This is a production server: Sutras are deployed here from release packages (Releases in the Admin Console, or sutra deploy release.zip), not one by one from the designer');
+    return flows.deploy(req.params.id, req.body?.version ? Number(req.body.version) : undefined, req.body?.note);
+  });
   app.delete('/api/flows/:id/deploy', async (req: any) => { flows.undeploy(req.params.id); return { ok: true }; });
 
   /** Test run of the draft (what is on the canvas). */

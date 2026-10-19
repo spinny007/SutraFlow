@@ -380,7 +380,8 @@ export const CHAPTERS: Chapter[] = [
 <li>Runs already in progress finish on the version they started with.</li>
 <li>Editing after a deploy changes only the draft until you deploy again.</li>
 <li>Other systems start a deployed Sutra with the Run API: <code>POST /api/flows/{flowId}/run?wait=30000</code> with <code>{ "input": { ... } }</code>.</li>
-</ul>`,
+</ul>
+<p><strong>Deploy</strong> is for development and system test servers. A server with <code>SUTRA_ENVIRONMENT=production</code> refuses it: production receives whole projects as release zips (Releases, below), so what runs there is always a reviewed, versioned package.</p>`,
   },
   {
     id: 'expose', title: 'Exposing APIs: security and TLS',
@@ -576,21 +577,42 @@ export const CHAPTERS: Chapter[] = [
     id: 'releases', title: 'Releases: packages and the command line',
     html: `
 <p>Build in the studio; release a <strong>package</strong>: one <code>.sutra</code> file with the whole project. It has every deployed Sutra at its version, the connections and API policies (secret names, never secret values), shared schemas and WSDLs, project variables and logging. The same file goes from test to production; each environment keeps its own deployment config and secrets.</p>
+<p>For a production team the package comes as a <strong>release zip</strong>:</p>
+<table class="t"><thead><tr><th>File</th><th>Holds</th></tr></thead><tbody>
+<tr><td><code>package.sutra</code></td><td>The package, with its checksum: changed or damaged files are refused.</td></tr>
+<tr><td><code>deployment-config.json</code></td><td>The deployment config to fill in for the target: every connection with its settings (hosts, folders, users, secret names), every project variable, logging, and the list of vault secrets the server needs.</td></tr>
+<tr><td><code>README.txt</code></td><td>The Sutras and their addresses, the secrets, where it was built from, and the commands to deploy and roll back.</td></tr>
+</tbody></table>
+<p class="h">Who deploys how</p>
+<ul>
+<li><strong>Development and system test</strong>: <em>Deploy</em> in the designer, Sutra by Sutra.</li>
+<li><strong>Production</strong>: a CI/CD pipeline builds the release zip from the Git repository and uploads it with the command line, or the production team uploads it in the Admin Console (Releases). A production server (<code>SUTRA_ENVIRONMENT=production</code>) refuses designer deploys.</li>
+</ul>
 <p class="h">In the studio</p>
 <ol>
 <li>Open <strong>Project &rarr; Configuration &rarr; Releases (packages)</strong>.</li>
-<li>Give a version, such as <code>1.4.0</code>, and a note, then <strong>Build and download</strong>.</li>
-<li>On the target server, open the same panel, choose the file, read the check (missing secrets, addresses already used by another project), and <strong>Deploy</strong>.</li>
+<li>Give a version, such as <code>1.4.0</code>, and a note, then <strong>Download release (.zip)</strong>, or <em>Package only (.sutra)</em>.</li>
+<li>On the target server, open the same panel or the Admin Console's <strong>Releases</strong>, choose the zip, read the check (missing secrets, addresses already used by another project), and <strong>Deploy</strong>. The zip's deployment config is applied with it.</li>
 <li>The history lists every deployment; <strong>Deploy again</strong> or <strong>Roll back</strong> returns to an earlier package.</li>
 </ol>
 <p>Deploying matches everything by name. A Sutra whose content changed gets a new version; an unchanged one is left alone, so the same package twice changes nothing. Sutras not in the package are undeployed (kept, not deleted) unless you tick <em>Keep Sutras that are not in the package deployed</em>.</p>
-<p class="h">From the command line or a CI pipeline</p>
-<pre>sutra package  --project "Orders" --version 1.4.0 --out orders-1.4.0.sutra
-sutra check    orders-1.4.0.sutra
-sutra test     orders-1.4.0.sutra --secrets-from-env
-sutra deploy   orders-1.4.0.sutra --server https://engine:4800 --token $TOKEN
-sutra rollback --project "Orders" --server https://engine:4800 --token $TOKEN</pre>
-<p>The token is a system account's API token (Admin Console, System accounts), limited to its roles, or the server's <code>SUTRA_ADMIN_TOKEN</code>. Without <code>--server</code> the tool works on the local data folder. Exit code 0 means success, 1 a failed check, test or deploy, 2 wrong usage. <code>sutra test</code> runs every Sutra of the package with its test data in a throw-away server.</p>
+<p class="h">From Git in a CI/CD pipeline</p>
+<p><code>sutra package --from-git</code> builds the release zip from the project's files in the repository (see Git), with no SutraFlow server or database: it reads the files into a throw-away one. Every Sutra in the repository, or those named with <code>--sutras</code>, is deployed by the release. <code>--ref</code> builds from a tag, branch or commit; the package records the repository (without credentials), the ref and the commit, shown in the README and the Admin Console. A private repository reads its token from <code>SUTRA_GIT_TOKEN</code> (and <code>SUTRA_GIT_LOGIN</code>); a pipeline that has checked out the repository already gives the folder.</p>
+<pre># build: from the repository at a tag
+sutra package --from-git https://github.com/acme/orders.git --ref v1.4.0 --version 1.4.0 --out orders-1.4.0.zip
+#   or from the folder the pipeline checked out
+sutra package --from-git . --version 1.4.0 --out orders-1.4.0.zip
+sutra test    orders-1.4.0.zip --secrets-from-env
+
+# release: to the production engine
+sutra check   orders-1.4.0.zip --server https://prod-engine:4800 --token $TOKEN
+sutra deploy  orders-1.4.0.zip --server https://prod-engine:4800 --token $TOKEN --config prod-config.json
+sutra rollback --project "Orders" --server https://prod-engine:4800 --token $TOKEN</pre>
+<p>The zip's own <code>deployment-config.json</code> is applied unless <code>--config</code> gives another; keep each environment's config in the pipeline (values may read <code>\${env:NAME}</code>), and add the listed secrets to the target's vault first (<code>sutra secret set</code>). The token is a system account's API token (Admin Console, System accounts) with Deploy on the project, or the server's <code>SUTRA_ADMIN_TOKEN</code>. Exit code 0 means success, 1 a failed check, test or deploy, 2 wrong usage, so a pipeline stops at the first failure. <code>sutra test</code> runs every Sutra of the package with its test data in a throw-away server.</p>
+<p class="h">From the command line, from a server</p>
+<pre>sutra package  --project "Orders" --version 1.4.0 --zip --server https://test-engine:4800 --token $TOKEN
+sutra package  --project "Orders" --version 1.4.0 --out orders-1.4.0.sutra</pre>
+<p>Without <code>--server</code> the tool works on the local data folder.</p>
 <p class="h">From a Sutra</p>
 <p>The <strong>Release</strong> palette does the same steps inside a Sutra, so a release can itself be a Sutra: on a timer or a REST call, [[releasePackage]], [[releaseDeploy]] to a test engine, [[approval]], [[releaseDeploy]] to production, then [[emailSend]] the result. [[releaseCheck]] and [[releaseRollback]] complete it. These activities are off until an administrator allows them in Server &amp; APIs.</p>`,
   },
@@ -630,6 +652,7 @@ sutra deploy shop-1.4.0.sutra --server https://prod:4800 --token $SUTRA_TOKEN</p
 <li><strong>Overview</strong>: tiles for engines, deployed Sutras, runs of the last 24 hours, waiting approvals, the work queue and the gateway certificate, and the latest failed runs with <em>Resubmit</em>. Test runs from the designer are not counted.</li>
 <li><strong>Applications</strong>: every deployed project with its package version and its Sutras: version, started or stopped, what starts it (REST path, SOAP path, timer, skill), runs of the last day and the last run. <em>Stop</em> makes the Sutra's triggers start nothing (its address answers 404, timers and listeners pause) while it stays deployed; <em>Start</em> brings it back on every engine; <em>Restart</em> does both at once, so its address, timers and listeners start fresh with the current connections. <em>Runs</em> opens its runs with every step's result, <em>Resubmit</em> and <em>Cancel run</em>; <em>Versions</em> deploys an earlier version; <em>Tuning</em> sets how the Sutra runs (below); <em>Package history</em> rolls the project back to an earlier package.</li>
 <li><strong>Approvals</strong>: running Sutras waiting for a person, with a comment and <em>Approve</em> or <em>Reject</em>.</li>
+<li><strong>Releases</strong>: deploy a release zip (or <code>.sutra</code> package): choose the file, see its Sutras, the secrets present or missing on this server, where it was built from and its deployment config, change the project or give another config, then <em>Deploy</em>. Below, every project's current package with its history: <em>Roll back</em>, or <em>Deploy again</em> for any earlier one. This is how a production server receives Sutras.</li>
 <li><strong>Engines</strong>: every engine sharing the database: alive or silent, leader, steps running, heartbeat. <em>Drain and stop</em> asks one engine to finish its steps, hand the rest to the others and stop; your service manager starts it again. <em>Delete old runs now</em> runs housekeeping at once. <em>Tuning</em> on the same page sets engine values (below).</li>
 </ul>
 [[img:console-command|Every confirmation offers the same action from a shell: the sutra command and the HTTP call, for Windows PowerShell or Linux and macOS.]]
@@ -733,9 +756,9 @@ sutra user list</pre>`,
 <p class="h">Headless engines</p>
 <p>The same program started with <code>SUTRA_MODE=engine</code> runs Sutras without the studio: no designer pages and no editing. It keeps <code>/health</code>, <code>/ready</code> and <code>/metrics</code>, the Admin Console at <code>/admin</code> for its users, and an automation API for API tokens (the admin token or system account tokens). Packages in <code>SUTRA_DEPLOY_DIR</code> are deployed when it starts; a package that cannot be deployed stops the start.</p>
 <p class="h">Docker</p>
-<pre>docker build -t sutraflow:1.0.0 .
+<pre>docker build -t sutraflow:1.5.0 .
 docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=... \\
-           -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:1.0.0</pre>
+           -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:1.5.0</pre>
 <p>The image runs as a non-root user, checks its own health, and writes JSON logs. <code>docker-compose.yml</code> has a studio and an engine; <code>docker-compose.cluster.yml</code> has PostgreSQL, a studio and two engines.</p>
 <p class="h">Clusters</p>
 <p>Several engines share one database (<code>SUTRA_DB=postgres://...</code>), each with its own <code>SUTRA_ENGINE_ID</code> and all with the same <code>SUTRA_MASTER_KEY</code>.</p>

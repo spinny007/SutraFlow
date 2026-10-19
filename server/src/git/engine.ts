@@ -33,6 +33,10 @@ export interface GitEngine {
   resolve(dir: string, file: string, side: 'ours' | 'theirs'): Promise<void>;
   abortMerge(dir: string): Promise<void>;
   testRemote(url: string, auth?: Auth): Promise<string[]>;
+  /** Checks out a branch, tag or commit (detached) for reading, as a package build does. */
+  checkout(dir: string, ref: string): Promise<void>;
+  /** The commit checked out. */
+  head(dir: string): Promise<string>;
 }
 
 // ---------- the git command ----------
@@ -134,6 +138,11 @@ const systemGit: GitEngine = {
   },
   async resolve(dir, file, side) { await git(dir, ['checkout', `--${side}`, '--', file]); await git(dir, ['add', '--', file]); },
   async abortMerge(dir) { await git(dir, ['merge', '--abort']); },
+  async checkout(dir, ref) {
+    const remote = (await git(dir, ['rev-parse', '--verify', '--quiet', `origin/${ref}`], { allowFail: true })).code === 0;
+    await git(dir, ['-c', 'advice.detachedHead=false', 'checkout', '--quiet', remote ? `origin/${ref}` : ref, '--']);
+  },
+  async head(dir) { return (await git(dir, ['rev-parse', 'HEAD'])).out.trim(); },
   async testRemote(url, auth) {
     const r = await git(null, ['ls-remote', '--heads', '--', url], { auth, timeoutMs: 60000 });
     return r.out.split('\n').filter(Boolean).map(l => l.split('\trefs/heads/')[1]).filter(Boolean);
@@ -243,6 +252,8 @@ const builtinGit: GitEngine = {
   },
   async resolve() { throw new Error('Resolving conflicts needs the git command'); },
   async abortMerge() { /* the built-in merge never leaves a merge open */ },
+  async checkout(dir, ref) { const { g } = await iso(); await g.checkout({ fs, dir, ref, force: true }); },
+  async head(dir) { const { g } = await iso(); return g.resolveRef({ fs, dir, ref: 'HEAD' }); },
   async testRemote(url, auth) { const { g, http } = await iso(); const info = await g.getRemoteInfo({ http, url, onAuth: onAuth(auth) }); return Object.keys(info.refs?.heads || {}); },
 };
 

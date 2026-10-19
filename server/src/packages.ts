@@ -25,6 +25,8 @@ export interface Package {
   name: string;
   version: string;
   note?: string;
+  /** Where a package built from Git came from: repository (no credentials), ref, commit. */
+  source?: { repository?: string; ref?: string; commit?: string };
   createdAt: string;
   createdWith: string;
   project: { name: string; description: string; variables: any[]; logging: any };
@@ -95,7 +97,7 @@ const exposesOf = (doc: FlowDoc) => doc.nodes.flatMap(n =>
  * Builds a package of a project. Each deployed Sutra is taken at its deployed version; a Sutra
  * that is not deployed is published from its draft and included as not deployed (or left out).
  */
-export function buildPackage(projectId: string, o: { version?: string; note?: string; sutras?: string[]; includeUndeployed?: boolean } = {}): Package {
+export function buildPackage(projectId: string, o: { version?: string; note?: string; sutras?: string[]; includeUndeployed?: boolean; allDeployed?: boolean; source?: Package['source'] } = {}): Package {
   const project = getProject(projectId);
   if (!project) throw new Error('Project not found');
   const version = o.version || '1.0.0';
@@ -108,7 +110,7 @@ export function buildPackage(projectId: string, o: { version?: string; note?: st
     } else if (o.includeUndeployed !== false) {
       const row = getFlow(f.id)!;
       const v = row.version && JSON.stringify(versionDoc(f.id, row.version)) === JSON.stringify(row.doc) ? row.version : publish(f.id, `Package ${version}`).version;
-      sutras.push({ id: f.id, name: f.name, version: v, deployed: false, doc: versionDoc(f.id, v)!, ...(f.folder ? { folder: f.folder } : {}) });
+      sutras.push({ id: f.id, name: f.name, version: v, deployed: !!o.allDeployed, doc: versionDoc(f.id, v)!, ...(f.folder ? { folder: f.folder } : {}) });
     }
   }
   if (o.sutras?.length) {
@@ -121,7 +123,7 @@ export function buildPackage(projectId: string, o: { version?: string; note?: st
   // Chosen Sutras take only the connections and schemas they use; a whole project takes all of them.
   const { resources, schemas } = o.sutras?.length ? usedBy(docs, allResources, allSchemas) : { resources: allResources, schemas: allSchemas };
   const body: Omit<Package, 'checksum'> = {
-    format: PACKAGE_FORMAT, formatVersion: 1, name: project.name, version, ...(o.note ? { note: o.note } : {}),
+    format: PACKAGE_FORMAT, formatVersion: 1, name: project.name, version, ...(o.note ? { note: o.note } : {}), ...(o.source ? { source: o.source } : {}),
     createdAt: now(), createdWith: sutraVersion,
     project: { name: project.name, description: project.description || '', variables: project.config.variables || [], logging: project.config.logging },
     schemas, resources, sutras,
