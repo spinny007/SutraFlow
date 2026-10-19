@@ -28,6 +28,7 @@
 - [Project layout](#project-layout)
 - [Testing](#testing)
 - [Known limitations](#known-limitations)
+- [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [Security](#security)
 - [License](#license)
@@ -208,6 +209,12 @@ Tested against stand-in services that answer like the real ones, but not yet aga
 - **Message validation**: a REST service's body schema describes the data for mapping but is not enforced as JSON Schema or XSD; *Validate fields* checks required fields.
 - **Single sign-on for people**: studio and Admin Console users sign in with SutraFlow accounts; JWT from an identity provider protects APIs, not the studio.
 - **Twitch and Discord triggers** poll (every minute and every few seconds) rather than receive pushed events.
+
+## Roadmap
+
+- **Asynchronous PostgreSQL storage**: the biggest remaining gain, and the reason SQLite is about four times faster on one server. Today each PostgreSQL statement is answered through a worker thread while the engine waits; an asynchronous storage layer with a connection pool would let one engine overlap the database work of many steps. It is a large change.
+- **Leaner run state**: each step currently rewrites the run state with the outputs of earlier steps, which costs Sutras that pass big data along. Keeping outputs only in the step rows removes that cost.
+- **Waking engines on new work**: PostgreSQL can notify engines when work arrives (LISTEN/NOTIFY), instead of them polling the queue.
 
 ## Contributing
 
