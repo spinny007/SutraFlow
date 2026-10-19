@@ -27,6 +27,7 @@ export const PERMISSIONS: { id: string; scope: Scope; name: string; help: string
   { id: 'server', scope: 'server', name: 'Server settings', help: 'Gateway ports and certificates, Sengine variables, scripts and release policies, model installs.' },
   { id: 'users', scope: 'server', name: 'Users and roles', help: 'Provision users and system accounts, roles and access.' },
   { id: 'audit', scope: 'server', name: 'Audit', help: 'Read and export the audit log.' },
+  { id: 'auditManage', scope: 'server', name: 'Audit settings and clearing', help: 'Change how long the audit log is kept and clear it; clear project logs on production servers.' },
   { id: 'alerts', scope: 'server', name: 'Alerts', help: 'Alert rules and channels.' },
 ];
 const PERM_IDS = new Set(PERMISSIONS.map(p => p.id));

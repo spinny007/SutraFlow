@@ -40,6 +40,8 @@ export const RULES: Record<string, Rule> = {
   'GET /api/samples': R(null),
   'POST /api/projects/:id/samples': R('design', 'project'),
   'GET /api/projects/:id/log': R('view', 'project'),
+  'POST /api/projects/:id/log/clear': R('design', 'project'),
+  'POST /api/projects/:id/runs/clear-tests': R('design', 'project'),
 
   'GET /api/projects/:id/package': R('view', 'project'),
   'POST /api/packages/check': R('deploy', 'package', true),
@@ -183,6 +185,10 @@ export const RULES: Record<string, Rule> = {
   'DELETE /api/alerts/channels/:id': R('alerts'),
   'POST /api/alerts/channels/:id/test': R('alerts'),
   'GET /api/audit': R('audit'),
+  'GET /api/audit/policy': R('audit'),
+  'PUT /api/audit/policy': R('auditManage'),
+  // Records its own entry (what was cleared, how many); refusals are still logged.
+  'POST /api/audit/clear': R('auditManage', undefined, true),
   'GET /api/audit/export': R('audit'),
 };
 
@@ -235,6 +241,32 @@ export function check(rule: Rule, caller: Caller, req: any): string | null {
 const SAFE = ['name', 'version', 'note', 'approved', 'comment', 'enabled', 'disabled', 'keepOthers', 'project', 'projectId', 'project_id', 'kind',
   'username', 'displayName', 'email', 'grants', 'perms', 'mode', 'allowed', 'sutrasMayChange', 'to', 'retentionDays', 'action', 'mustChange', 'expiresDays', 'domains', 'httpPort', 'httpsPort'];
 
+/**
+ * What a request is about, read before it runs (so a deleted Sutra still has its name): the project
+ * and, for Sutras, runs, approvals and their console actions, the Sutra (process).
+ */
+export function auditSubject(req: any) {
+  const pattern: string = req.routeOptions?.url || req.url.split('?')[0];
+  const id = String(req.params?.id || '');
+  const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+  let projectId = String(req.auditProject || b.projectId || b.project_id || '');
+  let sutraId = '', sutraName = '';
+  const flow = (fid: string) => { const f = q.get<any>('select id, name, project_id from flows where id = ?', fid); if (f) { sutraId = f.id; sutraName = f.name; projectId ||= f.project_id; } };
+  if (id && /^\/api\/(flows|console\/sutras)\/:id/.test(pattern)) flow(id);
+  else if (id && /^\/api\/runs\/:id/.test(pattern)) {
+    const r = q.get<any>('select flow_id, flow_name, project_id from runs where id = ?', id);
+    if (r) { sutraId = r.flow_id || ''; sutraName = r.flow_name || ''; projectId ||= r.project_id || ''; }
+  } else if (id && /^\/api\/approvals\/:id/.test(pattern)) {
+    const r = q.get<any>('select r.flow_id, r.flow_name, r.project_id from tasks t join runs r on r.id = t.run_id where t.id = ?', id);
+    if (r) { sutraId = r.flow_id || ''; sutraName = r.flow_name || ''; projectId ||= r.project_id || ''; }
+  } else if (pattern === '/api/flows' && b.doc?.name) sutraName = String(b.doc.name);
+  else if (id && /^\/api\/resources\/:id/.test(pattern)) projectId ||= q.get<any>('select project_id from resources where id = ?', id)?.project_id || '';
+  else if (id && /^\/api\/schemas\/:id/.test(pattern)) projectId ||= q.get<any>('select project_id from schemas where id = ?', id)?.project_id || '';
+  else if (id && /^\/api\/projects\/:id/.test(pattern)) projectId ||= id;
+  const projectName = projectId ? q.get<any>('select name from projects where id = ?', projectId)?.name || '' : '';
+  return { projectId, projectName, sutraId, sutraName };
+}
+
 export function auditRequest(req: any, status: number, rule: Rule | undefined, denied?: string) {
   const method = req.method.toUpperCase();
   if ((method === 'GET' || method === 'HEAD') && !denied) return;
@@ -246,8 +278,13 @@ export function auditRequest(req: any, status: number, rule: Rule | undefined, d
   if (denied) details.reason = denied;
   const pattern = req.routeOptions?.url || req.url.split('?')[0];
   const params = req.params && Object.keys(req.params).length ? Object.entries(req.params).map(([k, v]) => `${k}=${v}`).join(' ') : '';
+  let subject = req.auditSubject;
+  if (!subject) { try { subject = auditSubject(req); } catch { subject = { projectId: req.auditProject || '' }; } }
+  // A new Sutra has its id only after it is saved.
+  if (!subject.sutraId && pattern === '/api/flows' && req.auditCreated) subject = { ...subject, sutraId: req.auditCreated };
   audit({
     actor: req.user?.u || 'anonymous', actorKind: req.user?.kind, ip: req.ip, action: `${method} ${pattern}`, method, path: req.url.split('?')[0],
-    target: params, projectId: req.auditProject || '', status, outcome: denied ? 'denied' : status < 400 ? 'ok' : 'failed', details: Object.keys(details).length ? details : undefined,
+    target: params, projectId: subject.projectId || req.auditProject || '', projectName: subject.projectName, sutraId: subject.sutraId, sutraName: subject.sutraName,
+    status, outcome: denied ? 'denied' : status < 400 ? 'ok' : 'failed', details: Object.keys(details).length ? details : undefined,
   });
 }

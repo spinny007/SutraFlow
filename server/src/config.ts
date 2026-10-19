@@ -28,6 +28,9 @@ export const config = {
   webDir: process.env.SUTRA_WEB_DIR || '',
   /** studio: studio, engine and gateway in one process. engine: headless, no studio and no editing API. */
   mode: (process.env.SUTRA_MODE === 'engine' ? 'engine' : 'studio') as 'studio' | 'engine',
+  /** What this server is for. On production, only administrators may clear project logs. Default: development for a studio, production for a headless engine. */
+  environment: (['development', 'test', 'production'].includes(String(process.env.SUTRA_ENVIRONMENT || '').toLowerCase())
+    ? String(process.env.SUTRA_ENVIRONMENT).toLowerCase() : process.env.SUTRA_MODE === 'engine' ? 'production' : 'development') as 'development' | 'test' | 'production',
   /** Bearer token for the command-line tool and automation (Authorization: Bearer ...); acts as an administrator. */
   adminToken: process.env.SUTRA_ADMIN_TOKEN || '',
   /** Folder of .sutra packages deployed when the server starts (headless engines, container images). */

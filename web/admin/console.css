@@ -195,3 +195,11 @@ button.c-tile:not(:disabled):hover { border-color: var(--edge); }
   .c-halves { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { .c-drawer, .c-state.busy::before { animation: none; } }
+
+/* Audit: which server, and a deployed Sutra or a designer test. */
+.c-env { display: inline-block; font-size: 11px; font-weight: 600; padding: 0 7px; border-radius: 6px; border: 1px solid var(--line); text-transform: capitalize; }
+.c-env-production { color: #c0392b; border-color: color-mix(in srgb, #c0392b 45%, transparent); background: color-mix(in srgb, #c0392b 12%, transparent); }
+.c-env-test { color: #b7791f; border-color: color-mix(in srgb, #b7791f 45%, transparent); background: color-mix(in srgb, #b7791f 12%, transparent); }
+.c-env-development { color: #2b6cb0; border-color: color-mix(in srgb, #2b6cb0 45%, transparent); background: color-mix(in srgb, #2b6cb0 12%, transparent); }
+.c-origin { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.c-origin.is-deployed { color: #2e9e6a; }

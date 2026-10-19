@@ -27,6 +27,18 @@ export function housekeeping(o: { retentionDays?: number; now?: number } = {}) {
 }
 
 /** Deletes finished runs before cutoff (of one Sutra, or all), with their steps. */
+/** Deletes the finished test and debug runs of a project (the designer's own runs), not deployed runs. */
+export function clearTestRuns(projectId: string) {
+  let n = 0;
+  for (;;) {
+    const ids = q.all<{ id: string }>(`select id from runs where project_id = ? and source in ('test', 'debug') and status in ('done', 'failed', 'cancelled') limit 500`, projectId).map(r => r.id);
+    if (!ids.length) break;
+    tx(() => { for (const id of ids) { q.run('delete from tasks where run_id = ?', id); q.run('delete from runs where id = ?', id); } });
+    n += ids.length;
+  }
+  return n;
+}
+
 function prune(cutoff: string, flowId?: string) {
   let deletedRuns = 0;
   // In batches, so a large backlog never holds the database for long.

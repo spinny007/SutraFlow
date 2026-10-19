@@ -4,7 +4,7 @@ import { config } from '../config.js';
 import { resolve, resolveDeep } from '../template.js';
 import { getSecret, maskSecrets } from '../secrets.js';
 import { effectiveVariables, engineVariableValues } from '../projects.js';
-import { projectLog, wantsStepData } from '../logger.js';
+import { projectLog, wantsStepData, runOrigin } from '../logger.js';
 import { schemaTree } from '../schemas.js';
 import { adhocTree, evaluateMapping, type MappingValue } from '../mapping.js';
 import { resolveSetting } from '../settings.js';
@@ -195,7 +195,7 @@ export class Engine {
     if (o.onReply) this.replies.set(id, { resolve: o.onReply, done: false });
     if (o.onFinish) this.finishers.set(id, o.onFinish);
     metrics.runsStarted.inc({ sutra: o.doc.name, source: o.source || 'manual' });
-    projectLog(o.projectId, { level: 'info', msg: `Run started (${o.source || 'manual'}${o.version ? `, v${o.version}` : ', draft'})`, flow: o.doc.name, run: id });
+    projectLog(o.projectId, { level: 'info', msg: `Run started (${o.source || 'manual'}${o.version ? `, v${o.version}` : ', draft'})`, flow: o.doc.name, run: id, origin: runOrigin(o.source, o.version) });
     this.notify(id);
     queueMicrotask(() => this.pump());
     return id;
@@ -339,8 +339,8 @@ export class Engine {
         res = await withTimeout(Promise.resolve(exec), timeoutMs, ac, `${node.name} did not finish within ${timeoutMs} ms`);
       }
       this.controllers.delete(t.id);
-      for (const l of logs) projectLog(run.row.project_id, { level: l.level as any, msg: maskSecrets(l.msg, revealed), flow: run.doc.name, run: t.run_id, step: node.name });
-      if (wantsStepData(run.row.project_id)) projectLog(run.row.project_id, { level: 'debug', msg: 'Step finished', flow: run.doc.name, run: t.run_id, step: node.name, data: maskSecrets({ input, output: (res as any)?.out ?? (res as any)?.store }, revealed) });
+      for (const l of logs) projectLog(run.row.project_id, { level: l.level as any, msg: maskSecrets(l.msg, revealed), flow: run.doc.name, run: t.run_id, step: node.name, origin: runOrigin(run.row.source, run.row.version) });
+      if (wantsStepData(run.row.project_id)) projectLog(run.row.project_id, { level: 'debug', msg: 'Step finished', flow: run.doc.name, run: t.run_id, step: node.name, origin: runOrigin(run.row.source, run.row.version), data: maskSecrets({ input, output: (res as any)?.out ?? (res as any)?.store }, revealed) });
       if (this.handedOver.delete(t.id)) return;
       if (this.wasCancelled(t.id)) return this.settle(t.run_id);
       this.complete(t, run.doc, node, res || {}, { ms: Date.now() - started, revealed, logs, varsSet, replied });
@@ -351,7 +351,7 @@ export class Engine {
       // Stopped by another branch (End: stop process) or by a person: not a failure of this step.
       if (this.wasCancelled(t.id)) return this.settle(t.run_id);
       const msg = maskSecrets(String(e?.message || e), revealed);
-      projectLog(run.row.project_id, { level: t.attempt < (Number(s.retries) || 0) ? 'warn' : 'error', msg, flow: run.doc.name, run: t.run_id, step: node.name });
+      projectLog(run.row.project_id, { level: t.attempt < (Number(s.retries) || 0) ? 'warn' : 'error', msg, flow: run.doc.name, run: t.run_id, step: node.name, origin: runOrigin(run.row.source, run.row.version) });
       // Activities may attach what they captured (a script's output and error output) for the error branch.
       const failure = Object.assign(new Error(msg), e?.details !== undefined ? { details: maskSecrets(e.details, revealed) } : {});
       this.fail(t, run.doc, node, failure, { ms: Date.now() - started, logs });
@@ -747,7 +747,7 @@ export class Engine {
       this.docs.delete(runId);
       this.resolveReply(runId, run.state, run.row.error);
       const err = q.get<{ error: string }>('select error from runs where id = ?', runId)?.error;
-      projectLog(run.row.project_id, { level: status === 'failed' ? 'error' : 'info', msg: status === 'failed' ? `Run failed: ${err}` : 'Run finished', flow: run.doc.name, run: runId });
+      projectLog(run.row.project_id, { level: status === 'failed' ? 'error' : 'info', msg: status === 'failed' ? `Run failed: ${err}` : 'Run finished', flow: run.doc.name, run: runId, origin: runOrigin(run.row.source, run.row.version) });
       this.observeRun(runId, run.doc.name, status, run.row.started_at, run.row.source, run.state.trace, status === 'failed' ? err : undefined);
       this.finish(runId, status);
       this.runEnded(runId, run.row.flow_id, run.row.source, status);

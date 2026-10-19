@@ -19,7 +19,7 @@ export const lifecycle = {
 };
 
 export function health() {
-  return { ok: true, version, mode: config.mode, engine: config.engineId, startedAt: lifecycle.startedAt };
+  return { ok: true, version, mode: config.mode, environment: config.environment, engine: config.engineId, startedAt: lifecycle.startedAt };
 }
 
 export function readiness() {

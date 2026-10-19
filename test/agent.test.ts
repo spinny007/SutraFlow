@@ -17,8 +17,10 @@ const { hidePersonalData } = await import('../server/src/ai/guard.js');
 
 /** A fake Ollama: each chat request is answered by the current script from its prompt. */
 let script: (prompt: string, system: string) => unknown = () => ({ answer: 'ok' });
-const calls: { prompt: string; system: string; at: number }[] = [];
+const calls: { prompt: string; system: string; at: number; end?: number }[] = [];
 let delayMs = 0;
+/** Extra wait for one prompt (by its message), to hold a session busy. */
+let delayFor: (prompt: string) => number = () => 0;
 let fake: http.Server, fakeUrl = '';
 
 let srv: Awaited<ReturnType<typeof boot>>;
@@ -32,8 +34,11 @@ before(async () => {
       if (req.url === '/api/embed') { res.end(JSON.stringify({ model: b.model, embeddings: b.input.map((t: string) => knowledge.builtInVector(t, 64)) })); return; }
       const system = b.messages?.find((m: any) => m.role === 'system')?.content || '';
       const prompt = b.messages?.find((m: any) => m.role === 'user')?.content || '';
-      calls.push({ prompt, system, at: Date.now() });
-      if (delayMs) await new Promise(r => setTimeout(r, delayMs));
+      const call: { prompt: string; system: string; at: number; end?: number } = { prompt, system, at: Date.now() };
+      calls.push(call);
+      const wait = delayMs + delayFor(prompt);
+      if (wait) await new Promise(r => setTimeout(r, wait));
+      call.end = Date.now();
       const out = script(prompt, system);
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify({ model: 'fake', message: { role: 'assistant', content: typeof out === 'string' ? out : JSON.stringify(out) }, prompt_eval_count: 100, eval_count: 20 }));
@@ -92,18 +97,22 @@ test('an agent uses a tool Sutra, answers, and remembers the conversation', asyn
 
 test('messages of one session are handled one at a time, in arrival order; other sessions run alongside', async () => {
   calls.length = 0;
-  delayMs = 150;
+  delayMs = 50;
+  // msg1 holds its session for 1.5 s at the model: msg2 and msg3 must wait, msg9 (another session) must not.
+  delayFor = p => (/Now:\nuser: msg1\b/.test(p) ? 1500 : 0);
   script = p => ({ answer: `answer to ${/user: (msg\d)/.exec(p.split('Now:')[1] || '')?.[1]}` });
   const doc = agentDoc({ tools: 'none' });
   const ids = ['msg1', 'msg2', 'msg3'].map(m => engine.startRun({ doc, projectId: pid, input: { message: m, sessionId: 'queue-1' } }));
   const other = engine.startRun({ doc, projectId: pid, input: { message: 'msg9', sessionId: 'queue-2' } });
   for (const id of [...ids, other]) await engine.waitFor(id, 30000);
   delayMs = 0;
+  delayFor = () => 0;
   const { getResource } = await import('../server/src/resources.js');
   const turns = (await memory.loadSession(getResource(mem)!, () => '', 'queue-1')).turns.map(t => t.content);
   assert.deepEqual(turns, ['msg1', 'answer to msg1', 'msg2', 'answer to msg2', 'msg3', 'answer to msg3'], 'strictly one after the other, first come first served');
-  const starts = Object.fromEntries(calls.map(c => [/user: (msg\d)/.exec(c.prompt.split('Now:')[1])![1], c.at]));
-  assert.ok(starts.msg9 < starts.msg3, 'another session does not wait for this one');
+  const byMsg = Object.fromEntries(calls.map(c => [/user: (msg\d)/.exec(c.prompt.split('Now:')[1])![1], c as any]));
+  assert.ok(byMsg.msg9.at < byMsg.msg1.end, 'another session reaches the model while this session is busy');
+  assert.ok(byMsg.msg2.at >= byMsg.msg1.end, 'the next message of the session waits for the one before');
   assert.equal(memory.sessionQueue(getResource(mem)!, 'queue-1').length, 0, 'the queue is empty afterwards');
 });
 

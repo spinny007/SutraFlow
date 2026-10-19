@@ -15,6 +15,7 @@ export type ExplorerSel =
   | { kind: 'variables' }
   | { kind: 'ops' }
   | { kind: 'logging' }
+  | { kind: 'log' }
   | { kind: 'releases' };
 
 export function ProjectExplorer({ flows, flowId, openFlow, newFlow, sel, setSel, onFlowsChanged }: {
@@ -78,10 +79,11 @@ export function ProjectExplorer({ flows, flowId, openFlow, newFlow, sel, setSel,
       {sec('wsdl', 'Service descriptors', schemas.filter(s => s.kind === 'wsdl').length, () => setSel({ kind: 'newSchema', schemaKind: 'wsdl' }),
         <FolderTree area="wsdl" activeId={sel?.kind === 'schema' ? sel.id : null} onChanged={reload} open={id => setSel({ kind: 'schema', id })}
           items={schemas.filter(s => s.kind === 'wsdl').map(s => ({ id: s.id, name: s.name, folder: s.folder, icon: 'W', sub: 'WSDL' }))} />)}
-      {sec('cfg', 'Configuration', 4, undefined, <>
+      {sec('cfg', 'Configuration', 5, undefined, <>
         {item(`Project variables (${project?.config.variables.length ?? 0})`, isSel({ kind: 'variables' }), () => setSel({ kind: 'variables' }), '$')}
         {item('Deployment config (ops)', isSel({ kind: 'ops' }), () => setSel({ kind: 'ops' }), '⇅')}
         {item('Logging', isSel({ kind: 'logging' }), () => setSel({ kind: 'logging' }), '≡')}
+        {item('Project log', isSel({ kind: 'log' }), () => setSel({ kind: 'log' }), '☰')}
         {item('Releases (packages)', isSel({ kind: 'releases' }), () => setSel({ kind: 'releases' }), '⬢')}
       </>)}
       {creating && <NewProjectDialog onClose={() => setCreating(false)} onCreated={async id => { setCreating(false); setProjectId(id); setSel(null); await reload(); }} />}
@@ -253,6 +255,7 @@ export function ExplorerEditor({ sel, setSel }: { sel: ExplorerSel; setSel(s: Ex
       {sel.kind === 'variables' && <VariablesEditor />}
       {sel.kind === 'ops' && <OpsEditor />}
       {sel.kind === 'logging' && <LoggingEditor />}
+      {sel.kind === 'log' && <ProjectLog />}
       {sel.kind === 'releases' && <ReleasesPanel />}
     </div></aside>
   );
@@ -497,7 +500,6 @@ function LoggingEditor() {
   const { project, reload } = useCatalog();
   const toast = useToast();
   const [l, setL] = useState<LoggingConfig>(() => structuredClone(project!.config.logging));
-  const [tail, setTail] = useState<{ file: string | null; lines: string[] } | null>(null);
   const save = async () => {
     try { await put(`/api/projects/${project!.id}`, { name: project!.name, config: { logging: l } }); await reload(); toast('Logging saved'); }
     catch (e: any) { toast(e.message, true); }
@@ -514,9 +516,86 @@ function LoggingEditor() {
         <div className="fld"><label htmlFor="lk">Files kept</label><input id="lk" type="number" value={l.maxFiles} onChange={e => setL({ ...l, maxFiles: Number(e.target.value) })} /></div>
       </div>
       <div className="fld"><label className="check"><input type="checkbox" checked={l.stepData} onChange={e => setL({ ...l, stepData: e.target.checked })} /> Log each activity's input and output (debug level)</label></div>
-      <div className="row"><button className="btn primary" onClick={save}>Save</button>
-        <button className="btn" onClick={() => get(`/api/projects/${project!.id}/log?lines=200`).then(setTail).catch(e => toast(e.message, true))}>View log</button></div>
-      {tail && <><p className="sub" style={{ marginTop: 10 }}>{tail.file || 'Logging is off'}</p>{tail.lines.length ? <pre className="json">{tail.lines.join('\n')}</pre> : <p className="muted">Empty.</p>}</>}
+      <div className="row"><button className="btn primary" onClick={save}>Save</button></div>
+      <p className="muted xs">Read, search and clear the log under Configuration &gt; Project log.</p>
+    </>
+  );
+}
+
+/** One log line with its server and run origin as coloured tags (text lines "{production, deployed v3}" or JSON lines). */
+function LogLine({ line }: { line: string }) {
+  let env = '', origin = '', rest = line;
+  const m = /^(\S+ \S+\s+)\{(production|test|development)(?:, ([^}]+))?\} ?(.*)$/.exec(line);
+  if (m) { env = m[2]; origin = m[3] || ''; rest = m[1] + m[4]; }
+  else if (line.startsWith('{')) { try { const j = JSON.parse(line); env = j.environment || ''; origin = j.origin || ''; } catch { /* plain */ } }
+  return (
+    <div>
+      {env && <span className={`ltag env-${env}`}>{env}</span>}
+      {origin && <span className={`ltag ${origin.startsWith('deployed') ? 'org-deployed' : 'org-editor'}`}>{origin}</span>}
+      {rest}
+    </div>
+  );
+}
+
+const sizeText = (b: number) => (b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : b > 1024 ? `${Math.round(b / 1024)} KB` : `${b} bytes`);
+
+/**
+ * The project's log file: newest lines, by level and words, refreshed on demand or every 5 seconds.
+ * Developers clear it, and their own test runs, on development and test servers; on a production
+ * server only an administrator can.
+ */
+function ProjectLog() {
+  const { project } = useCatalog();
+  const toast = useToast();
+  const [f, setF] = useState({ level: '', q: '', lines: '200', origin: '' });
+  const [auto, setAuto] = useState(false);
+  const [data, setData] = useState<{ file: string | null; lines: string[]; bytes: number; files: number; environment: string } | null>(null);
+  const [confirm, setConfirm] = useState<'log' | 'runs' | null>(null);
+  const load = () => {
+    const p = new URLSearchParams({ lines: f.lines, ...(f.level ? { level: f.level } : {}), ...(f.q ? { q: f.q } : {}), ...(f.origin ? { origin: f.origin } : {}) });
+    return get<any>(`/api/projects/${project!.id}/log?${p}`).then(setData).catch(e => toast(e.message, true));
+  };
+  useEffect(() => { load(); }, [project?.id, f.level, f.lines, f.origin]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!auto) return; const t = window.setInterval(load, 5000); return () => window.clearInterval(t); }, [auto, f]); // eslint-disable-line react-hooks/exhaustive-deps
+  const prod = data?.environment === 'production';
+  const clear = async () => {
+    try {
+      if (confirm === 'log') { const r = await post<any>(`/api/projects/${project!.id}/log/clear`, {}); toast(`Log cleared (${sizeText(r.cleared)})`); }
+      else { const r = await post<any>(`/api/projects/${project!.id}/runs/clear-tests`, {}); toast(`${r.deleted} test runs deleted`); }
+      setConfirm(null); load();
+    } catch (e: any) { toast(e.message, true); }
+  };
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([(data?.lines || []).join('\n') + '\n'], { type: 'text/plain' }));
+    const a = document.createElement('a'); a.href = url; a.download = `${project!.name.replace(/[^\w.-]+/g, '-')}-log.txt`; a.click(); URL.revokeObjectURL(url);
+  };
+  return (
+    <>
+      <div className="phead"><div><h2>Project log</h2><p>What this project's runs wrote to its log file, newest at the bottom. <span className={`badge ${prod ? 'failed' : 'done'}`}>{data?.environment || 'development'} server</span></p></div></div>
+      <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+        <div className="fld"><label htmlFor="pl-level">Level</label><select id="pl-level" value={f.level} onChange={e => setF({ ...f, level: e.target.value })}><option value="">All</option><option value="info">Info and above</option><option value="warn">Warnings and errors</option><option value="error">Errors</option></select></div>
+        <div className="fld"><label htmlFor="pl-origin">Runs from</label><select id="pl-origin" value={f.origin} onChange={e => setF({ ...f, origin: e.target.value })}><option value="">All</option><option value="deployed">Deployed Sutras</option><option value="editor">Designer tests</option></select></div>
+        <div className="fld"><label htmlFor="pl-lines">Lines</label><select id="pl-lines" value={f.lines} onChange={e => setF({ ...f, lines: e.target.value })}>{['200', '500', '2000'].map(x => <option key={x}>{x}</option>)}</select></div>
+        <div className="fld" style={{ flex: 1, minWidth: 140 }}><label htmlFor="pl-q">Contains</label><input id="pl-q" type="text" value={f.q} onChange={e => setF({ ...f, q: e.target.value })} onKeyDown={e => { if (e.key === 'Enter') load(); }} placeholder="Sutra, run id, words" /></div>
+      </div>
+      <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+        <button className="btn" onClick={load}>Refresh</button>
+        <label className="check"><input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} /> Every 5 s</label>
+        <button className="btn" disabled={!data?.lines.length} onClick={download}>Download</button>
+        <button className="btn danger" disabled={!data?.bytes} onClick={() => setConfirm('log')}>Clear log</button>
+        <button className="btn danger" onClick={() => setConfirm('runs')}>Clear test runs</button>
+      </div>
+      <p className="muted xs">{data?.file ? `${data.file} · ${sizeText(data.bytes)}${data.files > 1 ? ` in ${data.files} files` : ''}` : 'Logging is off: turn it on under Configuration > Logging.'}{prod ? ' On a production server only an administrator can clear.' : ''}</p>
+      {confirm && (
+        <div className="warnbox" role="alertdialog" aria-label="Confirm">
+          {confirm === 'log' ? `Empty the log file and delete its rotated copies (${sizeText(data?.bytes || 0)})?` : 'Delete the finished test and debug runs of this project? Deployed runs are kept.'} This cannot be undone.
+          <div className="row" style={{ marginTop: 6 }}><button className="btn danger small" onClick={clear}>Delete</button><button className="btn small" onClick={() => setConfirm(null)}>Cancel</button></div>
+        </div>
+      )}
+      <p className="muted xs">Each line says where it comes from: <span className="ltag env-production">production</span> <span className="ltag env-test">test</span> <span className="ltag env-development">development</span> server, and <span className="ltag org-deployed">deployed v3</span> (a deployed Sutra and its version) or <span className="ltag org-editor">editor test</span> (a test or debug run from the designer).</p>
+      {data && (data.lines.length
+        ? <pre className="json loglines" style={{ maxHeight: '60vh', overflow: 'auto' }}>{data.lines.map((l, i) => <LogLine key={i} line={l} />)}</pre>
+        : <p className="muted">{f.level || f.q || f.origin ? 'No lines match.' : 'Empty.'}</p>)}
     </>
   );
 }

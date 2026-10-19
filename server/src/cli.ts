@@ -76,6 +76,10 @@ const HELP = `sutra <command> [options]
             API tokens of a system account, for scripts and pipelines.
   audit     [--actor name] [--outcome ok|failed|denied] [--from 2026-10-01] [--csv]
             Who did what, when, and with what outcome.
+  audit     retention [<days>]
+            How long audit entries are kept; with a number, sets it (0 = keep everything).
+  audit     clear --before 2026-10-01 | --older | --all
+            Clears audit entries before a date, older than the retention, or all; the clearing is recorded.
 
   Alerts (need --server):
   alerts    [list | history] | ack <id> | resolve <id> | check | rules | channels | test <channel>
@@ -485,6 +489,19 @@ async function operate(cmd: string, a: Args, call: Call): Promise<number> {
       }
     }
     throw new Usage('Use: sutra alerts [list | history | ack <id> | resolve <id> | check | rules | channels | test <channel>]');
+  }
+  if (cmd === 'audit' && sub === 'retention') {
+    if (a._[2] === undefined) { const s = await call('GET', '/api/audit/policy'); out(`Audit entries are kept ${s.retentionDays ? `${s.retentionDays} days` : 'for ever'}; ${s.entries} entries, the oldest from ${s.oldest || '-'}.`); return 0; }
+    const s = await call('PUT', '/api/audit/policy', { retentionDays: Number(a._[2]) });
+    out(`Audit entries are now kept ${s.retentionDays ? `${s.retentionDays} days` : 'for ever'}.`);
+    return 0;
+  }
+  if (cmd === 'audit' && sub === 'clear') {
+    const body = a.all ? { all: true } : a.older ? { olderThanRetention: true } : str(a, 'before') ? { before: str(a, 'before') } : null;
+    if (!body) throw new Usage('Use: sutra audit clear --before 2026-10-01 | --older | --all');
+    const r = await call('POST', '/api/audit/clear', body);
+    out(`Cleared ${r.deleted} audit entries (${r.what}). The clearing itself is recorded.`);
+    return 0;
   }
   if (cmd === 'audit') {
     const p = new URLSearchParams();

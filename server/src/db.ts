@@ -210,6 +210,14 @@ function migrate() {
   const add = (t: string, c: string, ddl: string) => { if (!cols(t).includes(c)) d.exec(`alter table ${t} add column ${d.kind === 'postgres' ? pgSchema(ddl) : ddl}`); };
   add('flows', 'project_id', 'project_id text');
   add('flows', 'folder', "folder text not null default ''");
+  // Audit entries keep the names of what they were about, so a renamed or deleted item stays readable.
+  add('audit', 'project_name', 'project_name text');
+  add('audit', 'sutra_id', 'sutra_id text');
+  add('audit', 'sutra_name', 'sutra_name text');
+  add('audit', 'environment', 'environment text');
+  add('audit', 'engine', 'engine text');
+  d.exec('create index if not exists audit_project on audit(project_id, at)');
+  d.exec('create index if not exists audit_sutra on audit(sutra_id, at)');
   add('resources', 'folder', "folder text not null default ''");
   add('schemas', 'folder', "folder text not null default ''");
   // Folders kept by the first folder release (Sutras only) move to the folders table.

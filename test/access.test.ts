@@ -190,7 +190,7 @@ test('audit log: changes, sign-ins and refusals; filters; CSV; never passwords o
   assert.ok(denied.length >= 3 && denied.every((e: any) => e.outcome === 'denied'));
   const csv = await call(admin, 'GET', '/api/audit/export?actor=dana');
   assert.match(String(csv.headers['content-type']), /text\/csv/);
-  assert.match(csv.body.split('\n')[0], /^at,actor,actorKind,ip,action,target,projectId,status,outcome,details$/);
+  assert.match(csv.body.split('\n')[0], /^at,environment,engine,actor,actorKind,ip,action,origin,projectName,projectId,sutraName,sutraId,target,status,outcome,details$/);
   const s = await signIn('rel', 'Harbor-light-42');
   assert.equal((await call({ cookie: s.cookie }, 'GET', '/api/audit')).statusCode, 403, 'the audit log needs the Audit permission');
 });

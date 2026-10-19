@@ -43,3 +43,7 @@ export const allActivities = [
   ...coreActivities, ...processActivities, ...transformActivities, ...httpActivities, ...soapActivities, ...fileActivities, ...remoteActivities, ...dbActivities, ...busActivities,
   ...emailActivities, ...firebaseActivities, ...saasActivities, ...microsoftActivities, ...codeActivities, ...scriptActivities, ...releaseActivities, ...aiActivities, ...agentActivities, ...mcpActivities,
 ];
+
+// Models often take 10 to 60 seconds to answer, and local models or long texts longer: AI steps allow
+// 10 minutes by default (a step's Settings tab can still set its own limit).
+for (const a of allActivities) if (a.palette === 'ai' && !a.timeoutMs) a.timeoutMs = 600000;

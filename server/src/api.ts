@@ -16,8 +16,8 @@ import { PIPES, resolve } from './template.js';
 import * as auth from './auth.js';
 import * as access from './access.js';
 import type { Caller } from './access.js';
-import { RULES, OPEN_ROUTES, check, auditRequest } from './guard.js';
-import { audit, listAudit, auditCsv } from './audit.js';
+import { RULES, OPEN_ROUTES, check, auditRequest, auditSubject } from './guard.js';
+import { audit, listAudit, auditCsv, auditStats, clearAudit } from './audit.js';
 import { overview, applications, setSutraEnabled, requestDrain, restartSutra } from './console.js';
 import * as gwa from './gateway/apps.js';
 import * as alerts from './alerts.js';
@@ -31,7 +31,7 @@ import * as projects from './projects.js';
 import * as schemas from './schemas.js';
 import { designSchemas } from './design.js';
 import { evalExpression, functionCatalog, refsOf, ExprError } from './expr.js';
-import { tailLog } from './logger.js';
+import { tailLog, clearLog } from './logger.js';
 import * as oauth from './connectors/oauth.js';
 import { listenerStatus } from './listeners.js';
 import { testResource, prepare } from './resourceTest.js';
@@ -41,7 +41,7 @@ import { health, readiness, lifecycle } from './lifecycle.js';
 import { clusterStatus } from './cluster.js';
 import { prometheusText } from './metrics.js';
 import { tracingStats } from './tracing.js';
-import { housekeeping } from './housekeeping.js';
+import { housekeeping, clearTestRuns } from './housekeeping.js';
 import { buildPackage, checkPackage, deployPackage, packageHistory, readPackage, rollbackPackage, testPackage, importPackage, copyProject } from './packages.js';
 
 const COOKIE = 'sutra_session';
@@ -169,6 +169,7 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     if (!rule) return reply.code(404).send({ error: 'Not found' });
     const denied = check(rule, req.user, req);
     if (denied) { auditRequest(req, 403, rule, denied); return reply.code(403).send({ error: denied }); }
+    if (req.method !== 'GET' && req.method !== 'HEAD' && !rule.quiet) { try { req.auditSubject = auditSubject(req); } catch { /* recorded without names */ } }
   });
   app.addHook('onResponse', async (req: any, reply: FastifyReply) => {
     if (!req.user || !req.url.startsWith('/api/') || reply.statusCode === 403) return;
@@ -183,7 +184,7 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.get('/api/auth/status', async req => {
     const s = auth.verifySession(cookie(req, COOKIE));
     const ok = !!s && access.sessionValid(s.u, s.iat);
-    return { setup: !auth.hasUsers(), user: ok ? access.me({ u: s!.u, kind: 'user' }) : null, version, mode: config.mode };
+    return { setup: !auth.hasUsers(), user: ok ? access.me({ u: s!.u, kind: 'user' }) : null, version, mode: config.mode, environment: config.environment };
   });
   app.post('/api/auth/setup', async (req: any, reply) => {
     if (auth.hasUsers()) throw new HttpError(409, 'Already set up');
@@ -243,8 +244,18 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.get('/api/access/users/:name/tokens', async (req: any) => access.listTokens(req.params.name));
   app.post('/api/access/users/:name/tokens', async (req: any) => { try { return access.createToken(req.params.name, String(req.body?.name || ''), Number(req.body?.expiresDays) || 0); } catch (e) { return accessErr(e); } });
   app.delete('/api/access/users/:name/tokens/:id', async (req: any) => { access.deleteToken(req.params.name, req.params.id); return { ok: true }; });
-  const auditFilter = (qs: any) => ({ actor: qs.actor, action: qs.action, projectId: qs.projectId, outcome: qs.outcome, from: qs.from, to: qs.to, text: qs.q, before: Number(qs.before) || undefined, limit: Number(qs.limit) || undefined });
+  const auditFilter = (qs: any) => ({ environment: qs.environment, actor: qs.actor, action: qs.action, projectId: qs.projectId, sutraId: qs.sutraId, outcome: qs.outcome, from: qs.from, to: qs.to, text: qs.q, before: Number(qs.before) || undefined, limit: Number(qs.limit) || undefined });
   app.get('/api/audit', async (req: any) => listAudit(auditFilter(req.query || {})));
+  app.get('/api/audit/policy', async () => auditStats());
+  app.put('/api/audit/policy', async (req: any) => {
+    const days = Number(req.body?.retentionDays);
+    if (!Number.isInteger(days) || days < 0 || days > 3650) throw bad('Days to keep: a whole number from 0 (keep everything) to 3650');
+    setEngineTuning({ auditRetentionDays: days });
+    return auditStats();
+  });
+  app.post('/api/audit/clear', async (req: any) => {
+    try { return { ...clearAudit(req.body || {}, { actor: req.user.u, actorKind: req.user.kind, ip: req.ip }), ...auditStats() }; } catch (e: any) { throw bad(e.message); }
+  });
   app.get('/api/audit/export', async (req: any, reply) => {
     reply.header('content-disposition', `attachment; filename="sutraflow-audit-${new Date().toISOString().slice(0, 10)}.csv"`);
     return reply.type('text/csv; charset=utf-8').send(auditCsv(auditFilter(req.query || {})));
@@ -409,7 +420,13 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.put('/api/engine-variables', async (req: any) => {
     return projects.saveEngineVariables(Array.isArray(req.body) ? req.body : []);
   });
-  app.get('/api/projects/:id/log', async (req: any) => tailLog(req.params.id, Math.min(2000, Number(req.query?.lines) || 200)));
+  app.get('/api/projects/:id/log', async (req: any) => ({ ...tailLog(req.params.id, Math.min(2000, Number(req.query?.lines) || 200), { level: req.query?.level, q: req.query?.q, origin: req.query?.origin }), environment: config.environment }));
+  /** Developers clear project logs and test runs on development and test servers; on production, only administrators. */
+  const devOnly = (req: any, what: string) => {
+    if (config.environment === 'production' && !access.can(req.user, 'auditManage')) throw new HttpError(403, `This is a production server: only an administrator may clear ${what}`);
+  };
+  app.post('/api/projects/:id/log/clear', async (req: any) => { projects.requireProject(req.params.id); devOnly(req, 'project logs'); return clearLog(req.params.id); });
+  app.post('/api/projects/:id/runs/clear-tests', async (req: any) => { projects.requireProject(req.params.id); devOnly(req, 'test runs'); return { deleted: clearTestRuns(req.params.id) }; });
 
   // ---------- OAuth connections ----------
   const redirectUri = (req: FastifyRequest) => `${req.protocol}://${req.headers.host}/api/oauth/callback`;
@@ -454,6 +471,7 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.get('/api/flows', async (req: any) => { const ok = seen(req); return flows.listFlows(req.query?.projectId).filter(f => ok(f.projectId)); });
   app.post('/api/flows', async (req: any) => {
     const f = flows.saveFlow(undefined, req.body?.doc ?? req.body, req.body?.projectId);
+    req.auditCreated = f.id;
     return req.body?.folder ? flows.setFlowFolder(f.id, req.body.folder) : f;
   });
   app.put('/api/flows/:id/folder', async (req: any) => flows.setFlowFolder(req.params.id, req.body?.folder));

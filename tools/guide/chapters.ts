@@ -55,6 +55,7 @@ export const CHAPTERS: Chapter[] = [
 <tr><td><code>SUTRA_MAX_STEPS</code></td><td>10000</td><td>Safety limit of steps per run.</td></tr>
 <tr><td><code>SUTRA_REPLY_TIMEOUT_MS</code></td><td>60000</td><td>How long an API caller waits for the reply step.</td></tr>
 <tr><td><code>SUTRA_DB</code></td><td>SQLite in the data folder</td><td><code>postgres://user:pass@host/db</code> to keep everything in PostgreSQL.</td></tr>
+<tr><td><code>SUTRA_ENVIRONMENT</code></td><td>development (studio), production (headless engine)</td><td>What the server is for: <code>development</code>, <code>test</code> or <code>production</code>. Shown on every log line and audit entry; on production only administrators clear project logs.</td></tr>
 </tbody></table>
 <p class="h">A development machine on Windows: Laragon</p>
 <p>For development and proofs of concept on Windows, <strong>Laragon</strong> is a convenient base: one installer brings Apache, MySQL, PostgreSQL, PHP, Node.js and HeidiSQL, starts them from one window, and keeps everything under <code>C:\\laragon</code>. The DB Ops samples use its MySQL as it comes (127.0.0.1:3306, user root, no password), and SutraFlow itself can keep its data in its PostgreSQL.</p>
@@ -148,6 +149,9 @@ export const CHAPTERS: Chapter[] = [
 <li>Packages and project copies keep each item's folder.</li>
 <li>Importing chosen Sutras (a new project from a package or a copy) brings the connections, schemas and service descriptors those Sutras use, directly or through each other (an MCP server and its policy), in their folders, and nothing else.</li>
 </ul>
+<p class="h">Project log</p>
+<p><em>Configuration &gt; Project log</em> shows what this project's runs wrote to its log file (set it up under <em>Logging</em>), newest at the bottom. Filter by level, by <em>Runs from</em> (deployed Sutras or designer tests) and by words; refresh it every 5 seconds; download what is shown. Every line carries two tags: the server it ran on (<em>production</em>, <em>test</em>, <em>development</em>) and the run, <em>deployed v3</em> for a deployed Sutra and its version, or <em>editor test</em> / <em>editor debug</em> for the designer's own runs. In the file a line reads <code>2026-10-19T09:12:03Z INFO  {development, editor test} [Orders / 3f2a91c0 / Check stock] ...</code>.</p>
+<p><strong>Clear log</strong> empties the file and its rotated copies; <strong>Clear test runs</strong> deletes the finished test and debug runs of the project and keeps deployed runs. Developers may do both on development and test servers; on a production server only an administrator may. Both are recorded in the audit log.</p>
 <p class="h">Missing project variables</p>
 <p>When a step reads a project variable the project does not define (<code>{{gv.X}}</code>, <code>{gv.X}</code>, <code>$gv.X</code> in JSONata or <code>get-project-variable('X')</code>), the activity shows ⚠ on the canvas and a warning at the top of its tabs, and it reads as empty while running. The same warning shows on a connection that reads one, and on every step that uses that connection. <strong>Add to project variables</strong> adds the missing names; give them values under <em>Configuration &gt; Project variables</em>. <em>Deploy</em> lists the same warnings.</p>
 <p class="h">Add a connection</p>
@@ -425,7 +429,7 @@ export const CHAPTERS: Chapter[] = [
 <tr><td>Wait between attempts</td><td>5 s</td><td>The pause before the next try.</td></tr>
 <tr><td>Keep-alive every</td><td>15 s</td><td>SFTP only: keeps a slow session open through firewalls. 0 turns it off.</td></tr>
 </tbody></table>
-<p>The step itself has a time limit too, in its <em>Settings</em> tab. SFTP and FTP steps allow 10 minutes by default (other activities 2 minutes); raise it for very large files. When a limit is passed, the error says which one, for example <em>Reading inbox/big.csv took longer than 60 s (Response time limit of the connection)</em>.</p>`,
+<p>The step itself has a time limit too, in its <em>Settings</em> tab. SFTP and FTP steps and every AI activity allow 10 minutes by default (other activities 2 minutes); raise it for very large files or slow models. When a limit is passed, the error says which one, for example <em>Reading inbox/big.csv took longer than 60 s (Response time limit of the connection)</em>.</p>`,
   },
   {
     id: 'apps', title: 'Databases, email, Firebase and apps',
@@ -668,7 +672,19 @@ sutra gateway stats --period 24h</pre>
 </tbody></table>
 [[note:Always one administrator|Nobody can disable or delete their own account, and the last active administrator cannot lose the role.]]
 <p class="h">Audit log</p>
-<p>Every change, sign-in and refused request is recorded with who, when, from which address, what, the project and the result. Filter by person, result, text and dates; <em>Export CSV</em> saves what the filters show. Passwords, secret values and tokens are never recorded. Entries are kept for <code>SUTRA_AUDIT_RETENTION_DAYS</code> (365).</p>
+<p>Every change, sign-in and refused request is recorded with who, when, from which address, what and the result, and with where it happened:</p>
+<ul>
+<li><strong>Where</strong>: the server (<em>production</em>, <em>test</em> or <em>development</em>, from <code>SUTRA_ENVIRONMENT</code>) and the engine, and whether it was a designer test run or a deployed Sutra.</li>
+<li><strong>Project</strong> and <strong>Sutra</strong>: name and id. The names are kept with the entry, so a renamed or deleted Sutra still reads as it was.</li>
+</ul>
+<p>Filter by server, project, Sutra (choose the project first), person, result, words and dates; <em>Export CSV</em> saves what the filters show, with all these columns. Passwords, secret values and tokens are never recorded. Entries recorded before this version show no server.</p>
+<p class="h">Audit retention and clearing</p>
+<p>The <em>Retention</em> card at the top of the Audit page shows how many entries there are, the oldest, and when the log was last cleared and by whom. With the <strong>Audit settings and clearing</strong> permission (Administrators have it):</p>
+<ul>
+<li><strong>Keep entries (days)</strong>: housekeeping deletes older entries; 0 keeps everything. The default is <code>SUTRA_AUDIT_RETENTION_DAYS</code> (365).</li>
+<li><strong>Delete older entries now</strong>, <strong>Clear before</strong> a date, or <strong>Clear all</strong>, each after a confirmation.</li>
+</ul>
+<p>Clearing is recorded as an entry of its own (who, what, how many), so the log always shows that it was cleared. From a shell: <code>sutra audit retention 180</code>, <code>sutra audit clear --before 2026-01-01</code>.</p>
 <p class="h">The first administrator of a headless engine</p>
 <p>A headless engine has no first-start page, so nobody who reaches it can claim it. Add the first administrator on the server, then sign in at <code>/admin</code>:</p>
 <pre>sutra user add admin --role administrator --password-from-env ADMIN_PASSWORD
