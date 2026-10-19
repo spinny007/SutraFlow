@@ -1,223 +1,204 @@
 # SutraFlow
 
-A visual integration designer and engine. You drag activities from palettes onto a canvas, map data between steps, test-run, and deploy Sutras that run on the server, either on a schedule or as REST and SOAP APIs secured by policies and TLS.
+**A visual integration designer and engine.** Drag activities onto a canvas, map data between steps, test and debug, and deploy *Sutras* (integration processes) that run as REST, SOAP and MCP services, on schedules, or on events: files, queues, mail, cloud drives, chat messages and more.
 
-One Node.js Sutra contains the studio, the engine and the gateway. Storage is SQLite, built into Node, so there is no database to install.
+![Version](https://img.shields.io/badge/version-1.6.0-2f6fd8)
+![Node.js](https://img.shields.io/badge/node-%E2%89%A5%2022.13-339933?logo=node.js&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-7-3178c6?logo=typescript&logoColor=white)
+![Database](https://img.shields.io/badge/database-SQLite%20%7C%20PostgreSQL-4169e1?logo=postgresql&logoColor=white)
+![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Docker-555)
+![Tests](https://img.shields.io/badge/tests-272-success)
+
+![The SutraFlow designer: palettes, canvas and the step inspector](docs/guide-images/designer.jpg)
+
+## Contents
+
+- [Features](#features)
+- [Quick start](#quick-start)
+- [Documentation](#documentation)
+- [Palettes](#palettes)
+- [Releases and CI/CD](#releases-and-cicd)
+- [Running in production](#running-in-production)
+- [Configuration](#configuration)
+- [Development](#development)
+- [Project layout](#project-layout)
+- [Testing](#testing)
+- [Known limitations](#known-limitations)
+- [Contributing](#contributing)
+- [Security](#security)
+- [License](#license)
+
+## Features
+
+- **Visual designer**: 118 activities in 18 palettes, drag-and-drop data mapping with For-Each, Where, Group by and Sort by, more than 100 formula functions, JSONata, live previews, step-by-step debugging with breakpoints, undo and redo, folders, and a description on every step.
+- **Durable engine**: every step is checkpointed in the database; approvals and long waits cost nothing while they wait; runs survive restarts and resume where they stopped; retries with backoff, error branches, an Error handler, loops, Merge, sub-Sutras, and resubmitting failed runs from the failed step.
+- **APIs and gateway**: REST and SOAP services with generated WSDL and OpenAPI; security policies (API keys, Basic, JWT, mutual TLS, WS-Security UsernameToken, IP allow lists, rate limits, CORS); gateway apps with keys, OAuth client-credentials tokens, plans and a firewall; TLS with your own certificate or Let's Encrypt.
+- **AI**: AI steps (prompt, classify, route, extract, summarize, translate, sentiment) on Claude, OpenAI, Gemini, Ollama and other providers; AI agents with tools, memory, guardrails, people in the loop and hand-offs; knowledge bases for RAG (built-in, pgvector, Qdrant, Chroma, Pinecone); Sutras published as MCP tools for Claude and other assistants; agents as chat pages, an OpenAI-compatible API and A2A.
+- **Connectors**: HTTP, SOAP with WS-Security, files, SFTP and FTP, PostgreSQL, MySQL, SQL Server, Oracle and SQLite, Kafka, RabbitMQ and ActiveMQ, email, Firebase, Google Drive, Sheets and Docs, SharePoint and OneDrive, Dropbox, YouTube, Twitch, Discord, Telegram, Facebook Pages, Azure Data Factory, Databricks, Python, PowerShell and shell scripts, and any OAuth REST API.
+- **Operations**: an Admin Console for deployed applications (start, stop, tuning, runs, approvals, engines, alerts, gateway traffic, users and roles, system accounts, audit log, releases, the database); clusters of engines on PostgreSQL with a leader, failover and graceful drain; Prometheus metrics, OpenTelemetry traces and JSON logs.
+- **Releases**: projects in Git from the designer; release zips with the deployment config, documentation and files; built by a CI/CD pipeline straight from Git with the `sutra` command; deployed by command line or the Admin Console, with history and rollback.
+- **Documentation from the design**: each Sutra and project produces its own documentation (HTML and Markdown) from its steps and their descriptions.
+
+![The Admin Console: deployed applications and their Sutras](docs/guide-images/console-apps.jpg)
 
 ## Quick start
 
-Requires Node.js 22.13 or later (24 recommended).
+**Requirements**: [Node.js](https://nodejs.org) 22.13 or later (24 recommended). Nothing else: the database is SQLite, built into Node. Python 3, PostgreSQL, Docker and AI models are optional.
 
 ```bash
-bin/sutraflow setup        # Windows: bin\sutraflow.cmd setup   (npm install, npm run build, sutraflow.env)
-bin/sutraflow start        # the studio, in the background
-bin/sutraflow open         # http://127.0.0.1:4800
+git clone https://github.com/spinny007/SutraFlow.git
+cd SutraFlow
+bin/sutraflow setup     # npm install, build, and sutraflow.env      (Windows: bin\sutraflow.cmd setup)
+bin/sutraflow start     # the studio, in the background
+bin/sutraflow open      # http://127.0.0.1:4800
 ```
 
-Open http://127.0.0.1:4800 and create the administrator account.
+Create the administrator account on the first visit, then **+ New Sutra → Samples** for working examples, or **New project → Package file → Or a sample project** for a whole project (an AI document assistant over a folder of PDF, Word and PowerPoint files).
 
-The `sutraflow` launcher is the one place for every command, on Windows and Linux, with or without Docker: `start [engine]`, `stop [engine|all]`, `restart`, `status`, `logs [--follow]`, `open [admin|guide]`, `cli <sutra command>`, `db info | db copy --to <postgres://...>`, `service` (systemd unit or Windows task), `docker [cluster] up|down|status|logs|build`. Settings (ports, data folder, database, Node path) are in `sutraflow.env`, made from `sutraflow.env.example` on first use. `npm start` still runs the server in the terminal. Deployed services are served by the gateway on port 8080 (HTTP) and 8443 (HTTPS once a certificate is set).
+The `sutraflow` launcher is the one place for every command on Windows and Linux: `start [engine]`, `stop [engine|all]`, `restart`, `status`, `logs [--follow]`, `open`, `cli <sutra command>`, `db`, `service` (start with the machine) and `docker [cluster] up|down|status|logs|build`. Settings are in `sutraflow.env`.
 
-For development with hot reload (studio on http://localhost:5173, API proxied to 4800):
+| Port | Default | For |
+|---|---|---|
+| Studio (admin) | `127.0.0.1:4800` | The designer, the Admin Console (`/admin`), the user guide (`/guide`) and the admin API. Keep it private. |
+| Gateway | `8080` (HTTP), `8443` (HTTPS) | The deployed Sutras: REST, SOAP, MCP, agents, `/oauth/token`, `/openapi.json`, `/health`. |
+| Headless engine | `4801`, gateway `9080` / `9443` | An engine without the designer, beside the studio or on other machines. |
 
-```bash
-npm run dev
-```
+## Documentation
 
-Run the test suite:
-
-```bash
-npm test
-```
-
-## Releasing and running in production
-
-Full guide: [docs/deployment.md](docs/deployment.md).
-
-- **Packages**: a release is one `.sutra` file with the whole project (Sutras at fixed versions, connections without secret values, schemas, variables), checked, deployed by name, recorded, and rolled back. In the studio: Project → Releases. From a Sutra: the **Release** palette (build, check, deploy, roll back, on this server or remote engines).
-- **Command line**: `sutra package | check | deploy | test | history | rollback | secret | status`, locally or against a server with `SUTRA_ADMIN_TOKEN`.
-- **Headless engines**: `SUTRA_MODE=engine` (no studio; token-only automation API; packages in `SUTRA_DEPLOY_DIR` deployed at start).
-- **Docker**: `Dockerfile`, `docker-compose.yml` (studio + engine), `docker-compose.cluster.yml` (PostgreSQL + studio + two engines).
-- **Clusters**: several engines on one database (`SUTRA_DB=postgres://...`). Work is shared and each step runs once; one leader runs timers and listeners, with failover; a dead engine's steps are finished by another; deploys reach every engine. Shutdown drains running steps (SIGTERM or `POST /api/engine/drain`).
-- **Monitoring**: `/health`, `/ready`, Prometheus `/metrics`, OpenTelemetry traces (`OTEL_EXPORTER_OTLP_ENDPOINT`), JSON logs (`SUTRA_LOG_FORMAT=json`). Finished runs are deleted after `SUTRA_RUN_RETENTION_DAYS`; failed runs can run again from the failed step.
-
-## Sample Sutras
-
-**+ New Sutra → Choose samples** adds working examples, all or the ones you tick: 31 Sutras that between them use every starter and every activity. They cover mapping (For-Each, loops), flow control (sub-Sutras, try / catch, routing, connection conditions), REST and SOAP (serving and calling), files (timer archive, file trigger drop folder, CSV import, text formats), databases (SQLite queries, updates, stored procedures), channels, counters, scripts (PowerShell, bash, programs), AI (local Ollama: classify, summarize, sentiment, translate, extract, route, reply), email (sending, inbox trigger), the service bus, Firebase, Google Drive and Sheets, Dropbox, YouTube, and MCP skills. Those needing a connection or a local model say so.
-
-## MCP skills
-
-A Sutra that starts with **MCP skill** is a tool AI assistants call over the Model Context Protocol; **Reply to AI** returns the outcome. An **MCP server** connection groups skills at an address on the gateway (for example `/mcp/orders`) with instructions and a security policy:
-
-```
-claude mcp add --transport http orders https://your-server:8443/mcp/orders --header "X-API-Key: your-key"
-```
-
-## User guide
-
-The full user guide is [docs/sutraflow-user-guide.html](docs/sutraflow-user-guide.html), also served by the studio at http://127.0.0.1:4800/guide (the **Guide** button in the top bar). It covers every screen, chapter by chapter, and every activity, connection type, function and pipe with its settings.
-
-The **Admin Console** at http://127.0.0.1:4800/admin (also on headless engines) manages what is deployed: applications and their Sutras (start, stop, restart, runs, versions, tuning, packages), engines, approvals, the gateway (apps and keys, plans, firewall, traffic, APIs and OpenAPI), users, system accounts, roles and the audit log. Every action also shows its `sutra` command and HTTP call for PowerShell and bash.
-
-How SutraFlow works inside, what every file does, deployment and features, with diagrams and a search box: [docs/sutraflow-architecture.html](docs/sutraflow-architecture.html), served at http://127.0.0.1:4800/architecture.
-
-```bash
-npm run guide          # rebuild the guide from the code (tools/build-user-guide.ts)
-npm run guide:shots    # retake its screenshots from a running server (headless Edge or Chrome)
-npm run architecture   # rebuild the architecture page (tools/build-architecture.ts)
-```
-
-## Projects
-
-The Designer's left panel has two tabs: **Project** (explorer) and **Palettes**. A project holds:
-
-| Item | Use |
+| Document | What it covers |
 |---|---|
-| Sutras | the Sutras, each with **Sutra variables** (`{vars.x}`) |
-| Resources | shared connections and security: HTTP, outbound security, API policies, databases, Kafka / RabbitMQ / ActiveMQ, SMTP / IMAP, Firebase, OAuth accounts, AI provider. Renameable; the name is the key in the deployment config |
-| Schemas | shared JSON (JSON Schema or a sample document) and XML (XSD) schemas that activities pick for payloads, bodies and mapping targets |
-| Service descriptors | WSDL files that Invoke SOAP service can call |
-| Project variables | `{gv.NAME}` ($_projectVariables) of type string, number, boolean or secret |
-| Deployment config | per-environment overrides for variables, resource settings and logging; exported/imported as one JSON file, or dropped in `data/config/<project>.json`; values may use `${env:NAME}` or `${env:NAME:-default}` |
-| Logging | log file per project (path, level, text/JSON, rotation, optional step input/output) |
+| [User guide](docs/sutraflow-user-guide.html) (also at `/guide`) | 44 chapters: every screen, every activity with its settings, connection types, functions; designing Sutras, how the engine runs them, AI, RAG step by step, the API gateway, releases and CI/CD, PostgreSQL, the data tables, production. |
+| [Architecture](docs/sutraflow-architecture.html) (also at `/architecture`) | How SutraFlow works inside: every source file, every table, every API route, the settings, with diagrams. |
+| [Deployment](docs/deployment.md) | Packages, the `sutra` command, headless engines, Docker, clusters, monitoring. |
+| [Engine design](docs/architecture.md) | Runs, tasks, checkpoints and the cluster in short. |
+| [Laragon (Windows development)](deploy/laragon/README.txt) | Running SutraFlow in Laragon with PostgreSQL. |
 
-## What is in the palettes
+The guide and the architecture page are built from the code (`npm run guide`, `npm run architecture`), so they list exactly what the code does.
+
+## Palettes
 
 | Palette | Activities |
 |---|---|
-| Triggers | Manual start, Timer (cron or interval), REST service, SOAP service (one output per operation, generated WSDL), Channel trigger |
-| HTTP / REST | Send HTTP request (headers, query, JSON/XML/text/form or body mapped to a schema; outbound security; TLS/mTLS), Send HTTP response |
-| SOAP / Web services | Invoke SOAP service (WSDL URL or project service descriptor, operation picker, raw envelope; WS-Security), SOAP reply (response or fault) |
-| Data & mapping | Map data (target schema, For-Each with Where / Group by / Sort by, If, Choose), Transform (JSONata), Parse/Render JSON and XML (with schemas), Parse/Render CSV, Filter, Sort, Aggregate |
-| Flow control | If/else, Switch, Router (named conditions, first or all matches, otherwise), For each, Merge, Wait (durable), Human approval, Set variables, Throw error, End (this branch, or stop the whole Sutra as succeeded or failed), Call Sutra and Return (reusable Sutras), Error handler (one per Sutra), No operation |
-| Files | File trigger (added / modified / removed), Read file, List / read directory (`C:\in\*.csv`), Write file (Append / Overwrite), Move / copy / delete. Content as text, CSV rows or lines (repeating, typed by a schema), JSON, XML or base64, in UTF-8, UTF-16, ISO-8859-1, Windows-1252 and more |
-| DB Ops | SQL query, SQL update, Call procedure, SQL transaction, for PostgreSQL, MySQL/MariaDB, SQL Server, Oracle and SQLite; `:name` parameters always bound |
-| Service Bus | Publish message, Message subscriber (trigger), Confirm message, for ActiveMQ / AMQP 1.0, RabbitMQ and Kafka: queue or topic, JMS headers (delivery mode, priority, time to live, message/correlation id, reply-to, type), custom properties, selectors, durable subscriptions; acknowledge auto, client (after success) or explicit (Confirm message); requeue or dead-letter on failure |
-| Email | Send email (SMTP, HTML, attachments), Email trigger (IMAP; mark read or move after success) |
-| Firebase | Firestore (get, set, add, query, delete), Realtime Database, Push notification (FCM) |
-| Apps | Google Sheets, Google Drive / Docs, Google Drive / Docs trigger, Dropbox, YouTube, Facebook Page, Connected API call (any REST API of an OAuth account) |
-| Custom code | JavaScript code (sandboxed: no host access, time and memory limits), HTML template (escaped placeholders, each / if) |
-| Scripts | PowerShell script (Windows PowerShell or 7), Shell script (bash, sh, cmd), Run program (arguments without a shell). Output, error output, exit code and JSON output captured; failures carry them on the error output. Off until an administrator allows scripts in Server & APIs; values arrive as environment variables, never as script text |
-| General | Log, Validate fields, Send to channel (in-memory messages to other deployed Sutras), Counter (per project, kept across restarts) |
-| AI | AI prompt, AI classify, AI router, AI extract, AI summarize, AI translate, AI sentiment. Engines: Claude, Gemini and OpenAI APIs, Ollama, and the Claude, Gemini and Codex command-line tools. Every AI activity also returns the provider, model, tokens and time |
+| Triggers | Manual start, Timer, REST service, SOAP service, Channel trigger |
+| HTTP / REST | Send HTTP request, Send HTTP response |
+| SOAP / Web services | Invoke SOAP service, SOAP reply |
+| Data & mapping | Map data, Parse / Render JSON, Parse / Render XML, Parse / Render CSV, Filter list, Sort list, Aggregate, Transform (JSONata) |
+| Flow control | If / else, Switch, Router, For each, Merge, Wait, Human approval, Set variables, Throw error, End, Call Sutra, Return, Error handler, No operation |
+| Files | File trigger, Read file, List / read directory, Write file, Move / copy / delete file |
+| SFTP / FTP | Remote file trigger, List, Read, Write, Move / copy / delete remote file |
+| DB Ops | SQL query, SQL update, Call procedure, SQL script, SQL transaction |
+| Service Bus | Publish message, Message subscriber, Confirm message (Kafka, RabbitMQ, ActiveMQ / AMQP 1.0) |
+| Email | Send email, Email trigger |
+| Firebase | Firestore, Realtime Database, Push notification (FCM) |
+| Apps and social | Connected API call, Google Sheets, Google Drive / Docs (and trigger), SharePoint / OneDrive (and trigger), Dropbox, YouTube, Facebook Page, Twitch (and live trigger), Discord (and trigger), Telegram (and trigger) |
+| Azure Data Factory & Databricks | Run ADF pipeline, ADF pipeline run, ADF run finished trigger, Run Databricks job or notebook, Databricks code block, Databricks SQL |
+| Custom code | JavaScript code (sandboxed), HTML template |
+| Scripts | Python script, PowerShell script, Shell script, Run program (off until an administrator allows scripts) |
+| Release | Build package, Check package, Deploy package, Roll back |
+| General | Log, Validate fields, Send to channel, Counter |
+| AI | AI prompt, classify, router, extract, summarize, translate, sentiment, Ollama; AI agent, Ask a person, Hand off to agent, memory, knowledge (add, read document text, search, ask, remove, embed), Call MCP tool, Agent channel, Agent reply, AI guard, AI tool, Reply to AI |
 
-Every activity except triggers also has an **error** output. Connect it to handle failures; otherwise the Sutra's **Error handler** runs, or the run fails. Each activity can have retries with exponential backoff, a timeout, a breakpoint, a **loop** (for each item of a list, collecting the results, or repeat while a condition holds, with a delay), and can be skipped. HTTP connections have an optional **circuit breaker**.
+Every activity except triggers has an **error** output, retries with backoff, a time limit, a breakpoint, a loop setting, and a description. Connections (22 kinds) are shared per project with secrets kept in an encrypted vault and named, never copied.
 
-## Mapping (Input tab)
+## Releases and CI/CD
 
-Select an activity and open **Input**. **Sutra Data** (left) lists `$_projectVariables`, `$_sengineVariables` (read only), `$_sutraContext`, `$_sutraVariables`, the previous step and every upstream activity; **Activity Input** (right) lists the activity's inputs and, for structured inputs, the tree of the chosen schema. Lines show what is mapped from where.
+A release is a zip with the whole project (Sutras at fixed versions, connections without secret values, schemas, variables), a deployment config to fill in per environment, documentation and files. Development and test servers may deploy from the designer; production takes release zips only.
 
-- Drag a field from left to right, or select a target and write its formula below. The function browser groups String, Encode/Decode, Date/Time, Number, Logical and List functions; a live preview evaluates the formula against the last run.
-- Drop a list onto a repeating target: a **For-Each** is created and fields with matching names are mapped (`{item.x}` is the current item, `{index}` its position). Targets also take **If** (include only when true) and **Choose / When / Otherwise**. **Auto map** maps every field with the same name.
-- **For-Each** options: **Where** keeps rows where a condition holds, **Group by** gives one element per distinct value (`{group.key}`, `{group.items}`, `{group.count}`), **Sort by** orders them. These use the row's column names directly: `upper-case(Country) = 'INDIA'`.
-- Click a field on either side to highlight where it is mapped; other lines fade.
-- Before a run, the trees show field names and types; after a run, values. An activity whose branch was not taken shows "not run" with its fields.
-
-Formulas (any input starting with `=`, and every mapping target):
-
-```
-=concat('Name : ', {input.name})
-=upper-case(substring-before({input.email}, '@'))
-=format-date('DD-MM-YY', {nodes.Parse XML.Order.date})
-=format-dateTime('DD MMM YYYY HH:mm', current-dateTime(), 'Asia/Kolkata')
-=string-to-base64(concat({gv.USER}, ':', {gv.PASSWORD}))
-=if({input.amount} > 1000, 'bulk', 'retail')
-=format-number(sum({input.lines}, 'price'), '#,##0.00')
-={input.rows}[upper-case(Country) = 'INDIA']          rows where the condition holds (XPath style)
-=count({input.rows}[Amount > 1000])
-={input.rows}[1].City                                    first row, then a field
-=sum({group.items}, 'Amount')                            inside a For-Each grouped by a field
-=xs:integer({input.qty})                                 casting: xs:string, xs:decimal, xs:boolean, xs:date...
-=concat({gv.OUT}, '\', current-timestamp('YYYYMMDD'), '.csv')
-=set-project-variable('LAST_RUN', current-dateTime())
+```bash
+# In a pipeline (GitHub Actions, GitLab, Azure DevOps, Jenkins): build from Git, test, deploy.
+sutra package --from-git . --ref v1.4.0 --version 1.4.0 --out orders-1.4.0.zip
+sutra test   orders-1.4.0.zip --secrets-from-env
+sutra deploy orders-1.4.0.zip --config prod-config.json --server https://prod-engine:4800 --token $TOKEN
+sutra rollback --project "Orders" --server https://prod-engine:4800 --token $TOKEN
 ```
 
-Function groups: String, Conversion, Encode/Decode, Date/Time, Number, Logical, Sequence (`count`, `position()`, `last()`, `exists`, `empty`), List (`group-by`, `flatten`, `pluck`, `sort`), Variables (`get-project-variable`, `set-project-variable`, `get-sengine-variable`, `set-sengine-variable`) and Utility (`uuid`, `timestamp`, `current-timestamp`, `file-name`, `dir-name`, `path-join`, `format-bytes`, `newline`). Backslashes in quoted text are literal (Windows paths); write a quote twice to include it.
+Full pipelines for GitHub Actions, GitLab CI, Azure DevOps and Jenkins are in the user guide (*CI/CD pipelines*).
 
-For larger reshaping of repeating JSON (filter, group, aggregate, nest in one expression), the **Transform (JSONata)** activity runs a JSONata expression, the same language as Node-RED and AWS Step Functions:
+## Running in production
 
-```
-{ "orders": rows[$uppercase(Country) = "INDIA"].{ "id": OrderId, "total": Qty * Price },
-  "byCity": rows{ City: $sum($.(Qty * Price)) } }
-```
+- **Headless engines**: `SUTRA_MODE=engine`, with the Admin Console and the gateway, packages from `SUTRA_DEPLOY_DIR` at start.
+- **PostgreSQL and clusters**: move from SQLite with one button (Admin Console → Database → Migrate now) or `tools/migrate-to-postgres`; then add engines on the same database. Work is shared, each step runs once, a leader runs timers and listeners with failover, and a stopped engine's steps are finished by another.
+- **Docker**: `Dockerfile`, `docker-compose.yml` (studio and engine) and `docker-compose.cluster.yml` (PostgreSQL, a studio and two engines).
+- **Monitoring**: `/health`, `/ready`, Prometheus `/metrics`, OpenTelemetry traces, JSON logs, alert rules (failed runs, slow runs, waiting approvals, gateway errors, engines, certificates) to email, webhooks or Sutras.
+- **Sign-in on production servers**: secrets per server vault; Azure managed identities or service principals; OAuth accounts connected with `sutra connect` or a refresh token secret.
 
-Plain text inputs may still use `{{input.x}}` templates with pipes. Field references: `input`, `nodes.<Activity name>`, `trigger`, `vars`, `gv` (project variables), `ev` (Sengine variables), `sutra` (the run: id, name, version, step), `secret`, `item`, `index`, `group`.
-
-Settings in the **General** tab (folders, URLs, queue and topic names, cron expressions) and connection settings also accept `{{gv.NAME}}`, `{{ev.NAME}}` and `=` formulas; the `{x}` button next to a field inserts a variable. **Sengine variables** are server settings made by the administrator in Server & APIs and shared by all projects. Sutras read them; changing them from a Sutra (`set-sengine-variable`) is off unless the administrator allows it, and is not advised.
-
-Names used in the studio: a process is a **Sutra**; its local variables are **Sutra variables** (`{vars.x}`); project-wide values are **Project variables** (`{gv.X}`); server-wide settings are **Sengine variables** (`{ev.X}`).
-
-## Debugging
-
-**Debug** runs the draft one activity at a time: it pauses before each activity (the canvas highlights it and its Output tab shows the input it will receive). **Step** runs the next activity, **Continue** runs to the next breakpoint, **Pause** stops before the next one, **Stop** cancels. Breakpoints are set per activity in its Settings tab.
-
-## Security
-
-### Calling out (Resources > Outbound security)
-
-| Method | Applies to | What is sent |
-|---|---|---|
-| Basic | REST, SOAP | `Authorization: Basic` |
-| Bearer | REST, SOAP | `Authorization: Bearer` |
-| API key | REST, SOAP | header or query parameter |
-| OAuth 2.0 client credentials | REST, SOAP | token fetched from the token URL, cached until expiry |
-| Custom headers | REST, SOAP | any headers, values may use `{{secret.X}}` |
-| WS-Security UsernameToken | SOAP | `wsse:UsernameToken`, PasswordDigest (nonce + created) or PasswordText, optional Timestamp |
-| WS-Security SAML token | SOAP | the SAML 1.1/2.0 `<Assertion>` in `wsse:Security`, from the vault or mapped from an earlier step (for example an STS call), optionally with a UsernameToken |
-| WS-Security X.509 | SOAP | BinarySecurityToken plus XML signature over Body and Timestamp (RSA-SHA256 or SHA1) |
-
-TLS for outbound calls comes from an **HTTP connection** resource: extra trusted CAs, client certificate and key (mutual TLS), proxy, timeout and certificate checking.
-
-### Exposing APIs (Resources > API security policy)
-
-A policy attached to a REST or SOAP service trigger checks, in order: HTTPS required, IP allow list (exact or IPv4 CIDR), caller authentication, then a per-caller rate limit. CORS origins are optional.
-
-Caller authentication: none, Basic (users map to vault secrets), API key (header; keys in the vault), JWT bearer (JWKS URL, PEM public key, or HS256 shared secret; issuer, audience and required scopes), WS-Security UsernameToken for SOAP (digest with time window and nonce replay protection), and mutual TLS (client CA in Server settings; optional allowed subjects).
-
-### Gateway TLS (Server & APIs)
-
-- **Self-signed**: for testing.
-- **Own certificate**: paste the PEM chain and key; the key is checked against the certificate and stored encrypted.
-- **Let's Encrypt**: HTTP-01 challenge answered by the gateway's HTTP listener, which must be reachable as port 80 on each domain. Staging is on by default. Certificates renew automatically 30 days before expiry and are swapped in without dropping connections.
-- **Client CA**: enables mutual TLS for services whose policy uses `mtls`.
-
-TLS 1.2 is the minimum.
-
-### Secrets and the studio
-
-- Secrets are encrypted with AES-256-GCM using `SUTRA_MASTER_KEY` (32 bytes, base64) or `data/master.key`, which is created on first start. Back that key up: without it the vault cannot be read.
-- Secret values are never returned by the API. Any secret used during a step is masked in stored outputs and logs.
-- The studio listens on 127.0.0.1 by default. Sessions are HttpOnly SameSite=Strict cookies, every change needs an `X-Sutra` header (CSRF guard), and sign-in attempts are throttled.
+See [docs/deployment.md](docs/deployment.md) and the user guide's *Running in production*.
 
 ## Configuration
 
+Settings are environment variables, set in `sutraflow.env` for the launcher. The most used:
+
 | Variable | Default | Meaning |
 |---|---|---|
-| `SUTRA_DATA_DIR` | `./data` next to the install | database, master key |
-| `SUTRA_MASTER_KEY` | (file) | vault key, base64 32 bytes |
-| `SUTRA_ADMIN_HOST` / `SUTRA_ADMIN_PORT` | 127.0.0.1 / 4800 | studio and admin API |
-| `SUTRA_GATEWAY_HTTP_PORT` / `SUTRA_GATEWAY_HTTPS_PORT` | 8080 / 8443 | defaults until changed in Server & APIs |
-| `SUTRA_WORKERS` | 16 | steps executed at the same time |
-| `SUTRA_MAX_STEPS` | 10000 | per-run safety cap |
-| `SUTRA_REPLY_TIMEOUT_MS` | 60000 | how long a REST/SOAP caller waits for the reply step |
+| `SUTRA_DATA_DIR` | `./data` | Data folder: SQLite database, master key, logs, project files |
+| `SUTRA_DB` | (SQLite) | `postgres://user@host:5432/sutraflow` for PostgreSQL; password in `SUTRA_DB_PASSWORD` |
+| `SUTRA_MASTER_KEY` | `data/master.key` | Vault key (base64, 32 bytes); the same on every engine of a cluster |
+| `SUTRA_MODE` | `studio` | `engine` for a headless engine |
+| `SUTRA_ENVIRONMENT` | `development` | `development`, `test` or `production` (production refuses designer deploys) |
+| `SUTRA_ADMIN_HOST`, `SUTRA_ADMIN_PORT` | `127.0.0.1`, `4800` | Studio and admin API |
+| `SUTRA_GATEWAY_HTTP_PORT`, `SUTRA_GATEWAY_HTTPS_PORT` | `8080`, `8443` | Gateway |
+| `SUTRA_WORKERS` | `16` | Steps one engine runs at once |
 
-## How runs are managed
+Every setting is listed in the architecture page (*Settings*); the build fails when the code reads one it does not list.
 
-See [docs/architecture.md](docs/architecture.md). In short: a run is a database row and each step execution is a task row. Workers pick pending tasks, and each finished step is checkpointed in one transaction together with the tasks for the next steps. Approvals and long waits cost nothing while they wait. After a crash, steps that were in flight go back to pending and resume. Runs that are in progress finish on the Sutra version they started with.
+## Development
 
-## Run API
+```bash
+npm install
+npm run dev            # studio with hot reload on http://localhost:5173 (API proxied to 4800)
+npm test               # the whole test suite (builds first)
+npm run typecheck      # server and web
+npm run build          # production build into dist/
+npm run guide          # rebuild the user guide from the code
+npm run guide:shots    # retake the guide's screenshots from a running server (headless Edge or Chrome)
+npm run architecture   # rebuild the architecture page
+npm run samples        # rebuild the sample project zips in samples/
+```
 
-Start the deployed version of a Sutra from another system (studio session required):
+Stack: Node.js and TypeScript, Fastify, React with React Flow, Vite; SQLite (`node:sqlite`) or PostgreSQL.
+
+## Project layout
 
 ```
-POST /api/flows/{flowId}/run?wait=30000
-{ "input": { "orderId": "A-1" } }
+bin/                    the sutraflow launcher (Windows .cmd, Linux and macOS sh)
+server/src/             the server: engine, gateway, admin API, connectors, palettes, AI, Git, the sutra command
+web/src/                the designer (React)
+web/admin/              the Admin Console (React)
+tools/                  builds of the guide, architecture page and sample zips; migrate-to-postgres
+docs/                   user guide, architecture page, deployment and design notes, guide screenshots
+samples/                sample project zips (release zips with their files)
+deploy/                 Laragon and other deployment templates
+test/                   the test suites
 ```
 
-## Tested here, and not
+## Testing
 
-The test suite (`npm test`, about 120 tests including real multi-process clusters, and every in-process suite again on PostgreSQL through PGlite) runs real servers for HTTP, SOAP with WS-Security, TLS, SMTP, an AMQP 1.0 peer (the ActiveMQ protocol), SQLite, and mock Google / Firebase / OAuth endpoints. PostgreSQL, MySQL, SQL Server, Oracle, Kafka, RabbitMQ, IMAP, Let's Encrypt and the live Google, Dropbox, YouTube and Facebook APIs use their standard client libraries but have not been run against real servers yet.
+`npm test` runs 272 tests: real HTTP, SOAP with WS-Security, TLS, SMTP, AMQP 1.0, SFTP and FTP servers, SQLite, Python, multi-process clusters, the launcher and the command-line tool, and every in-process suite again on PostgreSQL (PGlite). With the environment set, they also run against a real PostgreSQL (`SUTRA_TEST_PG_URL`, including pgvector and the move from SQLite, and `SUTRA_TEST_PG_BIN` for a password- and SSL-protected server) and MySQL (`SUTRA_TEST_MYSQL_URL`).
 
-## Not yet included
+Tested against stand-in services that answer like the real ones, but not yet against the real services: SQL Server, Oracle, Kafka, RabbitMQ, IMAP, Let's Encrypt, Qdrant, Chroma, Pinecone, and the Google, Microsoft, Dropbox, YouTube, Twitch, Discord, Telegram, Facebook, Azure Data Factory and Databricks APIs.
 
-WS-Security encryption and validation of incoming SAML/X.509 signatures; JSON Schema / XSD validation of messages; multiple studio users with roles; clustering several engine nodes on a shared database; SFTP/FTP and more SaaS connectors (the Connected API call activity reaches any REST API of an OAuth account meanwhile). New connectors register in `server/src/palettes/index.ts`.
+## Known limitations
+
+- **WS-Security**: no XML encryption, and signatures of incoming SAML and X.509 tokens are not validated. Incoming SOAP calls accept UsernameToken (with replay protection); outgoing calls can sign with X.509 and send SAML tokens.
+- **Message validation**: a REST service's body schema describes the data for mapping but is not enforced as JSON Schema or XSD; *Validate fields* checks required fields.
+- **Single sign-on for people**: studio and Admin Console users sign in with SutraFlow accounts; JWT from an identity provider protects APIs, not the studio.
+- **Twitch and Discord triggers** poll (every minute and every few seconds) rather than receive pushed events.
+
+## Contributing
+
+1. Open an issue that describes the change, or pick an existing one.
+2. Create a branch, make the change with tests, and run `npm run typecheck` and `npm test`.
+3. New activities need user guide text (`tools/guide/activities.ts`); new files and tables need a description for the architecture page; the builds report what is missing.
+4. Open a pull request that says what changed and how it was tested.
+
+New connectors register in `server/src/palettes/index.ts` (activities) and `server/src/resources.ts` (connection kinds).
+
+## Security
+
+- Secrets are encrypted with AES-256-GCM using the master key; their values are never returned by the API and are masked in outputs and logs. Back up `data/master.key` apart from the database.
+- The studio listens on 127.0.0.1 by default, with HttpOnly SameSite cookies, a CSRF guard, throttled sign-in, roles per project, and an audit log of every change.
+- Please report security problems privately to the maintainer rather than in a public issue.
+
+## License
+
+No licence has been chosen yet, so all rights are reserved by the author. Add a `LICENSE` file before others use or contribute to the code.
