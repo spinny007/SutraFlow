@@ -97,6 +97,29 @@ async function main() {
     await js(`${H} [...document.querySelectorAll('.ltabs button')].find(b => b.textContent === 'Project').click(); await wait(400);
       const s = [...document.querySelectorAll('.xitem')].find(b => b.textContent.includes('OrderXml')); s?.click(); await wait(1200);`);
     await shot('project-explorer');
+    // Git tab (the start screen when the project is not in a repository).
+    await js(`${H} [...document.querySelectorAll('.ltabs button')].find(b => b.textContent === 'Git').click(); await wait(1200);`);
+    await shot('git-tab');
+    // Git tab of a repository with a change: a throwaway project, removed afterwards.
+    const gitDemo = await js(`${H}
+      const api = async (m, u, b) => { const r = await fetch(u, { method: m, headers: { 'content-type': 'application/json', 'x-sutra': '1' }, body: b ? JSON.stringify(b) : undefined }); return r.json(); };
+      const p = await api('POST', '/api/projects', { name: 'Git tour ' + Date.now() });
+      const doc = (msg) => ({ name: 'Orders intake', nodes: [{ id: 's', type: 'start', name: 'Start', x: 60, y: 200, config: {} }, { id: 'l', type: 'log', name: 'Log order', x: 360, y: 200, config: { message: msg } }], edges: [{ id: 'e', from: 's', port: 'out', to: 'l' }] });
+      const f = await api('POST', '/api/flows', { doc: doc('Order received'), projectId: p.id, folder: 'Sales' });
+      await api('POST', '/api/flows', { doc: { ...doc('Nightly'), name: 'Nightly report' }, projectId: p.id });
+      await api('POST', '/api/projects/' + p.id + '/git/init', { branch: 'main' });
+      await api('PUT', '/api/flows/' + f.id, doc('Order received: {{input.orderId}}'));
+      await api('POST', '/api/flows', { doc: { ...doc('x'), name: 'Refund check' }, projectId: p.id });
+      localStorage.setItem('sutra.project', p.id);
+      return p.id;`);
+    await cdp('Page.reload', {}); await sleep(2500);
+    await js(`${H} await wait(800); [...document.querySelectorAll('.ltabs button')].find(b => b.textContent === 'Git').click(); await wait(1500);
+      const t = document.querySelector('.gitmsg'); if (t) { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(t, 'Orders intake: log the order number'); t.dispatchEvent(new Event('input', { bubbles: true })); } await wait(300);`);
+    await shot('git-changes');
+    await js(`await (async () => { await fetch('/api/projects/${gitDemo}/git', { method: 'DELETE', headers: { 'x-sutra': '1' } });
+      const fl = await (await fetch('/api/flows?projectId=${gitDemo}')).json(); for (const f of fl) await fetch('/api/flows/' + f.id, { method: 'DELETE', headers: { 'x-sutra': '1' } });
+      await fetch('/api/projects/${gitDemo}', { method: 'DELETE', headers: { 'x-sutra': '1' } }); localStorage.setItem('sutra.project', 'default'); })()`);
+    await cdp('Page.reload', {}); await sleep(2500);
     await js(`${H} [...document.querySelectorAll('.ltabs button')].find(b => b.textContent === 'Palettes').click(); document.querySelector('.react-flow__pane')?.click(); await wait(300);`);
 
     // 3. Mapper with formula editor (after a test run so values show).

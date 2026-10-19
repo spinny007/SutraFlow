@@ -177,6 +177,8 @@ export function versionDoc(flowId: string, version: number): FlowDoc | undefined
 }
 
 export function deploy(flowId: string, version?: number, note = '') {
+  const owner = q.get<any>('select p.owner from flows f join projects p on p.id = f.project_id where f.id = ?', flowId)?.owner;
+  if (owner) throw new Error(`This Sutra is in ${owner}'s own copy of a repository: test it here, push it, and deploy from the team's project`);
   let warnings: string[] = [];
   if (!version) ({ version, warnings } = publish(flowId, note || 'Deployed from studio'));
   if (!versionDoc(flowId, version)) throw new Error(`Version ${version} does not exist`);

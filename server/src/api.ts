@@ -1,4 +1,8 @@
 import crypto from 'node:crypto';
+import * as gitAccounts from './git/accounts.js';
+import * as gitWs from './git/workspaces.js';
+import { GIT_PROVIDERS } from './git/accounts.js';
+import { gitEngine } from './git/engine.js';
 import * as folders from './folders.js';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
@@ -247,6 +251,49 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   const auditFilter = (qs: any) => ({ environment: qs.environment, actor: qs.actor, action: qs.action, projectId: qs.projectId, sutraId: qs.sutraId, outcome: qs.outcome, from: qs.from, to: qs.to, text: qs.q, before: Number(qs.before) || undefined, limit: Number(qs.limit) || undefined });
   app.get('/api/audit', async (req: any) => listAudit(auditFilter(req.query || {})));
   app.get('/api/audit/policy', async () => auditStats());
+
+  // ---------- Git: per-person accounts, workspaces of projects ----------
+  const me = (req: any) => String(req.user?.u || '');
+  const gitErr = (e: any) => (e instanceof HttpError ? e : bad(e.message));
+  const gitDo = async <T>(fn: () => Promise<T> | T) => { try { return await fn(); } catch (e: any) { throw gitErr(e); } };
+  app.get('/api/git/providers', async () => ({ providers: GIT_PROVIDERS, engine: (() => { try { return gitEngine().kind; } catch { return 'none'; } })() }));
+  app.get('/api/git/accounts', async (req: any) => gitAccounts.listAccounts(me(req)));
+  app.post('/api/git/accounts', async (req: any) => gitDo(() => gitAccounts.addAccount(me(req), req.body || {})));
+  app.put('/api/git/accounts/:id', async (req: any) => gitDo(() => gitAccounts.updateAccount(me(req), req.params.id, req.body || {})));
+  app.delete('/api/git/accounts/:id', async (req: any) => gitDo(() => { gitAccounts.deleteAccount(me(req), req.params.id); return { ok: true }; }));
+  app.post('/api/git/accounts/:id/test', async (req: any) => gitDo(() => gitAccounts.testAccount(me(req), req.params.id, String(req.body?.url || ''))));
+  app.post('/api/git/clone', async (req: any) => {
+    if (!access.can(req.user, 'design')) throw new HttpError(403, 'You need the Design permission on a project to clone a repository');
+    return gitDo(async () => {
+      const r = await gitWs.cloneRepository(me(req), req.body || {});
+      // The owner may work in their copy, whatever their other grants are.
+      if (!req.user.all) q.run('insert into grants(username, role_id, project_id) values(?, ?, ?) on conflict do nothing', me(req), 'developer', r.projectId);
+      return r;
+    });
+  });
+  const own = (req: any) => { projects.requireProject(req.params.id); return req.params.id as string; };
+  app.get('/api/projects/:id/git', async (req: any) => gitDo(() => gitWs.gitState(own(req), me(req))));
+  app.post('/api/projects/:id/git/init', async (req: any) => gitDo(() => gitWs.initRepository(own(req), me(req), req.body || {})));
+  app.post('/api/projects/:id/git/publish', async (req: any) => gitDo(() => gitWs.publish(own(req), me(req), String(req.body?.url || ''), req.body?.accountId)));
+  app.post('/api/projects/:id/git/commit', async (req: any) => gitDo(() => gitWs.commit(own(req), me(req), String(req.body?.message || ''), { push: !!req.body?.push })));
+  app.post('/api/projects/:id/git/push', async (req: any) => gitDo(() => gitWs.push(own(req), me(req))));
+  app.post('/api/projects/:id/git/pull', async (req: any) => gitDo(() => gitWs.pull(own(req), me(req))));
+  app.post('/api/projects/:id/git/fetch', async (req: any) => gitDo(() => gitWs.fetchRemote(own(req), me(req))));
+  app.post('/api/projects/:id/git/discard', async (req: any) => gitDo(() => gitWs.discard(own(req), me(req), req.body?.path || undefined)));
+  app.get('/api/projects/:id/git/branches', async (req: any) => gitDo(() => gitWs.branches(own(req), me(req))));
+  app.post('/api/projects/:id/git/switch', async (req: any) => gitDo(() => gitWs.switchBranch(own(req), me(req), String(req.body?.branch || ''), !!req.body?.create)));
+  app.get('/api/projects/:id/git/log', async (req: any) => gitDo(() => gitWs.history(own(req), me(req), Number(req.query?.max) || 100)));
+  app.get('/api/projects/:id/git/commits/:sha', async (req: any) => gitDo(() => gitWs.commitFiles(own(req), me(req), req.params.sha)));
+  app.get('/api/projects/:id/git/diff', async (req: any) => gitDo(() => gitWs.diff(own(req), me(req), String(req.query?.path || ''), req.query?.sha || undefined)));
+  app.post('/api/projects/:id/git/resolve', async (req: any) => gitDo(() => gitWs.resolveConflict(own(req), me(req), String(req.body?.path || ''), req.body?.side === 'theirs' ? 'theirs' : 'ours')));
+  app.post('/api/projects/:id/git/abort', async (req: any) => gitDo(() => gitWs.abortMerge(own(req), me(req))));
+  app.post('/api/projects/:id/git/trust', async (req: any) => gitDo(() => { gitWs.trust(own(req), me(req)); return gitWs.gitState(own(req), me(req)); }));
+  app.delete('/api/projects/:id/git', async (req: any) => gitDo(() => {
+    const id = own(req);
+    const r = gitWs.disconnect(id, me(req));
+    if (r.removedProject) { for (const f of flows.listFlows(id)) flows.deleteFlow(f.id); projects.deleteProject(id); q.run('delete from grants where project_id = ?', id); }
+    return r;
+  }));
   app.put('/api/audit/policy', async (req: any) => {
     const days = Number(req.body?.retentionDays);
     if (!Number.isInteger(days) || days < 0 || days > 3650) throw bad('Days to keep: a whole number from 0 (keep everything) to 3650');
@@ -335,7 +382,8 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   }));
 
   // ---------- projects ----------
-  app.get('/api/projects', async req => { const ok = seen(req); return projects.listProjects().filter(p => ok(p.id)); });
+  // Personal copies (Git clones) are seen only by their owner.
+  app.get('/api/projects', async (req: any) => { const ok = seen(req); return projects.listProjects().filter(p => ok(p.id) && (!p.owner || p.owner === req.user?.u)); });
   app.post('/api/projects', async (req: any) => projects.saveProject({ name: req.body?.name, description: req.body?.description }));
   app.get('/api/projects/:id', async (req: any) => projects.requireProject(req.params.id));
   app.put('/api/projects/:id', async (req: any) => { projects.requireProject(req.params.id); return projects.saveProject({ ...req.body, id: req.params.id }); });

@@ -31,7 +31,7 @@ export interface OpsConfig {
   resources: Record<string, Record<string, any>>;
   logging: Partial<LoggingConfig>;
 }
-export interface Project { id: string; name: string; description: string; config: ProjectConfig; updated_at: string }
+export interface Project { id: string; name: string; description: string; config: ProjectConfig; updated_at: string; /** A person's own copy (Git clone): their username; '' for the team's projects. */ owner?: string; restricted?: number | boolean }
 
 export const defaultLogging: LoggingConfig = { enabled: true, file: 'logs/{project}.log', level: 'info', format: 'text', maxSizeMb: 10, maxFiles: 5, stepData: false };
 const emptyOps: OpsConfig = { variables: {}, resources: {}, logging: {} };

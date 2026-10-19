@@ -174,6 +174,42 @@ export const CHAPTERS: Chapter[] = [
 </ol>`,
   },
   {
+    id: 'git', title: 'Git: source control in the designer',
+    html: `
+<p>The <strong>Git</strong> tab beside Project and Palettes keeps a project in a Git repository (GitHub, GitLab, Bitbucket, Azure DevOps or any Git server), with commits, branches, history and diffs, in the manner of a code editor's source control view.</p>
+[[img:git-tab|The Git tab of a project that is not in a repository yet: Initialize or Clone.]]
+<p class="h">Where the files live</p>
+<p>The designer works on the project in SutraFlow's database as always. A project in Git also has a working copy on the SutraFlow server (<code>&lt;data&gt;/workspaces</code>): before Git looks at it, SutraFlow writes the project there as files, and after a pull, a branch switch or a discard it reads the files back. The repository holds readable files:</p>
+<table class="t"><thead><tr><th>File</th><th>Holds</th></tr></thead><tbody>
+<tr><td><code>sutraflow.json</code></td><td>The project: description, variables (secret values never), logging, empty folders.</td></tr>
+<tr><td><code>sutras/&lt;folder&gt;/&lt;name&gt;.sutra.json</code></td><td>One Sutra (its draft), in its folder.</td></tr>
+<tr><td><code>connections/&lt;folder&gt;/&lt;name&gt;.connection.json</code></td><td>One connection; passwords and keys by secret <em>name</em> only, the values stay in each server's vault.</td></tr>
+<tr><td><code>schemas/&lt;folder&gt;/&lt;name&gt;.json|.xsd|.wsdl</code></td><td>A schema or WSDL as given, with its <code>.schema.json</code> beside it.</td></tr>
+</tbody></table>
+<p class="h">Team project and personal copies</p>
+<ul>
+<li><strong>Initialize repository</strong> puts a team project in a new repository and makes the first commit; <strong>Publish</strong> sends it to an empty repository on the server. Everyone with Design on the project commits and pushes it, each with their own Git account. This is the project that is deployed.</li>
+<li><strong>Clone repository</strong> makes <em>your own copy</em>, named "&lt;name&gt; (you)". Only you see it; it can be tested, never deployed; your changes reach others when you push, and theirs reach you when you pull. Several people's copies of one repository never share ids or edits.</li>
+<li><strong>Restricted mode</strong>: a clone opens restricted. Steps that run code or commands from the repository (PowerShell, shell scripts, programs, JavaScript, release steps, MCP commands) do not run until you click <strong>Trust the authors</strong>. Reading, editing and other steps work as usual.</li>
+</ul>
+<p class="h">Your own Git account</p>
+<p><strong>My Git accounts</strong> holds your personal access tokens for each server. They are encrypted, never shown again, and used only for your pull and push; nobody else, not even an administrator, can see them or push with them. Commits carry the account's author name and email, or your own. Each provider says which token to make (GitHub: a fine-grained token with Contents read and write). Public repositories clone without an account. Sign-in with a GitHub, GitLab or Bitbucket button comes later, once an administrator registers an app with them.</p>
+<p class="h">Working with changes</p>
+[[img:git-changes|A project in Git: branch main, two changed Sutras (M changed, A added), the commit message, and the graph.]]
+<ol>
+<li><strong>Changes</strong> lists what differs from the last commit, by item: Sutra, connection, schema or project settings, marked M (changed), A (added), D (removed). Click an item for its diff; a Sutra's diff names the steps added, removed and changed above the lines. ↺ undoes one change; <em>Discard all</em> undoes every change.</li>
+<li>Write a message and <strong>Commit</strong> (Ctrl+Enter), or <strong>Commit &amp; Push</strong>.</li>
+<li><strong>⟳</strong> syncs (pull, then push); <strong>↓</strong> pulls; <strong>↑</strong> pushes. ↑2 ↓1 beside the branch counts commits to push and to pull. A pull needs no uncommitted changes.</li>
+<li><strong>⑂ branch</strong> lists branches here and on the server and creates new ones; switching loads that branch into the project.</li>
+<li><strong>Graph</strong> shows the history with branch labels; click a commit for the items it changed and their diffs.</li>
+</ol>
+<p class="h">Conflicts</p>
+<p>When a pull finds that both sides changed the same item, the project is left as it was and the conflicting items are listed. Choose <strong>Mine</strong> or <strong>Theirs</strong> for each; when none are left the merge is finished and loaded. <strong>Abort the merge</strong> goes back to before the pull.</p>
+<p class="h">The Git program</p>
+<p>SutraFlow uses the <code>git</code> command when it is installed (all features, SSH addresses), and its built-in Git otherwise (HTTPS only; a pull whose changes overlap needs the git command). <code>SUTRA_GIT=system</code> or <code>builtin</code> chooses. Tokens reach Git only through settings of the one command, never on its command line.</p>
+[[tip:Guidelines|Deploy to production from packages built by your pipeline from the repository, not from a personal copy (Releases).<br>Keep secret values out of Git: connections name their secrets, and each server's vault holds the values.<br>Give each repository's tokens the narrowest rights: Contents read and write on that repository only.]]`,
+  },
+  {
     id: 'build', title: 'Building a Sutra',
     html: `
 <ol>

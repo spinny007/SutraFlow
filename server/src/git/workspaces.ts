@@ -1,0 +1,263 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { q, now } from '../db.js';
+import { config } from '../config.js';
+import { getProject, saveProject, listProjects } from '../projects.js';
+import { gitEngine, type Status } from './engine.js';
+import { accountForUrl, authOf, authorOf } from './accounts.js';
+import { readWorkingTree, writeWorkingTree, listTree } from './files.js';
+import { forgetRestricted } from './restricted.js';
+
+/**
+ * Git workspaces. A project connected to a repository has a working copy on this server:
+ *  - shared: a project of the team (the one that is deployed) connected with Initialize. People with
+ *    Design on it commit and push with their own Git account.
+ *  - personal: a person's own copy, made by Clone ("Shop (meera)"). Only its owner sees and changes it;
+ *    it can be tested but not deployed; it opens restricted until the owner trusts the repository.
+ * The designer works on the project as always; the working copy is written from it before Git looks
+ * at it, and read back into it after a pull, a branch switch or a discard.
+ */
+export interface Workspace { id: string; projectId: string; owner: string; kind: 'shared' | 'personal'; dir: string; remoteUrl: string | null; branch: string; accountId: string | null; trusted: boolean; sourceProjectId: string | null }
+const row = (r: any): Workspace => ({ id: r.id, projectId: r.project_id, owner: r.owner, kind: r.kind, dir: r.dir, remoteUrl: r.remote_url, branch: r.branch, accountId: r.account_id, trusted: !!r.trusted, sourceProjectId: r.source_project_id });
+export const workspaceOf = (projectId: string) => { const r = q.get('select * from git_workspaces where project_id = ?', projectId); return r ? row(r) : null; };
+const safe = (s: string) => s.replace(/[^\w.-]+/g, '-').slice(0, 60) || 'x';
+/** Repository addresses: HTTPS or SSH; file:// only when SUTRA_GIT_ALLOW_FILE=1 (tests, offline mirrors), so nobody clones the server's own folders. */
+const urlOk = (u: string) => {
+  const v = String(u || '').trim();
+  if (/^file:\/\//i.test(v) && process.env.SUTRA_GIT_ALLOW_FILE === '1') return v;
+  if (!/^(https?:\/\/|ssh:\/\/|git@)[^\s]+$/i.test(v)) throw new Error('Give the repository address, for example https://github.com/acme/orders.git');
+  return v;
+};
+/** An address without any user or password in it. */
+const cleanUrl = (u: string) => u.replace(/^(https?:\/\/)[^@/]+@/i, '$1');
+
+function need(projectId: string, user: string) {
+  const w = workspaceOf(projectId);
+  if (!w) throw new Error('This project is not connected to a Git repository');
+  if (w.kind === 'personal' && w.owner !== user) throw new Error('This is another person\'s copy');
+  return w;
+}
+const auth = (w: Workspace, user: string) => {
+  const id = w.accountId && q.get('select 1 from git_accounts where id = ? and username = ?', w.accountId, user) ? w.accountId : w.remoteUrl ? accountForUrl(user, w.remoteUrl)?.id : undefined;
+  return { auth: authOf(user, id), accountId: id || null };
+};
+
+/** Starts a repository from a project of the team (shared workspace). */
+export async function initRepository(projectId: string, user: string, o: { branch?: string; remoteUrl?: string; accountId?: string } = {}) {
+  const p = getProject(projectId);
+  if (!p) throw new Error('Project not found');
+  if (workspaceOf(projectId)) throw new Error('This project is already connected to a repository');
+  const id = crypto.randomUUID();
+  const dir = path.join(config.dataDir, 'workspaces', 'shared', `${safe(p.name)}-${id.slice(0, 8)}`);
+  const branch = String(o.branch || 'main').trim();
+  const eng = gitEngine();
+  await eng.init(dir, branch);
+  fs.writeFileSync(path.join(dir, 'README.md'), `# ${p.name}\n\nA SutraFlow project. Open it in SutraFlow: Git > Clone repository.\n\n- \`sutras/\`: one file per Sutra\n- \`connections/\`: connections (secrets by name only; values stay in each server's vault)\n- \`schemas/\`: shared schemas and WSDLs\n`);
+  fs.writeFileSync(path.join(dir, '.gitattributes'), '* text=auto eol=lf\n');
+  q.run(`insert into git_workspaces(id, project_id, owner, kind, dir, remote_url, branch, account_id, trusted, created_at, updated_at) values(?, ?, ?, 'shared', ?, ?, ?, ?, 1, ?, ?)`,
+    id, projectId, user, dir, o.remoteUrl ? cleanUrl(urlOk(o.remoteUrl)) : null, branch, o.accountId || null, now(), now());
+  writeWorkingTree(dir, projectId, id);
+  await eng.commitAll(dir, `Start ${p.name} in SutraFlow`, authorOf(user, o.accountId));
+  if (o.remoteUrl) await eng.setRemote(dir, cleanUrl(o.remoteUrl));
+  return gitState(projectId, user);
+}
+
+/** Connects (or changes) the remote of a workspace and pushes to it. */
+export async function publish(projectId: string, user: string, remoteUrl: string, accountId?: string) {
+  const w = need(projectId, user);
+  const url = cleanUrl(urlOk(remoteUrl));
+  await gitEngine().setRemote(w.dir, url);
+  q.run('update git_workspaces set remote_url = ?, account_id = coalesce(?, account_id), updated_at = ? where id = ?', url, accountId || null, now(), w.id);
+  return push(projectId, user);
+}
+
+/** Clones a repository into a personal copy: a project only this person sees, restricted until trusted. */
+export async function cloneRepository(user: string, o: { url: string; branch?: string; accountId?: string; name?: string }) {
+  const url = cleanUrl(urlOk(o.url));
+  const accountId = o.accountId || accountForUrl(user, url)?.id;
+  const id = crypto.randomUUID();
+  const dir = path.join(config.dataDir, 'workspaces', safe(user), id);
+  const eng = gitEngine();
+  let branch: string;
+  try { branch = await eng.clone(url, dir, o.branch || undefined, authOf(user, accountId)); }
+  catch (e: any) { fs.rmSync(dir, { recursive: true, force: true }); throw new Error(`Could not clone ${url}: ${e.message}`); }
+  const meta = fs.existsSync(path.join(dir, 'sutraflow.json')) ? JSON.parse(fs.readFileSync(path.join(dir, 'sutraflow.json'), 'utf8')) : {};
+  const base = String(o.name || meta.name || path.basename(url).replace(/\.git$/, '')).trim();
+  const taken = new Set(listProjects().map(p => p.name.toLowerCase()));
+  let name = `${base} (${user})`;
+  for (let i = 2; taken.has(name.toLowerCase()); i++) name = `${base} (${user} ${i})`;
+  const p = saveProject({ name, description: meta.description || `My copy of ${url}` });
+  q.run("update projects set owner = ?, restricted = 1 where id = ?", user, p.id);
+  q.run(`insert into git_workspaces(id, project_id, owner, kind, dir, remote_url, branch, account_id, trusted, created_at, updated_at) values(?, ?, ?, 'personal', ?, ?, ?, ?, 0, ?, ?)`,
+    id, p.id, user, dir, url, branch, accountId || null, now(), now());
+  const report = readWorkingTree(dir, p.id, id);
+  return { projectId: p.id, name, report, ...(await gitState(p.id, user)) };
+}
+
+/** Trusts the repository of a personal copy: its Sutras may run scripts, programs, code and commands. */
+export function trust(projectId: string, user: string) {
+  const w = need(projectId, user);
+  q.run('update git_workspaces set trusted = 1 where id = ?', w.id);
+  q.run('update projects set restricted = 0 where id = ?', projectId);
+  forgetRestricted(projectId);
+}
+
+/** Item behind a file, for the change list: kind and name. */
+function describe(dir: string, rel: string, fallback: string | null) {
+  const kind = rel === 'sutraflow.json' ? 'project' : rel.startsWith('sutras/') ? 'sutra' : rel.startsWith('connections/') ? 'connection' : rel.startsWith('schemas/') ? 'schema' : 'file';
+  let name = path.posix.basename(rel).replace(/\.(sutra|connection|schema)\.json$/, '').replace(/\.(json|xsd|wsdl)$/, '');
+  try { const t = fs.existsSync(path.join(dir, rel)) ? fs.readFileSync(path.join(dir, rel), 'utf8') : fallback; if (t && rel.endsWith('.json')) name = JSON.parse(t).name || name; } catch { /* keep the file name */ }
+  return { kind, name: kind === 'project' ? 'Project settings' : name };
+}
+
+/** The Git view of a project: branch, ahead and behind, and its changes as items. */
+export async function gitState(projectId: string, user: string) {
+  const w = workspaceOf(projectId);
+  const p = getProject(projectId);
+  if (!w) return { connected: false as const, engine: gitEngine().kind, projectName: p?.name || '' };
+  if (w.kind === 'personal' && w.owner !== user) throw new Error('This is another person\'s copy');
+  const eng = gitEngine();
+  writeWorkingTree(w.dir, projectId, w.id);
+  const st: Status = await eng.status(w.dir);
+  const changes = await Promise.all(st.files.map(async f => {
+    const change = f.conflict ? 'U' : f.index === '?' || f.work === '?' || f.index === 'A' ? 'A' : f.index === 'D' || f.work === 'D' ? 'D' : 'M';
+    const d = describe(w.dir, f.path, change === 'D' ? await eng.fileAt(w.dir, 'HEAD', f.path) : null);
+    return { path: f.path, change, conflict: f.conflict, ...d };
+  }));
+  const a = auth(w, user);
+  return {
+    connected: true as const, engine: eng.kind, kind: w.kind, owner: w.owner, projectName: p?.name || '', remoteUrl: w.remoteUrl, branch: st.branch || w.branch,
+    upstream: st.upstream, ahead: st.ahead, behind: st.behind, merging: st.merging, trusted: w.trusted, hasAccount: !!a.auth,
+    changes: changes.filter(c => c.kind !== 'file' || !/^(README\.md|\.gitattributes)$/.test(c.path)).sort((x, y) => x.kind.localeCompare(y.kind) || x.name.localeCompare(y.name)),
+  };
+}
+
+export async function commit(projectId: string, user: string, message: string, o: { push?: boolean } = {}) {
+  const w = need(projectId, user);
+  const msg = String(message || '').trim();
+  if (!msg) throw new Error('Write a commit message');
+  writeWorkingTree(w.dir, projectId, w.id);
+  const a = auth(w, user);
+  const sha = await gitEngine().commitAll(w.dir, msg, authorOf(user, a.accountId));
+  if (!sha) throw new Error('Nothing to commit: no changes since the last commit');
+  if (o.push) await push(projectId, user);
+  return { sha, ...(await gitState(projectId, user)) };
+}
+
+export async function push(projectId: string, user: string) {
+  const w = need(projectId, user);
+  if (!w.remoteUrl) throw new Error('No remote yet: publish the repository to an address first');
+  const a = auth(w, user);
+  if (!a.auth && /^https?:/i.test(w.remoteUrl)) throw new Error('Add your Git account for this server first (Git > Accounts); pushes use only your own account');
+  const st = await gitEngine().status(w.dir);
+  await gitEngine().push(w.dir, st.branch || w.branch, a.auth);
+  return gitState(projectId, user);
+}
+
+export async function fetchRemote(projectId: string, user: string) {
+  const w = need(projectId, user);
+  if (!w.remoteUrl) throw new Error('No remote yet');
+  await gitEngine().fetch(w.dir, auth(w, user).auth);
+  return gitState(projectId, user);
+}
+
+/** Pulls the branch: merges and loads the result into the project. Conflicts are listed, not loaded. */
+export async function pull(projectId: string, user: string) {
+  const w = need(projectId, user);
+  if (!w.remoteUrl) throw new Error('No remote yet');
+  const before = await gitState(projectId, user);
+  if (before.connected && before.changes.length) throw new Error(`Commit or discard your ${before.changes.length} changes first`);
+  const a = auth(w, user);
+  const r = await gitEngine().pull(w.dir, before.connected ? before.branch : w.branch, authorOf(user, a.accountId), a.auth);
+  if (r.conflicts.length) return { conflicts: r.conflicts, ...(await stateAfterConflict(projectId, user)) };
+  const report = readWorkingTree(w.dir, projectId, w.id);
+  return { conflicts: [], report, ...(await gitState(projectId, user)) };
+}
+/** During a merge with conflicts the project is not rewritten from the files: only Git's view is shown. */
+async function stateAfterConflict(projectId: string, user: string) {
+  const w = need(projectId, user);
+  const st = await gitEngine().status(w.dir);
+  return { connected: true, merging: true, branch: st.branch, changes: st.files.map(f => ({ path: f.path, change: f.conflict ? 'U' : 'M', conflict: f.conflict, ...describe(w.dir, f.path, null) })) };
+}
+
+/** Keeps one side of a conflicting item; when none are left, finishes the merge and loads it. */
+export async function resolveConflict(projectId: string, user: string, file: string, side: 'ours' | 'theirs') {
+  const w = need(projectId, user);
+  const eng = gitEngine();
+  await eng.resolve(w.dir, file, side);
+  const st = await eng.status(w.dir);
+  if (st.files.some(f => f.conflict)) return { conflicts: st.files.filter(f => f.conflict).map(f => f.path), ...(await stateAfterConflict(projectId, user)) };
+  await eng.commitAll(w.dir, `Merge origin/${st.branch}`, authorOf(user, auth(w, user).accountId));
+  const report = readWorkingTree(w.dir, projectId, w.id);
+  return { conflicts: [], report, ...(await gitState(projectId, user)) };
+}
+export async function abortMerge(projectId: string, user: string) {
+  const w = need(projectId, user);
+  await gitEngine().abortMerge(w.dir);
+  readWorkingTree(w.dir, projectId, w.id);
+  return gitState(projectId, user);
+}
+
+/** Puts items back as they were at the last commit (one file, or all). */
+export async function discard(projectId: string, user: string, file?: string) {
+  const w = need(projectId, user);
+  const eng = gitEngine();
+  writeWorkingTree(w.dir, projectId, w.id);
+  const st = await eng.status(w.dir);
+  for (const f of st.files.filter(x => !file || x.path === file)) {
+    const old = await eng.fileAt(w.dir, 'HEAD', f.path);
+    if (old === null) fs.rmSync(path.join(w.dir, f.path), { force: true });
+    else { fs.mkdirSync(path.dirname(path.join(w.dir, f.path)), { recursive: true }); fs.writeFileSync(path.join(w.dir, f.path), old); }
+  }
+  const report = readWorkingTree(w.dir, projectId, w.id);
+  return { report, ...(await gitState(projectId, user)) };
+}
+
+export async function branches(projectId: string, user: string) { const w = need(projectId, user); return gitEngine().branches(w.dir); }
+
+/** Switches branch (or makes one) and loads it. The current branch must have no uncommitted changes. */
+export async function switchBranch(projectId: string, user: string, branch: string, create = false) {
+  const w = need(projectId, user);
+  const b = String(branch || '').trim();
+  if (!/^[\w./-]{1,100}$/.test(b) || b.includes('..')) throw new Error('A branch name uses letters, digits, - _ . and /');
+  const st = await gitState(projectId, user);
+  if (st.connected && st.changes.length) throw new Error(`Commit or discard your ${st.changes.length} changes before switching branch`);
+  await gitEngine().switchBranch(w.dir, b, create);
+  q.run('update git_workspaces set branch = ?, updated_at = ? where id = ?', b, now(), w.id);
+  const report = readWorkingTree(w.dir, projectId, w.id);
+  return { report, ...(await gitState(projectId, user)) };
+}
+
+export async function history(projectId: string, user: string, max = 100) {
+  const w = need(projectId, user);
+  return gitEngine().log(w.dir, Math.min(500, Math.max(1, max)));
+}
+export async function commitFiles(projectId: string, user: string, sha: string) {
+  const w = need(projectId, user);
+  if (!/^[0-9a-f]{7,40}$/i.test(sha)) throw new Error('Not a commit id');
+  return (await gitEngine().changedIn(w.dir, sha)).map(f => ({ ...f, ...describe(w.dir, f.path, null) }));
+}
+
+/** An item before (last commit, or a given commit's parent) and now, for the diff view. */
+export async function diff(projectId: string, user: string, file: string, sha?: string) {
+  const w = need(projectId, user);
+  const rel = path.posix.normalize(file).replace(/^\/+/, '');
+  if (rel.startsWith('..')) throw new Error('Not a file of the repository');
+  const eng = gitEngine();
+  if (sha) return { path: rel, before: await eng.fileAt(w.dir, `${sha}~1`, rel), after: await eng.fileAt(w.dir, sha, rel) };
+  writeWorkingTree(w.dir, projectId, w.id);
+  const now2 = fs.existsSync(path.join(w.dir, rel)) ? fs.readFileSync(path.join(w.dir, rel), 'utf8') : null;
+  return { path: rel, before: await eng.fileAt(w.dir, 'HEAD', rel), after: now2 };
+}
+
+/** Disconnects: a personal copy is removed with its project; a shared project only loses its working copy. */
+export function disconnect(projectId: string, user: string) {
+  const w = need(projectId, user);
+  q.run('delete from git_ids where workspace_id = ?', w.id);
+  q.run('delete from git_workspaces where id = ?', w.id);
+  fs.rmSync(w.dir, { recursive: true, force: true });
+  return { removedProject: w.kind === 'personal' };
+}
+
+export const trackedFiles = (dir: string) => listTree(dir);

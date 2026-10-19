@@ -1,4 +1,5 @@
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { GitPanel } from './Git';
 import { missingInNode, missingText } from './vars';
 import {
   ReactFlow, ReactFlowProvider, Background, Controls, MiniMap, Handle, Position, useReactFlow, useUpdateNodeInternals,
@@ -104,7 +105,7 @@ function DesignerInner() {
   const [run, setRun] = useState<RunDetail | null>(null);
   const [sample, setSample] = useState<{ outputs: Record<string, any>; vars?: Record<string, any> }>({ outputs: {} });
   const [dialog, setDialog] = useState<null | 'new' | 'deploy'>(null);
-  const [leftTab, setLeftTab] = useState<'project' | 'palette'>(() => { try { return (localStorage.getItem('sutra.left') as any) || 'palette'; } catch { return 'palette'; } });
+  const [leftTab, setLeftTab] = useState<'project' | 'palette' | 'git'>(() => { try { return (localStorage.getItem('sutra.left') as any) || 'palette'; } catch { return 'palette'; } });
   const [explorerSel, setExplorerSel] = useState<ExplorerSel | null>(null);
   const [tab, setTab] = useState<InspectorTab>('general');
   const [design, setDesign] = useState<Record<string, NodeDesign>>({});
@@ -402,8 +403,9 @@ function DesignerInner() {
           <div className="ltabs" role="tablist">
             <button role="tab" aria-selected={leftTab === 'project'} className={leftTab === 'project' ? 'act' : ''} onClick={() => setLeftTab('project')}>Project</button>
             <button role="tab" aria-selected={leftTab === 'palette'} className={leftTab === 'palette' ? 'act' : ''} onClick={() => setLeftTab('palette')}>Palettes</button>
+            <button role="tab" aria-selected={leftTab === 'git'} className={leftTab === 'git' ? 'act' : ''} onClick={() => setLeftTab('git')} title="Source control">Git</button>
           </div>
-          {leftTab === 'project'
+          {leftTab === 'git' ? <GitPanel onChanged={refreshFlows} /> : leftTab === 'project'
             ? <ProjectExplorer flows={flows} flowId={flowId} openFlow={id => setFlowId(id)} newFlow={() => setDialog('new')} sel={explorerSel} setSel={setExplorerSel} onFlowsChanged={refreshFlows} />
             : <Palette meta={meta} onAdd={t => addNode(t)} />}
         </aside>

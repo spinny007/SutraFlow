@@ -186,6 +186,31 @@ export const RULES: Record<string, Rule> = {
   'POST /api/alerts/channels/:id/test': R('alerts'),
   'GET /api/audit': R('audit'),
   'GET /api/audit/policy': R('audit'),
+  // Git accounts are each person's own; every handler works on the caller's accounts only.
+  'GET /api/git/providers': R(null),
+  'GET /api/git/accounts': R(null),
+  'POST /api/git/accounts': R(null),
+  'PUT /api/git/accounts/:id': R(null),
+  'DELETE /api/git/accounts/:id': R(null),
+  'POST /api/git/accounts/:id/test': R(null, undefined, true),
+  'POST /api/git/clone': R(null),
+  'GET /api/projects/:id/git': R('view', 'project'),
+  'POST /api/projects/:id/git/init': R('design', 'project'),
+  'POST /api/projects/:id/git/publish': R('design', 'project'),
+  'POST /api/projects/:id/git/commit': R('design', 'project'),
+  'POST /api/projects/:id/git/push': R('design', 'project'),
+  'POST /api/projects/:id/git/pull': R('design', 'project'),
+  'POST /api/projects/:id/git/fetch': R('design', 'project', true),
+  'POST /api/projects/:id/git/discard': R('design', 'project'),
+  'GET /api/projects/:id/git/branches': R('view', 'project'),
+  'POST /api/projects/:id/git/switch': R('design', 'project'),
+  'GET /api/projects/:id/git/log': R('view', 'project'),
+  'GET /api/projects/:id/git/commits/:sha': R('view', 'project'),
+  'GET /api/projects/:id/git/diff': R('view', 'project'),
+  'POST /api/projects/:id/git/resolve': R('design', 'project'),
+  'POST /api/projects/:id/git/abort': R('design', 'project'),
+  'POST /api/projects/:id/git/trust': R('design', 'project'),
+  'DELETE /api/projects/:id/git': R('design', 'project'),
   'PUT /api/audit/policy': R('auditManage'),
   // Records its own entry (what was cleared, how many); refusals are still logged.
   'POST /api/audit/clear': R('auditManage', undefined, true),
@@ -238,7 +263,7 @@ export function check(rule: Rule, caller: Caller, req: any): string | null {
 }
 
 // Fields copied into the audit log. Passwords, secret values, tokens and package contents never are.
-const SAFE = ['name', 'version', 'note', 'approved', 'comment', 'enabled', 'disabled', 'keepOthers', 'project', 'projectId', 'project_id', 'kind',
+const SAFE = ['branch', 'message', 'url', 'side', 'path', 'create', 'push', 'provider', 'host', 'label', 'login', 'name', 'version', 'note', 'approved', 'comment', 'enabled', 'disabled', 'keepOthers', 'project', 'projectId', 'project_id', 'kind',
   'username', 'displayName', 'email', 'grants', 'perms', 'mode', 'allowed', 'sutrasMayChange', 'to', 'retentionDays', 'action', 'mustChange', 'expiresDays', 'domains', 'httpPort', 'httpsPort'];
 
 /**

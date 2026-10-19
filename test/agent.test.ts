@@ -98,8 +98,9 @@ test('an agent uses a tool Sutra, answers, and remembers the conversation', asyn
 test('messages of one session are handled one at a time, in arrival order; other sessions run alongside', async () => {
   calls.length = 0;
   delayMs = 50;
-  // msg1 holds its session for 1.5 s at the model: msg2 and msg3 must wait, msg9 (another session) must not.
-  delayFor = p => (/Now:\nuser: msg1\b/.test(p) ? 1500 : 0);
+  // msg1 holds its session for 4 s at the model: msg2 and msg3 must wait, msg9 (another session) must not.
+  // (Generous: the PostgreSQL pass runs every suite at once on one in-process database.)
+  delayFor = p => (/Now:\nuser: msg1\b/.test(p) ? 4000 : 0);
   script = p => ({ answer: `answer to ${/user: (msg\d)/.exec(p.split('Now:')[1] || '')?.[1]}` });
   const doc = agentDoc({ tools: 'none' });
   const ids = ['msg1', 'msg2', 'msg3'].map(m => engine.startRun({ doc, projectId: pid, input: { message: m, sessionId: 'queue-1' } }));
@@ -111,8 +112,9 @@ test('messages of one session are handled one at a time, in arrival order; other
   const turns = (await memory.loadSession(getResource(mem)!, () => '', 'queue-1')).turns.map(t => t.content);
   assert.deepEqual(turns, ['msg1', 'answer to msg1', 'msg2', 'answer to msg2', 'msg3', 'answer to msg3'], 'strictly one after the other, first come first served');
   const byMsg = Object.fromEntries(calls.map(c => [/user: (msg\d)/.exec(c.prompt.split('Now:')[1])![1], c as any]));
-  assert.ok(byMsg.msg9.at < byMsg.msg1.end, 'another session reaches the model while this session is busy');
-  assert.ok(byMsg.msg2.at >= byMsg.msg1.end, 'the next message of the session waits for the one before');
+  const times = JSON.stringify(Object.fromEntries(Object.entries(byMsg).map(([k, v]: [string, any]) => [k, [v.at - byMsg.msg1.at, (v.end ?? 0) - byMsg.msg1.at]])));
+  assert.ok(byMsg.msg9.at < byMsg.msg1.end, `another session reaches the model while this session is busy ${times}`);
+  assert.ok(byMsg.msg2.at >= byMsg.msg1.end, `the next message of the session waits for the one before ${times}`);
   assert.equal(memory.sessionQueue(getResource(mem)!, 'queue-1').length, 0, 'the queue is empty afterwards');
 });
 

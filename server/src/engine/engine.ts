@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { restrictedReason } from '../git/restricted.js';
 import { q, tx, now } from '../db.js';
 import { config } from '../config.js';
 import { resolve, resolveDeep } from '../template.js';
@@ -305,6 +306,8 @@ export class Engine {
     let replied: ReplyPayload | undefined;
     try {
       let res: StepResult | void;
+      const blocked = restrictedReason(run.row.project_id, node);
+      if (blocked) throw new Error(blocked);
       if (s.disabled) {
         res = { port: this.portsOf(node)[0] || 'out', out: input };
       } else {

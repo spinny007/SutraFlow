@@ -171,6 +171,13 @@ create table if not exists ai_knowledge(kb_id text not null, id text not null, s
 create index if not exists ai_knowledge_source on ai_knowledge(kb_id, source);
 create table if not exists ai_session_queue(seq integer primary key autoincrement, store_id text not null, session text not null, run_id text not null, at text not null);
 create index if not exists ai_session_queue_s on ai_session_queue(store_id, session, seq);
+create table if not exists git_accounts(id text primary key, username text not null, provider text not null, host text not null, label text not null, login text not null,
+  token text not null, author_name text, author_email text, created_at text not null, last_used text);
+create index if not exists git_accounts_user on git_accounts(username);
+create table if not exists git_workspaces(id text primary key, project_id text not null unique, owner text not null, kind text not null, dir text not null, remote_url text,
+  branch text not null, account_id text, trusted integer not null default 0, source_project_id text, created_at text not null, updated_at text not null);
+create table if not exists git_ids(workspace_id text not null, kind text not null, repo_id text not null, local_id text not null, primary key(workspace_id, repo_id));
+create index if not exists git_ids_local on git_ids(workspace_id, local_id);
 create table if not exists ai_agent_state(run_id text not null, node_id text not null, state text not null, updated_at text not null, primary key(run_id, node_id));
 create table if not exists gw_requests(
   id integer primary key autoincrement, at text not null, engine text, kind text, method text, path text, route text, flow_id text,
@@ -210,6 +217,9 @@ function migrate() {
   const add = (t: string, c: string, ddl: string) => { if (!cols(t).includes(c)) d.exec(`alter table ${t} add column ${d.kind === 'postgres' ? pgSchema(ddl) : ddl}`); };
   add('flows', 'project_id', 'project_id text');
   add('flows', 'folder', "folder text not null default ''");
+  // Personal copies of a project (Git workspaces): the owner, and restricted mode until the repository is trusted.
+  add('projects', 'owner', "owner text not null default ''");
+  add('projects', 'restricted', 'restricted integer not null default 0');
   // Audit entries keep the names of what they were about, so a renamed or deleted item stays readable.
   add('audit', 'project_name', 'project_name text');
   add('audit', 'sutra_id', 'sutra_id text');
@@ -279,14 +289,20 @@ export const q = {
 };
 
 /** Runs fn inside one write transaction; storage calls are synchronous, so nothing else interleaves here. */
+let txDepth = 0;
 export function tx<T>(fn: () => T): T {
+  // Inside a transaction already (a whole pull, say, that deletes Sutras): the inner work joins it.
+  if (txDepth > 0) return fn();
   const d = getDb();
   d.begin();
+  txDepth++;
   try {
     const r = fn();
+    txDepth--;
     d.commit();
     return r;
   } catch (e) {
+    txDepth = 0;
     d.rollback();
     throw e;
   }

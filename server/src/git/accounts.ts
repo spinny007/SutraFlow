@@ -1,0 +1,80 @@
+import crypto from 'node:crypto';
+import { q, now } from '../db.js';
+import { encrypt, decrypt } from '../secrets.js';
+import { gitEngine, type Auth, type Who } from './engine.js';
+
+/**
+ * Git accounts belong to one person. Each holds a personal access token for GitHub, GitLab,
+ * Bitbucket, Azure DevOps or another Git server, encrypted with the master key, apart from the shared
+ * vault: no one else can see it, use it, or push with it. Commits carry the account's author name
+ * and email, or the person's own.
+ */
+export const GIT_PROVIDERS: Record<string, { name: string; host: string; login: string; tokenHelp: string }> = {
+  github: { name: 'GitHub', host: 'github.com', login: 'x-access-token', tokenHelp: 'Settings > Developer settings > Personal access tokens: a fine-grained token with Contents read and write on the repository.' },
+  gitlab: { name: 'GitLab', host: 'gitlab.com', login: 'oauth2', tokenHelp: 'Preferences > Access tokens: scopes read_repository and write_repository.' },
+  bitbucket: { name: 'Bitbucket', host: 'bitbucket.org', login: 'x-token-auth', tokenHelp: 'A repository or workspace access token with Repositories read and write. With an app password, set the login to your Bitbucket username.' },
+  azure: { name: 'Azure DevOps', host: 'dev.azure.com', login: 'pat', tokenHelp: 'User settings > Personal access tokens: scope Code (read and write).' },
+  other: { name: 'Other Git server', host: '', login: '', tokenHelp: 'A token or password the server accepts over HTTPS, and its login.' },
+};
+
+export interface GitAccount { id: string; provider: string; host: string; label: string; login: string; authorName: string; authorEmail: string; createdAt: string; lastUsed: string | null }
+const view = (r: any): GitAccount => ({ id: r.id, provider: r.provider, host: r.host, label: r.label, login: r.login, authorName: r.author_name || '', authorEmail: r.author_email || '', createdAt: r.created_at, lastUsed: r.last_used });
+
+export const listAccounts = (username: string) => q.all<any>('select * from git_accounts where username = ? order by label', username).map(view);
+
+export function addAccount(username: string, a: { provider: string; host?: string; label?: string; login?: string; token: string; authorName?: string; authorEmail?: string }) {
+  const p = GIT_PROVIDERS[a.provider];
+  if (!p) throw new Error(`Unknown provider: use ${Object.keys(GIT_PROVIDERS).join(', ')}`);
+  const host = String(a.host || p.host).trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '').toLowerCase();
+  if (!host) throw new Error('Give the Git server host, for example git.example.com');
+  const token = String(a.token || '').trim();
+  if (token.length < 8) throw new Error('Paste the access token');
+  const login = String(a.login || p.login).trim();
+  if (!login) throw new Error('Give the login (user name) for this server');
+  const id = crypto.randomUUID();
+  q.run(`insert into git_accounts(id, username, provider, host, label, login, token, author_name, author_email, created_at) values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    id, username, a.provider, host, String(a.label || `${p.name} (${host})`).trim(), login, JSON.stringify(encrypt(token)), a.authorName || '', a.authorEmail || '', now());
+  return view(q.get('select * from git_accounts where id = ?', id));
+}
+
+export function updateAccount(username: string, id: string, a: { label?: string; login?: string; token?: string; authorName?: string; authorEmail?: string }) {
+  const r = q.get<any>('select * from git_accounts where id = ? and username = ?', id, username);
+  if (!r) throw new Error('Git account not found');
+  q.run('update git_accounts set label = ?, login = ?, token = ?, author_name = ?, author_email = ? where id = ?',
+    a.label ?? r.label, a.login ?? r.login, a.token ? JSON.stringify(encrypt(a.token.trim())) : r.token, a.authorName ?? r.author_name, a.authorEmail ?? r.author_email, id);
+  return view(q.get('select * from git_accounts where id = ?', id));
+}
+
+export function deleteAccount(username: string, id: string) {
+  if (!Number(q.run('delete from git_accounts where id = ? and username = ?', id, username).changes)) throw new Error('Git account not found');
+  q.run('update git_workspaces set account_id = null where account_id = ?', id);
+}
+
+/** The credentials of one of this person's accounts; never another person's. */
+export function authOf(username: string, id: string | null | undefined): Auth | undefined {
+  if (!id) return undefined;
+  const r = q.get<any>('select login, token from git_accounts where id = ? and username = ?', id, username);
+  if (!r) return undefined;
+  q.run('update git_accounts set last_used = ? where id = ?', now(), id);
+  return { login: r.login, token: decrypt(JSON.parse(r.token)) };
+}
+
+/** The person's account for a repository address, by host. */
+export function accountForUrl(username: string, url: string) {
+  let host = '';
+  try { host = new URL(url).hostname.toLowerCase(); } catch { return undefined; }
+  return listAccounts(username).find(a => a.host === host || host.endsWith(`.${a.host}`));
+}
+
+/** Who a commit is by: the account's author, else the person's name and email. */
+export function authorOf(username: string, accountId?: string | null): Who {
+  const a = accountId ? q.get<any>('select author_name, author_email from git_accounts where id = ? and username = ?', accountId, username) : null;
+  const u = q.get<any>('select display_name, email from users where username = ?', username);
+  return { name: a?.author_name || u?.display_name || username, email: a?.author_email || u?.email || `${username}@users.sutraflow.local` };
+}
+
+/** Tries an account against a repository: the branches it can see. */
+export async function testAccount(username: string, id: string, url: string) {
+  const branches = await gitEngine().testRemote(url, authOf(username, id));
+  return { ok: true, branches };
+}
