@@ -92,11 +92,22 @@ mark{background:rgba(255,204,0,.45);color:inherit;border-radius:3px}
 <p class="h">Procedure</p>
 <ol>
 <li>Open a terminal in the SutraFlow folder.</li>
-<li>Install the packages: <code>npm install</code></li>
-<li>Build the studio and server: <code>npm run build</code></li>
-<li>Start the server: <code>npm start</code></li>
-<li>Open <code>http://127.0.0.1:4800</code>. The first time, create the administrator account.</li>
+<li>Install and build: <code>bin/sutraflow setup</code> (Windows: <code>bin\sutraflow.cmd setup</code>). It runs <code>npm install</code> and <code>npm run build</code>, and makes <code>sutraflow.env</code>, where the ports, the data folder and the database are set.</li>
+<li>Start: <code>bin/sutraflow start</code></li>
+<li>Open the designer: <code>bin/sutraflow open</code> (<code>http://127.0.0.1:4800</code>). The first time, create the administrator account.</li>
 </ol>
+<p class="h">The sutraflow command</p>
+<p>Every way of running SutraFlow uses one launcher: <code>bin/sutraflow</code> on Linux and macOS, <code>bin\sutraflow.cmd</code> on Windows (after <code>npm install -g</code> it is simply <code>sutraflow</code>). Its settings come from <code>sutraflow.env</code> in the SutraFlow folder, made from <code>sutraflow.env.example</code> on first use.</p>
+<div class="tw"><table class="t"><thead><tr><th>Command</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>start</code>, <code>start engine</code></td><td>Starts the studio, or a headless engine beside it on the same database, in the background (output in <code>&lt;data&gt;/logs</code>). <code>--foreground</code> keeps it in the terminal, for services and Laragon.</td></tr>
+<tr><td><code>stop</code>, <code>stop engine</code>, <code>stop all</code></td><td>Graceful: no new work, running steps finish first. <code>--force</code> ends a process that does not stop.</td></tr>
+<tr><td><code>restart</code>, <code>status</code>, <code>logs [--follow]</code></td><td>Restart; whether each part is ready, its process, addresses and database; the output log.</td></tr>
+<tr><td><code>open [designer|admin|guide|architecture]</code></td><td>Opens the page in the browser.</td></tr>
+<tr><td><code>cli ...</code></td><td>The <code>sutra</code> command against this studio with the local admin token, for example <code>sutraflow cli sutras list</code>.</td></tr>
+<tr><td><code>db info</code>, <code>db copy --to ...</code></td><td>Which database is in use; copies the data to PostgreSQL.</td></tr>
+<tr><td><code>service</code></td><td>Starting with the machine: a systemd unit on Linux, a scheduled task on Windows.</td></tr>
+<tr><td><code>docker up|down|status|logs|build</code>, <code>docker cluster up|down|...</code></td><td>The studio and an engine in Docker, or PostgreSQL with a studio and two engines. Missing passwords and the master key are made once into <code>.env</code>.</td></tr>
+</tbody></table></div>
 <p>For development with automatic reload, run <code>npm run dev</code> and open <code>http://localhost:5173</code>. The tests run with <code>npm test</code>.</p>
 <div class="tip"><strong>Guidelines</strong><p>Back up the <code>data</code> folder, and above all <code>data/master.key</code>: without it the encrypted secrets cannot be read.<br>Keep the studio on 127.0.0.1. Publish APIs through the gateway ports, not the studio port.</p></div>
 <p class="h">Server settings</p>
@@ -114,8 +125,9 @@ mark{background:rgba(255,204,0,.45);color:inherit;border-radius:3px}
 <p>For development and proofs of concept on Windows, <strong>Laragon</strong> is a convenient base: one installer brings Apache, MySQL, PostgreSQL, PHP, Node.js and HeidiSQL, starts them from one window, and keeps everything under <code>C:\laragon</code>. The DB Ops samples use its MySQL as it comes (127.0.0.1:3306, user root, no password), and SutraFlow itself can keep its data in its PostgreSQL.</p>
 <ol>
 <li>Install Laragon (the full edition) and click <strong>Start All</strong>.</li>
-<li>Put SutraFlow in <code>C:\laragon\www\sutra</code> with its scripts from <code>deploy/laragon</code>: <code>start-sutra.cmd</code> (studio on 4810, gateway on 8090), <code>start-engine.cmd</code>, <code>stop.cmd</code>, <code>status.cmd</code> and <code>sutra.cmd</code>. All settings are in <code>_env.cmd</code>; data lives in <code>C:\laragon\data\sutraflow</code>, outside the web folder.</li>
-<li>To use PostgreSQL instead of SQLite, stop SutraFlow, run <code>sutra.cmd db copy --to postgres://postgres@127.0.0.1:5432/sutraflow</code> (the database is created when missing), and set the same address as <code>SUTRA_DB</code> in <code>_env.cmd</code>. <code>sutra.cmd db info</code> shows which database is in use.</li>
+<li>Put SutraFlow in <code>C:\laragon\www\sutra</code> and copy <code>deploy/laragon/sutraflow.env</code> beside it: studio on 4810 (gateway 8090), engine on 4811 (gateway 8091), data in <code>C:\laragon\data\sutraflow</code> outside the web folder. Every command is the launcher: <code>bin\sutraflow.cmd start</code>, <code>stop</code>, <code>status</code>, <code>cli sutras list</code> and so on.</li>
+<li>Let Laragon start it: Menu &gt; Procfile, add <code>SutraFlow: autorun C:\laragon\www\sutra\bin\sutraflow.cmd start --foreground PWD=www/sutra</code>.</li>
+<li>To use PostgreSQL instead of SQLite, run <code>bin\sutraflow.cmd stop all</code>, then <code>bin\sutraflow.cmd db copy --to postgres://postgres@127.0.0.1:5432/sutraflow</code> (the database is created when missing), and set the same address as <code>SUTRA_DB</code> in <code>sutraflow.env</code>. <code>bin\sutraflow.cmd db info</code> shows which database is in use.</li>
 </ol>
 <p class="h">HeidiSQL and PostgreSQL</p>
 <p>HeidiSQL needs the PostgreSQL client library to open a PostgreSQL session; without it the connection fails with a missing <code>libpq.dll</code>. Either choose the library in the session's <em>Library</em> field from <code>C:\laragon\bin\postgresql\&lt;version&gt;\bin\libpq.dll</code>, or copy <code>libpq.dll</code> with the <code>libcrypto-*.dll</code>, <code>libssl-*.dll</code> (and, when present, <code>libiconv-*.dll</code> and <code>libintl-*.dll</code>) from that folder into <code>C:\laragon\bin\heidisql</code> and restart HeidiSQL. pgAdmin and DBeaver bring their own drivers, if you prefer them.</p>
@@ -141,8 +153,9 @@ mark{background:rgba(255,204,0,.45);color:inherit;border-radius:3px}
 </tbody></table></div>
 <p>With Docker, one command gives PostgreSQL with pgvector already in it: <code>docker run -d --name sutra-pg -e POSTGRES_PASSWORD=dev -p 5432:5432 pgvector/pgvector:pg17</code>, and <code>docker run -d --name sutra-mysql -e MYSQL_ROOT_PASSWORD=dev -p 3306:3306 mysql:8.4</code> adds MySQL. Then:</p>
 <ol>
-<li>Install SutraFlow (Procedure above), and set <code>SUTRA_DATA_DIR</code>, for example <code>~/sutraflow-data</code>.</li>
-<li>To keep SutraFlow in PostgreSQL: <code>npm run sutra -- db copy --to postgres://postgres:dev@127.0.0.1:5432/sutraflow</code>, then start it with <code>SUTRA_DB</code> set to the same address.</li>
+<li>Install SutraFlow (Procedure above: <code>bin/sutraflow setup</code>), and set <code>SUTRA_DATA_DIR</code> in <code>sutraflow.env</code>, for example <code>/home/me/sutraflow-data</code>.</li>
+<li>To keep SutraFlow in PostgreSQL: <code>bin/sutraflow db copy --to postgres://postgres:dev@127.0.0.1:5432/sutraflow</code>, then set <code>SUTRA_DB</code> to the same address in <code>sutraflow.env</code> and <code>bin/sutraflow start</code>.</li>
+<li>Start it with the machine: <code>bin/sutraflow service</code> prints a systemd unit to install.</li>
 <li>Check pgvector as on Windows: <code>SELECT name, default_version FROM pg_available_extensions WHERE name = 'vector';</code></li>
 </ol>
 <div class="tip"><strong>Guidelines</strong><p>Laragon and these Linux set-ups are for development machines. For servers, run SutraFlow as a service or in Docker with a managed PostgreSQL (see Running in production).<br>Keep the master key safe: the file <code>master.key</code> in the data folder (made the first time a secret is saved), or <code>SUTRA_MASTER_KEY</code>. Moving to PostgreSQL copies the encrypted secrets, and only this key opens them.</p></div>

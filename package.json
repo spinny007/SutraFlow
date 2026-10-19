@@ -73,6 +73,7 @@
     "esbuild@0.28.2": true
   },
   "bin": {
-    "sutra": "dist/server/cli.js"
+    "sutra": "dist/server/cli.js",
+    "sutraflow": "bin/sutraflow.mjs"
   }
 }

@@ -1,0 +1,4 @@
+# Windows command files need CRLF; shell scripts need LF.
+*.cmd text eol=crlf
+bin/sutraflow text eol=lf
+bin/*.mjs text eol=lf

@@ -1,0 +1,9 @@
+#!/bin/sh
+# SutraFlow launcher for Linux and macOS: start, stop, status and more. Run "sutraflow help".
+# Node.js: SUTRA_NODE from the environment, else from sutraflow.env, else node on the PATH.
+here=$(CDPATH= cd -- "$(dirname -- "$(readlink -f -- "$0" 2>/dev/null || echo "$0")")" && pwd)
+envfile=${SUTRAFLOW_ENV:-$here/../sutraflow.env}
+if [ -z "$SUTRA_NODE" ] && [ -f "$envfile" ]; then
+  SUTRA_NODE=$(sed -n 's/^[[:space:]]*SUTRA_NODE[[:space:]]*=[[:space:]]*//p' "$envfile" | tail -n 1 | tr -d '\r')
+fi
+exec "${SUTRA_NODE:-node}" "$here/sutraflow.mjs" "$@"

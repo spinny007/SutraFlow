@@ -103,27 +103,32 @@ sutra gateway firewall --allow "10.0.0.0/8" --deny "203.0.113.9"
 sutra gateway openapi > openapi.json
 ```
 
+### The sutraflow launcher
+
+One launcher runs SutraFlow everywhere: `bin/sutraflow` (Linux, macOS) and `bin\sutraflow.cmd` (Windows); `sutraflow` after `npm install -g`. Its settings are in `sutraflow.env` beside it, made from `sutraflow.env.example` on first use (ports, `SUTRA_DATA_DIR`, `SUTRA_DB`, `SUTRA_NODE`, and any other `SUTRA_` setting). `SUTRAFLOW_ENV` points it at another settings file.
+
+| Command | Does |
+|---|---|
+| `setup` | `npm install` and `npm run build` in a source folder (`npm ci --omit=dev` in a built copy), the settings file and the local admin token |
+| `start`, `start engine` | The studio, or a headless engine on the same database, in the background; output in `<data>/logs/<name>.out.log`. `--foreground` for services and Laragon |
+| `stop`, `stop engine`, `stop all` | Graceful drain: running steps finish first; `--force` ends a process that does not stop within 45 s |
+| `restart`, `status`, `logs [--follow]` | Restart; ready or not, process, addresses and database; the output log |
+| `open [designer\|admin\|guide\|architecture]` | Opens the page |
+| `cli ...` | The sutra command against this studio with the local admin token (`data/admin-token.txt`) |
+| `db info`, `db copy --to ...` | The database in use; copy to PostgreSQL |
+| `service` | A systemd unit (Linux) or a scheduled task (Windows) to start with the machine |
+| `docker up\|down\|status\|logs\|build` | `docker-compose.yml`: a studio and an engine. Makes `SUTRA_ADMIN_TOKEN` and `SUTRA_MASTER_KEY` once into `.env` |
+| `docker cluster up\|down\|status\|logs` | `docker-compose.cluster.yml`: PostgreSQL, a studio and two engines; also makes `POSTGRES_PASSWORD` |
+
 ### Windows with Laragon
 
-Templates in `deploy/laragon/` (copy them into `C:\laragon\www\sutra`; set the Node.js path in `_env.cmd`):
+Laragon uses the same launcher; `deploy/laragon/` holds only its settings, the Apache site and a README:
 
-1. Build (`npm run build`), then copy `package.json`, `package-lock.json`, `dist/` and `docs/*.html` to `C:\laragon\www\sutra` and run `npm ci --omit=dev` there.
-2. Scripts in that folder:
-
-   | Script | Does |
-   |---|---|
-   | `start-sutra.cmd` | Studio: designer, Admin Console and engine, http://127.0.0.1:4810 (gateway 8090) |
-   | `start-engine.cmd` | A headless engine on the same database, http://127.0.0.1:4811/admin (gateway 8091) |
-   | `stop.cmd`, `stop.cmd engine` | Graceful stop: running steps finish first |
-   | `status.cmd` | Ready or not, and every engine of the cluster |
-   | `open-designer.cmd`, `open-admin.cmd`, `open-guide.cmd` | Open the pages |
-   | `sutra.cmd ...` | The sutra command against this server, such as `sutra.cmd sutras list` |
-   | `_env.cmd` | Shared settings: data folder, Node.js 24, ports, and a local admin token made once |
-
-   Data stays outside the web folder in `C:\laragon\data\sutraflow`, with `admin-token.txt`, which acts as an administrator; keep it private.
-3. `.htaccess` in `www\sutra` denies direct access to the folder.
-4. `01-sutra.conf` goes to `C:\laragon\etcpache2\sites-enabled`: it loads Apache's proxy modules and forwards `http://sutra.test` to the studio.
-5. Add to Laragon's Procfile (Menu > Procfile): `SutraFlow: autorun C:\laragon\www\sutra\start-sutra.cmd PWD=www/sutra`.
+1. Build (`npm run build`), then copy `package.json`, `package-lock.json`, `bin/`, `dist/` and `docs/*.html` to `C:\laragon\www\sutra` and run `npm ci --omit=dev` there.
+2. Copy `deploy/laragon/sutraflow.env` to `C:\laragon\www\sutra\sutraflow.env`: studio on 4810 (gateway 8090), engine on 4811 (gateway 8091), data in `C:\laragon\data\sutraflow` outside the web folder, Laragon's PostgreSQL, and the Node.js path. `admin-token.txt` in the data folder acts as an administrator; keep it private.
+3. `01-sutra.conf` goes to `C:\laragon\etc\apache2\sites-enabled`: it loads Apache's proxy modules and forwards `http://sutra.test` to the studio.
+4. Add to Laragon's Procfile (Menu > Procfile): `SutraFlow: autorun C:\laragon\www\sutra\bin\sutraflow.cmd start --foreground PWD=www/sutra`.
+5. Everything else: `bin\sutraflow.cmd status`, `stop all`, `start engine`, `cli sutras list`, `open admin`.
 
 Laragon's MySQL works as a DB Ops connection (driver mysql, host 127.0.0.1, port 3306, user root). `SUTRA_TEST_MYSQL_URL=mysql://root@127.0.0.1:3306/sutraflow_test npm test` also runs the MySQL tests.
 
@@ -157,7 +162,7 @@ Point every engine at one database: `SUTRA_DB=postgres://user:pass@host/db` (or 
 sutra db copy --to postgres://postgres@127.0.0.1:5432/sutraflow
 ```
 
-A missing database is created. A target that already holds data is refused unless you add `--replace`. Then start the server with `SUTRA_DB` set to that address and the same master key (the `SUTRA_MASTER_KEY`, or the key file in the data folder), so the vault stays readable. `sutra db info` shows which database is in use and its row counts. With Laragon, `_env.cmd` holds the `SUTRA_DB` line.
+A missing database is created. A target that already holds data is refused unless you add `--replace`. Then start the server with `SUTRA_DB` set to that address and the same master key (the `SUTRA_MASTER_KEY`, or the key file in the data folder), so the vault stays readable. `sutra db info` shows which database is in use and its row counts. With the launcher (and Laragon), `sutraflow.env` holds the `SUTRA_DB` line.
 
 | Behaviour | How |
 |---|---|

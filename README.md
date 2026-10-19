@@ -9,18 +9,14 @@ One Node.js Sutra contains the studio, the engine and the gateway. Storage is SQ
 Requires Node.js 22.13 or later (24 recommended).
 
 ```bash
-npm install
+bin/sutraflow setup        # Windows: bin\sutraflow.cmd setup   (npm install, npm run build, sutraflow.env)
+bin/sutraflow start        # the studio, in the background
+bin/sutraflow open         # http://127.0.0.1:4800
 ```
 
-```bash
-npm run build
-```
+Open http://127.0.0.1:4800 and create the administrator account.
 
-```bash
-npm start
-```
-
-Open http://127.0.0.1:4800 and create the administrator account. Deployed services are served by the gateway on port 8080 (HTTP) and 8443 (HTTPS once a certificate is set).
+The `sutraflow` launcher is the one place for every command, on Windows and Linux, with or without Docker: `start [engine]`, `stop [engine|all]`, `restart`, `status`, `logs [--follow]`, `open [admin|guide]`, `cli <sutra command>`, `db info | db copy --to <postgres://...>`, `service` (systemd unit or Windows task), `docker [cluster] up|down|status|logs|build`. Settings (ports, data folder, database, Node path) are in `sutraflow.env`, made from `sutraflow.env.example` on first use. `npm start` still runs the server in the terminal. Deployed services are served by the gateway on port 8080 (HTTP) and 8443 (HTTPS once a certificate is set).
 
 For development with hot reload (studio on http://localhost:5173, API proxied to 4800):
 

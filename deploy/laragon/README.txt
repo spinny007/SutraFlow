@@ -1,15 +1,28 @@
 SutraFlow under Laragon
 =======================
 
-start-sutra.cmd     Studio: designer + Admin Console + engine     http://127.0.0.1:4810  (http://sutra.test)
-start-engine.cmd    Headless engine on the same database            http://127.0.0.1:4811/admin
-stop.cmd            Graceful stop of the studio; stop.cmd engine for the engine
-status.cmd          Ready or not, and every engine of the cluster
-open-designer.cmd   open-admin.cmd   open-guide.cmd
-sutra.cmd ...       The sutra command against this server, for example: sutra.cmd sutras list
-_env.cmd            Shared settings: data folder, Node.js, ports, the local admin token
+Everything is one launcher, the same one used on every machine:
 
-Data (database, vault key, logs, admin-token.txt): C:\laragon\data\sutraflow
+  C:\laragon\www\sutra\bin\sutraflow.cmd <command>      (run "sutraflow help" for all)
+
+  start              Studio: designer + Admin Console + engine   http://127.0.0.1:4810  (http://sutra.test)
+  start engine       Headless engine on the same database         http://127.0.0.1:4811/admin
+  stop | stop engine | stop all | restart      Graceful: running steps finish first
+  status             Ready or not, process, addresses, database
+  logs [engine] [--follow]                    The output log
+  open | open admin | open guide              The page in the browser
+  cli sutras list    The sutra command against this studio (local admin token)
+  db info            Which database is in use
+
+Install or update
+  1. Copy the SutraFlow folder (dist, bin, docs, package.json, package-lock.json) to C:\laragon\www\sutra
+     and run there: npm ci --omit=dev
+  2. Copy this folder's sutraflow.env to C:\laragon\www\sutra\sutraflow.env (Laragon ports, data folder,
+     PostgreSQL address, Node path).
+  3. Apache site for http://sutra.test: copy 01-sutra.conf to C:\laragon\etc\apache2\sites-enabled\
+  4. Start with Laragon: Menu > Procfile, add
+       SutraFlow: autorun C:\laragon\www\sutra\bin\sutraflow.cmd start --foreground PWD=www/sutra
+
+Data (database file, master.key, logs, admin-token.txt): C:\laragon\data\sutraflow
 Gateway: studio http://127.0.0.1:8090, engine http://127.0.0.1:8091
-Laragon starts the studio by itself (Menu > Procfile > SutraFlow).
-Keep admin-token.txt private: it acts as an administrator.
+Keep admin-token.txt and master.key private: the token acts as an administrator, the key opens the vault.
