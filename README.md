@@ -3,6 +3,8 @@
 **A visual integration designer and engine.** Drag activities onto a canvas, map data between steps, test and debug, and deploy *Sutras* (integration processes) that run as REST, SOAP and MCP services, on schedules, or on events: files, queues, mail, cloud drives, chat messages and more.
 
 ![Version](https://img.shields.io/badge/version-1.6.0-2f6fd8)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+[![Commercial licence available](https://img.shields.io/badge/commercial%20licence-available-orange)](COMMERCIAL-LICENSE.md)
 ![Node.js](https://img.shields.io/badge/node-%E2%89%A5%2022.13-339933?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-7-3178c6?logo=typescript&logoColor=white)
 ![Database](https://img.shields.io/badge/database-SQLite%20%7C%20PostgreSQL-4169e1?logo=postgresql&logoColor=white)
@@ -186,19 +188,19 @@ Tested against stand-in services that answer like the real ones, but not yet aga
 
 ## Contributing
 
-1. Open an issue that describes the change, or pick an existing one.
-2. Create a branch, make the change with tests, and run `npm run typecheck` and `npm test`.
-3. New activities need user guide text (`tools/guide/activities.ts`); new files and tables need a description for the architecture page; the builds report what is missing.
-4. Open a pull request that says what changed and how it was tested.
-
-New connectors register in `server/src/palettes/index.ts` (activities) and `server/src/resources.ts` (connection kinds).
+Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Code and documentation contributions need the [Contributor License Agreement](CLA.md), agreed once in your first pull request: you keep your copyright, and your contribution is published under the AGPL and may also be offered under commercial licences.
 
 ## Security
 
-- Secrets are encrypted with AES-256-GCM using the master key; their values are never returned by the API and are masked in outputs and logs. Back up `data/master.key` apart from the database.
-- The studio listens on 127.0.0.1 by default, with HttpOnly SameSite cookies, a CSRF guard, throttled sign-in, roles per project, and an audit log of every change.
-- Please report security problems privately to the maintainer rather than in a public issue.
+Secrets are encrypted in a vault, the studio stays on 127.0.0.1 with roles and an audit log, and gateway services are protected by policies and TLS. Report security problems privately: see [SECURITY.md](SECURITY.md).
 
 ## License
 
-No licence has been chosen yet, so all rights are reserved by the author. Add a `LICENSE` file before others use or contribute to the code.
+SutraFlow is **dual-licensed**:
+
+- **[GNU Affero General Public License v3.0](LICENSE)**: free for everyone. Use, change and run it for any purpose; if you change SutraFlow and people use your changed version over a network, or you distribute it, you share your changes under the AGPL.
+- **[Commercial licence](COMMERCIAL-LICENSE.md)**: for organisations that do not want to share their changes, for example in-house deployments with private changes, or SutraFlow inside a proprietary product or service. Terms per customer.
+
+Running SutraFlow unchanged needs no commercial licence, and the Sutras, projects and packages you build with it are yours, whichever licence applies.
+
+Copyright (C) Surya Partap Singh and SutraFlow contributors.

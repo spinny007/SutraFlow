@@ -3,6 +3,9 @@
   "version": "1.6.0",
   "description": "SutraFlow: visual integration designer and engine (palettes, mapping, SOAP/WS-Security, REST, exposed secured APIs, TLS/Let's Encrypt).",
   "private": true,
+  "license": "AGPL-3.0-only",
+  "author": "Surya Partap Singh",
+  "repository": { "type": "git", "url": "https://github.com/spinny007/SutraFlow.git" },
   "type": "module",
   "engines": {
     "node": ">=22.13"
