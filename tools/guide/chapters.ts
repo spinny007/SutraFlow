@@ -43,7 +43,44 @@ export const CHAPTERS: Chapter[] = [
 <tr><td><code>SUTRA_WORKERS</code></td><td>16</td><td>Steps that run at the same time.</td></tr>
 <tr><td><code>SUTRA_MAX_STEPS</code></td><td>10000</td><td>Safety limit of steps per run.</td></tr>
 <tr><td><code>SUTRA_REPLY_TIMEOUT_MS</code></td><td>60000</td><td>How long an API caller waits for the reply step.</td></tr>
-</tbody></table>`,
+<tr><td><code>SUTRA_DB</code></td><td>SQLite in the data folder</td><td><code>postgres://user:pass@host/db</code> to keep everything in PostgreSQL.</td></tr>
+</tbody></table>
+<p class="h">A development machine on Windows: Laragon</p>
+<p>For development and proofs of concept on Windows, <strong>Laragon</strong> is a convenient base: one installer brings Apache, MySQL, PostgreSQL, PHP, Node.js and HeidiSQL, starts them from one window, and keeps everything under <code>C:\\laragon</code>. The DB Ops samples use its MySQL as it comes (127.0.0.1:3306, user root, no password), and SutraFlow itself can keep its data in its PostgreSQL.</p>
+<ol>
+<li>Install Laragon (the full edition) and click <strong>Start All</strong>.</li>
+<li>Put SutraFlow in <code>C:\\laragon\\www\\sutra</code> with its scripts from <code>deploy/laragon</code>: <code>start-sutra.cmd</code> (studio on 4810, gateway on 8090), <code>start-engine.cmd</code>, <code>stop.cmd</code>, <code>status.cmd</code> and <code>sutra.cmd</code>. All settings are in <code>_env.cmd</code>; data lives in <code>C:\\laragon\\data\\sutraflow</code>, outside the web folder.</li>
+<li>To use PostgreSQL instead of SQLite, stop SutraFlow, run <code>sutra.cmd db copy --to postgres://postgres@127.0.0.1:5432/sutraflow</code> (the database is created when missing), and set the same address as <code>SUTRA_DB</code> in <code>_env.cmd</code>. <code>sutra.cmd db info</code> shows which database is in use.</li>
+</ol>
+<p class="h">HeidiSQL and PostgreSQL</p>
+<p>HeidiSQL needs the PostgreSQL client library to open a PostgreSQL session; without it the connection fails with a missing <code>libpq.dll</code>. Either choose the library in the session's <em>Library</em> field from <code>C:\\laragon\\bin\\postgresql\\&lt;version&gt;\\bin\\libpq.dll</code>, or copy <code>libpq.dll</code> with the <code>libcrypto-*.dll</code>, <code>libssl-*.dll</code> (and, when present, <code>libiconv-*.dll</code> and <code>libintl-*.dll</code>) from that folder into <code>C:\\laragon\\bin\\heidisql</code> and restart HeidiSQL. pgAdmin and DBeaver bring their own drivers, if you prefer them.</p>
+<p class="h">pgvector: knowledge bases in PostgreSQL</p>
+<p>A knowledge base stored in <em>PostgreSQL (pgvector)</em> needs the <strong>pgvector</strong> extension in the server. Laragon's PostgreSQL does not include it; add a Windows build that matches the major version of your PostgreSQL:</p>
+<ol>
+<li>Find the version: in Laragon's terminal run <code>postgres -V</code> (for example 18).</li>
+<li>Download a Windows x64 build of pgvector for that version. pgvector itself publishes source only; community builds exist (for example the <em>pgvector_pgsql_windows</em> releases on GitHub). Use one you trust, for the same PostgreSQL major version and 64-bit.</li>
+<li>Stop PostgreSQL in Laragon.</li>
+<li>From the zip, copy <code>lib\\vector.dll</code> into <code>C:\\laragon\\bin\\postgresql\\&lt;version&gt;\\lib\\</code>, and every file of <code>share\\extension\\</code> (<code>vector.control</code> and the <code>vector--*.sql</code> files) into <code>C:\\laragon\\bin\\postgresql\\&lt;version&gt;\\share\\extension\\</code>.</li>
+<li>Start PostgreSQL again.</li>
+<li>Check it: <code>SELECT name, default_version FROM pg_available_extensions WHERE name = 'vector';</code> returns a row.</li>
+</ol>
+<p>SutraFlow then turns the extension on in the knowledge base's database by itself (<code>CREATE EXTENSION IF NOT EXISTS vector</code>) the first time a document is added, when its database user may do so (the <code>postgres</code> user can). With a user without that right, run <code>CREATE EXTENSION vector;</code> once in that database as an administrator; <code>SELECT extname, extversion FROM pg_extension WHERE extname = 'vector';</code> confirms it. Without pgvector, use the <em>built-in</em> or <em>folder</em> store, which need nothing else.</p>
+<p class="h">A development machine on Linux</p>
+<p>Laragon is for Windows only. On Linux the same set comes from the distribution's packages, or from Docker:</p>
+<table class="t"><thead><tr><th>Part</th><th>Debian / Ubuntu</th><th>Fedora / RHEL</th></tr></thead><tbody>
+<tr><td>Node.js 24</td><td colspan="2">Through nvm (<code>nvm install 24</code>), or the NodeSource packages.</td></tr>
+<tr><td>MySQL or MariaDB</td><td><code>sudo apt install mariadb-server</code></td><td><code>sudo dnf install mariadb-server</code></td></tr>
+<tr><td>PostgreSQL</td><td><code>sudo apt install postgresql</code> (newer versions from the PostgreSQL apt repository)</td><td><code>sudo dnf install postgresql-server</code>, then <code>sudo postgresql-setup --initdb</code></td></tr>
+<tr><td>pgvector</td><td><code>sudo apt install postgresql-&lt;version&gt;-pgvector</code> from the PostgreSQL apt repository, for example <code>postgresql-17-pgvector</code></td><td><code>sudo dnf install pgvector_&lt;version&gt;</code> from the PostgreSQL yum repository</td></tr>
+<tr><td>A database tool</td><td colspan="2">DBeaver, pgAdmin, or the <code>psql</code> and <code>mysql</code> command lines.</td></tr>
+</tbody></table>
+<p>With Docker, one command gives PostgreSQL with pgvector already in it: <code>docker run -d --name sutra-pg -e POSTGRES_PASSWORD=dev -p 5432:5432 pgvector/pgvector:pg17</code>, and <code>docker run -d --name sutra-mysql -e MYSQL_ROOT_PASSWORD=dev -p 3306:3306 mysql:8.4</code> adds MySQL. Then:</p>
+<ol>
+<li>Install SutraFlow (Procedure above), and set <code>SUTRA_DATA_DIR</code>, for example <code>~/sutraflow-data</code>.</li>
+<li>To keep SutraFlow in PostgreSQL: <code>npm run sutra -- db copy --to postgres://postgres:dev@127.0.0.1:5432/sutraflow</code>, then start it with <code>SUTRA_DB</code> set to the same address.</li>
+<li>Check pgvector as on Windows: <code>SELECT name, default_version FROM pg_available_extensions WHERE name = 'vector';</code></li>
+</ol>
+[[tip:Guidelines|Laragon and these Linux set-ups are for development machines. For servers, run SutraFlow as a service or in Docker with a managed PostgreSQL (see Running in production).<br>Keep the master key safe: the file <code>master.key</code> in the data folder (made the first time a secret is saved), or <code>SUTRA_MASTER_KEY</code>. Moving to PostgreSQL copies the encrypted secrets, and only this key opens them.]]`,
   },
   {
     id: 'tour', title: 'The studio, screen by screen',
