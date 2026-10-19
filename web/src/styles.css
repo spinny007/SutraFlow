@@ -215,6 +215,7 @@ table.t tr.click:hover td { background: var(--paper); }
 .xfolder .xl { font-weight: 600; }
 .xwarn { color: var(--warn); font-size: 12px; flex: none; }
 .anode .vwarn { color: var(--warn); margin-left: 4px; font-size: 12px; }
+.anode .dmark { color: var(--muted); margin-left: 4px; font-size: 12px; }
 .xroot { display: flex; align-items: center; gap: 8px; padding: 4px 6px; margin-top: 2px; border-radius: 6px; }
 
 /* ---------- wide inspector for the mapper ---------- */

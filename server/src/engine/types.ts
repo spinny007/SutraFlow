@@ -5,6 +5,8 @@ export interface FlowNode {
   x: number;
   y: number;
   config: Record<string, any>;
+  /** What the step does and why, in the designer's words: shown on the canvas and in the generated documentation. */
+  description?: string;
   /** Per-step runtime policy. */
   settings?: StepSettings;
 }

@@ -67,6 +67,10 @@ export function NewProjectDialog({ onClose, onCreated }: { onClose(): void; onCr
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [samples, setSamples] = useState<Sample[]>([]);
   const [pkg, setPkg] = useState<any | null>(null);
+  const [zip, setZip] = useState<string | null>(null);
+  const [zipFiles, setZipFiles] = useState<string[]>([]);
+  const [samplesList, setSamplesList] = useState<{ file: string; name: string; description: string }[]>([]);
+  useEffect(() => { get<any[]>('/api/sample-projects').then(setSamplesList).catch(() => setSamplesList([])); }, []);
   const [pkgErr, setPkgErr] = useState('');
   const [deploy, setDeploy] = useState(false);
   const [from, setFrom] = useState('');
@@ -88,15 +92,31 @@ export function NewProjectDialog({ onClose, onCreated }: { onClose(): void; onCr
     setChosen(new Set());
   }, [source, from]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const readFile = async (file?: File) => {
-    setPkg(null); setPkgErr(''); setChosen(new Set());
-    if (!file) return;
+  /** A release zip (with its files) or a .sutra package, from a file or a sample project. */
+  const openBlob = async (blob: Blob, fileName: string) => {
+    setPkg(null); setPkgErr(''); setChosen(new Set()); setZip(null); setZipFiles([]);
     try {
-      const p = JSON.parse(await file.text());
+      if (/\.zip$/i.test(fileName)) {
+        const b64 = await new Promise<string>((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).replace(/^data:[^,]*,/, '')); fr.onerror = () => rej(fr.error); fr.readAsDataURL(blob); });
+        const o = await post<any>('/api/packages/open', { zip: b64 });
+        setZip(b64); setZipFiles(o.files || []); setPkg(o.package);
+        suggest(String(o.package.project?.name || 'Imported'));
+        return;
+      }
+      const p = JSON.parse(await blob.text());
       if (p?.format !== 'sutraflow-package') throw new Error('This is not a SutraFlow package (.sutra file)');
       setPkg(p);
       suggest(String(p.project?.name || 'Imported'));
-    } catch (e: any) { setPkgErr(e.message.includes('JSON') ? 'This file is not a SutraFlow package' : e.message); }
+    } catch (e: any) { setPkgErr(e.message.includes('JSON') ? 'This file is not a SutraFlow package or release zip' : e.message); }
+  };
+  const readFile = async (file?: File) => { if (file) await openBlob(file, file.name); else { setPkg(null); setZip(null); } };
+  const readSample = async (fileName: string) => {
+    if (!fileName) return;
+    try {
+      const r = await fetch(`/api/sample-projects/${encodeURIComponent(fileName)}`, { credentials: 'same-origin' });
+      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+      await openBlob(await r.blob(), fileName);
+    } catch (e: any) { setPkgErr(e.message); }
   };
 
   const items: Choice[] = useMemo(() => {
@@ -123,7 +143,7 @@ export function NewProjectDialog({ onClose, onCreated }: { onClose(): void; onCr
       let id = '', note = '';
       if (source === 'package' || source === 'copy') {
         const r = source === 'package'
-          ? await post('/api/projects/import', { package: pkg, project: name.trim(), sutras: [...chosen], asDrafts: !deploy })
+          ? await post('/api/projects/import', { ...(zip ? { zip } : { package: pkg }), project: name.trim(), sutras: [...chosen], asDrafts: !deploy })
           : await post(`/api/projects/${from}/copy`, { project: name.trim(), sutras: [...chosen] });
         id = r.project.id;
         if (r.missingSecrets?.length) note = ` Add these secrets before running them: ${r.missingSecrets.join(', ')}.`;
@@ -149,9 +169,18 @@ export function NewProjectDialog({ onClose, onCreated }: { onClose(): void; onCr
       </div>
       {source === 'package' && (
         <div className="fld">
-          <label htmlFor="np-file">Package file (.sutra)</label>
-          <input id="np-file" type="file" accept=".sutra,.json" onChange={e => readFile(e.target.files?.[0])} />
-          <div className="hint">Made with Releases (packages) or the sutra command on any SutraFlow server. Secret values never travel in a package.</div>
+          <label htmlFor="np-file">Release zip or package file</label>
+          <input id="np-file" type="file" accept=".zip,.sutra,.json" onChange={e => readFile(e.target.files?.[0])} />
+          <div className="hint">Made with Releases or the sutra command on any SutraFlow server. Secret values never travel in a package; a zip's files go to the project's files folder.</div>
+          {samplesList.length > 0 && <>
+            <label htmlFor="np-sample" style={{ marginTop: 8 }}>Or a sample project</label>
+            <select id="np-sample" defaultValue="" onChange={e => readSample(e.target.value)}>
+              <option value="">Choose</option>
+              {samplesList.map(s => <option key={s.file} value={s.file}>{s.name}</option>)}
+            </select>
+            {samplesList.map(s => <div key={s.file} className="hint">{s.name}: {s.description}</div>)}
+          </>}
+          {zipFiles.length > 0 && <div className="muted xs">With {zipFiles.length} files for the project files folder: {zipFiles.join(', ')}</div>}
           {pkgErr && <div className="errbox">{pkgErr}</div>}
           {pkg && <div className="muted xs">{pkg.name} {pkg.version} · {pkg.sutras.length} Sutras · made {String(pkg.createdAt || '').slice(0, 10)} with SutraFlow {pkg.createdWith}</div>}
         </div>

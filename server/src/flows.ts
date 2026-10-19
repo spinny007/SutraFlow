@@ -40,6 +40,7 @@ export function normalizeDoc(doc: any): FlowDoc {
     x: Number(n.x) || 0,
     y: Number(n.y) || 0,
     config: n.config && typeof n.config === 'object' ? n.config : {},
+    ...(n.description && String(n.description).trim() ? { description: String(n.description).slice(0, 4000) } : {}),
     settings: n.settings && typeof n.settings === 'object' ? n.settings : undefined,
   }));
   const ids = new Set(nodes.map((n: any) => n.id));

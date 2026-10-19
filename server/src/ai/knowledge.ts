@@ -287,20 +287,51 @@ function storeOf(kb: Resource, secret: Secret): Store {
   }
 }
 
-/** Adds a text under a source name (file name, URL, document id); an existing source is replaced. */
-export async function addKnowledge(kb: Resource, secret: Secret, source: string, text: string, meta: Record<string, any> = {}, signal?: AbortSignal) {
+/**
+ * Adds a text under a source name (file name, URL, document id); an existing source is replaced.
+ * Every passage keeps a contentHash of the text and details, so a feed that reads the same files
+ * again (a timer over a folder) can skip unchanged ones without making their vectors again.
+ */
+export async function addKnowledge(kb: Resource, secret: Secret, source: string, text: string, meta: Record<string, any> = {}, signal?: AbortSignal, o: { skipUnchanged?: boolean } = {}) {
   const src = String(source || '').trim().replace(/^\/+/, '');
   if (!src) throw new Error('Give the source a name, such as the file name or address');
+  const hash = crypto.createHash('sha256').update(JSON.stringify([text, meta, kb.config.chunkTokens, kb.config.overlapTokens])).digest('hex').slice(0, 32);
+  const st = storeOf(kb, secret);
+  const existing = (await st.list({ source: src })).filter(c => c.source === src);
+  if (o.skipUnchanged && existing.length && existing.every(c => c.meta?.contentHash === hash)) {
+    return { source: src, chunks: existing.length, tokens: 0, replaced: 0, model: '', skipped: true };
+  }
   const overlap = Number(kb.config.overlapTokens);
   const pieces = chunkText(text, Number(kb.config.chunkTokens) || 300, Number.isFinite(overlap) ? overlap : 40);
   if (!pieces.length) throw new Error(`${src}: there is no text to add`);
   const { vectors, model } = await embed(kb, secret, pieces, signal);
-  const st = storeOf(kb, secret);
-  const all = (await st.list({ source: src })).filter(c => c.source === src).length;
-  if (all) await st.remove({ source: src });
+  if (existing.length) await st.remove({ source: src });
   const at = now();
-  await st.add(pieces.map((t, i) => ({ id: crypto.randomUUID(), source: src, chunk: i + 1, text: t, meta, vector: vectors[i], at })));
-  return { source: src, chunks: pieces.length, tokens: pieces.reduce((a, t) => a + tokensOf(t), 0), replaced: all, model };
+  await st.add(pieces.map((t, i) => ({ id: crypto.randomUUID(), source: src, chunk: i + 1, text: t, meta: { ...meta, contentHash: hash }, vector: vectors[i], at })));
+  return { source: src, chunks: pieces.length, tokens: pieces.reduce((a, t) => a + tokensOf(t), 0), replaced: existing.length, model, skipped: false };
+}
+
+/** The sources a knowledge base holds, with their passage counts and when they were added. */
+export async function listSources(kb: Resource, secret: Secret, under?: string) {
+  const by = new Map<string, { source: string; chunks: number; at: string }>();
+  for (const c of await storeOf(kb, secret).list({ source: under ? String(under).replace(/^\/+|\/+$/g, '') : undefined })) {
+    const e = by.get(c.source) || { source: c.source, chunks: 0, at: c.at };
+    e.chunks++; if (c.at > e.at) e.at = c.at;
+    by.set(c.source, e);
+  }
+  return [...by.values()].sort((a, b) => a.source.localeCompare(b.source));
+}
+
+/**
+ * Removes every source not in the list (within a folder of sources when given): after a feed has
+ * read a whole folder, files deleted from it leave the knowledge base too.
+ */
+export async function keepOnlySources(kb: Resource, secret: Secret, keep: string[], under?: string) {
+  const want = new Set(keep.map(k => String(k).trim().replace(/^\/+/, '')).filter(Boolean));
+  const st = storeOf(kb, secret);
+  const removed: string[] = [];
+  for (const s of await listSources(kb, secret, under)) if (!want.has(s.source)) { await st.remove({ source: s.source }); removed.push(s.source); }
+  return { removed: removed.length, sources: removed, kept: want.size };
 }
 
 /** Passages closest to a question: meaning (vectors) and shared words together, best first. */

@@ -3,6 +3,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { unzip } from './ai/documents.js';
 import { readPackage, buildPackage, type Package } from './packages.js';
+import { packageDocumentation } from './docs.js';
 
 /**
  * Release bundles: what a production team receives. One zip holding the package (package.sutra),
@@ -54,7 +55,7 @@ export function configTemplate(p: Package) {
   };
 }
 
-function readme(p: Package) {
+function readme(p: Package, files: string[] = []) {
   const src = p.source ? `\nBuilt from ${p.source.repository || 'a Git folder'}${p.source.ref ? ` at ${p.source.ref}` : ''}${p.source.commit ? ` (commit ${p.source.commit.slice(0, 12)})` : ''}.\n` : '';
   return `SutraFlow release ${p.name} ${p.version}
 ${p.note ? `\n${p.note}\n` : ''}${src}
@@ -63,7 +64,9 @@ Made ${p.createdAt} with SutraFlow ${p.createdWith}. Checksum ${p.checksum}.
 Contents
   ${BUNDLE_PACKAGE}            the package: ${p.sutras.length} Sutras, ${p.resources.length} connections, ${p.schemas.length} schemas
   ${BUNDLE_CONFIG}   the deployment config: fill it in for the target environment
-
+  documentation.html       what each Sutra does, step by step (also documentation.md)
+${files.length ? `  files/                   ${files.length} files for the project files folder (${"$"}{files} in variables), written there on deploy
+` : ""}
 Sutras
 ${p.manifest.sutras.map(s => `  ${s.name} v${s.version}${s.exposes.length ? `  (${s.exposes.join(', ')})` : ''}`).join('\n') || '  none'}
 
@@ -80,21 +83,40 @@ Deploying
 `;
 }
 
-/** The release zip of a package: package, deployment config template, README. */
-export function buildBundle(p: Package, config?: unknown): Buffer {
+/** The release zip of a package: package, deployment config template, README, documentation, and any extra files (sample documents). */
+export function buildBundle(p: Package, config?: unknown, extra: [string, string | Buffer][] = []): Buffer {
+  const doc = packageDocumentation(p, p.createdWith);
   return zipFiles([
     [BUNDLE_PACKAGE, JSON.stringify(p, null, 2)],
     [BUNDLE_CONFIG, JSON.stringify(config ?? configTemplate(p), null, 2)],
     ['README.txt', readme(p).replace(/\n/g, '\r\n')],
+    ['documentation.html', doc.html],
+    ['documentation.md', doc.markdown],
+    ...extra,
   ]);
 }
 
 export const isZip = (b: Buffer) => b.length > 4 && b.readUInt32LE(0) === 0x04034b50;
 
-/** A release zip or a package file: the package, and the zip's deployment config when it has one. */
-export function readBundle(input: Buffer | string): { package: Package; config?: any } {
+/**
+ * Writes a release's files (files/ in the zip) into the project's files folder (${files}),
+ * replacing files of the same name; other files there are kept. Paths never leave that folder.
+ */
+export function writeProjectFiles(dir: string, files: [string, Buffer][]) {
+  const root = path.resolve(dir);
+  for (const [rel, data] of files) {
+    const full = path.resolve(root, rel);
+    if (!full.startsWith(root + path.sep)) throw new Error(`The file ${rel} would be outside the project's files folder`);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, data);
+  }
+  return files.length;
+}
+
+/** A release zip or a package file: the package, the zip's deployment config, and its files/ (for ${files}). */
+export function readBundle(input: Buffer | string): { package: Package; config?: any; files: [string, Buffer][] } {
   const buf = Buffer.isBuffer(input) ? input : Buffer.from(input, 'utf8');
-  if (!isZip(buf)) return { package: readPackage(buf.toString('utf8')) };
+  if (!isZip(buf)) return { package: readPackage(buf.toString('utf8')), files: [] };
   let z: Map<string, Buffer>;
   try { z = unzip(buf); } catch (e: any) { throw new Error(`The zip cannot be read: ${e.message}`); }
   const name = z.has(BUNDLE_PACKAGE) ? BUNDLE_PACKAGE : [...z.keys()].find(k => /\.sutra$/i.test(k));
@@ -103,7 +125,10 @@ export function readBundle(input: Buffer | string): { package: Package; config?:
   const cfgName = z.has(BUNDLE_CONFIG) ? BUNDLE_CONFIG : [...z.keys()].find(k => /deployment-config\.json$/i.test(k));
   let config: any;
   if (cfgName) { try { config = JSON.parse(z.get(cfgName)!.toString('utf8')); } catch (e: any) { throw new Error(`${cfgName} is not valid JSON: ${e.message}`); } }
-  return { package: pkg, config };
+  const files = [...z.entries()].filter(([k, v]) => k.startsWith('files/') && !k.endsWith('/') && v.length >= 0)
+    .map(([k, v]) => [k.slice('files/'.length), v] as [string, Buffer])
+    .filter(([k]) => k && !k.split('/').includes('..'));
+  return { package: pkg, config, files };
 }
 
 /**

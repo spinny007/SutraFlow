@@ -1,0 +1,15 @@
+[
+  {
+    "file": "ai-document-assistant.zip",
+    "name": "AI document assistant",
+    "description": "RAG over a folder of documents: every 15 minutes the PDF, Word, PowerPoint and Markdown files of the documents folder are read into a knowledge base (changed files again, deleted ones removed), and the documents answer as a REST API, an MCP tool for AI assistants such as Claude, and a chat agent. Sample documents of a tea shop are included.",
+    "sutras": [
+      "Sample: AI tool search documents",
+      "Sample: Add one document to knowledge",
+      "Sample: Document assistant",
+      "Sample: Document feed from a folder",
+      "Sample: Document questions API"
+    ],
+    "bytes": 30881
+  }
+]

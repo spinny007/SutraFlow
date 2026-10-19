@@ -7,7 +7,8 @@ import { listFlows, getFlow, saveFlow, publish, deploy, undeploy, versionDoc, va
 import { listResources, saveResource, RESOURCE_KINDS } from './resources.js';
 import { listSchemas, getSchema, saveSchema } from './schemas.js';
 import { setItemFolder } from './folders.js';
-import { listProjects, getProject, saveProject, importOpsFile } from './projects.js';
+import { listProjects, getProject, saveProject, importOpsFile, projectFilesDir } from './projects.js';
+import { writeProjectFiles } from './bundles.js';
 import { getSecret } from './secrets.js';
 
 /**
@@ -183,6 +184,8 @@ export interface DeployReport {
   sutras: { name: string; action: 'created' | 'updated' | 'unchanged'; version: number; deployed: boolean }[];
   undeployed: string[];
   unchanged: boolean;
+  /** Files of the release written to the project's files folder (${files}). */
+  files?: number;
   warnings: string[];
 }
 
@@ -192,7 +195,7 @@ export interface DeployReport {
  * a new version and are deployed. Sutras of the project that are not in the package are undeployed
  * (kept, not deleted) unless keepOthers is set. Every deployment is recorded for history and rollback.
  */
-export function deployPackage(input: unknown, o: { project?: string; ops?: unknown; keepOthers?: boolean; skipCheck?: boolean; by?: string; record?: boolean } = {}): DeployReport {
+export function deployPackage(input: unknown, o: { project?: string; ops?: unknown; keepOthers?: boolean; skipCheck?: boolean; by?: string; record?: boolean; files?: [string, Buffer][] } = {}): DeployReport {
   const p = readPackage(input);
   if (!o.skipCheck) {
     const c = checkPackage(p, { project: o.project });
@@ -262,6 +265,7 @@ export function deployPackage(input: unknown, o: { project?: string; ops?: unkno
     for (const f of listFlows(pid)) if (!keep.has(f.id) && f.deployed) { undeploy(f.id); report.undeployed.push(f.name); report.unchanged = false; }
   }
   if (o.ops !== undefined && o.ops !== null) importOpsFile(pid, typeof o.ops === 'string' ? JSON.parse(o.ops) : o.ops);
+  if (o.files?.length) report.files = writeProjectFiles(projectFilesDir(project.name), o.files);
   if (o.record === false) return report;
   q.run(`insert into package_deployments(id, seq, project_id, name, version, checksum, deployed_at, deployed_by, report, package)
     values(?, (select coalesce(max(seq), 0) + 1 from package_deployments), ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -275,7 +279,7 @@ export function deployPackage(input: unknown, o: { project?: string; ops?: unkno
  * missing secrets only warn. The project's connections, schemas and variables come along. Not
  * recorded as a package deployment.
  */
-export function importPackage(input: unknown, o: { project: string; sutras?: string[]; asDrafts?: boolean; by?: string }) {
+export function importPackage(input: unknown, o: { project: string; sutras?: string[]; asDrafts?: boolean; by?: string; files?: [string, Buffer][] }) {
   const p = readPackage(input);
   const name = String(o.project || '').trim();
   if (!name) throw new Error('Give the new project a name');
@@ -290,7 +294,7 @@ export function importPackage(input: unknown, o: { project: string; sutras?: str
   const c = checkPackage(chosen, { project: name });
   const errors = drafts ? c.errors.filter(e => !e.startsWith('Missing secrets')) : c.errors;
   if (errors.length) throw Object.assign(new Error(`The Sutras cannot be imported:\n- ${errors.join('\n- ')}`), { check: c });
-  const report = deployPackage(chosen, { project: name, keepOthers: true, skipCheck: true, by: o.by, record: false });
+  const report = deployPackage(chosen, { project: name, keepOthers: true, skipCheck: true, by: o.by, record: false, files: o.files });
   return { ...report, missingSecrets: c.secrets.filter(s => !s.present).map(s => s.name), asDrafts: drafts };
 }
 

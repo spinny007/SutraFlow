@@ -273,3 +273,9 @@ test('the user guide had no text for new activities (the guide build listed them
   const without = [...(engine as any).activities.keys()].filter((t: string) => !(t in ACTIVITY_TEXT));
   assert.deepEqual(without, []);
 });
+
+test('an activity link inside a guide tip ended the tip box early and showed raw [[...]] text', () => {
+  const src = fs.readFileSync(path.join(root, 'tools', 'guide', 'chapters.ts'), 'utf8');
+  const bad = [...src.matchAll(/\[\[tip:([^\]]*?)\[\[[A-Za-z]+\]\]/g)].map(m => m[1].slice(0, 40));
+  assert.deepEqual(bad, []);
+});

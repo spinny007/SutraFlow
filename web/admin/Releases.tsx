@@ -4,7 +4,7 @@ import { useToast } from '../src/ui';
 import { act } from './log';
 import { PageHead, Err, Empty, when, useMe, can } from './shared';
 
-interface Opened { package: any; config: any | null; check: { ok: boolean; errors: string[]; warnings: string[]; secrets: { name: string; present: boolean }[] }; file: string }
+interface Opened { package: any; config: any | null; files?: string[]; zip?: string; check: { ok: boolean; errors: string[]; warnings: string[]; secrets: { name: string; present: boolean }[] }; file: string }
 
 /** Reads a file as base64 (without the data: prefix). */
 const base64 = (f: File) => new Promise<string>((res, rej) => {
@@ -29,7 +29,7 @@ function Upload({ onDeployed }: { onDeployed(): void }) {
     try {
       const body = /\.zip$/i.test(f.name) ? { zip: await base64(f) } : { package: JSON.parse(await f.text()) };
       const o = await post<Omit<Opened, 'file'>>('/api/packages/open', { ...body, project: target || undefined });
-      setOpened({ ...o, file: f.name });
+      setOpened({ ...o, file: f.name, zip: 'zip' in body ? body.zip : undefined });
       if (!target) setProject(o.package.project.name);
     } catch (e: any) { setErr(`${f.name}: ${e.message}`); }
   };
@@ -49,7 +49,7 @@ function Upload({ onDeployed }: { onDeployed(): void }) {
       const ops = config ? { ...config, project: !config.project || config.project === opened.package.project.name ? project : config.project } : undefined;
       const r = await act<any>({
         label: `Deploy ${opened.package.name} ${opened.package.version} to ${project}`, method: 'POST', url: '/api/packages/deploy',
-        body: { package: opened.package, project, ops, keepOthers },
+        body: { ...(opened.zip ? { zip: opened.zip } : { package: opened.package }), project, ops, keepOthers },
         cli: ['deploy', opened.file, '--project', project, ...(override ? ['--config', override.name] : []), ...(keepOthers ? ['--keep-others'] : [])],
       });
       toast(`Deployed ${r.package.name} ${r.package.version} to ${r.project.name}${r.unchanged ? ': nothing changed' : ''}`);
@@ -73,6 +73,7 @@ function Upload({ onDeployed }: { onDeployed(): void }) {
             <tr><th>Made</th><td>{when(p.createdAt)} with SutraFlow {p.createdWith}</td></tr>
             <tr><th>Sutras</th><td>{p.manifest.sutras.map((s: any) => <div key={s.name}>{s.name} v{s.version}{s.exposes.length ? <span className="muted xs"> {s.exposes.join(', ')}</span> : null}</div>)}</td></tr>
             <tr><th>Secrets</th><td>{opened.check.secrets.length ? opened.check.secrets.map(s => <span key={s.name} className={`pill ${s.present ? 'ok' : 'err'}`} style={{ marginRight: 4 }}>{s.name}{s.present ? '' : ': missing'}</span>) : <span className="muted">none</span>}</td></tr>
+            {opened.files && opened.files.length > 0 && <tr><th>Files</th><td>{opened.files.length} for the project files folder: {opened.files.join(', ')}</td></tr>}
             <tr><th>Deployment config</th><td>{config ? `${override ? override.name : 'from the zip'}: ${Object.keys(config.variables || {}).length} variables, ${Object.keys(config.resources || {}).length} connections` : <span className="muted">none; the package's own values are used</span>}</td></tr>
           </tbody></table>
           <div className="c-filters" style={{ marginTop: 10 }}>

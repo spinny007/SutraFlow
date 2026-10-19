@@ -79,6 +79,8 @@ const FILES: Group[] = [
       ['server/src/samples.ts', 'The sample catalog offered in "New Sutra" (' + SAMPLES.length + ' samples covering every activity) and <code>addSamples()</code>: each goes to a <code>Samples/&lt;topic&gt;</code> folder, and every empty connection field it uses is set to a "Sample ..." connection made once in the project.'],
       ['server/src/channels.ts', 'Send to channel: starts every deployed Sutra of the project whose Channel trigger listens on that name. Reads deployments from the database, so it works across engines.'],
       ['server/src/bundles.ts', 'Release zips for production: the package, a deployment config to fill in (connections, project variables, secrets needed) and a README; zip writer and reader; packages built from the Git files of a project without a server.'],
+      ['server/src/docs.ts', 'Documentation made from Sutras: triggers, steps in run order with their descriptions and settings (connections by name, secrets by name), next steps, error handling, connections and variables; Markdown and HTML, for one Sutra, a project or a package.'],
+      ['server/src/sampledocs.ts', 'The documents of the RAG samples (a PDF, a Word document, a PowerPoint deck and a Markdown FAQ of a tea shop), made in code so they are always the same.'],
       ['server/src/packages.ts', 'Project packages: build (Sutras at their versions, connections, schemas, variables, a sha256 checksum), read, check, deploy (matched by name, prune or keep others, deployment config), history, rollback and test.'],
       ['server/src/cli.ts', 'The <code>sutra</code> command: package, check, deploy, test, history, rollback, secret, status. Works on a remote server with a token or on the local data folder.'],
     ],
@@ -221,6 +223,7 @@ const FILES: Group[] = [
   {
     id: 'tools', title: 'Documentation tools', intro: 'Pages built from the code, so they stay accurate.',
     files: [
+      ['tools/build-sample-projects.ts', 'Builds the sample project zips in samples/ (<code>npm run samples</code>): whole projects as release zips with their files, listed in samples/index.json for New project.'],
       ['tools/build-user-guide.ts', 'Builds docs/sutraflow-user-guide.html (<code>npm run guide</code>): chapters, every activity with its settings table, connection types, functions, pipes and samples, read from the server code.'],
       ['tools/guide/chapters.ts', 'User guide chapters.'],
       ['tools/guide/activities.ts', 'Advice text for every activity in the user guide.'],

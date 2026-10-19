@@ -4,7 +4,7 @@ import { getFlow, versionDoc } from '../flows.js';
 import { F, when } from './common.js';
 import { runAgent } from '../ai/agent.js';
 import { appendTurns, cleanSession, clearOld, clearSession, compact, fitTurns, loadSession, settingsOf, tokensOf } from '../ai/memory.js';
-import { addKnowledge, embed, embedWith, rebuildKnowledge, removeKnowledge, searchKnowledge } from '../ai/knowledge.js';
+import { addKnowledge, embed, embedWith, keepOnlySources, rebuildKnowledge, removeKnowledge, searchKnowledge } from '../ai/knowledge.js';
 import { callMcpTool, listMcpTools } from '../ai/mcpClient.js';
 import { aiCall } from '../ai/providers.js';
 import { guardText, GUARD_CHECKS } from '../ai/guard.js';
@@ -152,11 +152,12 @@ export const agentActivities: Activity[] = [
     desc: 'Adds a document to a knowledge base: splits it into passages, makes their vectors and stores them with the source name and details. Adding the same source again replaces it. Feed it from any palette: files, SFTP, SharePoint, Google Drive, a database, a web page.',
     fields: [knowledgeF, F('source', 'Source name', 'text', '{{input.name}}', { tpl: true, help: 'File name, address or document id. Used to replace or remove it later and shown as the citation.' }),
       F('text', 'Text', 'text', '{{input.text}}', { tpl: true }),
-      F('meta', 'Details', 'kv', [], { tpl: true, help: 'Stored with every passage and usable as search filters, for example department = sales or groups = finance.' })],
-    outputHint: { source: '', chunks: 0, tokens: 0, replaced: 0, model: '' },
+      F('meta', 'Details', 'kv', [], { tpl: true, help: 'Stored with every passage and usable as search filters, for example department = sales or groups = finance.' }),
+      F('unchanged', 'Same text as before', 'select', 'add again', { options: ['add again', 'skip'], help: 'skip: when the source already holds exactly this text and details, nothing is done (no new vectors). For feeds that read a whole folder on a timer.' })],
+    outputHint: { source: '', chunks: 0, tokens: 0, replaced: 0, model: '', skipped: false },
     execute: async c => {
       const meta = Object.fromEntries(((c.raw('meta') as any[]) || []).filter(r => r?.k).map(r => [r.k, c.resolve(r.v)]));
-      return { out: await addKnowledge(kbOf(c), c.secret, text(c.v('source')), text(c.v('text')), meta, c.signal) };
+      return { out: await addKnowledge(kbOf(c), c.secret, text(c.v('source')), text(c.v('text')), meta, c.signal, { skipUnchanged: c.raw('unchanged') === 'skip' }) };
     },
   },
   {
@@ -229,14 +230,21 @@ export const agentActivities: Activity[] = [
   },
   {
     type: 'knowledgeRemove', palette: 'ai', name: 'Remove knowledge', glyph: '⊖', ports: ['out'],
-    desc: 'Removes a source (or a folder of sources) from a knowledge base, everything, or makes every vector again after the vector model changed.',
-    fields: [knowledgeF, F('action', 'Action', 'select', 'remove a source', { options: ['remove a source', 'remove everything', 'rebuild vectors'] }),
-      F('source', 'Source name', 'text', '{{input.name}}', { tpl: true, ...when('action', 'remove a source') })],
-    outputHint: { removed: 0, chunks: 0, model: '' },
+    desc: 'Removes a source (or a folder of sources) from a knowledge base, everything, the sources not in a list (files deleted from a folder a feed reads), or makes every vector again after the vector model changed.',
+    fields: [knowledgeF, F('action', 'Action', 'select', 'remove a source', { options: ['remove a source', 'keep only these sources', 'remove everything', 'rebuild vectors'] }),
+      F('source', 'Source name', 'text', '{{input.name}}', { tpl: true, ...when('action', 'remove a source') }),
+      F('keep', 'Sources to keep', 'text', '{{input.items}}', { tpl: true, ...when('action', 'keep only these sources'), help: 'A list of source names, or of files (their relativePath, else name, is the source). Every other source is removed.' }),
+      F('under', 'Only in the folder of sources', 'text', '', { tpl: true, ...when('action', 'keep only these sources'), help: 'Empty = the whole knowledge base.' })],
+    outputHint: { removed: 0, sources: [''], kept: 0, chunks: 0, model: '' },
     execute: async c => {
       const kb = kbOf(c);
       const a = c.raw('action') || 'remove a source';
       if (a === 'rebuild vectors') return { out: await rebuildKnowledge(kb, c.secret, c.signal) };
+      if (a === 'keep only these sources') {
+        const v = c.v('keep');
+        const list = (Array.isArray(v) ? v : v === undefined || v === null || v === '' ? [] : String(v).split(/\r?\n|,/)).map((x: any) => (x && typeof x === 'object' ? x.source ?? x.relativePath ?? x.name ?? '' : x)).map(text);
+        return { out: await keepOnlySources(kb, c.secret, list, text(c.v('under')) || undefined) };
+      }
       return { out: { removed: await removeKnowledge(kb, text(c.v('source')), a === 'remove everything', c.secret) } };
     },
   },

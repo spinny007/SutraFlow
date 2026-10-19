@@ -167,6 +167,15 @@ export function loadOpsFiles(log: (m: string) => void = () => {}) {
   }
 }
 
+/**
+ * The project's files folder, <data>/files/<project name>: documents, templates and other files a
+ * project brings with it (release zips carry them in files/). Variables name it as ${files}.
+ */
+export function projectFilesDir(projectName: string) {
+  const safe = String(projectName || 'project').replace(/[<>:"/\\|?*\x00-\x1f]+/g, '-').replace(/^[.\s-]+|[.\s]+$/g, '') || 'project';
+  return path.join(config.dataDir, 'files', safe).split(path.sep).join('/');
+}
+
 /** ${env:NAME} and ${env:NAME:-default} read process environment variables. */
 export function substituteEnv(v: unknown): any {
   if (typeof v === 'string') {
@@ -195,7 +204,8 @@ export function effectiveVariables(projectId: string | null | undefined): Effect
   const secrets: string[] = [];
   for (const v of p.config.variables) {
     const rt = getSetting<Record<string, string>>(`runtimeVars:${projectId}`, {});
-    const raw = substituteEnv(rt[v.name] ?? ops.variables[v.name] ?? v.value);
+    let raw = substituteEnv(rt[v.name] ?? ops.variables[v.name] ?? v.value);
+    if (typeof raw === 'string' && raw.includes('${files}')) raw = raw.split('${files}').join(projectFilesDir(p.name));
     if (v.type === 'number') values[v.name] = Number(raw);
     else if (v.type === 'boolean') values[v.name] = ['true', '1', 'yes'].includes(String(raw).toLowerCase());
     else if (v.type === 'secret') {

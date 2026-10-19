@@ -50,6 +50,8 @@ export interface FlowNode {
   x: number;
   y: number;
   config: Record<string, any>;
+  /** What the step does and why: canvas tooltip and generated documentation. */
+  description?: string;
   settings?: { retries?: number; retryDelayMs?: number; timeoutMs?: number; disabled?: boolean; loop?: '' | 'for each item' | 'repeat while'; loopOver?: string; loopWhile?: string; loopDelayMs?: number; loopMax?: number };
 }
 export interface FlowEdge { id: string; from: string; port: string; to: string; label?: string; when?: 'always' | 'when' | 'otherwise'; condition?: string }

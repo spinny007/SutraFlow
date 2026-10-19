@@ -323,7 +323,7 @@ export const CHAPTERS: Chapter[] = [
 <p>Backslashes in quoted text are literal, so Windows paths need no escaping. Write a quote twice to include it: <code>'O''Brien'</code>. Function names ignore case. Every function is listed in <a href="#ch-functions">Function reference</a>.</p>
 <p class="h">Templates in text fields</p>
 <p>Text fields such as an email body or a log message use <code>{{ }}</code> templates with pipes: <code>Order {{input.id | upper}} for {{input.amount | number:2}}</code>. The pipes are listed in <a href="#ch-pipes">Template pipes</a>.</p>
-[[tip:When to use JSONata instead|For heavy reshaping of repeating JSON (filter, group, total and nest in one go) a single [[jsonata]] activity is often clearer than many mapper rules.]]`,
+[[tip:When to use JSONata instead|For heavy reshaping of repeating JSON (filter, group, total and nest in one go) a single <strong>JSONata</strong> activity is often clearer than many mapper rules.]]`,
   },
   {
     id: 'schemas', title: 'Schemas and WSDLs',
@@ -382,6 +382,26 @@ export const CHAPTERS: Chapter[] = [
 <li>Other systems start a deployed Sutra with the Run API: <code>POST /api/flows/{flowId}/run?wait=30000</code> with <code>{ "input": { ... } }</code>.</li>
 </ul>
 <p><strong>Deploy</strong> is for development and system test servers. A server with <code>SUTRA_ENVIRONMENT=production</code> refuses it: production receives whole projects as release zips (Releases, below), so what runs there is always a reviewed, versioned package.</p>`,
+  },
+  {
+    id: 'documentation', title: 'Documenting Sutras',
+    html: `
+<p>Every step has a <strong>Description</strong> in its General tab, below its name: what the step does and why, in your words. SutraFlow makes the documentation of a Sutra or a whole project from the steps, their descriptions and settings, so the documentation is always the design itself.</p>
+<ul>
+<li>On the canvas, a described step shows &equiv; after its name; pointing at it shows the description.</li>
+<li>The Sutra's General tab (click the canvas background) counts the steps without a description and has <strong>Documentation</strong> (a page to read, print or share) and <strong>Markdown</strong> (for a repository or wiki).</li>
+<li>Releases has the documentation of the whole project, and every release zip carries it as <code>documentation.html</code> and <code>documentation.md</code>.</li>
+<li>From a shell or a pipeline: <code>sutra doc --project "Orders" --out orders.html</code>, <code>--sutra "Order lookup"</code> for one Sutra, <code>--format md</code> for Markdown, or <code>sutra doc release.zip</code> for a release.</li>
+</ul>
+<p class="h">What the documentation holds</p>
+<ul>
+<li>The Sutra's description, folder, version and whether it is deployed.</li>
+<li><strong>How it starts</strong>: each trigger with its main settings (REST path, timer schedule, folder, tool name).</li>
+<li><strong>Steps</strong> in the order a run reaches them, each with its activity, description and settings. Connections are named, never their ids; secrets by name only, never their values.</li>
+<li>Where each step goes next, with the output and conditions, and which steps handle errors.</li>
+<li>Connections and project variables used; Sutra variables; and the steps still without a description.</li>
+</ul>
+[[tip:Writing good descriptions|Say why, not only what: "Skips unchanged files so no vectors are made again" beats "Add to knowledge".<br>Name the business rule a step carries out and who owns it.<br>Describe triggers for the people who call them: address, input, who may call.]]`,
   },
   {
     id: 'expose', title: 'Exposing APIs: security and TLS',
@@ -511,16 +531,68 @@ export const CHAPTERS: Chapter[] = [
 <p>The deployment config overrides any connection setting, the engine included. Test with a local Ollama and run production on another engine without changing a Sutra:</p>
 <pre>"resources": { "AI provider": { "engine": "Claude API", "model": "claude-sonnet-5-5", "apiKeySecret": "ANTHROPIC_KEY" } }</pre>
 [[tip:Command-line tools|The prompt is sent to the tool on standard input, never on the command line, and the tool runs in an empty folder as the SutraFlow server user. Keep the tool's own permissions for running commands and editing files switched off: a message from outside could otherwise ask it to act on the server.]]
-[[tip:Guidelines|Route AI decisions that matter (money, customers) through [[approval]] until you trust them.]]`,
+[[tip:Guidelines|Route AI decisions that matter (money, customers) through an <strong>Approval</strong> step until you trust them.]]`,
+  },
+  {
+    id: 'ai-concepts', title: 'AI concepts: models, RAG, tools, MCP and agents',
+    html: `
+<p>This chapter explains the ideas behind the AI palettes in plain words, and which SutraFlow part does each. The next chapters build with them.</p>
+<p class="h">Models and providers</p>
+<ul>
+<li><strong>Model</strong>: the program that writes text (a <em>large language model</em>). It reads a <strong>prompt</strong> and writes an answer. Large models (Claude, GPT, Gemini) are strong and paid per use; small local models (phi4-mini, qwen, llama in Ollama) are free, private and good at short, guided tasks.</li>
+<li><strong>AI provider</strong> (Resources): where the model runs and how to reach it: Claude, OpenAI, Gemini, Ollama, LM Studio, any OpenAI-compatible server, or a command-line assistant. Every AI step names one, so changing the model is one setting.</li>
+<li><strong>Tokens</strong>: models read and write in pieces of words, about four characters each. Prices, limits and speed are counted in tokens. The <strong>context window</strong> is how many tokens one call can hold: instructions, history, passages and the question together.</li>
+<li><strong>Instructions</strong> (the system prompt): the standing rules for a step, such as who it speaks for, how long answers are, what it must never do. <strong>Effort</strong> trades speed for care.</li>
+</ul>
+<p class="h">Single AI steps</p>
+<p>Most AI work is one call: [[aiPrompt]] (any prompt), [[aiClassify]] (pick a label), [[aiRouter]] (choose a branch), [[aiExtract]] (fields from text into JSON), [[aiSummarize]], [[aiTranslate]], [[aiSentiment]], and [[ollama]] for a local model. They fit anywhere in a Sutra, and their output maps like any other step's.</p>
+<p class="h">Embeddings, vectors and similarity</p>
+<p>An <strong>embedding</strong> turns a text into a list of numbers, a <strong>vector</strong>, so that texts with similar meaning get similar numbers. "How long can I return an item?" and "Returns are accepted within 30 days" share few words but have close vectors. Vectors come from an <strong>embedding model</strong> (Ollama <code>nomic-embed-text</code>, OpenAI <code>text-embedding-3-small</code>, Gemini) or, offline and free, from SutraFlow's built-in word vectors, which match shared words rather than meaning. [[aiEmbed]] gives you vectors directly.</p>
+<p class="h">Knowledge bases and RAG</p>
+<p><strong>Retrieval-augmented generation</strong> (RAG) lets a model answer from your documents instead of from memory: find the passages that matter, put them in the prompt, and have the model answer only from them, naming its sources. It is how an assistant knows today's price list, your leave policy or a contract it was never trained on, and it keeps answers checkable.</p>
+<ol>
+<li><strong>Feed</strong>: read each document ([[docText]] takes the text out of PDF, Word, PowerPoint, Excel, OpenDocument and HTML), split it into <strong>passages</strong> (chunks of a few hundred tokens that overlap a little, so no sentence is cut off from its context), make a vector of each, and store them with the <strong>source</strong> (file name or address) and <strong>details</strong> (metadata such as department or date). [[knowledgeAdd]] does all of it.</li>
+<li><strong>Store</strong>: the passages and vectors live in a <strong>vector store</strong>: built-in or a folder (nothing to install, fine for tens of thousands of passages), PostgreSQL with pgvector, Qdrant, Chroma or Pinecone (millions of passages, shared by several servers).</li>
+<li><strong>Retrieve</strong>: the question gets a vector too, and the closest passages are found. SutraFlow scores by meaning (70%) and shared words (30%), so names and codes such as TEA-01 still match. [[knowledgeSearch]].</li>
+<li><strong>Generate</strong>: the model answers from the passages, citing them as [source#passage]; with no fitting passage it says it does not know. [[knowledgeAsk]] does retrieve and generate in one step.</li>
+</ol>
+<p>The <strong>Knowledge base</strong> resource holds the store, where vectors come from, and the passage size; feeds, searches and agents name it.</p>
+<p class="h">Tools</p>
+<p>A model alone only writes text. A <strong>tool</strong> lets it act or look things up: check an order, read stock, create a ticket. In SutraFlow every tool is a Sutra that starts with [[mcpTool]]: you describe it (name, what it does, its inputs), build the work with any palette, and end with [[mcpReply]]. The model never touches your systems; it only asks for the tool, and the Sutra does the work with its own connections and checks. Tick <em>Changes data</em> on tools that change something.</p>
+<p class="h">MCP: the Model Context Protocol</p>
+<p>MCP is the open standard AI assistants use to find and call tools. It has two sides, and SutraFlow is both:</p>
+<ul>
+<li><strong>MCP server</strong>: SutraFlow publishes your AI tool Sutras on the gateway at <code>/mcp</code> (or an address of an <strong>MCP server</strong> resource with its own policy). Claude Desktop, Claude Code, ChatGPT, Copilot, Cursor and others connect and call them. A published agent appears there too, as <code>ask_&lt;name&gt;</code>.</li>
+<li><strong>MCP client</strong>: an <strong>MCP client</strong> resource connects SutraFlow to someone else's MCP server (by address, or a command such as <code>npx @modelcontextprotocol/server-filesystem</code>). [[mcpCall]] calls its tools directly; an agent with the client set may use them; <em>Allowed tools</em> limits which.</li>
+</ul>
+<p>A tool's test arguments let you run it in the designer without any assistant: Test runs the Sutra as if a caller had sent them, and shows <em>studio test</em> as the caller.</p>
+<p class="h">Agents</p>
+<p>An <strong>agent</strong> ([[aiAgent]]) is a model in a loop: it reads the goal, thinks, picks a tool, reads the result, and repeats until it can answer, within limits of steps, tokens and time you set. It can use your AI tool Sutras, a knowledge base (the tool <code>search_knowledge</code>, and passages fetched before it starts), and outside MCP tools. Each step is saved in the run, so you can see why it answered as it did.</p>
+<ul>
+<li><strong>Memory</strong>: runs stand alone, so a conversation is kept in an <strong>AI memory</strong> store under its session id; older turns are summarised when the history grows ([[memoryLoad]], [[memorySave]], [[memoryClear]]).</li>
+<li><strong>Guardrails</strong>: [[aiGuard]] checks a message before the model sees it: hides personal data, stops hidden instructions (<em>prompt injection</em>), blocks topics, limits length.</li>
+<li><strong>Human in the loop</strong>: an agent may stop with a question (<em>needs a person</em>); [[askPerson]] puts it in Approvals and the run waits for the answer.</li>
+<li><strong>Several agents</strong>: a supervisor routes each question ([[aiClassify]] or [[aiRouter]]) and [[agentHandoff]] passes it, with the same session, to a specialist agent.</li>
+<li><strong>Channels</strong>: [[agentChannel]] publishes an agent as a chat page and widget, an OpenAI-compatible model, an MCP tool and an A2A agent; [[agentReply]] answers on whichever the question came by. Long work answers with a job id at once.</li>
+</ul>
+<p class="h">Which to use</p>
+<table class="t"><thead><tr><th>You want</th><th>Use</th></tr></thead><tbody>
+<tr><td>Classify, extract or summarise text inside a process</td><td>A single AI step</td></tr>
+<tr><td>Answers from your documents, with sources</td><td>A knowledge base with [[knowledgeAsk]]</td></tr>
+<tr><td>Claude or another assistant to use your systems</td><td>AI tool Sutras published over MCP</td></tr>
+<tr><td>A conversation that looks things up and acts</td><td>An agent with tools, memory and a channel</td></tr>
+<tr><td>Fixed business rules (refunds, approvals, limits)</td><td>Ordinary steps (If, Switch, Ask a person) before or after the AI, never left to the model</td></tr>
+</tbody></table>
+[[tip:Good practice|Keep decisions that matter in ordinary steps; let the model read, write and choose among safe options.<br>Ask for JSON when a later step needs fields; <strong>AI extract</strong> checks it.<br>Log what the model was given and what it answered (Save steps), so answers can be explained.<br>Start with a small local model; move to a larger one only where answers fall short.]]`,
   },
   {
     id: 'mcp', title: 'AI skills over MCP',
     html: `
-<p>A Sutra that starts with an [[mcpTool]] trigger is a <strong>skill</strong>: AI assistants such as Claude connect to SutraFlow over the Model Context Protocol (MCP), see the skills, and call them. Each call runs the Sutra with the arguments the AI chose, and [[mcpReply]] sends the outcome back. Skills can do anything a Sutra does: write a CSV file, post to a Facebook page, look up an order in a database, start an approval.</p>
+<p>A Sutra that starts with an [[mcpTool]] trigger (<strong>AI tool</strong>) is a <strong>skill</strong>: AI assistants such as Claude connect to SutraFlow over the Model Context Protocol (MCP), see the skills, and call them. Each call runs the Sutra with the arguments the AI chose, and [[mcpReply]] sends the outcome back. Skills can do anything a Sutra does: write a CSV file, post to a Facebook page, look up an order in a database, start an approval.</p>
 <p class="h">Build a skill</p>
 <ol>
 <li>Under Resources, add an <strong>MCP server</strong>: its address on the gateway (for example <code>/mcp/orders</code>), a title, instructions for the AI, and an API security policy. One server holds many skills.</li>
-<li>Create a Sutra that starts with <strong>MCP skill</strong>, choose the server, and describe the tool: name, title, what it does and when to use it, and its inputs.</li>
+<li>Create a Sutra that starts with <strong>AI tool</strong>, choose the server, and describe the tool: name, title, what it does and when to use it, and its inputs.</li>
 <li>Build the work, and end every branch with <strong>Reply to AI</strong>; on error branches tick <em>Is an error</em>.</li>
 <li>Test it in the studio with the trigger's test arguments, then Deploy. Server &amp; APIs lists each skill with its address.</li>
 </ol>
@@ -565,6 +637,131 @@ export const CHAPTERS: Chapter[] = [
 [[tip:Guidelines|Put rules before the agent: route refunds, cancellations and other decisions with an If, not by asking the model to choose.<br>Give small models few tools and short instructions; they look things up well but may wander.<br>Protect public entry points with a policy that has a rate limit.]]`,
   },
   {
+    id: 'rag-build', title: 'Build RAG step by step: from a folder of documents to answers',
+    html: `
+<p>This chapter builds a complete RAG system: documents in a folder are read into a knowledge base every 15 minutes, and the knowledge answers as a REST API, an MCP tool for AI assistants, and a chat agent. The <strong>AI document assistant</strong> sample project is this system ready-made (New project &rarr; Package file &rarr; <em>Or a sample project</em>); build it yourself once to understand each part. Sources other than a local folder (Google Drive, SharePoint, SFTP, web pages, databases) are at the end; only the feed changes.</p>
+<p class="h">Step 1: a model (AI provider)</p>
+<p>Answers need a language model; vectors can come from a model or from the built-in word vectors. For a private, free setup install <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a> and pull two models:</p>
+<pre>ollama pull phi4-mini          # answers (about 2.5 GB; qwen3 or llama3.2 work too)
+ollama pull nomic-embed-text   # vectors (about 270 MB)</pre>
+<p>Under Resources add an <strong>AI provider</strong>: engine Ollama, model <code>phi4-mini</code>, address empty for this machine (<code>http://127.0.0.1:11434</code>). <em>Test connection</em> lists the models. A cloud model (Claude, OpenAI, Gemini) works the same: choose the engine and give its API key as a secret.</p>
+<p class="h">Step 2: a vector store</p>
+<table class="t"><thead><tr><th>Store</th><th>Good for</th><th>Set up</th></tr></thead><tbody>
+<tr><td>built-in</td><td>Starting, up to tens of thousands of passages, one server</td><td>Nothing: passages live in SutraFlow's database</td></tr>
+<tr><td>folder</td><td>The same, kept as a file you can back up or copy</td><td>A folder path</td></tr>
+<tr><td>PostgreSQL (pgvector)</td><td>Hundreds of thousands to millions of passages; several SutraFlow servers sharing one knowledge base</td><td>PostgreSQL with the pgvector extension (below)</td></tr>
+<tr><td>Qdrant</td><td>A dedicated vector database, fast filters</td><td><code>docker run -p 6333:6333 qdrant/qdrant</code></td></tr>
+<tr><td>Chroma</td><td>A light vector database in Python</td><td><code>pip install chromadb</code>, then <code>chroma run --path ./chroma</code> (port 8000)</td></tr>
+<tr><td>Pinecone</td><td>A hosted service, nothing to run</td><td>Create an index whose dimension matches the vector model (below); give its address and API key</td></tr>
+</tbody></table>
+<p><strong>pgvector on Windows (Laragon)</strong>: see <em>Development machines</em> for the download and the three files to copy, then in HeidiSQL or psql: <code>CREATE EXTENSION IF NOT EXISTS vector;</code></p>
+<p><strong>pgvector on Linux</strong> (Debian or Ubuntu with the PostgreSQL apt repository):</p>
+<pre>sudo apt install postgresql-16-pgvector      # match your PostgreSQL version
+sudo -u postgres psql -d sutraflow -c "CREATE EXTENSION IF NOT EXISTS vector;"</pre>
+<p>Then add a <strong>Database connection</strong> to that PostgreSQL in Resources. SutraFlow makes the table and its index itself on the first add.</p>
+<p><strong>Vector sizes</strong>: each model makes vectors of a fixed length, and a store keeps one length. <code>nomic-embed-text</code> 768, <code>mxbai-embed-large</code> 1024, OpenAI <code>text-embedding-3-small</code> 1536, built-in 512. After changing the vector model run [[knowledgeRemove]] with <em>rebuild vectors</em> (or start a new collection).</p>
+<p class="h">Step 3: the knowledge base</p>
+<p>Under Resources add a <strong>Knowledge base</strong>:</p>
+<table class="t"><thead><tr><th>Setting</th><th>Choose</th></tr></thead><tbody>
+<tr><td>Vector store</td><td>From step 2; with pgvector also the database connection and a table name</td></tr>
+<tr><td>Vectors from</td><td><em>AI provider</em> with model <code>nomic-embed-text</code> for meaning; <em>built-in</em> to start offline</td></tr>
+<tr><td>Passage size</td><td>200 to 400 tokens. Smaller finds precise facts; larger keeps more context. Policies and manuals: 250; long reports: 400</td></tr>
+<tr><td>Overlap</td><td>About 15% of the passage size (40 for 250)</td></tr>
+</tbody></table>
+<p><em>Test connection</em> makes a vector, reaches the store and tells how many passages and sources it holds.</p>
+<p class="h">Step 4: the documents folder</p>
+<p>Add a project variable <code>DOCS_FOLDER</code> with the folder to read, for example <code>D:/Shared/Policies</code> or <code>/srv/docs</code>. The value <code>\${files}/documents</code> means the project's own files folder (<code>&lt;data&gt;/files/&lt;project&gt;/documents</code>): release zips carry files there, so the same project works on every server. Production overrides the value in its deployment config.</p>
+<p class="h">Step 5: the feed, one document</p>
+<p>Make a Sutra <em>Add one document to knowledge</em> that handles one file; the folder feed calls it for each. With the file as its trigger, every step can say <code>{{trigger.relativePath}}</code>.</p>
+<ol>
+<li>[[start]] with test data of one file: <code>{"name": "returns-policy.pdf", "relativePath": "returns-policy.pdf", "extension": "pdf"}</code>.</li>
+<li>[[if]] <em>Document type</em>: <code>=lower-case({trigger.extension})</code> matches regex <code>^(pdf|docx|pptx|xlsx|odt|html|txt|md|csv)$</code>. False: log and [[return]].</li>
+<li>[[fileRead]] folder <code>{{gv.DOCS_FOLDER}}</code>, path <code>{{trigger.relativePath}}</code>, read as <em>base64 (binary)</em>.</li>
+<li>[[docText]] content <code>{{input.content}}</code>, content is base64, file name <code>{{trigger.name}}</code>, type auto.</li>
+<li>[[knowledgeAdd]] knowledge base from step 3, source <code>{{trigger.relativePath}}</code>, text <code>{{input.text}}</code>, details <code>type = {{trigger.extension}}</code> and <code>title = {{input.title}}</code>, <strong>Same text as before: skip</strong> (unchanged files make no new vectors).</li>
+<li>[[return]] the result. Connect the error outputs of the read, text and add steps to a warning [[log]] and a Return, so one bad file never stops the feed.</li>
+</ol>
+<p class="h">Step 6: the feed, the whole folder on a timer</p>
+<ol>
+<li>[[timer]] cron <code>0 */15 * * * *</code> (every 15 minutes; nightly <code>0 0 2 * * *</code> for large folders).</li>
+<li>[[fileList]] location <code>{{gv.DOCS_FOLDER}}</code>, pattern <code>*</code>, include sub-folders, read content: <em>do not read</em>. Connect <em>empty</em> to a warning log.</li>
+<li>[[forEach]] list <code>{{input.files}}</code>.</li>
+<li><em>item</em> &rarr; [[callProcess]] <em>Add one document to knowledge</em>, input <code>{{input}}</code>, wait.</li>
+<li><em>done</em> &rarr; [[knowledgeRemove]] action <strong>keep only these sources</strong>, sources <code>{{input.items}}</code>: files deleted from the folder leave the knowledge base.</li>
+<li>A [[log]] with the counts.</li>
+</ol>
+<p>Press <strong>Test</strong> once: the knowledge base fills (watch the run's steps). Test again: every file is skipped as unchanged. Deploy both Sutras to keep it current. For changes within seconds rather than minutes, start the one-document Sutra from a [[fileTrigger]] on the folder instead (added and changed files &rarr; add; removed &rarr; [[knowledgeRemove]]).</p>
+<p class="h">Step 7: check what it finds</p>
+<p>Make a small Sutra with [[start]] <code>{"question": "How many days do I have to return an item?"}</code> and [[knowledgeSearch]]. The output lists passages with source and score (0 to 1). Good passages for a clear question score 0.3 and more. If answers miss: ask with the words your documents use, lower the passage size, raise <em>Passages</em>, or switch to model vectors. Filter by details (<em>Only with details</em>, for example <code>type = pdf</code> or <code>department = HR</code>) to search part of the knowledge.</p>
+<p class="h">Step 8: answers as a REST API</p>
+<ol>
+<li>[[restService]] POST <code>/docs/ask</code>, body <code>{"question": "..."}</code>.</li>
+<li>[[knowledgeAsk]] provider from step 1, question <code>{{input.body.question}}</code>, passages 4, instructions <em>Answer in two or three sentences, only from the passages. Name the document you used.</em></li>
+<li>[[httpResponse]] 200 <code>{"answer": {{input.answer | json}}, "sources": {{input.sources | json}}}</code>; on <em>not found</em> a 404 that says the documents do not tell; on error a 502.</li>
+</ol>
+<pre>curl -X POST http://127.0.0.1:8080/docs/ask -H "content-type: application/json" -d "{\"question\": \"Is shipping free?\"}"</pre>
+<p class="h">Step 9: the documents as an MCP tool for Claude and other assistants</p>
+<ol>
+<li>[[mcpTool]] tool name <code>search_documents</code>, a description that says what the documents cover, input <code>question</code>.</li>
+<li>[[knowledgeSearch]] question <code>{{input.arguments.question}}</code>, 5 passages.</li>
+<li>[[mcpReply]] with <code>{{input.hits}}</code>; on <em>empty</em>, a reply that nothing matches.</li>
+</ol>
+<p>Deploy it and connect an assistant. This tool needs no model on SutraFlow: the assistant reads the passages and writes the answer. Claude Code:</p>
+<pre>claude mcp add --transport http shop-docs http://127.0.0.1:8080/mcp</pre>
+<p>Claude Desktop (<code>claude_desktop_config.json</code>), through the <code>mcp-remote</code> bridge:</p>
+<pre>{ "mcpServers": { "shop-docs": { "command": "npx", "args": ["-y", "mcp-remote", "http://127.0.0.1:8080/mcp"] } } }</pre>
+<p>Outside your own machine use the HTTPS gateway and an MCP server resource with an API security policy, and give the key as a header.</p>
+<p class="h">Step 10: a chat agent over the documents</p>
+<ol>
+<li>[[agentChannel]] agent name <code>docs-assistant</code>, chat, OpenAI-compatible and MCP ticked.</li>
+<li>[[aiAgent]] with the knowledge base set, <em>Passages fetched before the first step</em> 3, an AI memory store, session <code>{{trigger.sessionId}}</code>, tools <em>none</em> (or your AI tools), instructions to search first and name the documents.</li>
+<li>[[agentReply]] on <em>done</em>; a polite reply on <em>limit reached</em> and <em>needs a person</em>. Put [[aiGuard]] first when the chat is public.</li>
+</ol>
+<p>Deploy and open <code>/chat/docs-assistant</code> on the gateway, or add <code>&lt;script src="http://127.0.0.1:8080/chat/docs-assistant/widget.js"&gt;&lt;/script&gt;</code> to any web page.</p>
+<p class="h">Other sources for the feed</p>
+<table class="t"><thead><tr><th>Source</th><th>Feed</th></tr></thead><tbody>
+<tr><td>Google Drive or Google Docs</td><td>[[googleDriveTrigger]] on a folder (added, modified, removed) &rarr; [[googleDrive]] <em>export</em> as text/plain for Google Docs, or <em>download</em> for PDF and Office files &rarr; [[docText]] &rarr; [[knowledgeAdd]] with source = the file id or name; removed &rarr; [[knowledgeRemove]]. Needs a Google OAuth connection.</td></tr>
+<tr><td>SharePoint or OneDrive</td><td>[[msFilesTrigger]] on a library folder &rarr; [[msFiles]] <em>read</em> as document text &rarr; [[knowledgeAdd]]; removed &rarr; [[knowledgeRemove]]. Sample: <em>Knowledge feed from SharePoint</em>. Needs a Microsoft OAuth connection.</td></tr>
+<tr><td>SFTP or FTP server</td><td>[[remoteTrigger]] or a timer with the SFTP / FTP steps (list, read as base64) &rarr; [[docText]] &rarr; [[knowledgeAdd]].</td></tr>
+<tr><td>Web pages</td><td>[[docText]] from a web address (HTML or PDF) &rarr; [[knowledgeAdd]] with the address as source. Sample: <em>Knowledge feed from web pages</em>.</td></tr>
+<tr><td>Database rows</td><td>[[timer]] &rarr; [[dbQuery]] (for example products changed today) &rarr; [[forEach]] &rarr; [[knowledgeAdd]] with text built from the columns and source = the row key.</td></tr>
+<tr><td>Email attachments</td><td>An email trigger &rarr; [[forEach]] attachment &rarr; [[docText]] &rarr; [[knowledgeAdd]].</td></tr>
+</tbody></table>
+<p class="h">Who may see what</p>
+<p>Store details with each source (<code>department = HR</code>, <code>groups = finance,managers</code>) and pass the caller's group in <em>Only with details</em> when searching or asking. Keep documents that some people must never see in a separate knowledge base.</p>
+<p class="h">To production</p>
+<p>Build a release zip of the project (Releases). Put the documents in the project's files folder or set <code>DOCS_FOLDER</code> to the production share in the deployment config; set the AI provider's address and model, and the knowledge base's store, for production too (pgvector or Qdrant shared by every engine). Deploy the feed, its called Sutra, and the API, tool or agent.</p>
+[[tip:Good practice|Feed and answer in separate Sutras; the feed can fail or run long without touching answers.<br>Skip unchanged files; making vectors is the slow, costly part.<br>Answer only from passages and show sources; say when the documents do not tell.<br>Re-feed after changing passage size, and rebuild vectors after changing the vector model.]]`,
+  },
+  {
+    id: 'ai-samples', title: 'AI samples and sample projects',
+    html: `
+<p>Every AI sample is in <strong>New Sutra &rarr; Samples &rarr; AI agents</strong> (and the AI folder), with the connections it needs as <em>Sample ...</em> resources to fill in. Every step of the newer samples has a description: open <strong>Documentation</strong> on a Sutra's General tab for the whole design on one page.</p>
+<table class="t"><thead><tr><th>Sample</th><th>Shows</th><th>Needs</th></tr></thead><tbody>
+<tr><td>AI tool order status, AI tool stock check</td><td>Two AI tool Sutras: describe a tool, look the answer up (JSONata over sample data), Reply to AI. Test runs them with their test arguments.</td><td>Nothing; an assistant or agent to call them</td></tr>
+<tr><td>Order desk agent</td><td>A full agent: chat, OpenAI-compatible, MCP and A2A entry points; AI guard; refunds routed to a person by an If, never by the model; memory; Ask a person.</td><td>Ollama with a model; the two tools deployed</td></tr>
+<tr><td>Knowledge feed from web pages</td><td>For each address: Read document text from the web, Add to knowledge.</td><td>Internet access</td></tr>
+<tr><td>Knowledge feed from SharePoint</td><td>A SharePoint library kept in step with a knowledge base: added, modified, removed.</td><td>A Microsoft OAuth connection</td></tr>
+<tr><td>Policy assistant</td><td>Ask knowledge behind a chat channel; a reply when the documents do not say.</td><td>Ollama; a fed knowledge base</td></tr>
+<tr><td>Agent fed by a queue</td><td>Questions from RabbitMQ or ActiveMQ, one session at a time, answers to a reply queue, confirmed after sending.</td><td>A queue connection; Ollama</td></tr>
+<tr><td>Supervisor agent</td><td>AI classify chooses the specialist; Hand off to agent passes the question with the session.</td><td>The order desk and policy samples</td></tr>
+<tr><td>Agent with outside MCP tools</td><td>An MCP client (the file system server by npx), Call MCP tool, and an agent limited to read-only tools.</td><td>Node.js npx; Ollama</td></tr>
+<tr><td><strong>Document feed from a folder</strong> and <strong>Add one document to knowledge</strong></td><td>RAG over a folder every 15 minutes: PDF, Word, PowerPoint, Markdown; unchanged files skipped; deleted files removed. The documents come with the sample.</td><td>Nothing (built-in vectors)</td></tr>
+<tr><td><strong>Document questions API</strong></td><td>POST <code>/samples/docs/ask</code>: Ask knowledge, answer with sources, 404 when not found.</td><td>Ollama with a model</td></tr>
+<tr><td><strong>AI tool search documents</strong></td><td>The documents as the MCP tool <code>search_documents</code> for Claude and other assistants.</td><td>Nothing on SutraFlow</td></tr>
+<tr><td><strong>Document assistant</strong></td><td>A chat agent with the knowledge base, passages fetched first, memory.</td><td>Ollama with a model</td></tr>
+</tbody></table>
+<p class="h">Sample projects</p>
+<p>A <strong>sample project</strong> is a whole project as a release zip: its Sutras, connections, project variables, documentation and files. Import one with <strong>New project &rarr; Package file &rarr; Or a sample project</strong>, or deploy it to any server with <code>sutra deploy</code>. The zips are in the <code>samples</code> folder of SutraFlow (<code>npm run samples</code> makes them again).</p>
+<p><strong>AI document assistant</strong> (<code>samples/ai-document-assistant.zip</code>): the five document Sutras above, the connections Local Ollama, Sample document knowledge base and Sample AI memory, the project variable <code>DOCS_FOLDER = \${files}/documents</code>, and four documents of a tea shop (a PDF policy, a Word shipping guide, a PowerPoint catalogue, a Markdown FAQ) that go to the project's files folder. After importing:</p>
+<ol>
+<li>Open <em>Local Ollama</em> and choose a model (for example <code>phi4-mini</code>).</li>
+<li>Open <em>Sample: Document feed from a folder</em> and press Test: the knowledge base fills.</li>
+<li>Test <em>Sample: AI tool search documents</em> and <em>Sample: Document questions API</em>; then deploy the feed, its called Sutra and the ones you want to publish.</li>
+<li>Put your own documents in the folder (or point <code>DOCS_FOLDER</code> at yours); the next feed reads them.</li>
+</ol>`,
+  },
+  {
     id: 'secrets', title: 'Secrets and studio security',
     html: `
 <ul>
@@ -574,47 +771,201 @@ export const CHAPTERS: Chapter[] = [
 </ul>`,
   },
   {
-    id: 'releases', title: 'Releases: packages and the command line',
+    id: 'releases', title: 'Releases: build, package and deploy',
     html: `
-<p>Build in the studio; release a <strong>package</strong>: one <code>.sutra</code> file with the whole project. It has every deployed Sutra at its version, the connections and API policies (secret names, never secret values), shared schemas and WSDLs, project variables and logging. The same file goes from test to production; each environment keeps its own deployment config and secrets.</p>
-<p>For a production team the package comes as a <strong>release zip</strong>:</p>
-<table class="t"><thead><tr><th>File</th><th>Holds</th></tr></thead><tbody>
-<tr><td><code>package.sutra</code></td><td>The package, with its checksum: changed or damaged files are refused.</td></tr>
-<tr><td><code>deployment-config.json</code></td><td>The deployment config to fill in for the target: every connection with its settings (hosts, folders, users, secret names), every project variable, logging, and the list of vault secrets the server needs.</td></tr>
-<tr><td><code>README.txt</code></td><td>The Sutras and their addresses, the secrets, where it was built from, and the commands to deploy and roll back.</td></tr>
+<p>A release moves a whole project, unchanged, from the studio to test and on to production. This chapter covers what a release is, building it, deploying it, and rolling back. The next chapter automates it in a CI/CD pipeline.</p>
+<p class="h">The parts of a release</p>
+<table class="t"><thead><tr><th>Part</th><th>What it is</th></tr></thead><tbody>
+<tr><td><strong>Package</strong> (<code>.sutra</code>)</td><td>One file with the whole project: every Sutra at a fixed version (marked deployed or not), connections and API policies with secret <em>names</em> (never values), schemas and WSDLs, project variables, logging, and a sha256 checksum. A changed or damaged package is refused.</td></tr>
+<tr><td><strong>Deployment config</strong> (<code>deployment-config.json</code>)</td><td>The values that differ per environment: project variables, connection settings (hosts, ports, folders, queues, users, which secret), logging. Values may read environment variables: <code>\${env:DB_HOST}</code>, <code>\${env:DB_HOST:-localhost}</code>. Each environment keeps its own.</td></tr>
+<tr><td><strong>Secrets</strong></td><td>Passwords and keys stay in each server's vault and never travel. The package lists the names it needs.</td></tr>
+<tr><td><strong>Files</strong></td><td>Documents, templates and other files the project needs, in the release zip's <code>files/</code>; they go to the project's files folder (<code>\${files}</code> in variables).</td></tr>
+<tr><td><strong>Release zip</strong></td><td>All of it for a production team: <code>package.sutra</code>, <code>deployment-config.json</code> (filled with the package's own values, to change), <code>README.txt</code> (contents, secrets, where it was built from, commands), <code>documentation.html</code> and <code>.md</code>, and <code>files/</code>.</td></tr>
 </tbody></table>
-<p class="h">Who deploys how</p>
+<p class="h">Versions</p>
 <ul>
-<li><strong>Development and system test</strong>: <em>Deploy</em> in the designer, Sutra by Sutra.</li>
-<li><strong>Production</strong>: a CI/CD pipeline builds the release zip from the Git repository and uploads it with the command line, or the production team uploads it in the Admin Console (Releases). A production server (<code>SUTRA_ENVIRONMENT=production</code>) refuses designer deploys.</li>
+<li>Each Sutra has its own versions: v1, v2, ... made by Deploy or by a package. Runs in progress finish on the version they started with.</li>
+<li>A package has a version you choose, like <code>1.4.0</code> (major.minor.patch, optionally <code>-rc.1</code>): raise the patch for fixes, the minor for new Sutras or features, the major for changes callers must adapt to (a REST path or body changed). In Git, tag the commit with the same version (<code>v1.4.0</code>).</li>
+<li>The same package deployed twice changes nothing: Sutras whose content is unchanged keep their version.</li>
 </ul>
-<p class="h">In the studio</p>
+<p class="h">Who deploys how</p>
+<table class="t"><thead><tr><th>Environment</th><th>How Sutras get there</th></tr></thead><tbody>
+<tr><td>Development (each designer)</td><td><strong>Deploy</strong> in the designer, Sutra by Sutra; Test and Debug without deploying</td></tr>
+<tr><td>System test, integration</td><td>Designer Deploy, or packages from the pipeline</td></tr>
+<tr><td>UAT, pre-production</td><td>Release zips from the pipeline: the exact files that will go to production</td></tr>
+<tr><td>Production (<code>SUTRA_ENVIRONMENT=production</code>)</td><td>Release zips only: <code>sutra deploy</code> from the pipeline, or Admin Console &rarr; Releases. Designer Deploy is refused.</td></tr>
+</tbody></table>
+<p class="h">Build a release in the studio</p>
 <ol>
-<li>Open <strong>Project &rarr; Configuration &rarr; Releases (packages)</strong>.</li>
-<li>Give a version, such as <code>1.4.0</code>, and a note, then <strong>Download release (.zip)</strong>, or <em>Package only (.sutra)</em>.</li>
-<li>On the target server, open the same panel or the Admin Console's <strong>Releases</strong>, choose the zip, read the check (missing secrets, addresses already used by another project), and <strong>Deploy</strong>. The zip's deployment config is applied with it.</li>
-<li>The history lists every deployment; <strong>Deploy again</strong> or <strong>Roll back</strong> returns to an earlier package.</li>
+<li>Write a description for every step: the release documentation is made from them (see <em>Documenting Sutras</em>).</li>
+<li>Deploy and test the Sutras that belong in the release on your development server. The package takes each deployed Sutra at its deployed version; Sutras never deployed come along as not deployed.</li>
+<li>Open <strong>Project &rarr; Configuration &rarr; Releases (packages)</strong>, give a version and a note (what changed), and choose <strong>Download release (.zip)</strong>, or <em>Package only (.sutra)</em>.</li>
+<li>Open the zip: check <code>README.txt</code> (Sutras, addresses, secrets) and <code>documentation.html</code>, and fill in <code>deployment-config.json</code> for the target (or hand it to the team that owns that environment).</li>
 </ol>
-<p>Deploying matches everything by name. A Sutra whose content changed gets a new version; an unchanged one is left alone, so the same package twice changes nothing. Sutras not in the package are undeployed (kept, not deleted) unless you tick <em>Keep Sutras that are not in the package deployed</em>.</p>
-<p class="h">From Git in a CI/CD pipeline</p>
-<p><code>sutra package --from-git</code> builds the release zip from the project's files in the repository (see Git), with no SutraFlow server or database: it reads the files into a throw-away one. Every Sutra in the repository, or those named with <code>--sutras</code>, is deployed by the release. <code>--ref</code> builds from a tag, branch or commit; the package records the repository (without credentials), the ref and the commit, shown in the README and the Admin Console. A private repository reads its token from <code>SUTRA_GIT_TOKEN</code> (and <code>SUTRA_GIT_LOGIN</code>); a pipeline that has checked out the repository already gives the folder.</p>
-<pre># build: from the repository at a tag
-sutra package --from-git https://github.com/acme/orders.git --ref v1.4.0 --version 1.4.0 --out orders-1.4.0.zip
-#   or from the folder the pipeline checked out
-sutra package --from-git . --version 1.4.0 --out orders-1.4.0.zip
-sutra test    orders-1.4.0.zip --secrets-from-env
-
-# release: to the production engine
-sutra check   orders-1.4.0.zip --server https://prod-engine:4800 --token $TOKEN
-sutra deploy  orders-1.4.0.zip --server https://prod-engine:4800 --token $TOKEN --config prod-config.json
-sutra rollback --project "Orders" --server https://prod-engine:4800 --token $TOKEN</pre>
-<p>The zip's own <code>deployment-config.json</code> is applied unless <code>--config</code> gives another; keep each environment's config in the pipeline (values may read <code>\${env:NAME}</code>), and add the listed secrets to the target's vault first (<code>sutra secret set</code>). The token is a system account's API token (Admin Console, System accounts) with Deploy on the project, or the server's <code>SUTRA_ADMIN_TOKEN</code>. Exit code 0 means success, 1 a failed check, test or deploy, 2 wrong usage, so a pipeline stops at the first failure. <code>sutra test</code> runs every Sutra of the package with its test data in a throw-away server.</p>
-<p class="h">From the command line, from a server</p>
-<pre>sutra package  --project "Orders" --version 1.4.0 --zip --server https://test-engine:4800 --token $TOKEN
-sutra package  --project "Orders" --version 1.4.0 --out orders-1.4.0.sutra</pre>
-<p>Without <code>--server</code> the tool works on the local data folder.</p>
+<p class="h">Build a release from the command line</p>
+<pre># from a running studio or engine
+sutra package --project "Orders" --version 1.4.0 --note "Faster lookup" --zip --server https://studio:4800 --token $TOKEN
+# on the server itself, from its data folder
+sutra package --project "Orders" --version 1.4.0 --out orders-1.4.0.zip
+# from the project's Git repository, with no server at all (CI)
+sutra package --from-git https://github.com/acme/orders.git --ref v1.4.0 --version 1.4.0 --out orders-1.4.0.zip</pre>
+<p><code>--sutras "A,B"</code> takes only those Sutras with the connections and schemas they use. From Git every Sutra in the repository is deployed by the release; the package records the repository (without credentials), the ref and the commit.</p>
+<p class="h">Prepare the target</p>
+<ol>
+<li><strong>Secrets</strong>: add every name the README lists to the target's vault, from a secret store or the pipeline: <code>sutra secret set ORDERS_DB --from-env ORDERS_DB --server ... --token ...</code>, or Resources &rarr; Secrets.</li>
+<li><strong>Deployment config</strong>: hosts, folders and users of this environment; keep one file per environment in the pipeline or a config repository, with <code>\${env:...}</code> for values the server's environment gives.</li>
+<li><strong>Access</strong>: a system account with the Deploy permission on the project (Admin Console &rarr; System accounts), and an API token for it.</li>
+</ol>
+<p class="h">Deploy</p>
+<ul>
+<li><strong>Admin Console &rarr; Releases</strong>: choose the zip; read its check (Sutras and addresses, secrets present or missing, where it was built from, the config and files it brings); change the project name or give another deployment config; <strong>Deploy</strong>.</li>
+<li><strong>Command line</strong>: <code>sutra check orders-1.4.0.zip --server ... --token ...</code>, then <code>sutra deploy orders-1.4.0.zip --config prod-config.json --server ... --token ...</code>. The zip's own config applies unless <code>--config</code> gives another.</li>
+<li><strong>Designer</strong> (non-production): Releases &rarr; <em>Deploy a package here</em>.</li>
+<li><strong>Headless engines</strong> can also take packages from a folder at start (<code>SUTRA_DEPLOY_DIR</code>), for container images.</li>
+</ul>
+<p>Before anything changes the package is checked: checksum, activities this server knows, every secret present, and no REST or SOAP path already served by another project. Then everything is matched by name: the project (made when missing), schemas, connections, Sutras. Changed Sutras get a new version and are deployed; unchanged ones are left alone; Sutras of the project not in the package are undeployed (kept, not deleted) unless <em>keep others</em>. The deployment config is applied and the files written. Every deployment is recorded with who deployed it.</p>
+<p class="h">Check and roll back</p>
+<ul>
+<li>After a deploy: Admin Console &rarr; Applications for the Sutras and their state, Runs for failures, Alerts for rules that fire. <code>sutra test release.zip</code> runs every Sutra of a package with its test data in a throw-away server, before you deploy.</li>
+<li><strong>Roll back</strong>: Admin Console &rarr; Releases &rarr; <em>Roll back</em>, or <em>Deploy again</em> on any earlier package; <code>sutra rollback --project "Orders"</code>. A rollback is itself a deployment, recorded like any other.</li>
+</ul>
 <p class="h">From a Sutra</p>
-<p>The <strong>Release</strong> palette does the same steps inside a Sutra, so a release can itself be a Sutra: on a timer or a REST call, [[releasePackage]], [[releaseDeploy]] to a test engine, [[approval]], [[releaseDeploy]] to production, then [[emailSend]] the result. [[releaseCheck]] and [[releaseRollback]] complete it. These activities are off until an administrator allows them in Server &amp; APIs.</p>`,
+<p>The <strong>Release</strong> palette does the same steps inside a Sutra, so a release can itself be a Sutra: on a timer or a REST call, [[releasePackage]], [[releaseDeploy]] to a test engine, [[approval]], [[releaseDeploy]] to production, then [[emailSend]] the result. [[releaseCheck]] and [[releaseRollback]] complete it. These activities are off until an administrator allows them in Server &amp; APIs.</p>
+[[tip:Good practice|Promote the same zip from UAT to production; never rebuild it for production.<br>Keep deployment configs and secrets out of the package and out of Git; keep configs per environment, secrets in each vault.<br>Write the note: it shows in the history and the README.]]`,
+  },
+  {
+    id: 'cicd', title: 'CI/CD pipelines',
+    html: `
+<p>A pipeline builds the release from Git and takes it through test to production with no hand work and no designer access. Every step is a <code>sutra</code> command that ends with exit code 0 (success), 1 (a failed check, test or deploy) or 2 (wrong usage), so any CI system stops at the first problem.</p>
+<p class="h">The stages</p>
+<ol>
+<li><strong>Source</strong>: designers commit and push the project from the Git tab; a merge to the main branch, or a version tag such as <code>v1.4.0</code>, starts the pipeline.</li>
+<li><strong>Build</strong>: <code>sutra package --from-git . --ref $TAG --version $VERSION --out release.zip</code> on the build agent; no SutraFlow server is needed.</li>
+<li><strong>Test</strong>: <code>sutra test release.zip --secrets-from-env</code> runs every Sutra with its test data in a throw-away server; test secrets come from the pipeline's secret variables.</li>
+<li><strong>Document</strong>: <code>sutra doc release.zip --out documentation.html</code> (also inside the zip) for reviewers.</li>
+<li><strong>Deploy to UAT</strong>: <code>sutra check</code> then <code>sutra deploy release.zip --config config/uat.json</code> against the UAT engine.</li>
+<li><strong>Approve</strong>: a person approves in the CI system (environments with required reviewers, manual jobs, approval gates).</li>
+<li><strong>Deploy to production</strong>: the same zip, <code>--config config/prod.json</code>, against the production engine. Keep the zip as the pipeline's artifact.</li>
+</ol>
+<p class="h">What the pipeline needs</p>
+<table class="t"><thead><tr><th>Item</th><th>Where to keep it</th></tr></thead><tbody>
+<tr><td>The <code>sutra</code> command</td><td>Node.js 24 and SutraFlow on the build agent (<code>npm ci</code> in a checkout of SutraFlow, then <code>npm run sutra --</code>), or the SutraFlow container image</td></tr>
+<tr><td>Server addresses</td><td>Pipeline variables: <code>UAT_SERVER</code>, <code>PROD_SERVER</code> (the admin port, for example <code>https://prod-engine:4800</code>)</td></tr>
+<tr><td>Tokens</td><td>Secret variables: an API token of a system account with Deploy on the project, one per environment</td></tr>
+<tr><td>Deployment configs</td><td>A <code>config/</code> folder in the repository (no secrets in it), or a separate config repository</td></tr>
+<tr><td>Secret values</td><td>The CI system's secret store; set them on the target with <code>sutra secret set NAME --from-env NAME</code> as a pipeline step, or by the operations team</td></tr>
+<tr><td>Git access for <code>--from-git &lt;address&gt;</code></td><td><code>SUTRA_GIT_TOKEN</code> (and <code>SUTRA_GIT_LOGIN</code>); not needed when the pipeline has checked out the repository and passes <code>.</code></td></tr>
+</tbody></table>
+<p class="h">GitHub Actions</p>
+<pre>name: release
+on:
+  push:
+    tags: ['v*']
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4                      # the project repository
+      - uses: actions/checkout@v4
+        with: { repository: your-org/sutraflow, path: sutraflow }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: npm ci
+        working-directory: sutraflow
+      - name: Build the release
+        run: npm run --prefix sutraflow sutra -- package --from-git "$GITHUB_WORKSPACE" --ref "$GITHUB_REF_NAME" --version "\${GITHUB_REF_NAME#v}" --out "$GITHUB_WORKSPACE/release.zip"
+      - name: Test it
+        run: npm run --prefix sutraflow sutra -- test "$GITHUB_WORKSPACE/release.zip" --secrets-from-env
+        env: { ORDERS_DB: '\${{ secrets.TEST_ORDERS_DB }}' }
+      - uses: actions/upload-artifact@v4
+        with: { name: release, path: release.zip }
+  production:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production                           # required reviewers approve here
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: release }
+      - uses: actions/checkout@v4
+        with: { repository: your-org/sutraflow, path: sutraflow }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: npm ci
+        working-directory: sutraflow
+      - run: |
+          npm run --prefix sutraflow sutra -- check  "$PWD/release.zip" --server "$PROD_SERVER" --token "$PROD_TOKEN"
+          npm run --prefix sutraflow sutra -- deploy "$PWD/release.zip" --server "$PROD_SERVER" --token "$PROD_TOKEN" --config "$PWD/sutraflow/../config/prod.json"
+        env:
+          PROD_SERVER: '\${{ vars.PROD_SERVER }}'
+          PROD_TOKEN: '\${{ secrets.PROD_TOKEN }}'</pre>
+<p class="h">GitLab CI</p>
+<pre>stages: [build, test, uat, production]
+image: node:24
+variables: { VERSION: "\${CI_COMMIT_TAG}" }
+before_script:
+  - git clone --depth 1 https://gitlab.example.com/tools/sutraflow.git /opt/sutraflow && (cd /opt/sutraflow && npm ci)
+  - alias sutra="node --import tsx /opt/sutraflow/server/src/cli.ts"
+build:
+  stage: build
+  rules: [{ if: $CI_COMMIT_TAG }]
+  script: [ 'sutra package --from-git . --ref "$CI_COMMIT_TAG" --version "\${VERSION#v}" --out release.zip' ]
+  artifacts: { paths: [release.zip] }
+test:
+  stage: test
+  script: [ sutra test release.zip --secrets-from-env ]
+uat:
+  stage: uat
+  environment: uat
+  script: [ sutra deploy release.zip --config config/uat.json --server "$UAT_SERVER" --token "$UAT_TOKEN" ]
+production:
+  stage: production
+  environment: production
+  when: manual
+  script:
+    - sutra check  release.zip --server "$PROD_SERVER" --token "$PROD_TOKEN"
+    - sutra deploy release.zip --config config/prod.json --server "$PROD_SERVER" --token "$PROD_TOKEN"</pre>
+<p class="h">Azure DevOps</p>
+<pre>trigger: { tags: { include: ['v*'] } }
+pool: { vmImage: ubuntu-latest }
+stages:
+- stage: Build
+  jobs:
+  - job: package
+    steps:
+    - checkout: self
+    - checkout: git://Tools/sutraflow
+    - task: NodeTool@0
+      inputs: { versionSpec: '24.x' }
+    - script: cd sutraflow &amp;&amp; npm ci
+    - script: node --import tsx sutraflow/server/src/cli.ts package --from-git $(Build.SourcesDirectory)/orders --ref $(Build.SourceBranchName) --version $(Build.SourceBranchName) --out $(Build.ArtifactStagingDirectory)/release.zip
+    - publish: $(Build.ArtifactStagingDirectory)/release.zip
+      artifact: release
+- stage: Production
+  dependsOn: Build
+  jobs:
+  - deployment: deploy
+    environment: production                           # approvals and checks on the environment
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - script: node --import tsx $(Pipeline.Workspace)/sutraflow/server/src/cli.ts deploy $(Pipeline.Workspace)/release/release.zip --server $(PROD_SERVER) --token $(PROD_TOKEN) --config config/prod.json</pre>
+<p class="h">Jenkins</p>
+<pre>pipeline {
+  agent { docker { image 'node:24' } }
+  environment { SUTRA = 'node --import tsx /opt/sutraflow/server/src/cli.ts' }
+  stages {
+    stage('Build')  { steps { sh '$SUTRA package --from-git . --ref "$TAG_NAME" --version "\${TAG_NAME#v}" --out release.zip' } }
+    stage('Test')   { steps { sh '$SUTRA test release.zip --secrets-from-env' } }
+    stage('UAT')    { steps { withCredentials([string(credentialsId: 'uat-token', variable: 'T')]) { sh '$SUTRA deploy release.zip --config config/uat.json --server $UAT_SERVER --token $T' } } }
+    stage('Approve') { steps { input 'Deploy to production?' } }
+    stage('Production') { steps { withCredentials([string(credentialsId: 'prod-token', variable: 'T')]) { sh '$SUTRA deploy release.zip --config config/prod.json --server $PROD_SERVER --token $T' } } }
+  }
+  post { success { archiveArtifacts 'release.zip' } }
+}</pre>
+<p class="h">Container images</p>
+<p>For immutable production, bake the release into an engine image: <code>FROM sutraflow:1.6.0</code>, <code>COPY release.zip /deploy/</code>, and start it with <code>SUTRA_MODE=engine SUTRA_DEPLOY_DIR=/deploy</code>; the engine deploys every package in the folder at start. A new release is a new image.</p>
+[[tip:Good practice|One zip, many environments: build once, deploy the same artifact to UAT and production.<br>Give each environment its own system account and token, with Deploy on the project only.<br>Let the pipeline fail on <code>sutra check</code> before anything changes; keep rollback one command away.<br>Store the zip with the pipeline run: it is the record of exactly what went live.]]`,
   },
   {
     id: 'commands', title: 'Command reference',
@@ -756,9 +1107,9 @@ sutra user list</pre>`,
 <p class="h">Headless engines</p>
 <p>The same program started with <code>SUTRA_MODE=engine</code> runs Sutras without the studio: no designer pages and no editing. It keeps <code>/health</code>, <code>/ready</code> and <code>/metrics</code>, the Admin Console at <code>/admin</code> for its users, and an automation API for API tokens (the admin token or system account tokens). Packages in <code>SUTRA_DEPLOY_DIR</code> are deployed when it starts; a package that cannot be deployed stops the start.</p>
 <p class="h">Docker</p>
-<pre>docker build -t sutraflow:1.5.0 .
+<pre>docker build -t sutraflow:1.6.0 .
 docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=... \\
-           -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:1.5.0</pre>
+           -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:1.6.0</pre>
 <p>The image runs as a non-root user, checks its own health, and writes JSON logs. <code>docker-compose.yml</code> has a studio and an engine; <code>docker-compose.cluster.yml</code> has PostgreSQL, a studio and two engines.</p>
 <p class="h">Clusters</p>
 <p>Several engines share one database (<code>SUTRA_DB=postgres://...</code>), each with its own <code>SUTRA_ENGINE_ID</code> and all with the same <code>SUTRA_MASTER_KEY</code>.</p>

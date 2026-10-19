@@ -88,14 +88,19 @@ function NodeVariables({ node }: { node: FlowNode }) {
 
 const runOutputs = (p: Props) => (p.run && !ACTIVE.includes(p.run.status) ? p.run.outputs : p.run?.outputs && Object.keys(p.run.outputs).length ? p.run.outputs : p.sample.outputs);
 
-function Overview({ doc, setDoc, run, onDelete }: Props) {
+function Overview({ flowId, doc, setDoc, run, onDelete }: Props) {
   const { meta } = useCatalog();
   const triggers = doc.nodes.filter(n => meta.activities.find(a => a.type === n.type)?.trigger);
+  const undescribed = doc.nodes.filter(n => !n.description).length;
   return (
     <div className="tabbody">
       <div className="fld"><label htmlFor="fname">Sutra name</label><input id="fname" type="text" value={doc.name} onChange={e => setDoc(d => ({ ...d, name: e.target.value }))} /></div>
       <div className="fld"><label htmlFor="fdesc">Description</label><textarea id="fdesc" rows={2} value={doc.description || ''} onChange={e => setDoc(d => ({ ...d, description: e.target.value }))} /></div>
-      <p className="muted" style={{ fontSize: 12 }}>{doc.nodes.length} activities · {doc.edges.length} transitions · {triggers.length} trigger{triggers.length === 1 ? '' : 's'}</p>
+      <p className="muted" style={{ fontSize: 12 }}>{doc.nodes.length} activities · {doc.edges.length} transitions · {triggers.length} trigger{triggers.length === 1 ? '' : 's'}{undescribed > 0 && <> · {undescribed} without a description</>}</p>
+      <div className="row" style={{ marginBottom: 10 }}>
+        <a className="btn small" href={`/api/flows/${flowId}/documentation`} target="_blank" rel="noopener" title="What starts this Sutra and every step with its description and settings, as a page to read, print or share. Made from the saved Sutra.">Documentation</a>
+        <a className="btn small" href={`/api/flows/${flowId}/documentation?format=md`} title="The same as Markdown, for a repository or wiki">Markdown</a>
+      </div>
       <ProcessVariables vars={doc.variables || []} onChange={v => setDoc(d => ({ ...d, variables: v }))} />
       {run && <>
         <p className="sub">Last test run</p>
@@ -148,6 +153,11 @@ function General(p: Props & { node: FlowNode }) {
       <div className="fld"><label htmlFor="sname">Activity name</label>
         <input id="sname" type="text" defaultValue={node.name} key={node.id + node.name} onBlur={e => p.renameNode(node.id, e.target.value)} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
         <div className="hint">Mappings refer to activities by name; renaming updates them.</div>
+      </div>
+      <div className="fld"><label htmlFor="sdesc">Description</label>
+        <textarea id="sdesc" rows={2} defaultValue={node.description || ''} key={node.id + ':d'} placeholder="What this step does and why"
+          onBlur={e => { const v = e.target.value.trim(); if (v !== (node.description || '')) p.updateNode(node.id, n => ({ ...n, description: v || undefined })); }} />
+        <div className="hint">Shown when pointing at the step on the canvas, and in the Sutra's documentation (General tab of the Sutra: Documentation).</div>
       </div>
       {warnings.length > 0 && <div className="warnbox">{warnings.join('\n')}</div>}
       <FieldList fields={fields} values={node.config} onChange={setCfg} resources={resources} secrets={secrets}

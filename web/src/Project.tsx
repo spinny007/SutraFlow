@@ -669,7 +669,7 @@ function ReleasesPanel() {
   const [version, setVersion] = useState('1.0.0');
   const [note, setNote] = useState('');
   const [hist, setHist] = useState<any[]>([]);
-  const [pending, setPending] = useState<{ pkg: any; check: any; config?: any } | null>(null);
+  const [pending, setPending] = useState<{ pkg: any; check: any; config?: any; zip?: string; files?: string[] } | null>(null);
   const [keepOthers, setKeepOthers] = useState(false);
   const [busy, setBusy] = useState('');
   const load = () => get<any[]>(`/api/projects/${projectId}/packages`).then(setHist).catch(() => setHist([]));
@@ -701,14 +701,14 @@ function ReleasesPanel() {
         ? { zip: await new Promise<string>((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).replace(/^data:[^,]*,/, '')); fr.onerror = () => rej(fr.error); fr.readAsDataURL(f); }) }
         : { package: JSON.parse(await f.text()) };
       const o = await post<any>('/api/packages/open', { ...body, project: project?.name });
-      setPending({ pkg: o.package, check: o.check, config: o.config ?? undefined });
+      setPending({ pkg: o.package, check: o.check, config: o.config ?? undefined, zip: 'zip' in body ? body.zip : undefined, files: o.files });
     } catch (e: any) { toast(`Not a release: ${e.message}`, true); }
   };
   const deploy = async () => {
     if (!pending) return;
     setBusy('deploy');
     try {
-      const r = await post<any>('/api/packages/deploy', { package: pending.pkg, project: project?.name, ops: pending.config, keepOthers });
+      const r = await post<any>('/api/packages/deploy', { ...(pending.zip ? { zip: pending.zip } : { package: pending.pkg }), project: project?.name, ops: pending.config, keepOthers });
       toast(`Deployed ${r.package.name} ${r.package.version}${r.unchanged ? ': nothing changed' : ''}`);
       setPending(null); await load(); await reload();
     } catch (e: any) { toast(e.message, true); } finally { setBusy(''); }
@@ -729,12 +729,13 @@ function ReleasesPanel() {
         <button className="btn primary" disabled={busy === 'zip'} onClick={buildZip} title="Package, deployment config and README in one zip, for the production team">{busy === 'zip' ? 'Building' : 'Download release (.zip)'}</button>
         <button className="btn" disabled={busy === 'build'} onClick={build}>{busy === 'build' ? 'Building' : 'Package only (.sutra)'}</button>
       </div>
+      <p className="muted xs">The zip carries the project's documentation, made from the Sutras and the descriptions of their steps: <a href={`/api/projects/${projectId}/documentation`} target="_blank" rel="noopener">open it now</a> or <a href={`/api/projects/${projectId}/documentation?format=md`}>as Markdown</a>.</p>
       <p className="muted xs">For production, a CI pipeline builds the same zip from the Git repository: <code>sutra package --from-git &lt;repository&gt; --ref v1.4.0 --version 1.4.0</code>, and deploys it with <code>sutra deploy</code> or the Admin Console (Releases).</p>
       <p className="h" style={{ marginTop: 18 }}>Deploy a package here</p>
       <input type="file" accept=".zip,.sutra,.json" aria-label="Release zip or package file" onChange={e => pick(e.target.files?.[0])} />
       {pending && (
         <div className={pending.check.ok ? 'okbox' : 'errbox'} role="status">
-          <b>{pending.pkg.name} {pending.pkg.version}</b>: {pending.pkg.sutras.length} Sutras{pending.config ? ', with its deployment config' : ''}. {pending.check.ok ? 'Ready to deploy.' : 'Cannot be deployed:'}
+          <b>{pending.pkg.name} {pending.pkg.version}</b>: {pending.pkg.sutras.length} Sutras{pending.config ? ', with its deployment config' : ''}{pending.files?.length ? ` and ${pending.files.length} files` : ''}. {pending.check.ok ? 'Ready to deploy.' : 'Cannot be deployed:'}
           <ul>{[...pending.check.errors, ...pending.check.warnings].map((x: string) => <li key={x}>{x}</li>)}</ul>
           {pending.check.ok && <>
             <label className="check"><input type="checkbox" checked={keepOthers} onChange={e => setKeepOthers(e.target.checked)} /> Keep Sutras that are not in the package deployed</label>

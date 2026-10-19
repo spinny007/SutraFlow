@@ -47,6 +47,7 @@ import { prometheusText } from './metrics.js';
 import { tracingStats } from './tracing.js';
 import { housekeeping, clearTestRuns } from './housekeeping.js';
 import { buildBundle, readBundle, configFor } from './bundles.js';
+import { sutraDocumentation, projectDocumentation } from './docs.js';
 import { buildPackage, checkPackage, deployPackage, packageHistory, readPackage, rollbackPackage, testPackage, importPackage, copyProject } from './packages.js';
 
 const COOKIE = 'sutra_session';
@@ -416,6 +417,35 @@ export async function buildAdmin(): Promise<FastifyInstance> {
       return p;
     } catch (e: any) { throw bad(e.message); }
   });
+  /** Documentation made from the Sutras and their step descriptions: ?format=html (default) or md. */
+  const docReply = (reply: any, d: { markdown: string; html: string }, name: string, format?: string) => {
+    const mdOut = format === 'md' || format === 'markdown';
+    reply.header('content-type', mdOut ? 'text/markdown; charset=utf-8' : 'text/html; charset=utf-8');
+    if (mdOut) reply.header('content-disposition', `attachment; filename="${name.replace(/[^\w.-]+/g, '-')}.md"`);
+    return reply.send(mdOut ? d.markdown : d.html);
+  };
+  const docResources = (projectId: string) => listResources(undefined, projectId).map(r => ({ id: r.id, name: r.name, kind: r.kind }));
+  app.get('/api/projects/:id/documentation', async (req: any, reply) => {
+    const p = projects.requireProject(req.params.id);
+    const list = flows.listFlows(req.params.id).map(f => ({ id: f.id, doc: flows.getFlow(f.id)!.doc, version: f.deployed?.version, deployed: !!f.deployed, folder: f.folder }));
+    return docReply(reply, projectDocumentation({ name: p.name, description: p.description, variables: p.config.variables }, list, { resources: docResources(p.id), made: version }), p.name, req.query?.format);
+  });
+  app.get('/api/flows/:id/documentation', async (req: any, reply) => {
+    const f = flows.getFlow(req.params.id);
+    if (!f) throw new HttpError(404, 'Sutra not found');
+    const pid = f.project_id || null;
+    const others = pid ? flows.listFlows(pid).map(x => ({ id: x.id, name: x.name })) : [];
+    return docReply(reply, sutraDocumentation({ id: f.id, doc: f.doc, version: f.deployed?.version, deployed: !!f.deployed }, { resources: pid ? docResources(pid) : [], sutras: others, made: version }), f.doc.name, req.query?.format);
+  });
+  /** Sample projects shipped in samples/ (npm run samples): whole projects as release zips, with their files. */
+  const sampleIndex = () => { try { return JSON.parse(fs.readFileSync(path.join(rootDir, 'samples', 'index.json'), 'utf8')) as { file: string; name: string; description: string; sutras: string[]; bytes: number }[]; } catch { return []; } };
+  app.get('/api/sample-projects', async () => sampleIndex());
+  app.get('/api/sample-projects/:file', async (req: any, reply) => {
+    const s = sampleIndex().find(x => x.file === req.params.file);
+    if (!s) throw new HttpError(404, 'No such sample project');
+    reply.header('content-type', 'application/zip').header('content-disposition', `attachment; filename="${s.file}"`);
+    return reply.send(fs.readFileSync(path.join(rootDir, 'samples', s.file)));
+  });
   /** The release zip: package, deployment config to fill in, README. */
   app.get('/api/projects/:id/release', async (req: any, reply) => {
     projects.requireProject(req.params.id);
@@ -428,14 +458,22 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.post('/api/packages/open', async (req: any) => {
     try {
       const b = req.body?.zip ? readBundle(Buffer.from(String(req.body.zip), 'base64')) : readBundle(JSON.stringify(req.body?.package));
-      return { package: b.package, config: configFor(b.package, b.config, req.body?.project) ?? null, check: checkPackage(b.package, { project: req.body?.project }) };
+      return { package: b.package, config: configFor(b.package, b.config, req.body?.project) ?? null, files: b.files.map(f => f[0]), check: checkPackage(b.package, { project: req.body?.project }) };
     } catch (e: any) { throw bad(e.message); }
   });
   app.post('/api/packages/check', async (req: any) => {
     try { return checkPackage(readPackage(req.body?.package), { project: req.body?.project }); } catch (e: any) { throw bad(e.message); }
   });
+  /** A package, or a release zip (base64) whose deployment config (unless ops is given) and files come with it. */
   app.post('/api/packages/deploy', async (req: any) => {
-    try { return deployPackage(req.body?.package, { project: req.body?.project, ops: req.body?.ops, keepOthers: !!req.body?.keepOthers, by: req.user?.u }); } catch (e: any) { throw packErr(e); }
+    try {
+      if (req.body?.zip) {
+        const b = readBundle(Buffer.from(String(req.body.zip), 'base64'));
+        const ops = req.body?.ops !== undefined && req.body?.ops !== null ? req.body.ops : configFor(b.package, b.config, req.body?.project);
+        return deployPackage(b.package, { project: req.body?.project, ops, keepOthers: !!req.body?.keepOthers, by: req.user?.u, files: b.files });
+      }
+      return deployPackage(req.body?.package, { project: req.body?.project, ops: req.body?.ops, keepOthers: !!req.body?.keepOthers, by: req.user?.u });
+    } catch (e: any) { throw packErr(e); }
   });
   app.post('/api/packages/test', async (req: any) => {
     try { return await testPackage(req.body?.package, { skip: req.body?.skip }); } catch (e: any) { throw bad(e.message); }
@@ -445,7 +483,10 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.post('/api/projects/import', async (req: any) => {
     const asDrafts = req.body?.asDrafts !== false;
     if (!asDrafts && !access.can(caller(req), 'deploy', '')) throw new HttpError(403, 'Deploying while importing needs the Deploy permission on all projects; import as drafts instead');
-    try { return importPackage(req.body?.package, { project: req.body?.project, sutras: req.body?.sutras, asDrafts, by: caller(req).u }); } catch (e: any) { throw packErr(e); }
+    try {
+      const b = req.body?.zip ? readBundle(Buffer.from(String(req.body.zip), 'base64')) : null;
+      return importPackage(b ? b.package : req.body?.package, { project: req.body?.project, sutras: req.body?.sutras, asDrafts, by: caller(req).u, files: b?.files });
+    } catch (e: any) { throw packErr(e); }
   });
   /** New project from chosen Sutras of an existing project, as drafts. */
   app.post('/api/projects/:id/copy', async (req: any) => {

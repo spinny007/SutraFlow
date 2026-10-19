@@ -33,6 +33,9 @@ const HELP = `sutra <command> [options]
             Installs the package in a throw-away server and runs every Sutra with its test data.
   history   --project <name>
             Deployments of packages to a project.
+  doc       (--project <name> [--sutra <name>] | <release.zip | file.sutra>) [--format html|md] [--out file]
+            Documentation made from the Sutras and their step descriptions: what starts each Sutra,
+            its steps in order with their settings, connections and variables.
   rollback  --project <name> [--to <id>]
             Deploys the package before the current one, or the deployment with that id.
 
@@ -264,6 +267,8 @@ async function main(argv: string[]) {
         pkg = l.packages.buildPackage(await projectId(a, null), { version: str(a, 'version'), note: str(a, 'note'), sutras: pick });
       }
       const b = await import('./bundles.js');
+      // The zip's documentation names each step's activity and settings.
+      (await import('./engine/engine.js')).engine.register((await import('./palettes/index.js')).allActivities);
       const o = str(a, 'out') || '';
       const zip = !!a.zip || /\.zip$/i.test(o) || (fromGit && !/\.sutra$/i.test(o));
       const file = o || `${pkg.name.replace(/[^\w.-]+/g, '-')}-${pkg.version}${zip ? '.zip' : '.sutra'}`;
@@ -286,13 +291,16 @@ async function main(argv: string[]) {
       const ops = configFor(rel.package, str(a, 'config') ? JSON.parse(readFile(str(a, 'config'))) : rel.config, str(a, 'project'));
       let r: any;
       try {
-        r = call ? await call('POST', '/api/packages/deploy', { package: rel.package, project: str(a, 'project'), ops, keepOthers: !!a['keep-others'] })
-          : (await local()).packages.deployPackage(rel.package, { project: str(a, 'project'), ops, keepOthers: !!a['keep-others'], by: `cli ${os.userInfo().username}` });
+        // A zip goes as it is, so its files reach the server too.
+        const isZipFile = rel.files.length > 0;
+        r = call ? await call('POST', '/api/packages/deploy', isZipFile ? { zip: fs.readFileSync(a._[1]).toString('base64'), project: str(a, 'project') || rel.package.project.name, ops, keepOthers: !!a['keep-others'] } : { package: rel.package, project: str(a, 'project'), ops, keepOthers: !!a['keep-others'] })
+          : (await local()).packages.deployPackage(rel.package, { project: str(a, 'project'), ops, keepOthers: !!a['keep-others'], by: `cli ${os.userInfo().username}`, files: rel.files });
       } catch (e: any) { out(e.message); if (e.check) printCheck(e.check); return 1; }
       out(`Deployed ${r.package.name} ${r.package.version} to ${r.project.name}${r.project.created ? ' (new project)' : ''}${r.unchanged ? ': nothing changed' : ''}`);
       for (const s of r.sutras) out(`  ${s.action.padEnd(9)} ${s.name} v${s.version}${s.deployed ? '' : ' (not deployed)'}`);
       for (const n of r.undeployed) out(`  undeployed ${n}`);
       for (const w of r.warnings) out(`  warning  ${w}`);
+      if (r.files) out(`  files    ${r.files} written to the project's files folder`);
       return 0;
     }
     case 'test': {
@@ -322,6 +330,52 @@ async function main(argv: string[]) {
         await srv.stop();
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* files in use */ }
       }
+    }
+    case 'doc': {
+      const format = str(a, 'format') === 'md' || /\.md$/i.test(str(a, 'out') || '') ? 'md' : 'html';
+      let text: string, name: string;
+      if (a._[1]) {
+        const rel = await readRelease(a._[1]);
+        const { engine } = await import('./engine/engine.js');
+        const { allActivities } = await import('./palettes/index.js');
+        engine.register(allActivities);
+        const { packageDocumentation } = await import('./docs.js');
+        const d = packageDocumentation(rel.package, rel.package.createdWith);
+        text = format === 'md' ? d.markdown : d.html; name = `${rel.package.name}-${rel.package.version}`;
+      } else if (call) {
+        const id = await projectId(a, call);
+        const sutra = str(a, 'sutra');
+        let url = `/api/projects/${id}/documentation?format=${format}`;
+        if (sutra) {
+          const f = (await call('GET', `/api/flows?projectId=${id}`) as any[]).find(x => x.name.toLowerCase() === sutra.toLowerCase());
+          if (!f) throw new Error(`No Sutra named "${sutra}"`);
+          url = `/api/flows/${f.id}/documentation?format=${format}`;
+        }
+        text = String(await call('GET', url)); name = sutra || need(a, 'project');
+      } else {
+        await local();
+        const { listFlows, getFlow } = await import('./flows.js');
+        const { getProject } = await import('./projects.js');
+        const { listResources } = await import('./resources.js');
+        const { sutraDocumentation, projectDocumentation } = await import('./docs.js');
+        const { version } = await import('./config.js');
+        const id = await projectId(a, null);
+        const p = getProject(id)!;
+        const resources = listResources(undefined, id).map(r => ({ id: r.id, name: r.name, kind: r.kind }));
+        const list = listFlows(id).map(f => ({ id: f.id, doc: getFlow(f.id)!.doc, version: f.deployed?.version, deployed: !!f.deployed, folder: f.folder }));
+        const sutra = str(a, 'sutra');
+        let d;
+        if (sutra) {
+          const s = list.find(x => x.doc.name.toLowerCase() === sutra.toLowerCase());
+          if (!s) throw new Error(`No Sutra named "${sutra}"`);
+          d = sutraDocumentation(s, { resources, sutras: list.map(x => ({ id: x.id, name: x.doc.name })), made: version });
+        } else d = projectDocumentation({ name: p.name, description: p.description, variables: p.config.variables }, list, { resources, made: version });
+        text = format === 'md' ? d.markdown : d.html; name = sutra || p.name;
+      }
+      const file = str(a, 'out') || `${name.replace(/[^\w.-]+/g, '-')}.${format === 'md' ? 'md' : 'html'}`;
+      fs.writeFileSync(file, text);
+      out(`Wrote ${file}`);
+      return 0;
     }
     case 'history': {
       const id = await projectId(a, call);

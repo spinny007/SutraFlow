@@ -35,9 +35,9 @@ const ActivityNode = memo(function ActivityNode({ data, selected }: NodeProps<AN
   const fam = a ? famOf(meta, a.palette) : 'fam-general';
   const height = ports.length ? PORT_Y0 + 18 + (ports.length - 1) * PORT_GAP : 62;
   return (
-    <div className={`anode ${fam}${selected ? ' selected' : ''}${data.status ? ' st-' + data.status : ''}${data.n.settings?.disabled ? ' disabled' : ''}`} style={{ height }}>
+    <div className={`anode ${fam}${selected ? ' selected' : ''}${data.status ? ' st-' + data.status : ''}${data.n.settings?.disabled ? ' disabled' : ''}`} style={{ height }} title={data.n.description || undefined}>
       {data.bp && <span className="bp" title="Breakpoint" />}
-      <div className="head"><span className="glyph">{a?.glyph ?? '?'}</span><span className="nm">{data.n.name}</span>{miss.length > 0 && <span className="vwarn" title={missingText(miss)} aria-label="Missing project variables">⚠</span>}<span className="dot" /></div>
+      <div className="head"><span className="glyph">{a?.glyph ?? '?'}</span><span className="nm">{data.n.name}</span>{data.n.description && <span className="dmark" aria-label="Has a description">≡</span>}{miss.length > 0 && <span className="vwarn" title={missingText(miss)} aria-label="Missing project variables">⚠</span>}<span className="dot" /></div>
       <div className="ty">{a?.name ?? data.n.type}{data.count && data.count > 1 ? ` ×${data.count}` : ''}{data.n.settings?.loop ? <span className="loopmark" title={data.n.settings.loop === 'for each item' ? 'Runs once per item' : 'Repeats while a condition holds'}> ↻</span> : null}</div>
       {ports.length > 0 && <span className="ports-sep" />}
       {a && !a.trigger && !a.noInput && <Handle type="target" position={Position.Left} id="in" style={{ top: IN_Y }} />}

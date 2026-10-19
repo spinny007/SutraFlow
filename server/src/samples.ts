@@ -5,6 +5,9 @@ import { config } from './config.js';
 import { getSetting, q, setSetting } from './db.js';
 import { setItemFolder } from './folders.js';
 import type { Field, FlowNode } from './engine/types.js';
+import path from 'node:path';
+import { getProject, saveProject, projectFilesDir } from './projects.js';
+import { writeSampleDocuments } from './sampledocs.js';
 
 /**
  * Sample Sutras added to a project from "New Sutra": For-Each mapping, loops on an activity,
@@ -58,6 +61,7 @@ export const SAMPLES: { id: string; name: string; desc: string; palettes: string
   { id: 'agentqueue', name: 'AI agent: fed by a message queue', palettes: 'AI, Service Bus', desc: 'Takes questions from a RabbitMQ or ActiveMQ queue, answers each with the agent (one at a time per conversation), publishes the answer to a reply queue and confirms the message.', needs: 'a RabbitMQ or ActiveMQ connection; Ollama with a model' },
   { id: 'agentteam', name: 'AI agent: supervisor and specialists', palettes: 'AI', desc: 'A supervisor agent published at /chat/help sends each question to the order desk or the policy assistant with Hand off to agent, and answers with what they say.', needs: 'the order desk and knowledge base samples; Ollama with a model' },
   { id: 'agentmcp', name: 'AI agent: tools from another MCP server', palettes: 'AI', desc: 'Lists the tools of an outside MCP server (the file system server started with npx), calls one directly, and gives them to an agent that answers questions about files.', needs: 'Node.js npx on the server; Ollama with a model' },
+  { id: 'agentdocs', name: 'AI document assistant: RAG over a folder', palettes: 'AI, Files, Triggers, REST', desc: 'Every 15 minutes, reads the PDF, Word, PowerPoint and Markdown files of a folder into a knowledge base (changed files again, deleted ones out), and answers from it three ways: a REST API, an MCP tool for AI assistants, and a chat agent. Sample documents included.', needs: 'Ollama with a model for the API and the agent (the MCP tool needs none)' },
   { id: 'skills', name: 'MCP skills: Write CSV file, Post to Facebook page', palettes: 'Triggers, AI, Files, Apps', desc: 'Two Sutras that AI assistants call as tools, on a sample MCP server.', needs: 'a security policy on the MCP server; a Facebook connection for posting' },
 ];
 
@@ -918,6 +922,88 @@ export function addSamples(projectId: string, ids?: string[]) {
     edges: [E('s', 'l'), E('l', 'a'), E('a', 'g', 'done')],
   });
 
+
+  // ---------- AI document assistant: RAG over a local folder, as an API, an MCP tool and a chat agent ----------
+  const docsWanted = want('agentdocs');
+  const aiDocs = docsWanted ? (ai || conn('aiProvider', 'Local Ollama', { engine: 'Ollama', model: '', baseUrl: '', maxTokens: 800, ollamaApi: 'chat' })) : null;
+  const kbDocs = aiDocs && conn('aiKnowledge', 'Sample document knowledge base', { store: 'built-in', embedWith: 'built-in', chunkTokens: 200, overlapTokens: 40 });
+  if (aiDocs) {
+    // The documents (PDF, Word, PowerPoint, Markdown) go in the project's files folder, ${files}/documents,
+    // named by the project variable DOCS_FOLDER: the same on every server, and carried by release zips.
+    const p = getProject(projectId);
+    if (p) {
+      writeSampleDocuments(path.join(projectFilesDir(p.name), 'documents'));
+      if (!(p.config.variables || []).some((v: any) => v.name === 'DOCS_FOLDER')) {
+        saveProject({ id: p.id, name: p.name, description: p.description, config: { ...p.config, variables: [...(p.config.variables || []), { name: 'DOCS_FOLDER', type: 'string', value: '${files}/documents', description: 'Folder of documents the knowledge base is fed from (PDF, Word, PowerPoint, Excel, OpenDocument, HTML, text, Markdown). ${files} is the project files folder; use any folder of this server instead.' }] } });
+      }
+    }
+  }
+  const D = (n: FlowNode, description: string): FlowNode => ({ ...n, description });
+  const docOne = aiDocs && save({
+    name: 'Sample: Add one document to knowledge',
+    description: 'Called once per file by "Sample: Document feed from a folder": reads the file, takes its text and adds it to the knowledge base under its path in the folder. A file whose text has not changed since the last feed is skipped, so no vectors are made again. Files of other types are left alone; a file that cannot be read is logged and the feed goes on.',
+    nodes: [
+      D(N('s', 'start', 'File', 60, 240, { payload: JSON.stringify({ name: 'returns-policy.pdf', relativePath: 'returns-policy.pdf', extension: 'pdf', size: 3201, modifiedAt: '2026-10-19T09:00:00.000Z' }, null, 2) }), 'One file from the folder listing: name, path in the folder, extension, size and time changed. The test data is the sample returns policy.'),
+      D(N('i', 'if', 'Document type', 340, 240, { left: '=lower-case({trigger.extension})', op: 'matches regex', right: '^(pdf|docx|pptx|xlsx|odt|odp|ods|html|htm|txt|md|csv)$' }), 'Only file types Read document text understands go on; anything else (pictures, zips) is skipped.'),
+      D(N('r', 'fileRead', 'Read the file', 640, 160, { folder: '{{gv.DOCS_FOLDER}}', path: '{{trigger.relativePath}}', format: 'base64 (binary)', maxMb: 25 }), 'Reads the file from the documents folder (project variable DOCS_FOLDER) as base64, because documents are binary.'),
+      D(N('d', 'docText', 'Take the text', 940, 160, { from: 'earlier step', content: '{{input.content}}', encoding: 'base64', name: '{{trigger.name}}', type: 'auto', maxMb: 25 }), 'Takes the text out of the document: PDF pages, Word paragraphs, PowerPoint slides, Excel sheets, HTML or plain text. The extension tells the type.'),
+      D(N('k', 'knowledgeAdd', 'Add to knowledge', 1240, 160, { knowledge: kbDocs!.id, source: '{{trigger.relativePath}}', text: '{{input.text}}', meta: [{ k: 'type', v: '{{trigger.extension}}' }, { k: 'title', v: '{{input.title}}' }], unchanged: 'skip' }), 'Splits the text into passages, makes their vectors and stores them under the file\'s path, with its type and title as details. Same text as before: skipped.'),
+      D(N('ok', 'return', 'Return added', 1540, 160, { source: 'value', value: '{{input}}' }), 'Gives the feed what was done: source, passages, and whether it was skipped as unchanged.'),
+      D(N('o', 'log', 'Log other file', 640, 360, { level: 'info', message: 'Not a document type, left out: {{trigger.relativePath}}' }), 'Notes files that are not documents, for the run history.'),
+      D(N('x', 'log', 'Log not added', 1240, 360, { level: 'warn', message: 'Not added: {{trigger.relativePath}}: {{input.error.message}}' }), 'A damaged, empty or protected file is logged as a warning; the feed carries on with the next file.'),
+      D(N('no', 'return', 'Return left out', 1540, 360, { source: 'value', value: '{{trigger}}' }), 'Returns the file as it came, so the feed counts it as left out.'),
+    ],
+    edges: [E('s', 'i'), E('i', 'r', 'true'), E('i', 'o', 'false'), E('r', 'd'), E('d', 'k'), E('k', 'ok'), E('r', 'x', 'error'), E('d', 'x', 'error'), E('k', 'x', 'error'), E('o', 'no'), E('x', 'no')],
+  });
+  const docFeed = docOne && save({
+    name: 'Sample: Document feed from a folder',
+    description: 'Every 15 minutes, lists the documents folder (project variable DOCS_FOLDER, with sub-folders) and calls "Sample: Add one document to knowledge" for each file, so new and changed files reach the knowledge base; then removes from it the files that were deleted from the folder. Test it once to fill the knowledge base; deploy it (and the called Sutra) to keep it up to date.',
+    nodes: [
+      D(N('t', 'timer', 'Every 15 minutes', 60, 240, { mode: 'cron', cron: '0 */15 * * * *', every: 900, timezone: 'Asia/Kolkata', payload: '{}' }), 'Starts the feed every 15 minutes while deployed. Choose a longer time for large folders; Test runs it at once.'),
+      D(N('l', 'fileList', 'List documents', 340, 240, { location: '{{gv.DOCS_FOLDER}}', pattern: '*', recursive: true, sort: 'name', max: 2000, format: 'do not read' }), 'Lists every file in the documents folder and its sub-folders, without reading them: name, path in the folder, extension, size, time changed.'),
+      D(N('f', 'forEach', 'Each file', 640, 240, { list: '{{input.files}}', max: 2000 }), 'Sends every file of the listing down the item branch, then the whole list down the done branch.'),
+      D(N('c', 'callProcess', 'Add the document', 940, 140, { process: docOne.id, use: 'deployed (draft while testing)', wait: true, source: 'value', input: '{{input}}', resultSchema: '' }), 'Calls "Add one document to knowledge" with the file, and waits for it. Keeping the work for one file in its own Sutra lets every step there refer to the file as {trigger}.'),
+      D(N('k', 'knowledgeRemove', 'Remove deleted files', 940, 340, { knowledge: kbDocs!.id, action: 'keep only these sources', keep: '{{input.items}}', under: '' }), 'Keeps only the sources that are still files in the folder: documents deleted from the folder leave the knowledge base too.'),
+      D(N('g', 'log', 'Log the feed', 1240, 340, { level: 'info', message: "=concat(count({nodes.List documents.files}), ' files checked; ', {input.removed}, ' deleted files removed from the knowledge base')" }), 'Writes a summary line to the run history and the project log.'),
+      D(N('e', 'log', 'Folder is empty', 640, 440, { level: 'warn', message: 'No files in {{gv.DOCS_FOLDER}}' }), 'Warns when the folder is empty or missing, for example when DOCS_FOLDER points to the wrong place on this server.'),
+    ],
+    edges: [E('t', 'l'), E('l', 'f'), E('f', 'c', 'item'), E('f', 'k', 'done'), E('k', 'g'), E('l', 'e', 'empty')],
+  });
+  const docApi = docOne && save({
+    name: 'Sample: Document questions API',
+    description: `A REST API over the documents: POST ${gw}/samples/docs/ask with {"question": "..."} answers from the knowledge base with the documents it used, or 404 when the documents do not say. Run the document feed first.`,
+    nodes: [
+      D(N('t', 'restService', 'Ask API', 60, 240, { method: 'POST', path: '/samples/docs/ask', policy: '', maxBodyKb: 16, bodySchema: '', testRequest: JSON.stringify({ method: 'POST', params: {}, query: {}, headers: {}, body: { question: 'How many days do I have to return an item?' } }, null, 2) }), 'Receives the question as JSON. Give it an API security policy before exposing it outside your network.'),
+      D(N('a', 'knowledgeAsk', 'Answer from documents', 360, 240, { provider: aiDocs!.id, knowledge: kbDocs!.id, question: '{{input.body.question}}', top: 4, instructions: 'Answer in two or three sentences, only from the passages, in the language of the question. Name the document you used.', effort: 'low' }), 'Searches the knowledge base for the four closest passages and lets the AI answer only from them, with their sources. Goes to "not found" when nothing matches.'),
+      D(N('ok', 'httpResponse', 'Reply 200', 680, 160, { status: '200', contentType: 'application/json', bodySource: 'template', body: '{"answer": {{input.answer | json}}, "sources": {{input.sources | json}}}', headers: [] }), 'Sends the answer and the documents it came from.'),
+      D(N('nf', 'httpResponse', 'Reply 404', 680, 320, { status: '404', contentType: 'application/json', bodySource: 'template', body: '{"answer": "The documents do not say.", "sources": []}', headers: [] }), 'The documents hold nothing about the question: says so instead of guessing.'),
+      D(N('er', 'httpResponse', 'Reply 502', 680, 460, { status: '502', contentType: 'application/json', bodySource: 'template', body: '{"error": {{input.error.message | json}}}', headers: [] }), 'The AI model could not be reached (is Ollama running, with a model chosen in the Local Ollama connection?).'),
+    ],
+    edges: [E('t', 'a'), E('a', 'ok'), E('a', 'nf', 'not found'), E('a', 'er', 'error')],
+  });
+  const docTool = docOne && save({
+    name: 'Sample: AI tool search documents',
+    description: `An AI tool: while deployed, AI assistants such as Claude Desktop call search_documents over MCP at ${gw}/mcp and get the passages of the documents closest to their question, with sources; agents of this project can use it too. No AI model is needed on this server: the assistant writes the answer.`,
+    nodes: [
+      D(N('t', 'mcpTool', 'search_documents', 60, 240, { toolName: 'search_documents', title: 'Search documents', description: 'Searches the Asha Traders policy and product documents (returns, shipping, catalogue, FAQ) and returns the passages closest to the question, with the document each comes from.', inputs: [{ k: 'question', v: 'What to look for, in plain words' }], forAgents: true, changesData: false, testArguments: JSON.stringify({ question: 'Which tea is best for milk tea?' }, null, 2) }), 'Makes this Sutra the MCP tool search_documents with one input, question.'),
+      D(N('k', 'knowledgeSearch', 'Search documents', 360, 240, { knowledge: kbDocs!.id, question: '{{input.arguments.question}}', top: 5 }), 'Finds the five passages closest to the question by meaning and shared words.'),
+      D(N('r', 'mcpReply', 'Reply with passages', 680, 160, { source: 'value', result: '{{input.hits}}', isError: false }), 'Returns the passages with their sources and scores to the AI assistant.'),
+      D(N('n', 'mcpReply', 'Reply nothing found', 680, 320, { source: 'value', result: 'Nothing in the documents matches that question.', isError: false }), 'Tells the assistant plainly that the documents hold nothing about it.'),
+    ],
+    edges: [E('t', 'k'), E('k', 'r'), E('k', 'n', 'empty')],
+  });
+  const docAgent = docOne && save({
+    name: 'Sample: Document assistant',
+    description: `Published as the agent "docs-assistant": chat at ${gw}/chat/docs-assistant, OpenAI-compatible model docs-assistant at ${gw}/v1/chat/completions, and the MCP tool ask_docs_assistant at ${gw}/mcp. The agent searches the documents itself (search_knowledge), remembers each conversation, and answers with the document names.`,
+    nodes: [
+      D(N('t', 'agentChannel', 'Document assistant', 60, 240, { agentName: 'docs-assistant', title: 'Document assistant', description: 'Answers questions about Asha Traders returns, shipping, products and payments from the shop documents, with sources.', chat: true, openai: true, mcp: true, mcpServer: '', a2a: false, waitSeconds: 50, testMessage: JSON.stringify({ message: 'How long does delivery to Mumbai take, and is shipping free?', sessionId: 'test-1' }, null, 2) }), 'Publishes the agent as a chat page, an OpenAI-compatible model and an MCP tool, all at the gateway.'),
+      D(N('a', 'aiAgent', 'Document agent', 380, 240, { provider: aiDocs!.id, instructions: 'You answer questions about Asha Traders (a tea and crockery shop in Pune) from its documents. Always search the knowledge base first; answer in two to four sentences from what you find, and name the documents you used. If the documents do not say, say so; never guess prices, times or rules.', task: '{{input.message}}', memory: memStore ? memStore.id : '', session: '{{trigger.sessionId}}', tools: 'none', knowledge: kbDocs!.id, autoKnowledge: 3, canAsk: false, answerFormat: 'text', maxSteps: 5, maxTokens: 30000, maxSeconds: 300, saveSteps: true, effort: 'low' }), 'The agent: gets the three closest passages before it starts, may search again with search_knowledge, and remembers the conversation by session.'),
+      D(N('r', 'agentReply', 'Reply', 700, 160, { answer: '{{input.answer}}', status: 'answer', sessionId: '{{trigger.sessionId}}' }), 'Sends the answer back on the channel the question came from.'),
+      D(N('l', 'agentReply', 'Reply limit', 700, 340, { answer: 'I could not finish that. Please ask the order desk.', status: 'needs a person', sessionId: '{{trigger.sessionId}}' }), 'The agent used up its steps or time: a polite answer instead of silence.'),
+    ],
+    edges: [E('t', 'a'), E('a', 'r', 'done'), E('a', 'l', 'limit reached'), E('a', 'l', 'needs a person')],
+  });
+
   linkConnections(projectId, made, conn);
   for (const m of made) setFlowFolder(m.id, folderOf(m.sample));
   // Connections made for the samples go to a Samples folder of Resources.
@@ -925,7 +1011,7 @@ export function addSamples(projectId: string, ids?: string[]) {
 
   return [forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, release, localAi, email, queue, timer, fileTrig, textFormats, dbUpd, dbProc, soapCall, emailIn, firebase, google, apps, aiMore,
     soapPublic, soapMock, soapMockCall, msCustomers, msStock, msOrders, sqlInstall, sqlService, ...sftp, ...ftp,
-    toolOrder, toolStock, desk, ragWeb, ragSp, ragAsk, queueAgent, team, mcpAgent]
+    toolOrder, toolStock, desk, ragWeb, ragSp, ragAsk, queueAgent, team, mcpAgent, docOne, docFeed, docApi, docTool, docAgent]
     .filter((f): f is NonNullable<typeof f> & { id: string; name: string } => !!f)
     .map(f => ({ id: f.id, name: f.name, folder: folderOf(made.find(m => m.id === f.id)?.sample || '') }));
 }
@@ -944,7 +1030,7 @@ const FOLDERS: Record<string, string[]> = {
   'Apps': ['firebase', 'google', 'apps', 'skills'],
   'Queues': ['queue'],
   'Operations': ['scripts', 'release'],
-  'AI agents': ['agentdesk', 'agentrag', 'agentqueue', 'agentteam', 'agentmcp'],
+  'AI agents': ['agentdesk', 'agentrag', 'agentqueue', 'agentteam', 'agentmcp', 'agentdocs'],
 };
 const folderOf = (sample: string) => { const t = Object.entries(FOLDERS).find(([, ids]) => ids.includes(sample)); return t ? `Samples/${t[0]}` : 'Samples'; };
 for (const s of SAMPLES) s.folder = folderOf(s.id);
@@ -963,7 +1049,7 @@ export const SAMPLE_SUTRAS: Record<string, string[]> = {
   'Samples/Queues': ['Queue in and out'],
   'Samples/SOAP': ['Call a SOAP service', 'Call a public SOAP service', 'Mock SOAP weather service', 'Call the mock SOAP service'],
   'Samples/SFTP and FTP': ['SFTP upload list read archive', 'SFTP file trigger', 'FTP upload list read archive', 'FTP file trigger'],
-  'Samples/AI agents': ['AI tool order status', 'AI tool stock check', 'Order desk agent', 'Knowledge feed from web pages', 'Knowledge feed from SharePoint', 'Policy assistant', 'Agent fed by a queue', 'Supervisor agent', 'Agent with outside MCP tools'],
+  'Samples/AI agents': ['AI tool order status', 'AI tool stock check', 'Order desk agent', 'Knowledge feed from web pages', 'Knowledge feed from SharePoint', 'Policy assistant', 'Agent fed by a queue', 'Supervisor agent', 'Agent with outside MCP tools', 'Add one document to knowledge', 'Document feed from a folder', 'Document questions API', 'AI tool search documents', 'Document assistant'],
 };
 /** Letters and digits only, without "Sample:" and a " 2" suffix, so renamed punctuation still matches. */
 const sampleKey = (name: string) => name.replace(/^Sample:\s*/i, '').replace(/\s+\d+$/, '').toLowerCase().replace(/[^a-z0-9]/g, '');

@@ -57,7 +57,8 @@ const cli = (...args: string[]) => new Promise<{ status: number | null; out: str
 test('a release zip holds the package, a deployment config to fill in and a README', () => {
   const p = buildPackage(pid, { version: '1.2.0', note: 'Status service' });
   const z = unzip(buildBundle(p));
-  assert.deepEqual([...z.keys()], ['package.sutra', 'deployment-config.json', 'README.txt']);
+  assert.deepEqual([...z.keys()], ['package.sutra', 'deployment-config.json', 'README.txt', 'documentation.html', 'documentation.md']);
+  assert.match(z.get('documentation.md')!.toString(), /## Status[\s\S]*REST service: GET \/status/);
   const cfg = JSON.parse(z.get('deployment-config.json')!.toString());
   assert.equal(cfg.project, 'Orders');
   assert.deepEqual(cfg.secrets, ['ORDERS_DB']);
@@ -189,4 +190,16 @@ test('a production server refuses deploys from the designer; packages still depl
     const d = await call('POST', '/api/packages/deploy', { package: p, project: 'Orders', keepOthers: true });
     assert.equal(d.statusCode, 200, d.body);
   } finally { config.environment = 'development'; }
+});
+
+test('a release zip\'s files/ reach the project files folder when deployed with sutra deploy', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-relf-'));
+  const zip = path.join(dir, 'with-files.zip');
+  const p = buildPackage(pid, { version: '4.0.0' });
+  fs.writeFileSync(zip, buildBundle(p, undefined, [['files/templates/letter.txt', Buffer.from('Dear customer')], ['files/../escape.txt', Buffer.from('no')]]));
+  const r = await cli('deploy', zip, '--project', 'Orders files', '--keep-others', '--server', ADMIN);
+  assert.equal(r.status, 0, r.err + r.out);
+  assert.match(r.out, /files {4}1 written to the project's files folder/);
+  assert.equal(fs.readFileSync(path.join(projects.projectFilesDir('Orders files'), 'templates', 'letter.txt'), 'utf8'), 'Dear customer');
+  assert.ok(!fs.existsSync(path.join(projects.projectFilesDir('Orders files'), '..', 'escape.txt')), 'paths never leave the folder');
 });
