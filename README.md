@@ -179,7 +179,11 @@ test/                   the test suites
 
 The process-level tests exercise the central durability claims directly: engines share work without duplicating completed steps, elect and replace a leader, recover work from an engine killed mid-step, hand work back during drain, persist approvals and long waits without holding a worker, and deploy and call packages through both local and remote CLI paths.
 
-Optional tests use a real PostgreSQL server for database migration and cluster behavior (`SUTRA_TEST_PG_URL`), PostgreSQL tools for password- and SSL-protected migration (`SUTRA_TEST_PG_BIN`), and a real MySQL server (`SUTRA_TEST_MYSQL_URL`). The pgvector storage path is covered with a protocol-compatible test server; run an additional deployment test against the intended PostgreSQL/pgvector version before relying on it in production.
+Optional tests use a real PostgreSQL server for DB Ops steps (queries, bound parameters, transactions, plpgsql install scripts, procedures with output parameters), database migration and cluster behavior (`SUTRA_TEST_PG_URL`), PostgreSQL tools for password- and SSL-protected migration (`SUTRA_TEST_PG_BIN`), and a real MySQL server for DB Ops steps and install scripts (`SUTRA_TEST_MYSQL_URL`). With Laragon's MySQL and PostgreSQL:
+
+```bash
+SUTRA_TEST_PG_URL=postgres://postgres@127.0.0.1:5432/postgres SUTRA_TEST_MYSQL_URL=mysql://root@127.0.0.1:3306/sutraflow_test SUTRA_TEST_PG_BIN=C:/laragon/bin/postgresql/postgresql/bin npm test
+``` The pgvector storage path is covered with a protocol-compatible test server; run an additional deployment test against the intended PostgreSQL/pgvector version before relying on it in production.
 
 Tested against stand-in services that answer like the real ones, but not yet against the real services: SQL Server, Oracle, Kafka, RabbitMQ, IMAP, Let's Encrypt, Qdrant, Chroma, Pinecone, and the Google, Microsoft, Dropbox, YouTube, Twitch, Discord, Telegram, Facebook, Azure Data Factory and Databricks APIs.
 
