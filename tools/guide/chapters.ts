@@ -764,6 +764,90 @@ sudo -u postgres psql -d sutraflow -c "CREATE EXTENSION IF NOT EXISTS vector;"</
 </ol>`,
   },
   {
+    id: 'data-platforms', title: 'Azure Data Factory and Databricks',
+    html: `
+<p>The <strong>Azure Data Factory &amp; Databricks</strong> palette runs and watches data work on those platforms from a Sutra: start a pipeline, notebook or job when something happens (a file arrived, an order batch closed, a person approved), wait for it, and act on the outcome.</p>
+<p class="h">Connections and sign-in</p>
+<table class="t"><thead><tr><th>Sign in with</th><th>When</th><th>Set up</th></tr></thead><tbody>
+<tr><td>Service principal (client secret)</td><td>Servers anywhere: the usual choice for production</td><td>Entra ID &gt; App registrations &gt; New; a client secret; give the app the <em>Data Factory Contributor</em> role on the factory (Access control), or add it to the Databricks workspace as a service principal. Put the secret in the vault and name it on the connection.</td></tr>
+<tr><td>Managed identity</td><td>SutraFlow running on an Azure VM, App Service or container</td><td>Turn the identity on for that resource and give it the same role. No secret at all.</td></tr>
+<tr><td>Azure CLI (az login)</td><td>Development machines</td><td>Run <code>az login</code> as the account SutraFlow runs under.</td></tr>
+<tr><td>Personal access token (Databricks)</td><td>Trying things out</td><td>User Settings &gt; Developer &gt; Access tokens; keep it as a secret.</td></tr>
+<tr><td>Databricks OAuth (service principal)</td><td>Databricks on AWS or Google Cloud, or without Entra ID</td><td>A service principal in the account console with an OAuth secret.</td></tr>
+</tbody></table>
+<p><strong>Test connection</strong> signs in and reads the factory and its pipelines, or the workspace user, the default cluster and the default SQL warehouse, so a wrong secret, role or address shows before any run. Azure China and US Government clouds are a setting.</p>
+<p class="h">Steps</p>
+<ul>
+<li>[[adfRun]] runs a pipeline with parameters and waits: <em>out</em> on success, <em>failed</em> with the failing activities. It can rerun an earlier run from the failed activity.</li>
+<li>[[adfMonitor]] gets, waits for or cancels a run, lists activity runs, recent runs and pipelines, and starts or stops factory triggers.</li>
+<li>[[adfRunTrigger]] starts a Sutra when any pipeline run ends: alerts, approvals before a rerun, follow-on work.</li>
+<li>[[databricksRun]] runs a job or a notebook (cluster, serverless or a new job cluster) and returns the notebook's exit value.</li>
+<li>[[databricksCommand]] runs one Python, SQL, Scala or R block on a cluster, starting it when stopped.</li>
+<li>[[databricksSql]] runs SQL on a SQL warehouse with named parameters.</li>
+</ul>
+<p>Long work is polled with the step's own wait limit; when the limit runs out the run is cancelled (if ticked) and the step says where to look. The designer and Deploy warn when a connection, pipeline name, notebook path or SQL is missing.</p>
+<p class="h">Templates</p>
+<p>New Sutra &rarr; Samples &rarr; <em>Azure Data Factory: run, monitor, rerun</em> and <em>Databricks: notebooks, SQL and code blocks</em> add four Sutras in Samples/Azure and Databricks, with placeholder connections to fill in.</p>
+[[tip:Good practice|Give each environment its own service principal with only the roles it needs; production uses a managed identity where it can.<br>Keep pipeline and notebook logic in the platform; let the Sutra decide when to run and what to do with the outcome.<br>Connect the failed output: a quiet failure is the costly one.]]`,
+  },
+  {
+    id: 'python', title: 'Python scripts',
+    html: `
+<p>[[python]] runs Python 3 on the SutraFlow server: code written in the step, or a .py file. It is in the Scripts palette, so an administrator first allows scripts in <strong>Server &amp; APIs</strong>, which also shows which Python is used and lets you choose another (<code>sutra python</code> does the same from a shell).</p>
+<p class="h">Install Python</p>
+<ul>
+<li><strong>Windows</strong>: python.org, and tick <em>Add python.exe to PATH</em>; SutraFlow also finds the <code>py</code> launcher.</li>
+<li><strong>Linux</strong>: <code>sudo apt install python3 python3-venv</code> (Debian, Ubuntu) or <code>sudo dnf install python3</code>.</li>
+<li><strong>Containers</strong>: add Python to the image, or set <code>SUTRA_PYTHON</code> to its path.</li>
+<li>Packages: one virtual environment per project is tidy: <code>python -m venv D:/venvs/sales</code>, then <code>D:/venvs/sales/Scripts/python -m pip install pandas</code>, and give that folder as the step's <em>Virtual environment folder</em>.</li>
+</ul>
+<p class="h">What a script gets and gives</p>
+<pre>import json, os, sys
+params = json.load(open(os.environ["SUTRA_PARAMS_FILE"]))     # the step's Parameters
+previous = json.load(open(os.environ["SUTRA_INPUT_FILE"]))    # the previous step's output
+args = sys.argv[1:]                                           # the step's Arguments
+print(json.dumps({"total": 42}))                              # the last line, as JSON, becomes result</pre>
+<p>Parameters are also environment variables of the same names. Text is UTF-8 both ways. A non-zero exit code or an uncaught exception fails the step with the last lines of the traceback; untick <em>Fail when the exit code is not 0</em> to branch on <code>exitCode</code> yourself.</p>
+<p class="h">Fewer surprises in production</p>
+<p>Before anything runs, the designer and Deploy warn when Python is missing on this server, the code has a syntax error (with the line), the script file or virtual environment is missing, or a package in <em>Packages it imports</em> is not installed (with the pip command). Deploying to a server checks that server.</p>
+<p class="h">Templates</p>
+<p><em>Python scripts</em> in New Sutra &rarr; Samples adds an inline script with parameters and a script file (<code>sales_report.py</code>, in the project's files folder, found through the project variable <code>SCRIPTS_FOLDER</code>).</p>`,
+  },
+  {
+    id: 'social', title: 'YouTube, Twitch and social media',
+    html: `
+<p>The Apps and social palette works with YouTube ([[youtube]]), Twitch ([[twitch]], [[twitchLiveTrigger]]), Facebook Pages ([[facebookPage]]), Google Drive and Sheets, Dropbox, and any other service with OAuth through [[oauthRequest]].</p>
+<p class="h">Accounts: OAuth, not passwords</p>
+<p>These services do not accept a user name and password from other programs; an account is connected once with OAuth, and SutraFlow keeps its tokens encrypted and refreshes them. For each service:</p>
+<ol>
+<li>Register an app with the service: Google Cloud console (APIs: YouTube Data API v3, YouTube Analytics API, Drive, Sheets; an OAuth client of type Web application), or dev.twitch.tv &gt; Your Console &gt; Applications.</li>
+<li>Give the app the redirect address shown on the connection (<code>http(s)://your-server:port/api/oauth/callback</code>).</li>
+<li>Add an <strong>OAuth connection</strong>: the service, the client id, the client secret (as a vault secret), and the scopes.</li>
+<li>Sign in: <strong>Connect account</strong> in the studio. <strong>Test connection</strong> then names the account, YouTube channel or Twitch user.</li>
+</ol>
+<p class="h">Videos from Google Drive to YouTube</p>
+<p>YouTube uploads a file on the server. For videos kept in Google Drive, put [[googleDrive]] first with <em>download</em> and <em>Save to: server file</em> (streamed, so large videos are fine), then [[youtube]] <em>upload video</em> with <code>{{input.path}}</code>. The sample <em>Publish Drive videos to YouTube</em> does it for every new video in a Drive folder and removes the server copy afterwards. Upload as private, check, then publish with <em>update video</em> or <em>Publish at</em>.</p>
+<p class="h">Templates</p>
+<p><em>YouTube: publish from Google Drive, weekly analytics</em> and <em>Twitch: going live</em> in New Sutra &rarr; Samples (folder Samples/Social media).</p>`,
+  },
+  {
+    id: 'prod-connections', title: 'Connections on production servers',
+    html: `
+<p>A project deployed to another server brings its connections, but never their passwords, keys or tokens. Each server signs in on its own, so test and production can use different accounts, and a package can go to production without anyone copying a secret.</p>
+<table class="t"><thead><tr><th>Credential</th><th>How production gets it</th></tr></thead><tbody>
+<tr><td>Passwords, keys, client secrets, access tokens</td><td>Fields of type secret hold only a <em>name</em>. The package lists the names (README, Releases check); put the values in the production vault with <code>sutra secret set NAME --from-env NAME</code> from the pipeline's secret store, or Resources &gt; Secrets. A missing secret stops the deploy before anything changes.</td></tr>
+<tr><td>Other settings (hosts, factory, workspace, folders)</td><td>The deployment config of that environment; any value may read <code>\${env:NAME}</code>.</td></tr>
+<tr><td>Azure identities</td><td>Best: a managed identity on the production server (no secret). Else a service principal per environment, its secret in that server's vault.</td></tr>
+<tr><td>OAuth accounts (Google, YouTube, Twitch, Dropbox, Facebook, Microsoft)</td><td>One of: <strong>sutra connect</strong> (below); a <strong>refresh token secret</strong> on the connection; or Connect account in that server's studio. Tokens are encrypted with that server's master key and never leave it.</td></tr>
+</tbody></table>
+<p class="h">sutra connect</p>
+<pre>sutra connect "Sample Google (Drive and YouTube)" --project Media --server https://prod-engine:4800 --token $TOKEN</pre>
+<p>It prints the sign-in address for that server; open it in a browser, sign in to the account, and the command reports when the server has its tokens. The OAuth app must list that server's redirect address (shown by the command). Headless engines accept it too.</p>
+<p class="h">A refresh token secret</p>
+<p>When no person may sign in on production, give the OAuth connection a <em>Refresh token (secret)</em>: a refresh token of the account, kept as a secret on that server and set by the pipeline. The server signs in with it on first use. Get the refresh token once with the provider's tools (for Google, the OAuth Playground with your own client), store it in your secret manager, and rotate it like any other secret.</p>
+[[tip:Good practice|Separate accounts per environment: a test YouTube channel, a test factory, a test workspace.<br>Least rights: only the scopes and roles the Sutras use.<br>Test connection after every deploy, from the Admin Console or the Releases check.]]`,
+  },
+  {
     id: 'secrets', title: 'Secrets and studio security',
     html: `
 <ul>

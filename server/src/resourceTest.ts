@@ -9,7 +9,8 @@ import { testBroker } from './connectors/bus.js';
 import { testMail } from './connectors/email.js';
 import { testRemote } from './connectors/remote.js';
 import { testFirebase } from './connectors/firebase.js';
-import { connectionStatus } from './connectors/oauth.js';
+import { connectionStatus, accessToken, apiCall } from './connectors/oauth.js';
+import { testAzure } from './connectors/azure.js';
 
 /**
  * "Test connection" in the resource editor: tries the settings as they are on screen (saved or not),
@@ -95,8 +96,22 @@ async function run(r: Resource, secret: (n: string, w?: string) => string): Prom
       return testBroker(r, secret);
     case 'firebase':
       return testFirebase(r, secret);
+    case 'azureDataFactory':
+    case 'databricks':
+      return testAzure(r, secret);
     case 'oauthApp': {
       if (!r.id || r.id.startsWith('test-')) throw new Error('Save the connection, then use Connect account to sign in');
+      if (r.config.refreshTokenSecret) secret(r.config.refreshTokenSecret, 'Refresh token');
+      // A saved connection signs in now (with a refresh token secret too), so the test proves the account works.
+      await accessToken(r.id);
+      if (r.config.provider === 'twitch') {
+        const me = (await apiCall(r.id, { method: 'GET', url: 'https://api.twitch.tv/helix/users' })).body?.data?.[0];
+        return `Signed in to Twitch as ${me?.display_name || me?.login || 'the account'}`;
+      }
+      if (r.config.provider === 'google' && /youtube/.test(String(r.config.scopes || ''))) {
+        const ch = (await apiCall(r.id, { method: 'GET', url: 'https://www.googleapis.com/youtube/v3/channels', query: { part: 'snippet', mine: 'true' } }).catch(() => null))?.body?.items?.[0];
+        if (ch) return `Account connected; YouTube channel ${ch.snippet?.title}`;
+      }
       const st = connectionStatus(r.id);
       if (!st.connected) throw new Error('No account connected yet: use Connect account below');
       return `Account connected${st.expiresAt ? `; token valid until ${new Date(st.expiresAt).toLocaleString()}` : ''}${st.canRefresh ? ', refreshed automatically' : ''}`;

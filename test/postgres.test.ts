@@ -11,7 +11,7 @@ import { root, startServer, waitFor } from './proc.js';
  * several processes on one database (headless, cluster, the command-line cases) need a real server:
  * set SUTRA_TEST_PG_URL=postgres://user:pass@host/db to run the cluster check below as well.
  */
-const SUITES = ['access', 'agent', 'agentchannel', 'alerts', 'admin', 'connectors', 'console', 'docsample', 'engine', 'expr', 'features', 'folders', 'gateway', 'gatewayapps', 'git', 'logs', 'mcp', 'observability', 'packages', 'palettes', 'process', 'project', 'rag', 'regression', 'release', 'releases', 'remote', 'scripts', 'sutras', 'template', 'tuning'];
+const SUITES = ['access', 'agent', 'agentchannel', 'alerts', 'azure', 'admin', 'connectors', 'console', 'docsample', 'engine', 'expr', 'features', 'folders', 'gateway', 'gatewayapps', 'git', 'logs', 'mcp', 'observability', 'packages', 'palettes', 'process', 'project', 'pyyoutube', 'rag', 'regression', 'release', 'releases', 'remote', 'scripts', 'sutras', 'template', 'tuning'];
 
 /** The child is a test run of its own: drop the variable that makes node --test report to a parent run. */
 function childEnv(extra: Record<string, string>) {

@@ -9,7 +9,7 @@ import fastifyStatic from '@fastify/static';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { q } from './db.js';
+import { q, getSetting, setSetting } from './db.js';
 import { engine } from './engine/engine.js';
 import * as flows from './flows.js';
 import { PALETTES } from './palettes/index.js';
@@ -139,7 +139,7 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   // Headless engines: what the Admin Console and automation need (packages, deployed Sutras, runs,
   // approvals, secrets, engines, access, audit); no designer API.
   const ENGINE_API = [/^\/api\/packages\//, /^\/api\/projects\/?$/, /^\/api\/projects\/[^/]+\/(packages|rollback)$/, /^\/api\/engine\//, /^\/api\/runs/, /^\/api\/secrets/, /^\/api\/meta$/,
-    /^\/api\/access\//, /^\/api\/audit/, /^\/api\/auth\//, /^\/api\/console\//, /^\/api\/gateway\//, /^\/api\/alerts/, /^\/api\/approvals/, /^\/api\/flows\/[^/]+\/(versions|deploy)$/];
+    /^\/api\/access\//, /^\/api\/audit/, /^\/api\/auth\//, /^\/api\/console\//, /^\/api\/gateway\//, /^\/api\/alerts/, /^\/api\/approvals/, /^\/api\/flows\/[^/]+\/(versions|deploy)$/, /^\/api\/oauth\//, /^\/api\/scripts\/python$/, /^\/api\/resources(\?|$)/];
   const sameToken = (a: string, b: string) => !!a && !!b && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
   /** The caller: the admin token (everything), a system account token, or a signed-in person. */
   const identify = (req: FastifyRequest): Caller | null => {
@@ -513,6 +513,15 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     return { allowed: projects.releasesAllowed() };
   });
   app.get('/api/scripts/policy', async () => ({ allowed: projects.scriptsAllowed() }));
+  /** Which Python runs Python steps here, and the path an administrator set. */
+  app.get('/api/scripts/python', async () => { const { findPython, forgetPython } = await import('./python.js'); forgetPython(); return { ...findPython(), configured: getSetting<string>('pythonPath', ''), fromEnv: process.env.SUTRA_PYTHON || '' }; });
+  app.put('/api/scripts/python', async (req: any) => {
+    const { findPython, forgetPython } = await import('./python.js');
+    const p = String(req.body?.path ?? '').trim();
+    if (p) { const t = findPython({ interpreter: p }); if (!t.ok) throw bad(t.message); }
+    setSetting('pythonPath', p); forgetPython();
+    return { ...findPython(), configured: p, fromEnv: process.env.SUTRA_PYTHON || '' };
+  });
   app.put('/api/scripts/policy', async (req: any) => {
     projects.setScriptsAllowed(!!req.body?.allowed);
     return { allowed: projects.scriptsAllowed() };

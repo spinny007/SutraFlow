@@ -1,7 +1,11 @@
 import type { Activity, ExecCtx } from '../engine/types.js';
 import { kvToObject } from '../resources.js';
 import { registerListener } from '../listeners.js';
-import { apiCall } from './oauth.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { apiCall, streamCall } from './oauth.js';
 import { F, when, isObj, writeFields, writeMode, appended } from '../palettes/common.js';
 
 /** Activities for Google Sheets, Google Drive / Docs, Dropbox, YouTube, Facebook Pages, and any REST API of a connected account. */
@@ -90,6 +94,8 @@ export const saasActivities: Activity[] = [
       F('folderId', 'Folder id', 'text', '', { tpl: true, ...when('op', 'list', 'upload') }),
       F('q', 'Search (Drive query)', 'text', "trashed = false", { tpl: true, ...when('op', 'list'), help: "e.g. mimeType = 'application/vnd.google-apps.document'" }),
       F('fileId', 'File id', 'text', '{{input.id}}', { tpl: true, ...when('op', 'download', 'export') }),
+      F('saveTo', 'Save to', 'select', 'step output', { options: ['step output', 'server file'], ...when('op', 'download', 'export'), help: 'server file: streamed to disk, for videos and other large files (then YouTube, SFTP or Read document text can take the file).' }),
+      F('savePath', 'Server file', 'text', "=concat({gv.DOWNLOADS}, '/', {input.name})", { tpl: true, ...when('saveTo', 'server file'), help: 'Full path of the file to write; its folder is made when missing.' }),
       F('exportAs', 'Export as', 'select', 'text/plain', { options: ['text/plain', 'text/html', 'application/pdf', 'text/csv', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'], ...when('op', 'export') }),
       F('name', 'File name', 'text', 'report.csv', { tpl: true, ...when('op', 'upload') }),
       F('content', 'Content', 'textarea', '{{input.text}}', { tpl: true, ...when('op', 'upload') }),
@@ -110,6 +116,16 @@ export const saasActivities: Activity[] = [
         const id = encodeURIComponent(String(c.v('fileId')));
         const url = op === 'export' ? `${DRIVE}/files/${id}/export` : `${DRIVE}/files/${id}`;
         const textual = op === 'export' && /^text\//.test(c.raw('exportAs'));
+        if (c.raw('saveTo') === 'server file') {
+          const target = String(c.v('savePath') || '').trim();
+          if (!target) throw new Error('Server file is not set');
+          const meta = (await call(c, { method: 'GET', url: `${DRIVE}/files/${id}`, query: { fields: 'id,name,mimeType,size,modifiedTime' } })).body;
+          fs.mkdirSync(path.dirname(target), { recursive: true });
+          const q = new URLSearchParams(op === 'export' ? { mimeType: c.raw('exportAs') } : { alt: 'media' });
+          const res = await streamCall(c.raw('connection'), `${url}?${q}`, { method: 'GET', signal: c.signal });
+          await pipeline(Readable.fromWeb(res.body as any), fs.createWriteStream(target));
+          return { out: { fileId: c.v('fileId'), name: meta.name, mimeType: meta.mimeType, path: target, size: fs.statSync(target).size, modifiedTime: meta.modifiedTime } };
+        }
         const r = await call(c, { method: 'GET', url, query: op === 'export' ? { mimeType: c.raw('exportAs') } : { alt: 'media' }, parse: 'buffer' });
         return { out: { fileId: c.v('fileId'), content: textual ? r.buffer!.toString('utf8') : r.buffer!.toString('base64'), encoding: textual ? 'text' : 'base64', size: r.buffer!.length } };
       }
@@ -198,25 +214,123 @@ export const saasActivities: Activity[] = [
     },
   },
   {
-    type: 'youtube', palette: 'apps', name: 'YouTube', glyph: '▶', ports: ['out'],
-    desc: 'Lists your channel\'s latest videos, searches videos, or gets video statistics.',
+    type: 'youtube', palette: 'apps', name: 'YouTube', glyph: '▶', ports: ['out'], timeoutMs: 6 * 3600000,
+    desc: 'Your channel on YouTube: its videos, playlists, comments and statistics, search, Analytics reports (views, watch time, subscribers by day, video or country), uploading a video from a file on the server, changing a video\'s title, description, tags and privacy, and setting its thumbnail. To publish videos kept in Google Drive, save them to a server file with Google Drive / Docs first.',
     fields: [
-      conn('Scope https://www.googleapis.com/auth/youtube.readonly'),
-      F('op', 'Operation', 'select', 'my videos', { options: ['my videos', 'search', 'video stats'] }),
+      conn('Scopes: .../auth/youtube.readonly to read, .../auth/youtube.upload to upload, .../auth/youtube.force-ssl to change videos and read comments, .../auth/yt-analytics.readonly for Analytics.'),
+      F('op', 'Operation', 'select', 'my videos', { options: ['my videos', 'search', 'video stats', 'channel stats', 'playlists', 'playlist videos', 'comments', 'analytics report', 'upload video', 'update video', 'set thumbnail'] }),
       F('q', 'Search', 'text', '', { tpl: true, ...when('op', 'search') }),
-      F('videoIds', 'Video ids (comma separated)', 'text', '', { tpl: true, ...when('op', 'video stats') }),
-      F('max', 'Maximum results', 'number', 25),
+      F('videoIds', 'Video ids (comma separated)', 'text', '{{input.videoId}}', { tpl: true, ...when('op', 'video stats', 'comments', 'update video', 'set thumbnail') }),
+      F('playlistId', 'Playlist id', 'text', '', { tpl: true, ...when('op', 'playlist videos'), help: 'From the playlist address: list=...' }),
+      F('startDate', 'From', 'text', "=format-date('YYYY-MM-DD', add-to-date(current-date(), 0, 0, -28))", { tpl: true, ...when('op', 'analytics report') }),
+      F('endDate', 'To', 'text', '=current-date()', { tpl: true, ...when('op', 'analytics report') }),
+      F('metrics', 'Metrics', 'text', 'views,estimatedMinutesWatched,averageViewDuration,likes,subscribersGained', { ...when('op', 'analytics report'), help: 'Comma separated YouTube Analytics metrics.' }),
+      F('dimensions', 'By', 'select', 'day', { options: ['day', 'month', 'video', 'country', 'deviceType', 'insightTrafficSourceType', 'none'], ...when('op', 'analytics report') }),
+      F('filters', 'Filters', 'text', '', { tpl: true, ...when('op', 'analytics report'), help: 'Optional, for example video==dQw4w9WgXcQ or country==IN.' }),
+      F('from', 'Video from', 'select', 'server file', { options: ['server file', 'earlier step (base64)'], ...when('op', 'upload video') }),
+      F('filePath', 'Video file', 'text', '{{input.path}}', { tpl: true, ...when('from', 'server file'), help: 'A file on the SutraFlow server, for example saved there by Google Drive / Docs (Save to: server file) or a file trigger. Streamed, so large videos are fine.' }),
+      F('content', 'Video content (base64)', 'text', '{{input.content}}', { tpl: true, ...when('from', 'earlier step (base64)'), help: 'For short clips only; large videos belong in a server file.' }),
+      F('thumbnailPath', 'Thumbnail image file', 'text', '{{input.path}}', { tpl: true, ...when('op', 'set thumbnail'), help: 'JPEG or PNG under 2 MB, 1280x720 is best.' }),
+      F('title', 'Title', 'text', '{{input.name}}', { tpl: true, ...when('op', 'upload video', 'update video') }),
+      F('description', 'Description', 'textarea', '', { tpl: true, ...when('op', 'upload video', 'update video') }),
+      F('tags', 'Tags (comma separated)', 'text', '', { tpl: true, ...when('op', 'upload video', 'update video') }),
+      F('categoryId', 'Category id', 'text', '22', { ...when('op', 'upload video', 'update video'), help: '22 People & Blogs, 27 Education, 28 Science & Technology, 24 Entertainment, 26 Howto & Style.' }),
+      F('privacy', 'Privacy', 'select', 'private', { options: ['private', 'unlisted', 'public'], ...when('op', 'upload video', 'update video') }),
+      F('publishAt', 'Publish at', 'text', '', { tpl: true, ...when('op', 'upload video', 'update video'), help: 'Optional: an ISO date and time; the video stays private until then.' }),
+      F('madeForKids', 'Made for kids', 'bool', false, when('op', 'upload video')),
+      F('addToPlaylist', 'Add to playlist id', 'text', '', { tpl: true, ...when('op', 'upload video') }),
+      F('notify', 'Notify subscribers', 'bool', true, when('op', 'upload video')),
+      F('max', 'Maximum results', 'number', 25, when('op', 'my videos', 'search', 'playlists', 'playlist videos', 'comments')),
     ],
-    outputHint: { items: [{ id: '', title: '', publishedAt: '' }] },
+    outputHint: { items: [{ id: '', title: '', publishedAt: '' }], count: 0, videoId: '', url: '', rows: [{}], columns: [''] },
     execute: async c => {
       const Y = 'https://www.googleapis.com/youtube/v3';
+      const op = c.raw('op') || 'my videos';
       const max = String(Math.min(50, Number(c.raw('max')) || 25));
-      if (c.raw('op') === 'video stats') {
-        const r = await call(c, { method: 'GET', url: `${Y}/videos`, query: { part: 'snippet,statistics', id: String(c.v('videoIds') || '') } });
-        return { out: { items: (r.body.items || []).map((v: any) => ({ id: v.id, title: v.snippet?.title, ...v.statistics })) } };
+      const ids = String(c.v('videoIds') || '').split(',').map(s => s.trim()).filter(Boolean);
+      const list = (items: any[]) => ({ out: { items, count: items.length } });
+      switch (op) {
+        case 'video stats': {
+          const r = await call(c, { method: 'GET', url: `${Y}/videos`, query: { part: 'snippet,statistics,contentDetails,status', id: ids.join(',') } });
+          return list((r.body.items || []).map((v: any) => ({ id: v.id, title: v.snippet?.title, publishedAt: v.snippet?.publishedAt, duration: v.contentDetails?.duration, privacy: v.status?.privacyStatus, views: Number(v.statistics?.viewCount || 0), likes: Number(v.statistics?.likeCount || 0), comments: Number(v.statistics?.commentCount || 0) })));
+        }
+        case 'channel stats': {
+          const r = await call(c, { method: 'GET', url: `${Y}/channels`, query: { part: 'snippet,statistics', mine: 'true' } });
+          const ch = r.body.items?.[0];
+          if (!ch) throw new Error('The connected account has no YouTube channel');
+          return { out: { id: ch.id, title: ch.snippet?.title, subscribers: Number(ch.statistics?.subscriberCount || 0), views: Number(ch.statistics?.viewCount || 0), videos: Number(ch.statistics?.videoCount || 0), url: `https://www.youtube.com/channel/${ch.id}` } };
+        }
+        case 'playlists': {
+          const r = await call(c, { method: 'GET', url: `${Y}/playlists`, query: { part: 'snippet,contentDetails,status', mine: 'true', maxResults: max } });
+          return list((r.body.items || []).map((p: any) => ({ id: p.id, title: p.snippet?.title, videos: p.contentDetails?.itemCount, privacy: p.status?.privacyStatus })));
+        }
+        case 'playlist videos': {
+          const r = await call(c, { method: 'GET', url: `${Y}/playlistItems`, query: { part: 'snippet,contentDetails', playlistId: String(c.v('playlistId') || ''), maxResults: max } });
+          return list((r.body.items || []).map((p: any) => ({ id: p.contentDetails?.videoId, title: p.snippet?.title, publishedAt: p.contentDetails?.videoPublishedAt, position: p.snippet?.position })));
+        }
+        case 'comments': {
+          const r = await call(c, { method: 'GET', url: `${Y}/commentThreads`, query: { part: 'snippet', videoId: ids[0] || '', maxResults: max, order: 'time' } });
+          return list((r.body.items || []).map((t: any) => { const s = t.snippet?.topLevelComment?.snippet || {}; return { id: t.id, author: s.authorDisplayName, text: s.textOriginal, likes: s.likeCount, publishedAt: s.publishedAt, replies: t.snippet?.totalReplyCount }; }));
+        }
+        case 'analytics report': {
+          const dim = c.raw('dimensions') || 'day';
+          const r = await call(c, { method: 'GET', url: 'https://youtubeanalytics.googleapis.com/v2/reports', query: { ids: 'channel==MINE', startDate: String(c.v('startDate')), endDate: String(c.v('endDate')), metrics: String(c.raw('metrics') || 'views'), ...(dim !== 'none' ? { dimensions: dim, sort: dim === 'day' || dim === 'month' ? dim : `-${String(c.raw('metrics') || 'views').split(',')[0]}` } : {}), ...(dim === 'video' ? { maxResults: '50' } : {}), filters: String(c.v('filters') || '') } });
+          const cols = (r.body.columnHeaders || []).map((h: any) => h.name);
+          const rows = (r.body.rows || []).map((row: any[]) => Object.fromEntries(cols.map((k: string, i: number) => [k, row[i]])));
+          return { out: { columns: cols, rows, count: rows.length } };
+        }
+        case 'update video': {
+          if (!ids[0]) throw new Error('Video id is not set');
+          const cur = (await call(c, { method: 'GET', url: `${Y}/videos`, query: { part: 'snippet,status', id: ids[0] } })).body.items?.[0];
+          if (!cur) throw new Error(`No video ${ids[0]} on the connected channel`);
+          const snippet = { ...cur.snippet, ...(c.v('title') ? { title: String(c.v('title')) } : {}), ...(c.v('description') ? { description: String(c.v('description')) } : {}), ...(c.v('tags') ? { tags: String(c.v('tags')).split(',').map(t => t.trim()).filter(Boolean) } : {}), categoryId: c.raw('categoryId') || cur.snippet.categoryId };
+          const status = { ...cur.status, privacyStatus: c.raw('privacy') || cur.status.privacyStatus, ...(c.v('publishAt') ? { publishAt: String(c.v('publishAt')), privacyStatus: 'private' } : {}) };
+          const r = await call(c, { method: 'PUT', url: `${Y}/videos`, query: { part: 'snippet,status' }, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: ids[0], snippet: { title: snippet.title, description: snippet.description, tags: snippet.tags, categoryId: snippet.categoryId }, status: { privacyStatus: status.privacyStatus, ...(status.publishAt ? { publishAt: status.publishAt } : {}) } }) });
+          return { out: { videoId: r.body.id, title: r.body.snippet?.title, privacy: r.body.status?.privacyStatus, url: `https://youtu.be/${r.body.id}` } };
+        }
+        case 'set thumbnail': {
+          if (!ids[0]) throw new Error('Video id is not set');
+          const f = String(c.v('thumbnailPath') || '');
+          if (!fs.existsSync(f)) throw new Error(`Thumbnail file not found on this server: ${f}`);
+          const r = await call(c, { method: 'POST', url: 'https://www.googleapis.com/upload/youtube/v3/thumbnails/set', query: { videoId: ids[0] }, headers: { 'content-type': /\.png$/i.test(f) ? 'image/png' : 'image/jpeg' }, body: fs.readFileSync(f) });
+          return { out: { videoId: ids[0], thumbnails: r.body.items?.[0] || {} } };
+        }
+        case 'upload video': {
+          // Resumable upload: the metadata first, then the video streamed to the address YouTube gives.
+          let size: number, body: any, name: string;
+          if ((c.raw('from') || 'server file') === 'server file') {
+            const f = String(c.v('filePath') || '').trim();
+            if (!f || !fs.existsSync(f)) throw new Error(`Video file not found on this server: ${f || '(empty)'}`);
+            size = fs.statSync(f).size; name = path.basename(f);
+            body = Readable.toWeb(fs.createReadStream(f));
+          } else {
+            const buf = Buffer.from(String(c.v('content') || ''), 'base64');
+            if (!buf.length) throw new Error('The video content is empty');
+            size = buf.length; body = buf; name = 'video';
+          }
+          const tags = String(c.v('tags') || '').split(',').map(t => t.trim()).filter(Boolean);
+          const meta = {
+            snippet: { title: String(c.v('title') || name).replace(/\.[a-z0-9]{2,4}$/i, '').slice(0, 100), description: String(c.v('description') || '').slice(0, 5000), ...(tags.length ? { tags } : {}), categoryId: c.raw('categoryId') || '22' },
+            status: { privacyStatus: c.v('publishAt') ? 'private' : c.raw('privacy') || 'private', ...(c.v('publishAt') ? { publishAt: String(c.v('publishAt')) } : {}), selfDeclaredMadeForKids: !!c.raw('madeForKids') },
+          };
+          const start = await streamCall(c.raw('connection'), `https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status&notifySubscribers=${c.raw('notify') !== false}`, {
+            method: 'POST', signal: c.signal, body: JSON.stringify(meta),
+            headers: { 'content-type': 'application/json; charset=UTF-8', 'x-upload-content-length': String(size), 'x-upload-content-type': 'video/*' },
+          });
+          const location = start.headers.get('location');
+          if (!location) throw new Error('YouTube did not give an upload address');
+          c.log('info', `Uploading ${name} (${(size / 1048576).toFixed(1)} MB) to YouTube`);
+          const up = await streamCall(c.raw('connection'), location, { method: 'PUT', signal: c.signal, body, headers: { 'content-type': 'video/*', 'content-length': String(size) } });
+          const v: any = await up.json();
+          const playlist = String(c.v('addToPlaylist') || '').trim();
+          if (playlist) await call(c, { method: 'POST', url: `${Y}/playlistItems`, query: { part: 'snippet' }, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ snippet: { playlistId: playlist, resourceId: { kind: 'youtube#video', videoId: v.id } } }) });
+          return { out: { videoId: v.id, url: `https://youtu.be/${v.id}`, title: v.snippet?.title, privacy: v.status?.privacyStatus, uploadStatus: v.status?.uploadStatus, bytes: size, playlist: playlist || null } };
+        }
+        default: {
+          const r = await call(c, { method: 'GET', url: `${Y}/search`, query: { part: 'snippet', maxResults: max, order: 'date', type: 'video', ...(op === 'my videos' ? { forMine: 'true' } : { q: String(c.v('q') || '') }) } });
+          return list((r.body.items || []).map((v: any) => ({ id: v.id?.videoId, title: v.snippet?.title, publishedAt: v.snippet?.publishedAt, channel: v.snippet?.channelTitle })));
+        }
       }
-      const r = await call(c, { method: 'GET', url: `${Y}/search`, query: { part: 'snippet', maxResults: max, order: 'date', type: 'video', ...(c.raw('op') === 'my videos' ? { forMine: 'true' } : { q: String(c.v('q') || '') }) } });
-      return { out: { items: (r.body.items || []).map((v: any) => ({ id: v.id?.videoId, title: v.snippet?.title, publishedAt: v.snippet?.publishedAt, channel: v.snippet?.channelTitle })) } };
     },
   },
   {
@@ -245,6 +359,91 @@ export const saasActivities: Activity[] = [
       return { out: { id: r.body.id } };
     },
   },
+  {
+    type: 'twitch', palette: 'apps', name: 'Twitch', glyph: '◘', ports: ['out'],
+    desc: 'Twitch channels: users, whether a channel is live and its viewers, channel information, followers, past broadcasts (videos), clips, the schedule, and for your own channel: changing the title, game and tags, creating a clip, and sending a chat message.',
+    fields: [
+      conn('An OAuth connection with Service twitch (dev.twitch.tv > Your Console > Applications). Scopes: user:read:email; channel:manage:broadcast to change the channel; clips:edit for clips; user:write:chat for chat; moderator:read:followers for followers.'),
+      F('op', 'Operation', 'select', 'stream status', { options: ['users', 'stream status', 'channel info', 'followers', 'videos', 'clips', 'schedule', 'update channel', 'create clip', 'chat message'] }),
+      F('logins', 'Channels (login names, comma separated)', 'text', '', { tpl: true, help: 'Empty = the connected account\'s own channel.' }),
+      F('title', 'Title', 'text', '{{input.title}}', { tpl: true, ...when('op', 'update channel') }),
+      F('game', 'Game or category', 'text', '', { tpl: true, ...when('op', 'update channel'), help: 'A category name such as Just Chatting or Software and Game Development.' }),
+      F('tags', 'Tags (comma separated)', 'text', '', { tpl: true, ...when('op', 'update channel') }),
+      F('message', 'Message', 'textarea', 'Thanks for watching! New video: {{input.url}}', { tpl: true, ...when('op', 'chat message') }),
+      F('max', 'Maximum results', 'number', 20, when('op', 'followers', 'videos', 'clips', 'schedule')),
+    ],
+    outputHint: { items: [{ id: '', login: '', live: false, title: '', viewers: 0 }], count: 0 },
+    execute: async c => {
+      const H = 'https://api.twitch.tv/helix';
+      const op = c.raw('op') || 'stream status';
+      const first = String(Math.min(100, Number(c.raw('max')) || 20));
+      const logins = String(c.v('logins') || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      const usersQ = new URLSearchParams(); for (const l of logins) usersQ.append('login', l);
+      const users = (await call(c, { method: 'GET', url: `${H}/users${logins.length ? `?${usersQ}` : ''}` })).body.data || [];
+      if (!users.length) throw new Error(logins.length ? `No Twitch user ${logins.join(', ')}` : 'The connected account has no Twitch user');
+      const me = users[0];
+      const list = (items: any[]) => ({ out: { items, count: items.length } });
+      const byIds = (key: string) => { const q = new URLSearchParams(); for (const u of users) q.append(key, u.id); return q.toString(); };
+      switch (op) {
+        case 'users': return list(users.map((u: any) => ({ id: u.id, login: u.login, name: u.display_name, description: u.description, created: u.created_at, type: u.broadcaster_type, image: u.profile_image_url })));
+        case 'stream status': {
+          const live = (await call(c, { method: 'GET', url: `${H}/streams?${byIds('user_id')}` })).body.data || [];
+          return list(users.map((u: any) => { const s = live.find((x: any) => x.user_id === u.id); return { id: u.id, login: u.login, live: !!s, title: s?.title || '', game: s?.game_name || '', viewers: s?.viewer_count || 0, startedAt: s?.started_at || null, url: `https://www.twitch.tv/${u.login}` }; }));
+        }
+        case 'channel info': {
+          const ch = (await call(c, { method: 'GET', url: `${H}/channels?${byIds('broadcaster_id')}` })).body.data || [];
+          return list(ch.map((x: any) => ({ id: x.broadcaster_id, login: x.broadcaster_login, title: x.title, game: x.game_name, tags: x.tags || [], language: x.broadcaster_language })));
+        }
+        case 'followers': {
+          const r = (await call(c, { method: 'GET', url: `${H}/channels/followers`, query: { broadcaster_id: me.id, first } })).body;
+          return { out: { total: r.total ?? 0, items: (r.data || []).map((f: any) => ({ id: f.user_id, login: f.user_login, name: f.user_name, followedAt: f.followed_at })), count: (r.data || []).length } };
+        }
+        case 'videos': return list(((await call(c, { method: 'GET', url: `${H}/videos`, query: { user_id: me.id, first } })).body.data || []).map((v: any) => ({ id: v.id, title: v.title, url: v.url, views: v.view_count, duration: v.duration, publishedAt: v.published_at, type: v.type })));
+        case 'clips': return list(((await call(c, { method: 'GET', url: `${H}/clips`, query: { broadcaster_id: me.id, first } })).body.data || []).map((x: any) => ({ id: x.id, title: x.title, url: x.url, views: x.view_count, creator: x.creator_name, createdAt: x.created_at, duration: x.duration })));
+        case 'schedule': {
+          const r = await call(c, { method: 'GET', url: `${H}/schedule`, query: { broadcaster_id: me.id, first } }).catch((e: any) => { if (/404/.test(e.message)) return { body: { data: { segments: [] } } }; throw e; });
+          return list((r.body.data?.segments || []).map((s: any) => ({ id: s.id, title: s.title, start: s.start_time, end: s.end_time, game: s.category?.name || '' })));
+        }
+        case 'update channel': {
+          const body: any = {};
+          if (c.v('title')) body.title = String(c.v('title')).slice(0, 140);
+          if (c.v('tags')) body.tags = String(c.v('tags')).split(',').map(t => t.trim().replace(/\s+/g, '')).filter(Boolean).slice(0, 10);
+          const game = String(c.v('game') || '').trim();
+          if (game) {
+            const g = (await call(c, { method: 'GET', url: `${H}/games`, query: { name: game } })).body.data?.[0];
+            if (!g) throw new Error(`No Twitch category named "${game}"`);
+            body.game_id = g.id;
+          }
+          if (!Object.keys(body).length) throw new Error('Give a title, a game or tags to change');
+          await call(c, { method: 'PATCH', url: `${H}/channels`, query: { broadcaster_id: me.id }, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+          return { out: { login: me.login, ...body } };
+        }
+        case 'create clip': {
+          const r = (await call(c, { method: 'POST', url: `${H}/clips`, query: { broadcaster_id: me.id } })).body.data?.[0];
+          return { out: { id: r?.id, editUrl: r?.edit_url, url: r?.id ? `https://clips.twitch.tv/${r.id}` : '' } };
+        }
+        case 'chat message': {
+          const sender = (await call(c, { method: 'GET', url: `${H}/users` })).body.data?.[0];
+          const r = (await call(c, { method: 'POST', url: `${H}/chat/messages`, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ broadcaster_id: me.id, sender_id: sender?.id || me.id, message: String(c.v('message') || '').slice(0, 500) }) })).body.data?.[0];
+          if (r && r.is_sent === false) throw new Error(`Twitch did not send the message: ${r.drop_reason?.message || 'dropped'}`);
+          return { out: { messageId: r?.message_id, sent: true, channel: me.login } };
+        }
+        default: throw new Error(`Unknown operation ${op}`);
+      }
+    },
+  },
+  {
+    type: 'twitchLiveTrigger', palette: 'apps', name: 'Twitch live trigger', glyph: '◘', trigger: true, ports: ['live', 'offline'],
+    desc: 'Starts the Sutra when a Twitch channel goes live or ends its stream: to announce it on other networks, post in a chat, or record statistics. Polls while deployed.',
+    fields: [
+      conn('An OAuth connection with Service twitch.'),
+      F('logins', 'Channels (login names, comma separated)', 'text', '', { help: 'Empty = the connected account\'s own channel.' }),
+      F('pollSeconds', 'Check every (seconds)', 'number', 60),
+      F('testEvent', 'Test event (JSON)', 'code', JSON.stringify({ event: 'live', login: 'ashatraders', name: 'AshaTraders', title: 'Tea tasting: Assam vs Darjeeling', game: 'Food & Drink', viewers: 42, startedAt: '2026-10-19T14:00:00Z', url: 'https://www.twitch.tv/ashatraders' }, null, 2)),
+    ],
+    outputHint: { event: 'live', login: '', name: '', title: '', game: '', viewers: 0, startedAt: '', url: '' },
+    execute: c => { const e = c.input ?? JSON.parse(c.raw('testEvent') || '{}'); return { port: e.event === 'offline' ? 'offline' : 'live', out: e }; },
+  },
 ];
 
 // ---------- Google Drive / Docs trigger ----------
@@ -269,6 +468,36 @@ registerListener('googleDriveTrigger', c => {
       }
       for (const [id, k] of known) if (!seen.has(id)) { known.delete(id); c.fire({ event: 'removed', id, name: k.name }); }
       c.status('ok', `Watching ${files.length} files`);
+    } catch (e: any) {
+      c.status('error', e.message);
+    }
+  };
+  tick();
+  const t = setInterval(tick, every);
+  return () => clearInterval(t);
+});
+
+/** Twitch live trigger: polls the channels' streams and fires when one goes live or ends. */
+registerListener('twitchLiveTrigger', c => {
+  const cfg = c.node.config;
+  const every = Math.max(30, Number(cfg.pollSeconds) || 60) * 1000;
+  const logins = String(cfg.logins || '').split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean);
+  let state: Map<string, boolean> | null = null;
+  const H = 'https://api.twitch.tv/helix';
+  const tick = async () => {
+    try {
+      const q = new URLSearchParams(); for (const l of logins) q.append('login', l);
+      const users = (await apiCall(cfg.connection, { method: 'GET', url: `${H}/users${logins.length ? `?${q}` : ''}` })).body.data || [];
+      const ids = new URLSearchParams(); for (const u of users) ids.append('user_id', u.id);
+      const live = users.length ? (await apiCall(cfg.connection, { method: 'GET', url: `${H}/streams?${ids}` })).body.data || [] : [];
+      const next = new Map<string, boolean>();
+      for (const u of users) {
+        const s = live.find((x: any) => x.user_id === u.id);
+        next.set(u.id, !!s);
+        if (state && state.get(u.id) !== !!s) c.fire({ event: s ? 'live' : 'offline', login: u.login, name: u.display_name, title: s?.title || '', game: s?.game_name || '', viewers: s?.viewer_count || 0, startedAt: s?.started_at || null, url: `https://www.twitch.tv/${u.login}` });
+      }
+      state = next;
+      c.status('ok', `Watching ${users.map((u: any) => u.login).join(', ')}: ${live.length} live`);
     } catch (e: any) {
       c.status('error', e.message);
     }

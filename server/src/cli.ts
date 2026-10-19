@@ -42,6 +42,12 @@ const HELP = `sutra <command> [options]
   Server, data and people:
   status
             Server health, readiness and engines.
+  connect   <connection> --project <name> [--wait-minutes 10]
+            Signs in an OAuth connection (Google, YouTube, Twitch, ...) on a server without the studio:
+            prints the sign-in address, and waits until the account is connected. The server's
+            /api/oauth/callback address must be a redirect address of the OAuth app. Needs --server.
+  python    [--set <path to python> | --clear]
+            Which Python runs Python steps on the server; --set chooses an interpreter.
   secret    set <NAME> (--value <v> | --from-env <VAR>)
             Saves a secret in the vault (encrypted); Sutras and connections use it by name.
   db        copy --to <postgres://user:pass@host/db | file.db> [--replace]
@@ -376,6 +382,39 @@ async function main(argv: string[]) {
       fs.writeFileSync(file, text);
       out(`Wrote ${file}`);
       return 0;
+    }
+    case 'connect': {
+      if (!call) throw new Usage('connect needs --server (the server whose account is being connected)');
+      const name = a._[1];
+      if (!name) throw new Usage('Give the connection name');
+      const pid = await projectId(a, call);
+      const r = (await call('GET', `/api/resources?projectId=${pid}&kind=oauthApp`) as any[]).find(x => x.name.toLowerCase() === name.toLowerCase());
+      if (!r) throw new Error(`No OAuth connection named "${name}" in the project`);
+      const st0 = await call('GET', `/api/oauth/${r.id}`);
+      const start = await call('GET', `/api/oauth/${r.id}/start`);
+      out(`Open this address in a browser and sign in to the account for ${r.name}:\n\n  ${start.url}\n`);
+      out(`The OAuth app must allow the redirect address ${st0.redirectUri}`);
+      const until = Date.now() + Math.max(1, Number(str(a, 'wait-minutes')) || 10) * 60000;
+      const was = st0.connectedAt || '';
+      while (Date.now() < until) {
+        await new Promise(res => setTimeout(res, 3000));
+        const st = await call('GET', `/api/oauth/${r.id}`);
+        if (st.connected && st.connectedAt !== was) { out(`Connected: ${r.name}${st.canRefresh ? ' (refreshed automatically)' : ''}`); return 0; }
+      }
+      out('No sign-in arrived in time. Run the command again.');
+      return 1;
+    }
+    case 'python': {
+      if (!call) {
+        await local();
+        const { findPython } = await import('./python.js');
+        const p = findPython(str(a, 'set') ? { interpreter: str(a, 'set') } : {});
+        out(p.message);
+        return p.ok ? 0 : 1;
+      }
+      const p = a.set !== undefined || a.clear ? await call('PUT', '/api/scripts/python', { path: a.clear ? '' : str(a, 'set') || '' }) : await call('GET', '/api/scripts/python');
+      out(p.message);
+      return p.ok ? 0 : 1;
     }
     case 'history': {
       const id = await projectId(a, call);

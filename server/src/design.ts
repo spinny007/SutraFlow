@@ -110,6 +110,7 @@ function designNode(doc: FlowDoc, n: FlowNode, ins: { edge: { port: string }; fr
   } catch (e: any) {
     warnings.push(e.message);
   }
+  if (act?.designCheck) { try { warnings.push(...act.designCheck(cfg)); } catch (e: any) { warnings.push(e.message); } }
   // Looping activities: for each item gives every result; repeat while gives the last one and the count.
   if (n.settings?.loop === 'for each item') outShape = { name: n.name, type: 'object', children: [{ ...(outShape || ANY('iterations')), name: 'iterations', repeats: true }, { name: 'count', type: 'integer' }] };
   else if (n.settings?.loop === 'repeat while' && outShape) outShape = { ...outShape, children: [...(outShape.children || []), { name: '_iterations', type: 'integer' }] };

@@ -5,9 +5,10 @@ import path from 'node:path';
 import type { Activity, ExecCtx } from '../engine/types.js';
 import { F, when } from './common.js';
 import { scriptsAllowed } from '../projects.js';
+import { findPython, missingPackages, pythonDesignCheck } from '../python.js';
 
 /**
- * Scripts palette: PowerShell, shell scripts and programs run on the SutraFlow server.
+ * Scripts palette: PowerShell, shell scripts, Python and programs run on the SutraFlow server.
  *
  * Safety: nothing runs until an administrator allows scripts (Server & APIs). Values reach a script as
  * environment variables and the previous step's output as a JSON file, never pasted into the script
@@ -146,6 +147,67 @@ async function runScript(c: ExecCtx, kind: 'powershell' | 'shell') {
 }
 
 export const scriptActivities: Activity[] = [
+  {
+    type: 'python', palette: 'scripts', name: 'Python script', glyph: 'Py', ports: ['out'], timeoutMs: 3600000,
+    desc: 'Runs Python 3 code written here, or a .py file on the server, with arguments and parameters, and captures its output, error output and exit code. Printed JSON becomes json and result. The designer and Deploy warn when Python, the file or a package is missing, or the code does not parse. Needs scripts to be allowed in Server & APIs.',
+    fields: [
+      F('source', 'Code from', 'select', 'code', { options: ['code', 'file'] }),
+      F('code', 'Code', 'code', 'import json, os, sys\n\nparams = json.load(open(os.environ["SUTRA_PARAMS_FILE"]))\nprevious = json.load(open(os.environ["SUTRA_INPUT_FILE"]))\n\ntotal = sum(float(line.get("amount", 0)) for line in previous.get("lines", []))\nprint(json.dumps({"orderId": params.get("orderId"), "total": round(total * (1 + float(params.get("taxRate", 0))), 2)}))', { ...when('source', 'code'), help: 'Print JSON (json.dumps) on the last line to hand structured data to the next step.' }),
+      F('file', 'Script file', 'text', process.platform === 'win32' ? 'C:/scripts/report.py' : '/opt/scripts/report.py', { ...when('source', 'file'), help: 'A .py file on the SutraFlow server. May use {{gv.SCRIPTS}}.' }),
+      F('args', 'Arguments', 'list', [], { tpl: true, help: 'One per line, each passed as one argument (sys.argv[1:]).' }),
+      F('params', 'Parameters', 'kv', [{ k: 'orderId', v: '{{input.orderId}}' }, { k: 'taxRate', v: '0.18' }], { tpl: true, help: 'A JSON file named by SUTRA_PARAMS_FILE, and environment variables of the same names. The previous step\'s output is in SUTRA_INPUT_FILE.' }),
+      F('python', 'Python', 'select', 'detected', { options: ['detected', 'this interpreter'], help: 'detected: the server\'s Python (Server & APIs shows which). this interpreter: a path you give, such as a virtual environment\'s python.' }),
+      F('pythonPath', 'Interpreter path', 'text', '', when('python', 'this interpreter')),
+      F('venv', 'Virtual environment folder', 'text', '', { help: 'Optional: a venv folder; its python is used and its packages are available.' }),
+      F('packages', 'Packages it imports', 'text', '', { help: 'Comma separated import names, such as pandas, requests, openpyxl: checked before it runs, so a missing one is found in the designer, not in production.' }),
+      F('workDir', 'Working folder', 'text', '', { help: 'Empty = a new temporary folder for each run (the script file\'s folder for a file).' }),
+      F('timeoutMs', 'Time limit (ms)', 'number', 300000),
+      F('failOnExit', 'Fail when the exit code is not 0', 'bool', true, { help: 'Then the error output carries the exit code and the last lines of the traceback.' }),
+    ],
+    outputHint: { ...RESULT, result: null, python: '' },
+    designCheck: cfg => pythonDesignCheck(cfg, scriptsAllowed()),
+    execute: async c => {
+      const cwd = guard(c);
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-py-'));
+      try {
+        const venv = String(c.raw('venv') || '').trim();
+        const py = findPython({ interpreter: c.raw('python') === 'this interpreter' ? String(c.raw('pythonPath') || '').trim() : undefined, venv: venv || undefined });
+        if (!py.ok) throw new Error(py.message);
+        const miss = missingPackages(py, String(c.raw('packages') || '').split(','));
+        if (miss.length) throw new Error(`Python packages not installed: ${miss.join(', ')}. On the server: ${py.path} -m pip install ${miss.join(' ')}`);
+        let file: string;
+        if ((c.raw('source') || 'code') === 'file') {
+          file = String(c.raw('file') || '').trim();
+          if (!file || !fs.existsSync(file)) throw new Error(`Script file not found on this server: ${file || '(empty)'}`);
+        } else {
+          file = path.join(dir, 'script.py');
+          fs.writeFileSync(file, String(c.raw('code') ?? ''), 'utf8');
+        }
+        const env = envFor(c, dir);
+        const params: Record<string, unknown> = {};
+        for (const r of (c.raw('params') as any[]) || []) {
+          const k = String(r?.k || '').trim();
+          if (!k) continue;
+          if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) throw new Error(`"${k}" is not a valid parameter name (letters, digits and _)`);
+          const v = c.resolve(r.v);
+          params[k] = v;
+          env[k] = v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+        }
+        const pfile = path.join(dir, 'params.json');
+        fs.writeFileSync(pfile, JSON.stringify(params));
+        Object.assign(env, { SUTRA_PARAMS_FILE: pfile, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1', PYTHONUTF8: '1' });
+        const args = ((c.raw('args') as any[]) || []).map(a => { const v = c.resolve(a); return v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v); });
+        const r = await run(py.exe, [...py.prefix, file, ...args], { cwd: cwd || (c.raw('source') === 'file' ? path.dirname(file) : dir), env, timeoutMs: Math.max(1000, Number(c.raw('timeoutMs')) || 300000), signal: c.signal });
+        // The result: all of the output as JSON, else its last line as JSON.
+        let result = r.json;
+        if (result === null) { const last = r.lines[r.lines.length - 1]?.trim() || ''; if (/^[[{"\d-]|^(true|false|null)$/.test(last)) { try { result = JSON.parse(last); } catch { /* text */ } } }
+        const out = finish(c, r);
+        return { out: { ...out.out, result, json: r.json ?? result, python: py.message } };
+      } finally {
+        fs.rm(dir, { recursive: true, force: true }, () => {});
+      }
+    },
+  },
   {
     type: 'powershell', palette: 'scripts', name: 'PowerShell script', glyph: '❯', ports: ['out'],
     desc: 'Runs a PowerShell script on the server and captures its output, error output and exit code. Values come in as environment variables. Needs scripts to be allowed in Server & APIs.',

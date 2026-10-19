@@ -170,6 +170,8 @@ export interface Activity {
   outputSchema?(cfg: Record<string, any>, h: SchemaHelpers): import('../schemas.js').SNode | null | undefined;
   /** Output is the input unchanged (If, Switch, Log, Wait...): its shape is the incoming shape. */
   passThrough?: boolean;
+  /** Problems this step would meet on this server (a program, file or package missing), shown in the designer and on Deploy before anything runs. */
+  designCheck?: (cfg: Record<string, any>) => string[];
   execute(ctx: ExecCtx): Promise<StepResult | void> | StepResult | void;
 }
 

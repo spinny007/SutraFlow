@@ -96,6 +96,7 @@ export function validateDoc(doc: FlowDoc, projectId?: string) {
     if (names.has(n.name)) errors.push(`Two steps are named "${n.name}". Step names must be unique because mappings refer to them.`);
     names.add(n.name);
     if (a && !a.trigger && !a.noInput && !doc.edges.some(e => e.to === n.id)) warnings.push(`${n.name} has no incoming connection and will never run`);
+    if (a?.designCheck && !n.settings?.disabled) { try { for (const w of a.designCheck(n.config || {})) warnings.push(`${n.name}: ${w}`); } catch (e: any) { warnings.push(`${n.name}: ${e.message}`); } }
   }
   const triggers = doc.nodes.filter(n => engine.activity(n.type)?.trigger);
   if (!triggers.length) errors.push('The Sutra has no trigger step');

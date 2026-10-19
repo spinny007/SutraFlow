@@ -6,7 +6,7 @@ import { q } from '../db.js';
  * steps, and MCP steps (Call MCP tool, AI agent) whose MCP connection starts a command on this server.
  * Reading, editing and every other activity work as usual.
  */
-const RISKY = new Set(['powershell', 'shellScript', 'runProgram', 'jsCode', 'releasePackage', 'releaseCheck', 'releaseDeploy', 'releaseRollback']);
+const RISKY = new Set(['powershell', 'shellScript', 'runProgram', 'python', 'databricksCommand', 'jsCode', 'releasePackage', 'releaseCheck', 'releaseDeploy', 'releaseRollback']);
 const cache = new Map<string, boolean>();
 
 export function isRestricted(projectId: string | null | undefined) {

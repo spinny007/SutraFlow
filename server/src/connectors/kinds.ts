@@ -109,11 +109,12 @@ export const CONNECTOR_KINDS: ResourceKind[] = [
     ],
   },
   {
-    kind: 'oauthApp', name: 'OAuth connection (Google, Dropbox, Facebook…)', desc: 'Connects an account with OAuth 2.0 (authorization code). Used by Google Sheets, Drive, Docs, YouTube, Dropbox, Facebook and Connected API call.',
+    kind: 'oauthApp', name: 'OAuth connection (Google, YouTube, Twitch, Dropbox, Facebook)', desc: 'Connects an account with OAuth 2.0 (authorization code). Used by Google Sheets, Drive, Docs, YouTube, Twitch, Dropbox, Facebook and Connected API call. Sign in with Connect account (studio), sutra connect (any server), or a refresh token secret (servers set up by a pipeline).',
     fields: [
-      F('provider', 'Service', 'select', 'google', { options: ['google', 'dropbox', 'facebook', 'microsoft', 'custom'] }),
+      F('provider', 'Service', 'select', 'google', { options: ['google', 'dropbox', 'facebook', 'microsoft', 'twitch', 'custom'] }),
       F('clientId', 'Client ID', 'text', ''), F('clientSecretSecret', 'Client secret', 'secret', ''),
-      F('scopes', 'Scopes', 'text', 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive', { help: 'Space separated. Google: spreadsheets, drive, youtube.readonly. Dropbox: files.content.read files.content.write. Facebook: pages_manage_posts pages_read_engagement.' }),
+      F('scopes', 'Scopes', 'text', 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive', { help: 'Space separated. Google: .../auth/spreadsheets, .../auth/drive, .../auth/youtube.readonly, .../auth/youtube.upload, .../auth/youtube.force-ssl, .../auth/yt-analytics.readonly. Twitch: user:read:email channel:manage:broadcast clips:edit user:write:chat moderator:read:followers. Dropbox: files.content.read files.content.write. Facebook: pages_manage_posts pages_read_engagement.' }),
+      F('refreshTokenSecret', 'Refresh token (secret)', 'secret', '', { help: 'Optional, for servers without the studio: a refresh token of the account kept as a secret on that server (set by your pipeline with sutra secret set). Used instead of Connect account.' }),
       F('authUrl', 'Authorization URL', 'text', '', { ...when('provider', 'custom') }),
       F('tokenUrl', 'Token URL', 'text', '', { ...when('provider', 'custom') }),
       F('apiBase', 'API base URL', 'text', '', { help: 'Optional; for Connected API call with relative paths.' }),

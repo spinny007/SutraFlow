@@ -173,16 +173,29 @@ function EngineVariables() {
 function ScriptsPolicy() {
   const toast = useToast();
   const [allowed, setAllowed] = useState<boolean | null>(null);
+  const [py, setPy] = useState<{ ok: boolean; message: string; configured: string; fromEnv: string } | null>(null);
+  const [pyPath, setPyPath] = useState('');
   useEffect(() => { get<{ allowed: boolean }>('/api/scripts/policy').then(p => setAllowed(p.allowed)).catch(() => {}); }, []);
+  useEffect(() => { get<any>('/api/scripts/python').then(p => { setPy(p); setPyPath(p.configured || ''); }).catch(() => {}); }, []);
   if (allowed === null) return null;
   return (
     <div className="card">
       <h2>Scripts</h2>
-      <p className="muted" style={{ fontSize: 13 }}>The Scripts palette (PowerShell script, Shell script, Run program) runs commands on this server with the SutraFlow service account's rights. Values reach scripts as environment variables, never as script text.</p>
+      <p className="muted" style={{ fontSize: 13 }}>The Scripts palette (PowerShell script, Shell script, Python script, Run program) runs commands on this server with the SutraFlow service account's rights. Values reach scripts as environment variables, never as script text.</p>
       <label className="check">
         <input type="checkbox" checked={allowed} onChange={e => put<{ allowed: boolean }>('/api/scripts/policy', { allowed: e.target.checked }).then(p => { setAllowed(p.allowed); toast(p.allowed ? 'Script activities are allowed' : 'Script activities are switched off'); }).catch(err => toast(err.message, true))} />
         Allow script activities to run on this server
       </label>
+      {py && <>
+        <p className="h" style={{ marginTop: 14 }}>Python</p>
+        <div className={py.ok ? 'okbox' : 'warnbox'} role="status">{py.message}{py.fromEnv ? ' (from SUTRA_PYTHON)' : ''}</div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <input className="inp code" aria-label="Python interpreter path" style={{ flex: 1 }} value={pyPath} placeholder={'Empty = found automatically (py, python3, python)'} onChange={e => setPyPath(e.target.value)} />
+          <button className="btn small" onClick={() => put<any>('/api/scripts/python', { path: pyPath }).then(p => { setPy(p); toast(p.message); }).catch(err => toast(err.message, true))}>Use</button>
+          <button className="btn small" onClick={() => get<any>('/api/scripts/python').then(p => { setPy(p); toast(p.message, !p.ok); }).catch(err => toast(err.message, true))}>Check again</button>
+        </div>
+        <p className="muted xs">Python steps use this interpreter unless they name a virtual environment or their own. The designer and Deploy warn when Python, a script file or a package is missing.</p>
+      </>}
     </div>
   );
 }

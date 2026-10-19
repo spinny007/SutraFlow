@@ -1,0 +1,572 @@
+import { spawn } from 'node:child_process';
+import type { Activity, ExecCtx, Field, ResourceKind } from '../engine/types.js';
+import { requireResource, type Resource } from '../resources.js';
+import { registerListener } from '../listeners.js';
+import { httpCall } from '../security/outbound.js';
+import { getSecret } from '../secrets.js';
+import { F, when } from '../palettes/common.js';
+
+/**
+ * Azure Data Factory and Databricks: run pipelines, jobs, notebooks, code blocks and SQL, wait for
+ * them and report what happened. Sign-in is a service principal, a managed identity, the Azure CLI
+ * of the server, or (Databricks) a personal access token or Databricks OAuth. Long waits poll with
+ * the step's own time limit, and a run still going when the limit is reached can be cancelled.
+ */
+
+type Secret = (name: string, what?: string) => string;
+const CLOUDS: Record<string, { login: string; management: string }> = {
+  'Azure (global)': { login: 'https://login.microsoftonline.com', management: 'https://management.azure.com' },
+  'Azure China': { login: 'https://login.chinacloudapi.cn', management: 'https://management.chinacloudapi.cn' },
+  'Azure US Government': { login: 'https://login.microsoftonline.us', management: 'https://management.usgovcloudapi.net' },
+};
+/** The Azure application id of Databricks: Entra tokens for this resource sign in to any Azure Databricks workspace. */
+const DATABRICKS_RESOURCE = '2ff814a6-3304-4ab8-85cb-cd0e6f879c1d';
+const AZ_AUTH = ['service principal (client secret)', 'managed identity', 'Azure CLI (az login)'];
+
+const cloudFields = (): Field[] => [
+  F('cloud', 'Azure cloud', 'select', 'Azure (global)', { options: [...Object.keys(CLOUDS), 'custom'] }),
+  F('loginUrl', 'Sign-in address', 'text', 'https://login.microsoftonline.com', when('cloud', 'custom')),
+  F('managementUrl', 'Management address', 'text', 'https://management.azure.com', when('cloud', 'custom')),
+];
+const spFields = (k: string, vals: string[]): Field[] => [
+  F('tenantId', 'Tenant id', 'text', '', { help: 'Directory (tenant) id of the Entra ID app, or the domain such as contoso.onmicrosoft.com.', ...when(k, ...vals.filter(v => v !== 'managed identity' && v !== 'Azure CLI (az login)')) }),
+  F('clientId', 'Client id', 'text', '', { help: 'Application (client) id of the app registration (service principal).', ...when(k, ...vals.filter(v => v.includes('service principal'))) }),
+  F('clientSecretSecret', 'Client secret', 'secret', '', when(k, ...vals.filter(v => v.includes('service principal')))),
+  F('identityClientId', 'Managed identity client id', 'text', '', { help: 'Only for a user-assigned identity; empty = the system-assigned identity.', ...when(k, 'managed identity', 'Azure managed identity') }),
+];
+
+export const AZURE_KINDS: ResourceKind[] = [
+  {
+    kind: 'azureDataFactory', name: 'Azure Data Factory', desc: 'A data factory whose pipelines Sutras run and monitor. The identity needs the Data Factory Contributor role on the factory (or its resource group).',
+    fields: [
+      F('auth', 'Sign in with', 'select', AZ_AUTH[0], { options: AZ_AUTH, help: 'A service principal for servers; a managed identity when SutraFlow runs in Azure; the Azure CLI of this server (az login) for development.' }),
+      ...spFields('auth', AZ_AUTH),
+      F('subscriptionId', 'Subscription id', 'text', ''),
+      F('resourceGroup', 'Resource group', 'text', ''),
+      F('factoryName', 'Data factory', 'text', ''),
+      F('pollSeconds', 'Check status every (seconds)', 'number', 15, { help: 'How often a waiting step asks for the run status.' }),
+      ...cloudFields(),
+    ],
+  },
+  {
+    kind: 'databricks', name: 'Databricks workspace', desc: 'A Databricks workspace (Azure, AWS or Google Cloud) for jobs, notebooks, code blocks on clusters and SQL warehouses.',
+    fields: [
+      F('host', 'Workspace address', 'text', 'https://adb-1234567890123456.7.azuredatabricks.net', { help: 'The address of the workspace as in the browser, without a path.' }),
+      F('auth', 'Sign in with', 'select', 'personal access token', { options: ['personal access token', 'Databricks OAuth (service principal)', 'Azure service principal', 'Azure managed identity', 'Azure CLI (az login)'] }),
+      F('tokenSecret', 'Access token', 'secret', '', { help: 'User Settings > Developer > Access tokens. Prefer a service principal for production.', ...when('auth', 'personal access token') }),
+      ...spFields('auth', ['Databricks OAuth (service principal)', 'Azure service principal', 'Azure managed identity', 'Azure CLI (az login)']),
+      F('clusterId', 'Default cluster id', 'text', '', { help: 'For notebooks and code blocks on an all-purpose cluster: Compute > the cluster > its id in the address. Steps may name another.' }),
+      F('warehouseId', 'Default SQL warehouse id', 'text', '', { help: 'For Databricks SQL: SQL Warehouses > the warehouse > Connection details.' }),
+      F('pollSeconds', 'Check status every (seconds)', 'number', 10),
+      ...cloudFields().map(f => ({ ...f, showIfAny: [{ k: 'auth', in: ['Azure service principal', 'Azure managed identity', 'Azure CLI (az login)'] }] })),
+    ],
+  },
+];
+// The Databricks client id and secret also serve Databricks OAuth (no tenant).
+for (const f of AZURE_KINDS[1].fields) if (f.k === 'tenantId') f.showIf = { k: 'auth', in: ['Azure service principal'] };
+
+// ---------- Azure sign-in ----------
+const tokens = new Map<string, { token: string; until: number }>();
+const endpoints = (r: Resource) => r.config.cloud === 'custom'
+  ? { login: String(r.config.loginUrl || CLOUDS['Azure (global)'].login).replace(/\/+$/, ''), management: String(r.config.managementUrl || CLOUDS['Azure (global)'].management).replace(/\/+$/, '') }
+  : CLOUDS[r.config.cloud] || CLOUDS['Azure (global)'];
+
+/** The Azure CLI's token for a resource: `az account get-access-token`, for development machines. */
+function azCli(resource: string, tenant?: string): Promise<{ token: string; until: number }> {
+  if (tenant && !/^[\w.-]+$/.test(tenant)) throw new Error('The tenant id may use letters, digits, dots and dashes only');
+  return new Promise((resolve, reject) => {
+    const args = ['account', 'get-access-token', '--resource', resource, '--output', 'json', ...(tenant ? ['--tenant', tenant] : [])];
+    // az is a .cmd on Windows, so it needs the shell there; every argument above is fixed or checked.
+    const p = spawn('az', args, { windowsHide: true, shell: process.platform === 'win32' });
+    let out = '', err = '';
+    p.stdout.on('data', d => (out += d)); p.stderr.on('data', d => (err += d));
+    p.on('error', () => reject(new Error('The Azure CLI (az) is not installed on this server')));
+    p.on('close', code => {
+      if (code !== 0) return reject(new Error(/az login/i.test(err) ? 'The Azure CLI is not signed in on this server: run az login' : `az account get-access-token failed: ${err.trim().slice(0, 300) || code}`));
+      try { const j = JSON.parse(out); resolve({ token: j.accessToken, until: j.expires_on ? Number(j.expires_on) * 1000 : Date.parse(j.expiresOn) || Date.now() + 1800000 }); } catch { reject(new Error('The Azure CLI did not return a token')); }
+    });
+  });
+}
+
+/** An Entra ID access token for a resource ("https://management.azure.com" or the Databricks id), kept until it nearly expires. */
+export async function azureToken(r: Resource, secret: Secret, resource: string, method = String(r.config.auth || AZ_AUTH[0])): Promise<string> {
+  const key = `${r.id}:${(r as any).rev || ''}:${resource}:${method}`;
+  const c = tokens.get(key);
+  if (c && c.until > Date.now() + 120000) return c.token;
+  let got: { token: string; until: number };
+  if (/managed identity/.test(method)) {
+    const idEnd = process.env.IDENTITY_ENDPOINT, idHeader = process.env.IDENTITY_HEADER;
+    const cid = String(r.config.identityClientId || '').trim();
+    const res = idEnd && idHeader
+      ? await httpCall({ method: 'GET', url: `${idEnd}?api-version=2019-08-01&resource=${encodeURIComponent(resource)}${cid ? `&client_id=${encodeURIComponent(cid)}` : ''}`, headers: { 'X-IDENTITY-HEADER': idHeader }, timeoutMs: 15000, parse: 'json' })
+      : await httpCall({ method: 'GET', url: `http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=${encodeURIComponent(resource)}${cid ? `&client_id=${encodeURIComponent(cid)}` : ''}`, headers: { Metadata: 'true' }, timeoutMs: 15000, parse: 'json' })
+        .catch(() => { throw new Error('No managed identity here: SutraFlow is not running in Azure (or the identity is not assigned)'); });
+    if (res.status >= 400 || !res.body?.access_token) throw new Error(`The managed identity gave no token (${res.status}): ${JSON.stringify(res.body).slice(0, 200)}`);
+    got = { token: res.body.access_token, until: Number(res.body.expires_on) * 1000 || Date.now() + 3000000 };
+  } else if (/Azure CLI/.test(method)) {
+    got = await azCli(resource, String(r.config.tenantId || '').trim() || undefined);
+  } else {
+    const tenant = String(r.config.tenantId || '').trim();
+    if (!tenant) throw new Error('Tenant id is not set');
+    if (!r.config.clientId) throw new Error('Client id is not set');
+    const res = await httpCall({
+      method: 'POST', url: `${endpoints(r).login}/${encodeURIComponent(tenant)}/oauth2/v2.0/token`, timeoutMs: 20000, parse: 'json',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'client_credentials', client_id: r.config.clientId, client_secret: secret(r.config.clientSecretSecret, 'Client secret'), scope: `${resource}/.default` }).toString(),
+    });
+    if (res.status >= 400 || !res.body?.access_token) throw new Error(`Sign-in failed (${res.status}): ${res.body?.error_description?.split('\r\n')[0] || res.body?.error || JSON.stringify(res.body).slice(0, 200)}`);
+    got = { token: res.body.access_token, until: Date.now() + (Number(res.body.expires_in) || 3600) * 1000 };
+  }
+  tokens.set(key, got);
+  return got.token;
+}
+
+const errText = (body: any, text?: string) => String(body?.error?.message || body?.message || body?.error_description || body?.error || text || JSON.stringify(body)).slice(0, 400);
+const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((res, rej) => {
+  const t = setTimeout(res, ms);
+  signal?.addEventListener('abort', () => { clearTimeout(t); rej(new Error('Stopped')); }, { once: true });
+});
+const secretOf = (c: ExecCtx): Secret => (n, what) => { const v = c.secret(n); if (v === undefined || v === null) throw new Error(`${what || 'Secret'}: secret "${n}" does not exist`); return v; };
+
+// ---------- Data Factory ----------
+export function adfClient(r: Resource, secret: Secret, signal?: AbortSignal) {
+  for (const k of ['subscriptionId', 'resourceGroup', 'factoryName']) if (!String(r.config[k] || '').trim()) throw new Error(`${k === 'factoryName' ? 'Data factory' : k === 'resourceGroup' ? 'Resource group' : 'Subscription id'} is not set on ${r.name}`);
+  const mgmt = endpoints(r).management;
+  const path = `/subscriptions/${encodeURIComponent(r.config.subscriptionId)}/resourceGroups/${encodeURIComponent(r.config.resourceGroup)}/providers/Microsoft.DataFactory/factories/${encodeURIComponent(r.config.factoryName)}`;
+  const call = async (method: string, sub: string, body?: unknown, query: Record<string, string> = {}) => {
+    const token = await azureToken(r, secret, mgmt);
+    const u = new URL(`${mgmt}${path}${sub}`);
+    u.searchParams.set('api-version', '2018-06-01');
+    for (const [k, v] of Object.entries(query)) if (v !== '' && v !== undefined) u.searchParams.set(k, v);
+    const res = await httpCall({ method, url: u.toString(), headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body), timeoutMs: 60000, signal, parse: 'json' });
+    if (res.status >= 400) throw new Error(`Data Factory ${method} ${sub || 'factory'} failed (${res.status}): ${errText(res.body, res.text)}`);
+    return res.body;
+  };
+  const monitorUrl = (runId: string) => `https://adf.azure.com/en/monitoring/pipelineruns/${runId}?factory=${encodeURIComponent(path)}`;
+  return { call, path, monitorUrl };
+}
+
+const ADF_DONE = ['Succeeded', 'Failed', 'Cancelled'];
+const shapeRun = (r: any) => ({ runId: r.runId, pipeline: r.pipelineName, status: r.status, message: r.message || '', runStart: r.runStart || null, runEnd: r.runEnd || null, durationMs: r.durationInMs ?? null, parameters: r.parameters || {}, invokedBy: r.invokedBy?.name || '' });
+async function adfActivities(adf: ReturnType<typeof adfClient>, runId: string) {
+  const now = new Date();
+  const r = await adf.call('POST', `/pipelineruns/${encodeURIComponent(runId)}/queryActivityruns`, { lastUpdatedAfter: new Date(now.getTime() - 30 * 86400000).toISOString(), lastUpdatedBefore: new Date(now.getTime() + 86400000).toISOString() });
+  return (r.value || []).map((a: any) => ({ activity: a.activityName, type: a.activityType, status: a.status, start: a.activityRunStart, end: a.activityRunEnd, durationMs: a.durationInMs, error: a.error?.message || '', errorCode: a.error?.errorCode || '', output: a.output ?? null }));
+}
+
+/** Waits for a pipeline run to end, logging each change; cancels it when the wait runs out (if asked). */
+async function adfWait(c: ExecCtx, adf: ReturnType<typeof adfClient>, runId: string, pollMs: number, limitMs: number, cancelOnLimit: boolean) {
+  const t0 = Date.now();
+  let last = '';
+  for (;;) {
+    const run = await adf.call('GET', `/pipelineruns/${encodeURIComponent(runId)}`);
+    if (run.status !== last) { c.log('info', `${run.pipelineName || 'Pipeline'} run ${runId}: ${run.status}`); last = run.status; }
+    if (ADF_DONE.includes(run.status)) return run;
+    if (Date.now() - t0 > limitMs) {
+      if (cancelOnLimit) { await adf.call('POST', `/pipelineruns/${encodeURIComponent(runId)}/cancel`, undefined, { isRecursive: 'true' }).catch(() => {}); }
+      throw new Error(`The pipeline run ${runId} was still ${run.status} after ${Math.round(limitMs / 60000)} minutes${cancelOnLimit ? '; it was cancelled' : ''}. Monitor it: ${adf.monitorUrl(runId)}`);
+    }
+    await sleep(pollMs, c.signal);
+  }
+}
+
+const adfConn = F('connection', 'Data factory', 'resource', '', { resourceKind: 'azureDataFactory' });
+const dbxConn = F('connection', 'Databricks workspace', 'resource', '', { resourceKind: 'databricks' });
+const kvObj = (c: ExecCtx, k: string) => Object.fromEntries(((c.raw(k) as any[]) || []).filter(r => r?.k).map(r => [String(r.k), c.resolve(r.v)]));
+const jsonObj = (v: unknown, what: string) => {
+  if (v === undefined || v === null || v === '') return {};
+  if (typeof v === 'object') return v as Record<string, unknown>;
+  try { const o = JSON.parse(String(v)); if (o && typeof o === 'object' && !Array.isArray(o)) return o; } catch { /* below */ }
+  throw new Error(`${what} must be a JSON object`);
+};
+const conn = (c: ExecCtx, kind: string, what: string) => requireResource(c.raw('connection'), kind, what);
+const waitFields = (dflt: number): Field[] => [
+  F('wait', 'Wait until it ends', 'bool', true, { help: 'Off: start it and go on at once with its run id (check it later with a status step).' }),
+  F('waitMinutes', 'Wait at most (minutes)', 'number', dflt, when('wait', true)),
+  F('cancelOnLimit', 'Cancel the run when the wait runs out', 'bool', true, when('wait', true)),
+];
+
+// ---------- Databricks ----------
+export function dbxClient(r: Resource, secret: Secret, signal?: AbortSignal) {
+  const host = String(r.config.host || '').trim().replace(/\/+$/, '');
+  if (!/^https?:\/\//.test(host)) throw new Error(`Workspace address of ${r.name} must start with https://`);
+  const auth = String(r.config.auth || 'personal access token');
+  const token = async () => {
+    if (auth === 'personal access token') return secret(r.config.tokenSecret, 'Access token');
+    if (auth === 'Databricks OAuth (service principal)') {
+      const key = `${r.id}:${(r as any).rev || ''}:dbx-oauth`;
+      const cached = tokens.get(key);
+      if (cached && cached.until > Date.now() + 120000) return cached.token;
+      if (!r.config.clientId) throw new Error('Client id is not set');
+      const res = await httpCall({ method: 'POST', url: `${host}/oidc/v1/token`, timeoutMs: 20000, parse: 'json', headers: { 'content-type': 'application/x-www-form-urlencoded', authorization: 'Basic ' + Buffer.from(`${r.config.clientId}:${secret(r.config.clientSecretSecret, 'Client secret')}`).toString('base64') }, body: 'grant_type=client_credentials&scope=all-apis' });
+      if (res.status >= 400 || !res.body?.access_token) throw new Error(`Databricks sign-in failed (${res.status}): ${errText(res.body, res.text)}`);
+      tokens.set(key, { token: res.body.access_token, until: Date.now() + (Number(res.body.expires_in) || 3600) * 1000 });
+      return res.body.access_token as string;
+    }
+    return azureToken(r, secret, DATABRICKS_RESOURCE, auth.replace('Azure service principal', 'service principal (client secret)'));
+  };
+  const call = async (method: string, path: string, body?: unknown, query: Record<string, string | number | undefined> = {}) => {
+    const u = new URL(path.startsWith('http') ? path : `${host}${path}`);
+    for (const [k, v] of Object.entries(query)) if (v !== '' && v !== undefined) u.searchParams.set(k, String(v));
+    const res = await httpCall({ method, url: u.toString(), headers: { authorization: `Bearer ${await token()}`, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body), timeoutMs: 60000, signal, parse: 'json' });
+    if (res.status >= 400) throw new Error(`Databricks ${method} ${u.pathname} failed (${res.status}): ${errText(res.body, res.text)}`);
+    return res.body ?? {};
+  };
+  return { call, host };
+}
+
+const DBX_RUN_DONE = ['TERMINATED', 'SKIPPED', 'INTERNAL_ERROR'];
+async function dbxWaitRun(c: ExecCtx, dbx: ReturnType<typeof dbxClient>, runId: number, pollMs: number, limitMs: number, cancelOnLimit: boolean) {
+  const t0 = Date.now();
+  let last = '';
+  for (;;) {
+    const run = await dbx.call('GET', '/api/2.1/jobs/runs/get', undefined, { run_id: runId });
+    const st = run.state || {};
+    const now = `${st.life_cycle_state}${st.result_state ? `/${st.result_state}` : ''}`;
+    if (now !== last) { c.log('info', `Databricks run ${runId}: ${now}${st.state_message ? ` (${st.state_message})` : ''}`); last = now; }
+    if (DBX_RUN_DONE.includes(st.life_cycle_state)) return run;
+    if (Date.now() - t0 > limitMs) {
+      if (cancelOnLimit) await dbx.call('POST', '/api/2.1/jobs/runs/cancel', { run_id: runId }).catch(() => {});
+      throw new Error(`The Databricks run ${runId} was still ${now} after ${Math.round(limitMs / 60000)} minutes${cancelOnLimit ? '; it was cancelled' : ''}: ${run.run_page_url || ''}`);
+    }
+    await sleep(pollMs, c.signal);
+  }
+}
+/** A notebook's dbutils.notebook.exit value, as JSON when it is JSON. */
+const exitValue = (v: unknown) => { if (typeof v !== 'string') return v ?? null; try { return JSON.parse(v); } catch { return v; } };
+
+async function dbxClusterRunning(c: ExecCtx, dbx: ReturnType<typeof dbxClient>, clusterId: string, start: boolean, limitMs: number) {
+  const t0 = Date.now();
+  let started = false;
+  for (;;) {
+    const cl = await dbx.call('GET', '/api/2.0/clusters/get', undefined, { cluster_id: clusterId });
+    if (cl.state === 'RUNNING') return cl;
+    if (['TERMINATED', 'TERMINATING'].includes(cl.state) && !started) {
+      if (!start) throw new Error(`The cluster ${cl.cluster_name || clusterId} is ${cl.state}; start it, or tick Start the cluster when stopped`);
+      if (cl.state === 'TERMINATED') { c.log('info', `Starting the cluster ${cl.cluster_name || clusterId}`); await dbx.call('POST', '/api/2.0/clusters/start', { cluster_id: clusterId }); started = true; }
+    }
+    if (cl.state === 'ERROR' || cl.state === 'UNKNOWN') throw new Error(`The cluster ${cl.cluster_name || clusterId} is ${cl.state}: ${cl.state_message || ''}`);
+    if (Date.now() - t0 > limitMs) throw new Error(`The cluster ${cl.cluster_name || clusterId} did not start within ${Math.round(limitMs / 60000)} minutes`);
+    await sleep(5000, c.signal);
+  }
+}
+
+/** Rows of a statement or command result as objects keyed by column name. */
+const asObjects = (cols: string[], rows: any[][]) => rows.map(r => Object.fromEntries(cols.map((k, i) => [k, r[i]])));
+
+const LANGS = ['python', 'sql', 'scala', 'r'];
+
+export const azureActivities: Activity[] = [
+  {
+    type: 'adfRun', palette: 'azure', name: 'Run ADF pipeline', glyph: '⛁', ports: ['out', 'failed'], timeoutMs: 24 * 3600000,
+    desc: 'Runs an Azure Data Factory pipeline with parameters and, when asked, waits for it: Succeeded goes to out; Failed or Cancelled to failed, with the failing activities and their errors. Can rerun a failed run from the failed activity.',
+    fields: [
+      adfConn,
+      F('pipeline', 'Pipeline', 'text', 'CopySalesToLake', { tpl: true, help: 'The pipeline name as in the factory.' }),
+      F('parameters', 'Parameters', 'kv', [{ k: 'runDate', v: '{{input.date}}' }], { tpl: true, help: 'Pipeline parameters by name. Objects and lists are passed as JSON.' }),
+      F('parametersJson', 'More parameters (JSON)', 'code', '', { tpl: true, help: 'Optional: a JSON object merged with the rows above, for nested values.' }),
+      F('mode', 'Run', 'select', 'new run', { options: ['new run', 'rerun from the failed activity', 'rerun from an activity'], help: 'Reruns repeat an earlier run (its run id below) from where it failed, or from a named activity.' }),
+      F('referenceRunId', 'Earlier run id', 'text', '{{input.runId}}', { tpl: true, showIf: { k: 'mode', in: ['rerun from the failed activity', 'rerun from an activity'] } }),
+      F('startActivity', 'Start from activity', 'text', '', { tpl: true, ...when('mode', 'rerun from an activity') }),
+      ...waitFields(120),
+      F('withActivities', 'Include activity runs', 'bool', true, { help: 'Each activity of the run with its status, duration, output and error.', ...when('wait', true) }),
+    ],
+    designCheck: cfg => [...(cfg.connection ? [] : ['Choose the data factory connection']), ...(String(cfg.pipeline || '').trim() ? [] : ['Give the pipeline name'])],
+    outputHint: { runId: '', pipeline: '', status: 'Succeeded', message: '', runStart: '', runEnd: '', durationMs: 0, parameters: {}, activities: [{ activity: '', type: '', status: '', durationMs: 0, error: '', output: {} }], failedActivities: [{ activity: '', error: '' }], monitorUrl: '' },
+    execute: async c => {
+      const r = conn(c, 'azureDataFactory', 'Data factory');
+      const adf = adfClient(r, secretOf(c), c.signal);
+      const pipeline = String(c.v('pipeline') || '').trim();
+      if (!pipeline) throw new Error('Pipeline is not set');
+      const params = { ...kvObj(c, 'parameters'), ...jsonObj(c.v('parametersJson'), 'More parameters') };
+      const mode = c.raw('mode') || 'new run';
+      const query: Record<string, string> = {};
+      if (mode !== 'new run') {
+        const ref = String(c.v('referenceRunId') || '').trim();
+        if (!ref) throw new Error('Give the run id of the earlier run to rerun');
+        Object.assign(query, { referencePipelineRunId: ref, isRecovery: 'true' }, mode === 'rerun from the failed activity' ? { startFromFailure: 'true' } : { startActivityName: String(c.v('startActivity') || '') });
+      }
+      const started = await adf.call('POST', `/pipelines/${encodeURIComponent(pipeline)}/createRun`, params, query);
+      const runId = started.runId;
+      c.log('info', `Started ${pipeline}: run ${runId}`);
+      if (c.raw('wait') === false) return { out: { runId, pipeline, status: 'Queued', parameters: params, monitorUrl: adf.monitorUrl(runId) } };
+      const pollMs = Math.max(1, Number(r.config.pollSeconds) || 15) * 1000;
+      const run = await adfWait(c, adf, runId, pollMs, (Number(c.raw('waitMinutes')) > 0 ? Number(c.raw('waitMinutes')) : 120) * 60000, c.raw('cancelOnLimit') !== false);
+      const activities = c.raw('withActivities') === false ? [] : await adfActivities(adf, runId).catch(() => []);
+      const out = { ...shapeRun(run), activities, failedActivities: activities.filter((a: any) => a.status === 'Failed').map((a: any) => ({ activity: a.activity, error: a.error })), monitorUrl: adf.monitorUrl(runId) };
+      return { port: run.status === 'Succeeded' ? 'out' : 'failed', out };
+    },
+  },
+  {
+    type: 'adfMonitor', palette: 'azure', name: 'ADF pipeline run', glyph: '◷', ports: ['out', 'failed'], timeoutMs: 24 * 3600000,
+    desc: 'Checks on Azure Data Factory: the status of a run, waiting for it, cancelling it, its activity runs, the recent runs of the factory, the pipelines, or starting and stopping a factory trigger.',
+    fields: [
+      adfConn,
+      F('op', 'Operation', 'select', 'get run', { options: ['get run', 'wait for run', 'cancel run', 'activity runs', 'recent runs', 'list pipelines', 'start trigger', 'stop trigger'] }),
+      F('runId', 'Run id', 'text', '{{input.runId}}', { tpl: true, ...when('op', 'get run', 'wait for run', 'cancel run', 'activity runs') }),
+      F('pipeline', 'Only this pipeline', 'text', '', { tpl: true, ...when('op', 'recent runs') }),
+      F('status', 'Only with status', 'select', 'any', { options: ['any', 'Succeeded', 'Failed', 'InProgress', 'Queued', 'Cancelled'], ...when('op', 'recent runs') }),
+      F('hours', 'Updated in the last (hours)', 'number', 24, when('op', 'recent runs')),
+      F('trigger', 'Factory trigger', 'text', '', { tpl: true, ...when('op', 'start trigger', 'stop trigger') }),
+      F('waitMinutes', 'Wait at most (minutes)', 'number', 120, when('op', 'wait for run')),
+      F('cancelOnLimit', 'Cancel the run when the wait runs out', 'bool', false, when('op', 'wait for run')),
+    ],
+    designCheck: cfg => (cfg.connection ? [] : ['Choose the data factory connection']),
+    outputHint: { runId: '', status: '', runs: [{ runId: '', pipeline: '', status: '', runStart: '', durationMs: 0 }], activities: [{ activity: '', status: '', error: '' }], pipelines: [{ name: '', parameters: {} }], count: 0 },
+    execute: async c => {
+      const r = conn(c, 'azureDataFactory', 'Data factory');
+      const adf = adfClient(r, secretOf(c), c.signal);
+      const op = c.raw('op') || 'get run';
+      const runId = String(c.v('runId') || '').trim();
+      const needRun = () => { if (!runId) throw new Error('Run id is not set'); return encodeURIComponent(runId); };
+      switch (op) {
+        case 'get run': return { out: { ...shapeRun(await adf.call('GET', `/pipelineruns/${needRun()}`)), monitorUrl: adf.monitorUrl(runId) } };
+        case 'wait for run': {
+          needRun();
+          const run = await adfWait(c, adf, runId, Math.max(1, Number(r.config.pollSeconds) || 15) * 1000, (Number(c.raw('waitMinutes')) > 0 ? Number(c.raw('waitMinutes')) : 120) * 60000, c.raw('cancelOnLimit') === true);
+          const activities = await adfActivities(adf, runId).catch(() => []);
+          return { port: run.status === 'Succeeded' ? 'out' : 'failed', out: { ...shapeRun(run), activities, monitorUrl: adf.monitorUrl(runId) } };
+        }
+        case 'cancel run': await adf.call('POST', `/pipelineruns/${needRun()}/cancel`, undefined, { isRecursive: 'true' }); return { out: { runId, status: 'Cancelling' } };
+        case 'activity runs': { const a = await adfActivities(adf, needRun()); return { out: { runId, activities: a, count: a.length } }; }
+        case 'recent runs': {
+          const hours = Math.max(1, Number(c.raw('hours')) || 24);
+          const filters: any[] = [];
+          const p = String(c.v('pipeline') || '').trim();
+          if (p) filters.push({ operand: 'PipelineName', operator: 'Equals', values: [p] });
+          if (c.raw('status') && c.raw('status') !== 'any') filters.push({ operand: 'Status', operator: 'Equals', values: [c.raw('status')] });
+          const res = await adf.call('POST', '/queryPipelineRuns', { lastUpdatedAfter: new Date(Date.now() - hours * 3600000).toISOString(), lastUpdatedBefore: new Date(Date.now() + 60000).toISOString(), filters, orderBy: [{ orderBy: 'RunStart', order: 'DESC' }] });
+          const runs = (res.value || []).map(shapeRun);
+          return { out: { runs, count: runs.length } };
+        }
+        case 'list pipelines': {
+          const res = await adf.call('GET', '/pipelines');
+          const pipelines = (res.value || []).map((p: any) => ({ name: p.name, parameters: Object.fromEntries(Object.entries(p.properties?.parameters || {}).map(([k, v]: any) => [k, v.type])), folder: p.properties?.folder?.name || '' }));
+          return { out: { pipelines, count: pipelines.length } };
+        }
+        default: {
+          const t = String(c.v('trigger') || '').trim();
+          if (!t) throw new Error('Factory trigger is not set');
+          await adf.call('POST', `/triggers/${encodeURIComponent(t)}/${op === 'start trigger' ? 'start' : 'stop'}`);
+          return { out: { trigger: t, status: op === 'start trigger' ? 'Started' : 'Stopped' } };
+        }
+      }
+    },
+  },
+  {
+    type: 'adfRunTrigger', palette: 'azure', name: 'ADF run finished trigger', glyph: '⛁', trigger: true, ports: ['succeeded', 'failed', 'cancelled'],
+    desc: 'Starts the Sutra when a pipeline run of the data factory ends, whoever started it (a schedule, a person, another tool): to alert on failures, rerun them, or carry on with the next work. Polls while deployed.',
+    fields: [
+      adfConn,
+      F('pipelines', 'Only these pipelines', 'text', '', { help: 'Comma separated; empty = every pipeline.' }),
+      F('pollSeconds', 'Check every (seconds)', 'number', 60),
+      F('testEvent', 'Test event (JSON)', 'code', JSON.stringify({ runId: 'a1b2c3d4-0000-4000-8000-000000000001', pipeline: 'CopySalesToLake', status: 'Failed', message: 'Operation on target Copy sales failed: the source file was not found', runStart: '2026-10-19T01:00:00Z', runEnd: '2026-10-19T01:04:10Z', durationMs: 250000, parameters: { runDate: '2026-10-18' }, invokedBy: 'NightlySchedule' }, null, 2)),
+    ],
+    designCheck: cfg => (cfg.connection ? [] : ['Choose the data factory connection']),
+    outputHint: { runId: '', pipeline: '', status: '', message: '', runStart: '', runEnd: '', durationMs: 0, parameters: {}, invokedBy: '', monitorUrl: '' },
+    execute: c => {
+      const e = c.input ?? JSON.parse(c.raw('testEvent') || '{}');
+      return { port: e.status === 'Succeeded' ? 'succeeded' : e.status === 'Cancelled' ? 'cancelled' : 'failed', out: e };
+    },
+  },
+  {
+    type: 'databricksRun', palette: 'azure', name: 'Run Databricks job or notebook', glyph: '◆', ports: ['out', 'failed'], timeoutMs: 24 * 3600000,
+    desc: 'Runs a Databricks job (by id, with job parameters) or a notebook (by path, with parameters, on a cluster, serverless or a new job cluster) and, when asked, waits for it. A notebook\'s dbutils.notebook.exit value comes back as result (JSON when it is JSON). Failed or cancelled runs go to failed with the error.',
+    fields: [
+      dbxConn,
+      F('what', 'Run', 'select', 'notebook', { options: ['notebook', 'job'] }),
+      F('jobId', 'Job id', 'text', '', { tpl: true, ...when('what', 'job'), help: 'Workflows > the job > Job ID.' }),
+      F('jobParams', 'Job parameters', 'kv', [], { tpl: true, ...when('what', 'job') }),
+      F('notebookPath', 'Notebook path', 'text', '/Workspace/Shared/sales/daily_totals', { tpl: true, ...when('what', 'notebook'), help: 'The notebook in the workspace (or Repos), without .py or .ipynb.' }),
+      F('notebookParams', 'Notebook parameters', 'kv', [{ k: 'run_date', v: '{{input.date}}' }], { tpl: true, ...when('what', 'notebook'), help: 'Read in the notebook with dbutils.widgets.get("run_date"). Values are text.' }),
+      F('compute', 'Compute', 'select', 'existing cluster', { options: ['existing cluster', 'serverless', 'new job cluster'], ...when('what', 'notebook') }),
+      F('clusterId', 'Cluster id', 'text', '', { tpl: true, ...when('compute', 'existing cluster'), help: 'Empty = the default cluster of the workspace connection.' }),
+      F('sparkVersion', 'Runtime version', 'text', '15.4.x-scala2.12', when('compute', 'new job cluster')),
+      F('nodeType', 'Node type', 'text', 'Standard_DS3_v2', when('compute', 'new job cluster')),
+      F('workers', 'Workers', 'number', 1, when('compute', 'new job cluster')),
+      ...waitFields(120),
+    ],
+    designCheck: cfg => [...(cfg.connection ? [] : ['Choose the Databricks workspace']), ...((cfg.what || 'notebook') === 'job' ? (String(cfg.jobId || '').trim() ? [] : ['Give the job id']) : (String(cfg.notebookPath || '').trim() ? [] : ['Give the notebook path']))],
+    outputHint: { runId: 0, runPageUrl: '', state: '', result: null, error: '', errorTrace: '', durationMs: 0, tasks: [{ task: '', runId: 0, state: '', result: null, error: '' }] },
+    execute: async c => {
+      const r = conn(c, 'databricks', 'Databricks workspace');
+      const dbx = dbxClient(r, secretOf(c), c.signal);
+      const params = Object.fromEntries(Object.entries(kvObj(c, c.raw('what') === 'job' ? 'jobParams' : 'notebookParams')).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)]));
+      let runId: number;
+      if (c.raw('what') === 'job') {
+        const jobId = Number(String(c.v('jobId') || '').trim());
+        if (!jobId) throw new Error('Job id is not set');
+        runId = (await dbx.call('POST', '/api/2.1/jobs/run-now', { job_id: jobId, ...(Object.keys(params).length ? { job_parameters: params } : {}) })).run_id;
+      } else {
+        const nb = String(c.v('notebookPath') || '').trim();
+        if (!nb) throw new Error('Notebook path is not set');
+        const compute = c.raw('compute') || 'existing cluster';
+        const task: any = { task_key: 'notebook', notebook_task: { notebook_path: nb, base_parameters: params, source: 'WORKSPACE' } };
+        if (compute === 'existing cluster') {
+          const cid = String(c.v('clusterId') || r.config.clusterId || '').trim();
+          if (!cid) throw new Error('No cluster: give a cluster id here or a default cluster on the workspace connection');
+          task.existing_cluster_id = cid;
+        } else if (compute === 'new job cluster') task.new_cluster = { spark_version: c.raw('sparkVersion'), node_type_id: c.raw('nodeType'), num_workers: Number(c.raw('workers')) || 1 };
+        runId = (await dbx.call('POST', '/api/2.1/jobs/runs/submit', { run_name: `SutraFlow ${c.node.name}`, tasks: [task] })).run_id;
+      }
+      c.log('info', `Databricks run ${runId} started`);
+      if (c.raw('wait') === false) return { out: { runId, state: 'PENDING' } };
+      const run = await dbxWaitRun(c, dbx, runId, Math.max(1, Number(r.config.pollSeconds) || 10) * 1000, (Number(c.raw('waitMinutes')) > 0 ? Number(c.raw('waitMinutes')) : 120) * 60000, c.raw('cancelOnLimit') !== false);
+      const tasks = [];
+      for (const t of run.tasks || []) {
+        const o = await dbx.call('GET', '/api/2.1/jobs/runs/get-output', undefined, { run_id: t.run_id }).catch(() => ({}));
+        tasks.push({ task: t.task_key, runId: t.run_id, state: t.state?.result_state || t.state?.life_cycle_state, result: exitValue(o.notebook_output?.result), error: o.error || t.state?.state_message || '', errorTrace: o.error_trace || '' });
+      }
+      const ok = run.state?.result_state === 'SUCCESS';
+      const first = tasks[0] || {} as any;
+      return { port: ok ? 'out' : 'failed', out: { runId, runPageUrl: run.run_page_url || '', state: run.state?.result_state || run.state?.life_cycle_state, message: run.state?.state_message || '', result: tasks.length === 1 ? first.result : null, error: ok ? '' : first.error || run.state?.state_message || '', errorTrace: ok ? '' : first.errorTrace || '', durationMs: (run.end_time && run.start_time) ? run.end_time - run.start_time : run.run_duration ?? null, tasks } };
+    },
+  },
+  {
+    type: 'databricksCommand', palette: 'azure', name: 'Databricks code block', glyph: '❖', ports: ['out'], timeoutMs: 6 * 3600000,
+    desc: 'Runs a block of Python, SQL, Scala or R on a running all-purpose cluster, like one notebook cell, and returns its text or table. Python gets the parameters as the dict sutra_params. Can start the cluster first.',
+    fields: [
+      dbxConn,
+      F('clusterId', 'Cluster id', 'text', '', { tpl: true, help: 'Empty = the default cluster of the workspace connection.' }),
+      F('language', 'Language', 'select', 'python', { options: LANGS }),
+      F('code', 'Code', 'code', 'df = spark.table("samples.nyctaxi.trips").where(f"pickup_zip = {sutra_params[\'zip\']}")\nprint(df.count())', { help: 'The last expression or print() is the result. A SQL block returns its rows.' }),
+      F('params', 'Parameters (Python)', 'kv', [{ k: 'zip', v: '{{input.zip}}' }], { tpl: true, ...when('language', 'python'), help: 'Available in the code as sutra_params["name"]; passed as data, never pasted into the code.' }),
+      F('startCluster', 'Start the cluster when stopped', 'bool', true),
+      F('waitMinutes', 'Wait at most (minutes)', 'number', 30),
+    ],
+    designCheck: cfg => [...(cfg.connection ? [] : ['Choose the Databricks workspace']), ...(String(cfg.code || '').trim() ? [] : ['Write the code to run'])],
+    outputHint: { resultType: 'text', text: '', columns: [''], rows: [{}], count: 0, clusterId: '' },
+    execute: async c => {
+      const r = conn(c, 'databricks', 'Databricks workspace');
+      const dbx = dbxClient(r, secretOf(c), c.signal);
+      const clusterId = String(c.v('clusterId') || r.config.clusterId || '').trim();
+      if (!clusterId) throw new Error('No cluster: give a cluster id here or a default cluster on the workspace connection');
+      const limit = (Number(c.raw('waitMinutes')) > 0 ? Number(c.raw('waitMinutes')) : 30) * 60000;
+      await dbxClusterRunning(c, dbx, clusterId, c.raw('startCluster') !== false, limit);
+      const language = LANGS.includes(c.raw('language')) ? c.raw('language') : 'python';
+      let code = String(c.raw('code') || '');
+      if (language === 'python') {
+        // Parameters travel as base64 JSON, so no value can change the code.
+        const b64 = Buffer.from(JSON.stringify(kvObj(c, 'params'))).toString('base64');
+        code = `import json as _sutra_json, base64 as _sutra_b64\nsutra_params = _sutra_json.loads(_sutra_b64.b64decode("${b64}").decode("utf-8"))\n${code}`;
+      }
+      const ctx = (await dbx.call('POST', '/api/1.2/contexts/create', { clusterId, language })).id;
+      try {
+        const cmd = (await dbx.call('POST', '/api/1.2/commands/execute', { clusterId, contextId: ctx, language, command: code })).id;
+        const t0 = Date.now();
+        for (;;) {
+          const st = await dbx.call('GET', '/api/1.2/commands/status', undefined, { clusterId, contextId: ctx, commandId: cmd });
+          if (['Finished', 'Cancelled', 'Error'].includes(st.status)) {
+            const res = st.results || {};
+            if (st.status !== 'Finished' || res.resultType === 'error') throw new Error(`The code failed: ${String(res.summary || res.cause || st.status).replace(/<[^>]+>/g, '').trim().slice(0, 800)}`);
+            if (res.resultType === 'table') {
+              const cols = (res.schema || []).map((s: any) => s.name);
+              const rows = asObjects(cols, res.data || []);
+              return { out: { resultType: 'table', columns: cols, rows, count: rows.length, truncated: !!res.truncated, clusterId } };
+            }
+            return { out: { resultType: res.resultType || 'text', text: typeof res.data === 'string' ? res.data : JSON.stringify(res.data ?? ''), clusterId } };
+          }
+          if (Date.now() - t0 > limit) {
+            await dbx.call('POST', '/api/1.2/commands/cancel', { clusterId, contextId: ctx, commandId: cmd }).catch(() => {});
+            throw new Error(`The code block was still running after ${Math.round(limit / 60000)} minutes and was cancelled`);
+          }
+          await sleep(2000, c.signal);
+        }
+      } finally {
+        dbx.call('POST', '/api/1.2/contexts/destroy', { clusterId, contextId: ctx }).catch(() => {});
+      }
+    },
+  },
+  {
+    type: 'databricksSql', palette: 'azure', name: 'Databricks SQL', glyph: '◫', ports: ['out', 'empty'], timeoutMs: 6 * 3600000,
+    desc: 'Runs a SQL statement on a Databricks SQL warehouse with named parameters (:name, passed as values, never pasted into the SQL) and returns the rows as objects.',
+    fields: [
+      dbxConn,
+      F('warehouseId', 'SQL warehouse id', 'text', '', { tpl: true, help: 'Empty = the default warehouse of the workspace connection.' }),
+      F('statement', 'SQL', 'code', 'SELECT pickup_zip, count(*) AS trips, round(avg(fare_amount), 2) AS avg_fare\nFROM samples.nyctaxi.trips\nWHERE pickup_zip = :zip\nGROUP BY pickup_zip'),
+      F('params', 'Parameters', 'kv', [{ k: 'zip', v: '{{input.zip}}' }], { tpl: true, help: 'Named parameters used as :name in the SQL.' }),
+      F('catalog', 'Catalog', 'text', ''), F('schema', 'Schema', 'text', ''),
+      F('maxRows', 'Maximum rows', 'number', 10000),
+      F('waitMinutes', 'Wait at most (minutes)', 'number', 30),
+    ],
+    designCheck: cfg => [...(cfg.connection ? [] : ['Choose the Databricks workspace']), ...(String(cfg.statement || '').trim() ? [] : ['Write the SQL'])],
+    outputHint: { rows: [{}], columns: [''], count: 0, statementId: '', truncated: false },
+    execute: async c => {
+      const r = conn(c, 'databricks', 'Databricks workspace');
+      const dbx = dbxClient(r, secretOf(c), c.signal);
+      const warehouse = String(c.v('warehouseId') || r.config.warehouseId || '').trim();
+      if (!warehouse) throw new Error('No SQL warehouse: give its id here or a default warehouse on the workspace connection');
+      const params = Object.entries(kvObj(c, 'params')).map(([name, v]) => ({ name, value: v === null || v === undefined ? null : typeof v === 'string' ? v : JSON.stringify(v), type: typeof v === 'number' ? (Number.isInteger(v) ? 'BIGINT' : 'DOUBLE') : typeof v === 'boolean' ? 'BOOLEAN' : 'STRING' }));
+      const max = Math.max(1, Number(c.raw('maxRows')) || 10000);
+      let st = await dbx.call('POST', '/api/2.0/sql/statements', { warehouse_id: warehouse, statement: String(c.raw('statement') || ''), parameters: params, wait_timeout: '30s', on_wait_timeout: 'CONTINUE', format: 'JSON_ARRAY', disposition: 'INLINE', row_limit: max, ...(c.raw('catalog') ? { catalog: c.raw('catalog') } : {}), ...(c.raw('schema') ? { schema: c.raw('schema') } : {}) });
+      const t0 = Date.now(), limit = (Number(c.raw('waitMinutes')) > 0 ? Number(c.raw('waitMinutes')) : 30) * 60000;
+      while (['PENDING', 'RUNNING'].includes(st.status?.state)) {
+        if (Date.now() - t0 > limit) { await dbx.call('POST', `/api/2.0/sql/statements/${st.statement_id}/cancel`).catch(() => {}); throw new Error(`The statement was still running after ${Math.round(limit / 60000)} minutes and was cancelled`); }
+        await sleep(2000, c.signal);
+        st = await dbx.call('GET', `/api/2.0/sql/statements/${st.statement_id}`);
+      }
+      if (st.status?.state !== 'SUCCEEDED') throw new Error(`The statement ${String(st.status?.state || 'failed').toLowerCase()}: ${st.status?.error?.message || ''}`);
+      const cols = (st.manifest?.schema?.columns || []).map((x: any) => x.name);
+      const data: any[][] = [...(st.result?.data_array || [])];
+      let next = st.result?.next_chunk_internal_link;
+      while (next && data.length < max) { const ch = await dbx.call('GET', next); data.push(...(ch.data_array || [])); next = ch.next_chunk_internal_link; }
+      const rows = asObjects(cols, data.slice(0, max));
+      return { port: rows.length ? 'out' : 'empty', out: { rows, columns: cols, count: rows.length, statementId: st.statement_id, truncated: !!st.manifest?.truncated || data.length > max } };
+    },
+  },
+];
+
+/** Test connection of a data factory: signs in, reads the factory, lists its pipelines. */
+export async function testAzure(r: Resource, secret: Secret) {
+  if (r.kind === 'azureDataFactory') {
+    const adf = adfClient(r, secret);
+    const f = await adf.call('GET', '');
+    const p = await adf.call('GET', '/pipelines');
+    const names = (p.value || []).map((x: any) => x.name);
+    return `Signed in and reached ${f.name || r.config.factoryName} (${f.location || 'Azure'}): ${names.length} pipeline${names.length === 1 ? '' : 's'}${names.length ? `: ${names.slice(0, 6).join(', ')}${names.length > 6 ? ', ...' : ''}` : ''}`;
+  }
+  const dbx = dbxClient(r, secret);
+  const me = await dbx.call('GET', '/api/2.0/preview/scim/v2/Me');
+  const parts = [`Signed in to ${new URL(dbx.host).host} as ${me.userName || me.displayName || 'the service principal'}`];
+  if (r.config.clusterId) {
+    const cl = await dbx.call('GET', '/api/2.0/clusters/get', undefined, { cluster_id: r.config.clusterId }).catch((e: any) => ({ state: `not found (${e.message.slice(0, 80)})` }));
+    parts.push(`cluster ${cl.cluster_name || r.config.clusterId} is ${cl.state}`);
+  }
+  if (r.config.warehouseId) {
+    const w = await dbx.call('GET', `/api/2.0/sql/warehouses/${encodeURIComponent(r.config.warehouseId)}`).catch((e: any) => ({ state: `not found (${e.message.slice(0, 80)})` }));
+    parts.push(`SQL warehouse ${w.name || r.config.warehouseId} is ${w.state}`);
+  }
+  return parts.join('; ');
+}
+
+// ---------- the run-finished trigger ----------
+registerListener('adfRunTrigger', c => {
+  const cfg = c.node.config;
+  const every = Math.max(30, Number(cfg.pollSeconds) || 60) * 1000;
+  const only = String(cfg.pipelines || '').split(',').map(s => s.trim()).filter(Boolean);
+  let since = new Date(Date.now() - 60000).toISOString();
+  const seen = new Set<string>();
+  const tick = async () => {
+    try {
+      const r = requireResource(cfg.connection, 'azureDataFactory', 'Data factory');
+      const adf = adfClient(r, (n, w) => { const v = getSecret(n); if (v === undefined) throw new Error(`${w || 'Secret'}: secret "${n}" does not exist`); return v; });
+      const until = new Date().toISOString();
+      const filters: any[] = [{ operand: 'Status', operator: 'In', values: ADF_DONE }];
+      if (only.length) filters.push({ operand: 'PipelineName', operator: 'In', values: only });
+      const res = await adf.call('POST', '/queryPipelineRuns', { lastUpdatedAfter: since, lastUpdatedBefore: until, filters });
+      for (const run of res.value || []) {
+        if (seen.has(run.runId)) continue;
+        seen.add(run.runId);
+        c.fire({ ...shapeRun(run), monitorUrl: adf.monitorUrl(run.runId) });
+      }
+      if (seen.size > 5000) seen.clear();
+      since = new Date(Date.parse(until) - 5000).toISOString();
+      c.status('ok', `Watching ${r.config.factoryName}${only.length ? ` (${only.join(', ')})` : ''}`);
+    } catch (e: any) {
+      c.status('error', e.message);
+    }
+  };
+  tick();
+  const t = setInterval(tick, every);
+  return () => clearInterval(t);
+});

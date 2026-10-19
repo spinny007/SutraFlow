@@ -1,0 +1,99 @@
+import { spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { getSetting } from './db.js';
+
+/**
+ * Python on the SutraFlow server: which interpreter runs Python steps, and checks made before a run
+ * (the designer and Deploy show them): is Python installed, does the code parse, are the packages
+ * there. Results are kept for a minute so the designer stays quick.
+ */
+export interface PythonInfo { ok: boolean; exe: string; prefix: string[]; version: string; path: string; message: string }
+
+const CACHE_MS = 60000;
+let found: { at: number; key: string; info: PythonInfo } | null = null;
+
+const probe = (exe: string, prefix: string[]): PythonInfo | null => {
+  try {
+    const r = spawnSync(exe, [...prefix, '-c', 'import sys,json;print(json.dumps({"v":sys.version.split()[0],"p":sys.executable}))'], { encoding: 'utf8', timeout: 8000, windowsHide: true });
+    if (r.status !== 0 || !r.stdout) return null;
+    const j = JSON.parse(r.stdout.trim().split(/\r?\n/).pop()!);
+    if (!/^3\./.test(j.v)) return null;
+    return { ok: true, exe, prefix, version: j.v, path: j.p, message: `Python ${j.v} at ${j.p}` };
+  } catch { return null; }
+};
+
+/** The interpreter of a virtual environment folder. */
+export const venvPython = (venv: string) => path.join(venv, process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+
+/**
+ * The Python to use: a given interpreter or virtual environment, else SUTRA_PYTHON, the server setting
+ * (Server & APIs), then the py launcher (Windows), python3 and python on the PATH.
+ */
+export function findPython(o: { interpreter?: string; venv?: string } = {}): PythonInfo {
+  const explicit = o.venv ? venvPython(o.venv) : o.interpreter || '';
+  const key = `${explicit}|${process.env.SUTRA_PYTHON || ''}|${getSetting<string>('pythonPath', '')}`;
+  if (found && found.key === key && Date.now() - found.at < CACHE_MS) return found.info;
+  let info: PythonInfo | null = null;
+  if (explicit) {
+    info = probe(explicit, []) || { ok: false, exe: explicit, prefix: [], version: '', path: explicit, message: o.venv ? `No Python in the virtual environment ${o.venv} (expected ${explicit})` : `${explicit} is not a working Python 3` };
+  } else {
+    const configured = process.env.SUTRA_PYTHON || getSetting<string>('pythonPath', '');
+    const tries: [string, string[]][] = [
+      ...(configured ? [[configured, []] as [string, string[]]] : []),
+      ...(process.platform === 'win32' ? [['py', ['-3']] as [string, string[]]] : []),
+      ['python3', []], ['python', []],
+    ];
+    for (const [exe, prefix] of tries) { info = probe(exe, prefix); if (info) break; }
+    info ||= { ok: false, exe: '', prefix: [], version: '', path: '', message: `Python 3 is not installed on this server${configured ? ` (and ${configured} does not work)` : ''}. Install it from python.org (tick "Add python.exe to PATH") or with the package manager (apt install python3), or set its path in Server & APIs or SUTRA_PYTHON.` };
+  }
+  found = { at: Date.now(), key, info };
+  return info;
+}
+export const forgetPython = () => { found = null; };
+
+const checks = new Map<string, { at: number; result: string[] }>();
+const cached = (key: string, make: () => string[]) => {
+  const c = checks.get(key);
+  if (c && Date.now() - c.at < CACHE_MS * 10) return c.result;
+  const result = make();
+  checks.set(key, { at: Date.now(), result });
+  if (checks.size > 500) checks.delete(checks.keys().next().value!);
+  return result;
+};
+
+/** Syntax errors of Python code, with the line, without running it. */
+export function pythonSyntax(py: PythonInfo, code: string): string[] {
+  if (!py.ok || !code.trim()) return [];
+  return cached('syn:' + crypto.createHash('sha1').update(py.path + code).digest('hex'), () => {
+    const r = spawnSync(py.exe, [...py.prefix, '-c', 'import ast,sys\ntry:\n ast.parse(sys.stdin.read())\nexcept SyntaxError as e:\n print(f"line {e.lineno}: {e.msg}")'], { input: code, encoding: 'utf8', timeout: 8000, windowsHide: true });
+    const out = (r.stdout || '').trim();
+    return out ? [`Python syntax error, ${out}`] : [];
+  });
+}
+
+/** Packages (import names) the code needs that are not installed for this Python. */
+export function missingPackages(py: PythonInfo, packages: string[]): string[] {
+  const list = packages.map(p => p.trim()).filter(p => /^[A-Za-z_][\w.]*$/.test(p));
+  if (!py.ok || !list.length) return [];
+  return cached('pkg:' + py.path + list.join(','), () => {
+    const r = spawnSync(py.exe, [...py.prefix, '-c', `import importlib.util,json;print(json.dumps([m for m in ${JSON.stringify(list)} if importlib.util.find_spec(m.split(".")[0]) is None]))`], { encoding: 'utf8', timeout: 15000, windowsHide: true });
+    try { return JSON.parse((r.stdout || '[]').trim().split(/\r?\n/).pop()!); } catch { return []; }
+  });
+}
+
+/** What the Python step would meet on this server, as warnings for the designer and Deploy. */
+export function pythonDesignCheck(cfg: Record<string, any>, scriptsOn: boolean): string[] {
+  const w: string[] = [];
+  if (!scriptsOn) w.push('Script activities are switched off on this server; an administrator can allow them in Server & APIs');
+  const dynamic = (v: unknown) => typeof v === 'string' && (v.includes('{{') || v.startsWith('='));
+  if (cfg.venv && !dynamic(cfg.venv) && !fs.existsSync(String(cfg.venv))) w.push(`Virtual environment folder not found on this server: ${cfg.venv}`);
+  const py = findPython({ interpreter: cfg.python === 'this interpreter' && !dynamic(cfg.pythonPath) ? cfg.pythonPath : undefined, venv: cfg.venv && !dynamic(cfg.venv) && fs.existsSync(String(cfg.venv)) ? cfg.venv : undefined });
+  if (!py.ok) { w.push(py.message); return w; }
+  if ((cfg.source || 'code') === 'code') w.push(...pythonSyntax(py, String(cfg.code || '')));
+  else if (cfg.file && !dynamic(cfg.file) && !fs.existsSync(String(cfg.file))) w.push(`Script file not found on this server: ${cfg.file}`);
+  const miss = missingPackages(py, String(cfg.packages || '').split(','));
+  if (miss.length) w.push(`Python packages not installed for ${py.message.replace(/^Python /, 'Python ')}: ${miss.join(', ')} (pip install ${miss.join(' ')})`);
+  return w;
+}

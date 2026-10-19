@@ -65,6 +65,8 @@ export const RULES: Record<string, Rule> = {
   'PUT /api/releases/policy': R('server'),
   'GET /api/scripts/policy': R(null),
   'PUT /api/scripts/policy': R('server'),
+  'GET /api/scripts/python': R(null),
+  'PUT /api/scripts/python': R('server'),
   'GET /api/engine-variables/policy': R(null),
   'PUT /api/engine-variables/policy': R('server'),
 

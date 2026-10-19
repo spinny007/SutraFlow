@@ -5,6 +5,7 @@ import { config } from './config.js';
 import { getSetting, q, setSetting } from './db.js';
 import { setItemFolder } from './folders.js';
 import type { Field, FlowNode } from './engine/types.js';
+import fs from 'node:fs';
 import path from 'node:path';
 import { getProject, saveProject, projectFilesDir } from './projects.js';
 import { writeSampleDocuments } from './sampledocs.js';
@@ -62,6 +63,11 @@ export const SAMPLES: { id: string; name: string; desc: string; palettes: string
   { id: 'agentteam', name: 'AI agent: supervisor and specialists', palettes: 'AI', desc: 'A supervisor agent published at /chat/help sends each question to the order desk or the policy assistant with Hand off to agent, and answers with what they say.', needs: 'the order desk and knowledge base samples; Ollama with a model' },
   { id: 'agentmcp', name: 'AI agent: tools from another MCP server', palettes: 'AI', desc: 'Lists the tools of an outside MCP server (the file system server started with npx), calls one directly, and gives them to an agent that answers questions about files.', needs: 'Node.js npx on the server; Ollama with a model' },
   { id: 'agentdocs', name: 'AI document assistant: RAG over a folder', palettes: 'AI, Files, Triggers, REST', desc: 'Every 15 minutes, reads the PDF, Word, PowerPoint and Markdown files of a folder into a knowledge base (changed files again, deleted ones out), and answers from it three ways: a REST API, an MCP tool for AI assistants, and a chat agent. Sample documents included.', needs: 'Ollama with a model for the API and the agent (the MCP tool needs none)' },
+  { id: 'adf', name: 'Azure Data Factory: run, monitor, rerun', palettes: 'Azure, Flow control, AI', desc: 'Runs a pipeline with parameters and waits for it, reruns from the failed activity, and watches the factory for failed runs, asking a person before a rerun.', needs: 'an Azure service principal with Data Factory Contributor on the factory' },
+  { id: 'databricks', name: 'Databricks: notebooks, SQL and code blocks', palettes: 'Azure', desc: 'Runs a notebook with parameters and reads its exit value; queries a SQL warehouse with a named parameter and runs a Python cell on a cluster.', needs: 'a Databricks workspace with a cluster and a SQL warehouse; a token or service principal' },
+  { id: 'python', name: 'Python scripts', palettes: 'Scripts', desc: 'Python written in the step and a .py file from the project files, with arguments, parameters and the previous output, printing JSON for the next step.', needs: 'Python 3 on the server; scripts allowed in Server & APIs' },
+  { id: 'youtube', name: 'YouTube: publish from Google Drive, weekly analytics', palettes: 'Apps and social', desc: 'New videos in a Drive folder are saved to the server and uploaded to YouTube; every week the channel\'s analytics go to a Google Sheet.', needs: 'a Google OAuth app with the Drive, YouTube and Sheets scopes' },
+  { id: 'twitch', name: 'Twitch: going live', palettes: 'Apps and social', desc: 'When the channel goes live, a welcome in the chat; after the stream, the follower count.', needs: 'a Twitch application (dev.twitch.tv)' },
   { id: 'skills', name: 'MCP skills: Write CSV file, Post to Facebook page', palettes: 'Triggers, AI, Files, Apps', desc: 'Two Sutras that AI assistants call as tools, on a sample MCP server.', needs: 'a security policy on the MCP server; a Facebook connection for posting' },
 ];
 
@@ -1004,6 +1010,134 @@ export function addSamples(projectId: string, ids?: string[]) {
     edges: [E('t', 'a'), E('a', 'r', 'done'), E('a', 'l', 'limit reached'), E('a', 'l', 'needs a person')],
   });
 
+
+  // ---------- data platforms, Python and social media ----------
+  /** Adds a project variable once (kept when the project has it already). */
+  const ensureVar = (name: string, value: string, description: string) => {
+    const p = getProject(projectId);
+    if (p && !(p.config.variables || []).some((v: any) => v.name === name)) saveProject({ id: p.id, name: p.name, description: p.description, config: { ...p.config, variables: [...(p.config.variables || []), { name, type: 'string', value, description }] } });
+  };
+  const adfC = want('adf') ? conn('azureDataFactory', 'Sample Azure Data Factory', { auth: 'service principal (client secret)', tenantId: '', clientId: '', clientSecretSecret: 'ADF_CLIENT_SECRET', subscriptionId: '', resourceGroup: '', factoryName: '', pollSeconds: 15, cloud: 'Azure (global)' }) : null;
+  const adfRunS = adfC && save({
+    name: 'Sample: ADF run pipeline and wait',
+    description: 'Runs the Data Factory pipeline CopySalesToLake for a date and waits for it. When it fails, it logs the failing activity and reruns the pipeline once from the failed activity (the steps that succeeded are not repeated). Fill in the Sample Azure Data Factory connection (tenant, app, secret ADF_CLIENT_SECRET, subscription, resource group, factory) and use your pipeline name.',
+    nodes: [
+      D(N('s', 'start', 'Run date', 60, 240, { payload: JSON.stringify({ runDate: '2026-10-18' }, null, 2) }), 'The date to load; a timer or another Sutra can start this one with its own date.'),
+      D(N('r', 'adfRun', 'Copy sales to the lake', 360, 240, { connection: adfC.id, pipeline: 'CopySalesToLake', parameters: [{ k: 'runDate', v: '{{input.runDate}}' }], parametersJson: '', mode: 'new run', wait: true, waitMinutes: 120, cancelOnLimit: true, withActivities: true }), 'Starts the pipeline with the date as its runDate parameter and waits up to two hours; a run still going then is cancelled.'),
+      D(N('ok', 'log', 'Log success', 700, 140, { level: 'info', message: "=concat('Pipeline ', {input.pipeline}, ' succeeded in ', round({input.durationMs} div 1000), ' s: ', {input.monitorUrl})" }), 'Records the run and its duration, with the link to the run in Data Factory Studio.'),
+      D(N('f', 'log', 'Log the failure', 700, 340, { level: 'error', message: "=concat('Pipeline ', {input.pipeline}, ' ', {input.status}, ': ', {input.message})" }), 'Records why it failed; an alert rule on error logs or failed runs can notify the data team.'),
+      D(N('rr', 'adfRun', 'Rerun from the failure', 1000, 340, { connection: adfC.id, pipeline: '{{input.pipeline}}', mode: 'rerun from the failed activity', referenceRunId: "{{nodes.Copy sales to the lake.runId}}", wait: true, waitMinutes: 120, cancelOnLimit: true, withActivities: true }), 'Tries once more from the activity that failed (for example after a locked table or a short outage), reusing what already succeeded.'),
+      D(N('g', 'log', 'Log the rerun', 1300, 340, { level: 'warn', message: "=concat('Rerun of ', {input.pipeline}, ': ', {input.status})" }), 'Records how the rerun ended.'),
+    ],
+    edges: [E('s', 'r'), E('r', 'ok'), E('r', 'f', 'failed'), E('f', 'rr'), E('rr', 'g'), E('rr', 'g', 'failed')],
+  });
+  const adfAlert = adfC && save({
+    name: 'Sample: ADF alert on failed runs',
+    description: 'While deployed, watches the data factory for pipeline runs that end, whoever started them (schedules included). A failed run is logged and put to a person (Runs > Approvals) with its error; on Rerun it is run again from the failed activity.',
+    nodes: [
+      D(N('t', 'adfRunTrigger', 'Pipeline run ended', 60, 240, { connection: adfC.id, pipelines: '', pollSeconds: 60 }), 'Checks the factory every minute for runs that ended: succeeded, failed or cancelled. Empty pipeline list = all pipelines.'),
+      D(N('f', 'adfMonitor', 'What failed', 360, 300, { connection: adfC.id, op: 'activity runs', runId: '{{trigger.runId}}' }), 'Reads the activity runs of the failed run, to tell which activity failed and why.'),
+      D(N('a', 'askPerson', 'Rerun it?', 660, 300, { question: "=concat('Pipeline ', {trigger.pipeline}, ' failed: ', {trigger.message}, '. Rerun from the failed activity?')", assignee: 'data-team' }), 'Asks the data team in Approvals; nothing is rerun without a person.'),
+      D(N('r', 'adfRun', 'Rerun from the failure', 960, 240, { connection: adfC.id, pipeline: '{{trigger.pipeline}}', mode: 'rerun from the failed activity', referenceRunId: '{{trigger.runId}}', wait: false }), 'Starts the rerun and goes on; this trigger reports how it ends.'),
+      D(N('l', 'log', 'Log declined', 960, 400, { level: 'warn', message: 'Not rerun: {{trigger.pipeline}} {{trigger.runId}}' }), 'Records that the team chose not to rerun.'),
+      D(N('ok', 'log', 'Log success', 360, 140, { level: 'info', message: '{{trigger.pipeline}} succeeded ({{trigger.durationMs}} ms)' }), 'A record of every successful run, for the project log.'),
+    ],
+    edges: [E('t', 'ok', 'succeeded'), E('t', 'f', 'failed'), E('t', 'f', 'cancelled'), E('f', 'a'), E('a', 'r', 'answered'), E('a', 'l', 'declined')],
+  });
+  const dbxC = want('databricks') ? conn('databricks', 'Sample Databricks', { host: 'https://adb-1234567890123456.7.azuredatabricks.net', auth: 'personal access token', tokenSecret: 'DATABRICKS_TOKEN', clusterId: '', warehouseId: '', pollSeconds: 10 }) : null;
+  const dbxNb = dbxC && save({
+    name: 'Sample: Databricks notebook with parameters',
+    description: 'Runs a notebook with a date parameter on the default cluster, waits for it, and logs the value the notebook returns with dbutils.notebook.exit(json.dumps({...})). In the notebook: run_date = dbutils.widgets.get("run_date"). Fill in the Sample Databricks connection (address, token secret DATABRICKS_TOKEN, cluster id).',
+    nodes: [
+      D(N('s', 'start', 'Run date', 60, 240, { payload: JSON.stringify({ date: '2026-10-18' }, null, 2) }), 'The date to process.'),
+      D(N('r', 'databricksRun', 'Daily totals notebook', 360, 240, { connection: dbxC.id, what: 'notebook', notebookPath: '/Workspace/Shared/sales/daily_totals', notebookParams: [{ k: 'run_date', v: '{{input.date}}' }], compute: 'existing cluster', clusterId: '', wait: true, waitMinutes: 60, cancelOnLimit: true }), 'Runs the notebook as a one-time run with run_date, and waits up to an hour.'),
+      D(N('ok', 'log', 'Log the result', 680, 160, { level: 'info', message: "=concat('Notebook finished: ', string({input.result}), ' ', {input.runPageUrl})" }), 'The notebook\'s exit value (JSON becomes fields) and the link to the run.'),
+      D(N('f', 'log', 'Log the error', 680, 340, { level: 'error', message: '{{input.error}} {{input.runPageUrl}}' }), 'The error of the failing cell and the link to the run, for whoever looks next.'),
+    ],
+    edges: [E('s', 'r'), E('r', 'ok'), E('r', 'f', 'failed')],
+  });
+  const dbxSql = dbxC && save({
+    name: 'Sample: Databricks SQL and code block',
+    description: 'Queries the samples.nyctaxi.trips table on a SQL warehouse with a named parameter, then runs a Python block on the cluster with the count as a parameter. Set the default warehouse and cluster on the Sample Databricks connection.',
+    nodes: [
+      D(N('s', 'start', 'Zip code', 60, 240, { payload: JSON.stringify({ zip: '10001' }, null, 2) }), 'The pickup zip code to look at.'),
+      D(N('q', 'databricksSql', 'Trips for the zip', 360, 240, { connection: dbxC.id, warehouseId: '', statement: 'SELECT pickup_zip, count(*) AS trips, round(avg(fare_amount), 2) AS avg_fare\nFROM samples.nyctaxi.trips\nWHERE pickup_zip = :zip\nGROUP BY pickup_zip', params: [{ k: 'zip', v: '{{input.zip}}' }], catalog: '', schema: '', maxRows: 1000, waitMinutes: 10 }), 'Counts trips with SQL on the warehouse; the zip code is a parameter, never pasted into the SQL.'),
+      D(N('c', 'databricksCommand', 'Classify in Python', 680, 240, { connection: dbxC.id, clusterId: '', language: 'python', code: 'trips = int(sutra_params["trips"])\nprint("busy" if trips > 1000 else "quiet")', params: [{ k: 'trips', v: '{{input.rows[0].trips}}' }], startCluster: true, waitMinutes: 20 }), 'Runs a Python cell on the cluster (starting it when stopped), with the count as sutra_params["trips"].'),
+      D(N('l', 'log', 'Log it', 980, 240, { level: 'info', message: "=concat('Zip ', {trigger.zip}, ' is ', {input.text})" }), 'Records the outcome.'),
+      D(N('e', 'log', 'No trips', 680, 400, { level: 'warn', message: 'No trips for {{trigger.zip}}' }), 'The query returned no rows.'),
+    ],
+    edges: [E('s', 'q'), E('q', 'c'), E('q', 'e', 'empty'), E('c', 'l')],
+  });
+  if (want('python')) {
+    const p = getProject(projectId);
+    if (p) {
+      const dir = path.join(projectFilesDir(p.name), 'scripts');
+      fs.mkdirSync(dir, { recursive: true });
+      const f = path.join(dir, 'sales_report.py');
+      if (!fs.existsSync(f)) fs.writeFileSync(f, '"""Sales report: reads the amounts given as parameters and prints a summary as JSON."""\nimport json\nimport os\nimport statistics\nimport sys\n\nparams = json.load(open(os.environ["SUTRA_PARAMS_FILE"]))\namounts = [float(a) for a in params.get("amounts", [])]\nif not amounts:\n    print("No amounts given", file=sys.stderr)\n    sys.exit(2)\nprint(json.dumps({\n    "region": params.get("region", ""),\n    "count": len(amounts),\n    "total": round(sum(amounts), 2),\n    "average": round(statistics.mean(amounts), 2),\n    "median": round(statistics.median(amounts), 2),\n    "mode": sys.argv[1] if len(sys.argv) > 1 else "full",\n}))\n', 'utf8');
+    }
+    ensureVar('SCRIPTS_FOLDER', '${files}/scripts', 'Folder of the Python scripts the Sutras run. ${files} is the project files folder.');
+  }
+  const pyInline = want('python') && save({
+    name: 'Sample: Python script with parameters',
+    description: 'Runs Python written in the step: reads its parameters (SUTRA_PARAMS_FILE) and the previous step\'s output (SUTRA_INPUT_FILE), and prints JSON that the next step maps as result. Needs Python 3 on the server and scripts allowed in Server & APIs; the designer warns when either is missing.',
+    nodes: [
+      D(N('s', 'start', 'Order', 60, 240, { payload: JSON.stringify({ orderId: 'A-1001', lines: [{ sku: 'TEA-01', amount: 240 }, { sku: 'CUP-02', amount: 450 }] }, null, 2) }), 'An order with its lines, as a REST call or a file would bring it.'),
+      D(N('p', 'python', 'Total with tax', 360, 240, { source: 'code', code: 'import json, os\n\nparams = json.load(open(os.environ["SUTRA_PARAMS_FILE"]))\norder = json.load(open(os.environ["SUTRA_INPUT_FILE"]))\n\nnet = sum(float(l["amount"]) for l in order["lines"])\ntax = round(net * float(params["taxRate"]), 2)\nprint(json.dumps({"orderId": params["orderId"], "net": net, "tax": tax, "total": round(net + tax, 2)}))', args: [], params: [{ k: 'orderId', v: '{{input.orderId}}' }, { k: 'taxRate', v: '0.18' }], python: 'detected', pythonPath: '', venv: '', packages: '', workDir: '', timeoutMs: 60000, failOnExit: true }), 'Adds up the lines and the tax in Python; the order id and tax rate are parameters, the order comes as the input file.'),
+      D(N('l', 'log', 'Log the total', 660, 160, { level: 'info', message: "=concat('Order ', {input.result.orderId}, ': total ', {input.result.total})" }), 'Uses the printed JSON (result) like any other step\'s output.'),
+      D(N('x', 'log', 'Log the error', 660, 340, { level: 'error', message: '{{input.error.message}}' }), 'A Python error (with the last lines of the traceback) or a missing Python ends up here.'),
+    ],
+    edges: [E('s', 'p'), E('p', 'l'), E('p', 'x', 'error')],
+  });
+  const pyFile = want('python') && save({
+    name: 'Sample: Python script file',
+    description: 'Runs the script sales_report.py from the project\'s scripts folder (project variable SCRIPTS_FOLDER) with an argument and parameters, the way a data team keeps scripts in files under version control. The script comes with the sample.',
+    nodes: [
+      D(N('s', 'start', 'Sales', 60, 240, { payload: JSON.stringify({ region: 'West', amounts: [1200, 980, 2200, 450] }, null, 2) }), 'The amounts to summarise.'),
+      D(N('p', 'python', 'Sales report', 360, 240, { source: 'file', file: '{{gv.SCRIPTS_FOLDER}}/sales_report.py', args: ['quick'], params: [{ k: 'region', v: '{{input.region}}' }, { k: 'amounts', v: '{{input.amounts}}' }], python: 'detected', pythonPath: '', venv: '', packages: 'statistics', workDir: '', timeoutMs: 60000, failOnExit: true }), 'Runs the script with the argument quick (sys.argv[1]); lists and objects arrive as JSON in the parameters file.'),
+      D(N('l', 'log', 'Log the report', 660, 240, { level: 'info', message: "=concat({input.result.region}, ': ', {input.result.count}, ' sales, total ', {input.result.total}, ', median ', {input.result.median})" }), 'Records the summary.'),
+    ],
+    edges: [E('s', 'p'), E('p', 'l')],
+  });
+  const ytC = want('youtube') ? conn('oauthApp', 'Sample Google (Drive and YouTube)', { provider: 'google', clientId: '', clientSecretSecret: '', scopes: 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly https://www.googleapis.com/auth/spreadsheets', refreshTokenSecret: '' }) : null;
+  if (ytC) ensureVar('DOWNLOADS', '${files}/downloads', 'Folder where files from Google Drive are saved before upload. ${files} is the project files folder.');
+  const ytPublish = ytC && save({
+    name: 'Sample: Publish Drive videos to YouTube',
+    description: 'While deployed, watches the Google Drive folder "Videos to publish": each new video is saved to a server file (streamed, so large videos are fine), uploaded to YouTube as private with its file name as the title, and the server copy is removed. Set the folder id, connect the Sample Google connection with the Drive and YouTube scopes, and choose the privacy you want.',
+    nodes: [
+      D(N('t', 'googleDriveTrigger', 'New video in Drive', 60, 240, { connection: ytC.id, folderId: '', mimeType: 'any', pollSeconds: 120, testEvent: JSON.stringify({ event: 'added', id: '1AbCvideo', name: 'Tea tasting - Assam vs Darjeeling.mp4', mimeType: 'video/mp4', modifiedTime: '2026-10-19T09:00:00Z' }, null, 2) }), 'Checks the Drive folder every two minutes; a file added there starts the Sutra.'),
+      D(N('d', 'googleDrive', 'Save to a server file', 360, 240, { connection: ytC.id, op: 'download', fileId: '{{trigger.id}}', saveTo: 'server file', savePath: "=concat({gv.DOWNLOADS}, '/', {trigger.id}, '-', {trigger.name})" }), 'Google Drive first: streams the video to the downloads folder (project variable DOWNLOADS) instead of holding it in memory.'),
+      D(N('y', 'youtube', 'Upload to YouTube', 660, 240, { connection: ytC.id, op: 'upload video', from: 'server file', filePath: '{{input.path}}', title: '{{trigger.name}}', description: 'Uploaded by SutraFlow from Google Drive.', tags: 'tea, Asha Traders', categoryId: '26', privacy: 'private', publishAt: '', madeForKids: false, addToPlaylist: '', notify: false }), 'Then YouTube: uploads the saved file with a resumable upload, as private, so someone can check it before publishing.'),
+      D(N('m', 'fileMove', 'Remove the server copy', 960, 240, { folder: '{{gv.DOWNLOADS}}', action: 'delete', from: "=concat({trigger.id}, '-', {trigger.name})" }), 'Deletes the downloaded copy; the video stays in Drive and on YouTube.'),
+      D(N('l', 'log', 'Log the video', 1260, 240, { level: 'info', message: "=concat('Uploaded ', {trigger.name}, ': ', {nodes.Upload to YouTube.url})" }), 'Records the YouTube address of the new video.'),
+      D(N('x', 'log', 'Log the failure', 960, 420, { level: 'error', message: 'Not published: {{trigger.name}}: {{input.error.message}}' }), 'A download or upload that failed, with the reason (for example a missing scope or the daily upload quota).'),
+    ],
+    edges: [E('t', 'd', 'added'), E('d', 'y'), E('y', 'm'), E('m', 'l'), E('d', 'x', 'error'), E('y', 'x', 'error')],
+  });
+  const ytReport = ytC && save({
+    name: 'Sample: YouTube weekly analytics to Google Sheets',
+    description: 'Every Monday at 08:00, reads the channel\'s views, watch time, likes and new subscribers for each day of the last week from YouTube Analytics and appends them to a Google Sheet. Set the spreadsheet id.',
+    nodes: [
+      D(N('t', 'timer', 'Every Monday 08:00', 60, 240, { mode: 'cron', cron: '0 0 8 * * MON', every: 300, timezone: 'Asia/Kolkata', payload: '{}' }), 'Starts the report once a week.'),
+      D(N('a', 'youtube', 'Last week by day', 360, 240, { connection: ytC.id, op: 'analytics report', startDate: "=format-date('YYYY-MM-DD', add-to-date(current-date(), 0, 0, -7))", endDate: "=format-date('YYYY-MM-DD', add-to-date(current-date(), 0, 0, -1))", metrics: 'views,estimatedMinutesWatched,likes,subscribersGained', dimensions: 'day', filters: '' }), 'One row per day with the four metrics, from YouTube Analytics.'),
+      D(N('g', 'googleSheets', 'Append to the sheet', 660, 240, { connection: ytC.id, op: 'append', spreadsheetId: '', range: 'Weekly!A1:E', header: true, rows: '{{input.rows}}', valueInput: 'USER_ENTERED' }), 'Adds the rows under the header day, views, estimatedMinutesWatched, likes, subscribersGained.'),
+    ],
+    edges: [E('t', 'a'), E('a', 'g')],
+  });
+  const twC = want('twitch') ? conn('oauthApp', 'Sample Twitch', { provider: 'twitch', clientId: '', clientSecretSecret: 'TWITCH_CLIENT_SECRET', scopes: 'user:read:email user:write:chat moderator:read:followers', refreshTokenSecret: '' }) : null;
+  const twLive = twC && save({
+    name: 'Sample: Twitch going live announcement',
+    description: 'While deployed, notices when the channel goes live: welcomes viewers in the chat and logs the stream; when the stream ends, logs the latest broadcast and the follower count. Connect the Sample Twitch connection (an application at dev.twitch.tv with the redirect address shown on the connection).',
+    nodes: [
+      D(N('t', 'twitchLiveTrigger', 'Channel goes live', 60, 240, { connection: twC.id, logins: '', pollSeconds: 60 }), 'Checks the connected channel every minute; going live and going offline are separate outputs.'),
+      D(N('c', 'twitch', 'Welcome in chat', 360, 140, { connection: twC.id, op: 'chat message', logins: '', message: "=concat('We are live: ', {trigger.title}, '! Ask your tea questions in the chat.')" }), 'Posts a welcome message in the channel\'s chat as the connected account.'),
+      D(N('l', 'log', 'Log the stream', 660, 140, { level: 'info', message: "=concat('Live: ', {trigger.title}, ' (', {trigger.game}, ')')" }), 'Records the stream title and category.'),
+      D(N('f', 'twitch', 'Followers', 360, 340, { connection: twC.id, op: 'followers', logins: '', max: 1 }), 'After the stream: how many followers the channel has now.'),
+      D(N('g', 'log', 'Log after the stream', 660, 340, { level: 'info', message: "=concat('Stream ended; followers: ', {input.total})" }), 'Records the follower count after each stream, for a simple growth record.'),
+    ],
+    edges: [E('t', 'c', 'live'), E('c', 'l'), E('t', 'f', 'offline'), E('f', 'g')],
+  });
+
   linkConnections(projectId, made, conn);
   for (const m of made) setFlowFolder(m.id, folderOf(m.sample));
   // Connections made for the samples go to a Samples folder of Resources.
@@ -1011,7 +1145,7 @@ export function addSamples(projectId: string, ids?: string[]) {
 
   return [forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, release, localAi, email, queue, timer, fileTrig, textFormats, dbUpd, dbProc, soapCall, emailIn, firebase, google, apps, aiMore,
     soapPublic, soapMock, soapMockCall, msCustomers, msStock, msOrders, sqlInstall, sqlService, ...sftp, ...ftp,
-    toolOrder, toolStock, desk, ragWeb, ragSp, ragAsk, queueAgent, team, mcpAgent, docOne, docFeed, docApi, docTool, docAgent]
+    toolOrder, toolStock, desk, ragWeb, ragSp, ragAsk, queueAgent, team, mcpAgent, docOne, docFeed, docApi, docTool, docAgent, adfRunS, adfAlert, dbxNb, dbxSql, pyInline, pyFile, ytPublish, ytReport, twLive]
     .filter((f): f is NonNullable<typeof f> & { id: string; name: string } => !!f)
     .map(f => ({ id: f.id, name: f.name, folder: folderOf(made.find(m => m.id === f.id)?.sample || '') }));
 }
@@ -1031,6 +1165,9 @@ const FOLDERS: Record<string, string[]> = {
   'Queues': ['queue'],
   'Operations': ['scripts', 'release'],
   'AI agents': ['agentdesk', 'agentrag', 'agentqueue', 'agentteam', 'agentmcp', 'agentdocs'],
+  'Azure and Databricks': ['adf', 'databricks'],
+  'Python': ['python'],
+  'Social media': ['youtube', 'twitch'],
 };
 const folderOf = (sample: string) => { const t = Object.entries(FOLDERS).find(([, ids]) => ids.includes(sample)); return t ? `Samples/${t[0]}` : 'Samples'; };
 for (const s of SAMPLES) s.folder = folderOf(s.id);
@@ -1050,6 +1187,9 @@ export const SAMPLE_SUTRAS: Record<string, string[]> = {
   'Samples/SOAP': ['Call a SOAP service', 'Call a public SOAP service', 'Mock SOAP weather service', 'Call the mock SOAP service'],
   'Samples/SFTP and FTP': ['SFTP upload list read archive', 'SFTP file trigger', 'FTP upload list read archive', 'FTP file trigger'],
   'Samples/AI agents': ['AI tool order status', 'AI tool stock check', 'Order desk agent', 'Knowledge feed from web pages', 'Knowledge feed from SharePoint', 'Policy assistant', 'Agent fed by a queue', 'Supervisor agent', 'Agent with outside MCP tools', 'Add one document to knowledge', 'Document feed from a folder', 'Document questions API', 'AI tool search documents', 'Document assistant'],
+  'Samples/Azure and Databricks': ['ADF run pipeline and wait', 'ADF alert on failed runs', 'Databricks notebook with parameters', 'Databricks SQL and code block'],
+  'Samples/Python': ['Python script with parameters', 'Python script file'],
+  'Samples/Social media': ['Publish Drive videos to YouTube', 'YouTube weekly analytics to Google Sheets', 'Twitch going live announcement'],
 };
 /** Letters and digits only, without "Sample:" and a " 2" suffix, so renamed punctuation still matches. */
 const sampleKey = (name: string) => name.replace(/^Sample:\s*/i, '').replace(/\s+\d+$/, '').toLowerCase().replace(/[^a-z0-9]/g, '');

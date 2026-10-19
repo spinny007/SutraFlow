@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { getSetting, setSetting } from '../db.js';
-import { encrypt, decrypt, requireSecret } from '../secrets.js';
+import { encrypt, decrypt, requireSecret, getSecret } from '../secrets.js';
 import { requireResource, effectiveResource, type Resource } from '../resources.js';
 import { httpCall } from '../security/outbound.js';
 
@@ -14,9 +14,10 @@ export const PROVIDERS: Record<string, { auth: string; token: string; extraAuth?
   dropbox: { auth: 'https://www.dropbox.com/oauth2/authorize', token: 'https://api.dropboxapi.com/oauth2/token', extraAuth: { token_access_type: 'offline' }, api: 'https://api.dropboxapi.com' },
   facebook: { auth: 'https://www.facebook.com/v19.0/dialog/oauth', token: 'https://graph.facebook.com/v19.0/oauth/access_token', api: 'https://graph.facebook.com/v19.0' },
   microsoft: { auth: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize', token: 'https://login.microsoftonline.com/common/oauth2/v2.0/token', api: 'https://graph.microsoft.com/v1.0' },
+  twitch: { auth: 'https://id.twitch.tv/oauth2/authorize', token: 'https://id.twitch.tv/oauth2/token', extraAuth: { force_verify: 'true' }, api: 'https://api.twitch.tv/helix' },
 };
 
-interface Stored { access: { iv: string; tag: string; data: string }; refresh?: { iv: string; tag: string; data: string }; expiresAt: number; scope?: string; account?: string; connectedAt: string }
+interface Stored { access: { iv: string; tag: string; data: string }; refresh?: { iv: string; tag: string; data: string }; expiresAt: number; scope?: string; account?: string; connectedAt: string; refreshFrom?: string }
 
 const endpoints = (r: Resource) => {
   const p = PROVIDERS[r.config.provider];
@@ -66,12 +67,13 @@ async function tokenRequest(r: Resource, form: Record<string, string>) {
   return res.body as { access_token: string; refresh_token?: string; expires_in?: number; scope?: string };
 }
 
-function save(id: string, t: { access_token: string; refresh_token?: string; expires_in?: number; scope?: string }, keepRefresh?: Stored['refresh']) {
+function save(id: string, t: { access_token: string; refresh_token?: string; expires_in?: number; scope?: string | string[] }, keepRefresh?: Stored['refresh'], refreshFrom?: string) {
   const s: Stored = {
+    refreshFrom,
     access: encrypt(t.access_token),
     refresh: t.refresh_token ? encrypt(t.refresh_token) : keepRefresh,
     expiresAt: Date.now() + (Number(t.expires_in) || 3600) * 1000,
-    scope: t.scope,
+    scope: Array.isArray(t.scope) ? t.scope.join(' ') : t.scope,
     connectedAt: new Date().toISOString(),
   };
   setSetting(`oauth:${id}`, s);
@@ -89,16 +91,24 @@ const refreshing = new Map<string, Promise<string>>();
 export async function accessToken(id: string): Promise<{ token: string; resource: Resource; api: string }> {
   const r = effectiveResource(id);
   if (!r || r.kind !== 'oauthApp') throw new Error('OAuth connection not found');
-  const s = getSetting<Stored | null>(`oauth:${id}`, null);
-  if (!s) throw new Error(`${r.name} is not connected. Open it in the project explorer and press Connect account.`);
+  let s = getSetting<Stored | null>(`oauth:${id}`, null);
+  // A refresh token kept as a secret (set by a pipeline on a server without the studio) stands in for Connect account.
+  const fromSecret = String(r.config.refreshTokenSecret || '').trim();
+  if (fromSecret && (!s || s.refreshFrom !== fromSecret)) {
+    const v = getSecret(fromSecret);
+    if (v === undefined) throw new Error(`${r.name}: the refresh token secret "${fromSecret}" does not exist on this server`);
+    s = { access: encrypt(''), refresh: encrypt(v), expiresAt: 0, connectedAt: new Date().toISOString(), refreshFrom: fromSecret };
+    setSetting(`oauth:${id}`, s);
+  }
+  if (!s) throw new Error(`${r.name} is not connected. Press Connect account on it in the studio, run "sutra connect" against this server, or give it a refresh token secret.`);
   const api = endpoints(r).api;
   if (s.expiresAt > Date.now() + 60000) return { token: decrypt(s.access), resource: r, api };
   if (!s.refresh) throw new Error(`${r.name}: the access token expired and there is no refresh token. Connect the account again.`);
   let p = refreshing.get(id);
   if (!p) {
     p = (async () => {
-      const t = await tokenRequest(r, { grant_type: 'refresh_token', refresh_token: decrypt(s.refresh!) });
-      save(id, t, s.refresh);
+      const t = await tokenRequest(r, { grant_type: 'refresh_token', refresh_token: decrypt(s!.refresh!) });
+      save(id, t, s!.refresh, s!.refreshFrom);
       return t.access_token;
     })().finally(() => refreshing.delete(id));
     refreshing.set(id, p);
@@ -106,15 +116,33 @@ export async function accessToken(id: string): Promise<{ token: string; resource
   return { token: await p, resource: r, api };
 }
 
+/** The address of a provider URL for this connection: relative paths join the API base; an API base override (tests, proxies) keeps the path. */
+export function providerUrl(resource: Resource, api: string, url: string) {
+  let u = /^https?:\/\//i.test(url) ? url : api.replace(/\/+$/, '') + '/' + url.replace(/^\/+/, '');
+  if (resource.config.apiBase && /^https?:\/\//i.test(url)) u = resource.config.apiBase.replace(/\/+$/, '') + new URL(url).pathname + new URL(url).search;
+  return u;
+}
+
+/** A streamed request with the connection's token (large uploads and downloads); the caller reads or sends the body. */
+export async function streamCall(id: string, url: string, init: { method: string; headers?: Record<string, string>; body?: any; signal?: AbortSignal }) {
+  const { token, api, resource } = await accessToken(id);
+  const res = await fetch(providerUrl(resource, api, url), { method: init.method, headers: { authorization: `Bearer ${token}`, ...(init.headers || {}) }, body: init.body, signal: init.signal, ...(init.body && typeof init.body !== 'string' && !Buffer.isBuffer(init.body) ? { duplex: 'half' } : {}) } as any);
+  if (res.status >= 400) {
+    const text = await res.text().catch(() => '');
+    let msg = text; try { const j = JSON.parse(text); msg = j.error?.message || j.message || text; } catch { /* text */ }
+    throw new Error(`${init.method} ${new URL(res.url || url).pathname} failed (${res.status}): ${String(msg).slice(0, 300)}`);
+  }
+  return res;
+}
+
 /** Authorized request to the provider's API (relative paths join the API base). */
 export async function apiCall(id: string, o: { method: string; url: string; query?: Record<string, string>; headers?: Record<string, string>; body?: string | Buffer; parse?: string; signal?: AbortSignal; timeoutMs?: number }) {
   const { token, api, resource } = await accessToken(id);
-  // With an API base override (tests, proxies), absolute provider URLs keep only their path.
-  let url = /^https?:\/\//i.test(o.url) ? o.url : api.replace(/\/+$/, '') + '/' + o.url.replace(/^\/+/, '');
-  if (resource.config.apiBase && /^https?:\/\//i.test(o.url)) url = resource.config.apiBase.replace(/\/+$/, '') + new URL(o.url).pathname + new URL(o.url).search;
-  const u = new URL(url);
+  const u = new URL(providerUrl(resource, api, o.url));
   for (const [k, v] of Object.entries(o.query || {})) if (v !== undefined && v !== '') u.searchParams.set(k, v);
-  const res = await httpCall({ method: o.method, url: u.toString(), headers: { authorization: `Bearer ${token}`, accept: 'application/json', ...(o.headers || {}) }, body: o.body, timeoutMs: o.timeoutMs || 60000, signal: o.signal, parse: o.parse || 'auto' });
+  // Twitch wants the app's client id with every call.
+  const extra: Record<string, string> = resource.config.provider === 'twitch' ? { 'client-id': resource.config.clientId } : {};
+  const res = await httpCall({ method: o.method, url: u.toString(), headers: { authorization: `Bearer ${token}`, accept: 'application/json', ...extra, ...(o.headers || {}) }, body: o.body, timeoutMs: o.timeoutMs || 60000, signal: o.signal, parse: o.parse || 'auto' });
   if (res.status >= 400) {
     const msg = typeof res.body === 'object' ? res.body?.error?.message || res.body?.error_summary || JSON.stringify(res.body) : res.text;
     throw new Error(`${o.method} ${u.pathname} failed (${res.status}): ${String(msg).slice(0, 300)}`);
