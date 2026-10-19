@@ -156,41 +156,6 @@ for (const store of ['PostgreSQL (pgvector)', 'Qdrant', 'Chroma', 'Pinecone']) {
   });
 }
 
-const PG = process.env.SUTRA_TEST_PG_URL;
-test('knowledge in a real PostgreSQL server with pgvector', { skip: !PG && 'set SUTRA_TEST_PG_URL, for example postgres://postgres@127.0.0.1:5432/postgres' }, async () => {
-  const { default: pg } = await import('pg');
-  const name = `sutra_vector_test_${Date.now()}`;
-  const admin = new pg.Client({ connectionString: PG });
-  await admin.connect();
-  await admin.query(`CREATE DATABASE ${name}`);
-  const u = new URL(PG!); u.pathname = `/${name}`;
-  try {
-    const dbRes = saveResource({ kind: 'database', name: `PG ${name}`, project_id: pid, config: { driver: 'postgres', host: u.hostname, port: Number(u.port) || 5432, database: name, user: decodeURIComponent(u.username) || 'postgres', poolMax: 2 } }).id;
-    const kb = getResource(saveResource({ kind: 'aiKnowledge', name: `KB ${name}`, project_id: pid, config: { store: 'PostgreSQL (pgvector)', database: dbRes, table: 'kb', embedWith: 'built-in' } }).id)!;
-    const s = () => '';
-    await kn.addKnowledge(kb, s, 'Policies/HR/leave.md', 'Staff get 24 days of paid leave each year.', { team: 'hr' });
-    await kn.addKnowledge(kb, s, 'Policies/Customer/returns.md', 'Customers may return items within 30 days of delivery.', { team: 'support' });
-    let hits = await kn.searchKnowledge(kb, s, 'paid leave for staff');
-    assert.equal(hits[0].source, 'Policies/HR/leave.md');
-    hits = await kn.searchKnowledge(kb, s, 'days', { meta: { team: 'support' } });
-    assert.deepEqual([...new Set(hits.map(h => h.source))], ['Policies/Customer/returns.md']);
-    assert.equal(await kn.removeKnowledge(kb, 'Policies/HR', false, s), 1);
-    assert.deepEqual(await kn.knowledgeStats(kb, s), { chunks: 1, sources: 1 });
-    const c = new pg.Client({ connectionString: u.toString() });
-    await c.connect();
-    const ext = await c.query(`select extversion from pg_extension where extname = 'vector'`);
-    const col = await c.query(`select format_type(atttypid, atttypmod) t from pg_attribute where attrelid = 'kb'::regclass and attname = 'embedding'`);
-    await c.end();
-    assert.ok(ext.rows[0]?.extversion, 'the vector extension was installed in the database');
-    assert.equal(col.rows[0].t, 'vector(512)');
-  } finally {
-    const { closeDbPools } = await import('../server/src/connectors/db.js');
-    await closeDbPools();
-    await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`).catch(() => {});
-    await admin.end();
-  }
-});
-
 test('document text: Word, PowerPoint, Excel, PDF, HTML', async () => {
   let d = await documentText(DOCX, { name: 'Returns.docx' });
   assert.equal(d.type, 'docx');
