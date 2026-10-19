@@ -1,3 +1,12 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 import { useEffect, useRef, useState } from 'react';
 import { get, post } from '../src/api';
 import { ToastHost } from '../src/ui';
@@ -12,6 +21,7 @@ import { Roles } from './Roles';
 import { Audit } from './Audit';
 import { Releases } from './Releases';
 import { Database } from './Database';
+import { Memory } from './Memory';
 import { Traffic, GwApps, Plans, Firewall, Apis } from './Gateway';
 import { AlertsPage, RulesPage, ChannelsPage } from './Alerts';
 import { ConsolePanel, useEntries } from './log';
@@ -20,10 +30,10 @@ import { ConsolePanel, useEntries } from './log';
  * Admin Console: manages what is deployed (projects, Sutras, runs, approvals), the engines, people,
  * system accounts, roles and the audit log. Design work stays in the designer.
  */
-type Page = 'overview' | 'apps' | 'approvals' | 'engines' | 'alerts' | 'rules' | 'channels' | 'traffic' | 'gwapps' | 'plans' | 'firewall' | 'apis' | 'people' | 'systems' | 'roles' | 'audit' | 'releases' | 'database';
+type Page = 'overview' | 'apps' | 'approvals' | 'engines' | 'alerts' | 'rules' | 'channels' | 'traffic' | 'gwapps' | 'plans' | 'firewall' | 'apis' | 'people' | 'systems' | 'roles' | 'audit' | 'releases' | 'database' | 'memory';
 
 const NAV: { group: string; items: { id: Page; label: string; perm?: string }[] }[] = [
-  { group: 'Operate', items: [{ id: 'overview', label: 'Overview' }, { id: 'apps', label: 'Applications' }, { id: 'approvals', label: 'Approvals' }, { id: 'releases', label: 'Releases', perm: 'view' }, { id: 'engines', label: 'Engines' }] },
+  { group: 'Operate', items: [{ id: 'overview', label: 'Overview' }, { id: 'apps', label: 'Applications' }, { id: 'approvals', label: 'Approvals' }, { id: 'releases', label: 'Releases', perm: 'view' }, { id: 'engines', label: 'Engines' }, { id: 'memory', label: 'Memory tables', perm: 'view' }] },
   { group: 'Alerts', items: [{ id: 'alerts', label: 'Alerts', perm: 'view' }, { id: 'rules', label: 'Alert rules', perm: 'view' }, { id: 'channels', label: 'Channels', perm: 'alerts' }] },
   { group: 'Gateway', items: [{ id: 'traffic', label: 'Traffic', perm: 'gateway' }, { id: 'gwapps', label: 'Apps and keys', perm: 'gateway' }, { id: 'plans', label: 'Plans', perm: 'gateway' }, { id: 'firewall', label: 'Firewall', perm: 'gateway' }, { id: 'apis', label: 'APIs', perm: 'gateway' }] },
   { group: 'Access', items: [{ id: 'people', label: 'Users', perm: 'users' }, { id: 'systems', label: 'System accounts', perm: 'users' }, { id: 'roles', label: 'Roles', perm: 'users' }] },
@@ -128,6 +138,7 @@ export function Console() {
               {current === 'approvals' && <Approvals />}
               {current === 'releases' && <Releases />}
               {current === 'engines' && <Engines />}
+              {current === 'memory' && <Memory />}
               {current === 'alerts' && <AlertsPage />}
               {current === 'rules' && <RulesPage />}
               {current === 'channels' && <ChannelsPage />}

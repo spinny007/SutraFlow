@@ -1,9 +1,16 @@
+# SutraFlow
+# Copyright (c) 2026-27 Surya Partap Singh
+# Developer: Surya Partap Singh | Website: MixAgile.com
+# File version: 1.7.5
+# License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+# A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+# SPDX-License-Identifier: AGPL-3.0-only
 # syntax=docker/dockerfile:1
 # SutraFlow: one image for the studio and for headless engines (SUTRA_MODE=studio | engine).
 #
-#   docker build -t sutraflow:1.6.0 .
-#   docker run -p 4800:4800 -p 8080:8080 -v sutra-data:/data sutraflow:1.6.0
-#   docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:1.6.0
+#   docker build -t sutraflow:1.7.5 .
+#   docker run -p 4800:4800 -p 8080:8080 -v sutra-data:/data sutraflow:1.7.5
+#   docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:1.7.5
 
 FROM node:24-bookworm-slim AS build
 WORKDIR /app

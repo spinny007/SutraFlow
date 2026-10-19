@@ -1,3 +1,12 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 import crypto from 'node:crypto';
 import { hostname as osHostname } from 'node:os';
 import { getPath, asText, toNumber } from './values.js';
@@ -416,6 +425,8 @@ export interface VariableHooks {
   setProject(projectId: string | null, name: string, value: unknown): void;
   getEngine(name: string): any;
   setEngine(name: string, value: unknown): void;
+  /** A row (or one field of it) of a project's memory table, from memory only. */
+  memoryLookup?(projectId: string | null, table: string, key: string, field?: string): any;
 }
 let hooks: VariableHooks | null = null;
 export function setVariableHooks(h: VariableHooks) { hooks = h; }
@@ -507,6 +518,8 @@ export const FUNCTIONS: Record<string, FnDef> = Object.fromEntries([
     lazy: (a, ctx) => needHooks().getEngine(s(evaluate(a[0], ctx))) }],
   ['set-sengine-variable', { group: 'Variables', sig: "set-sengine-variable('NAME', value)", help: 'Changes a Sengine variable for every project. Not advised: works only when the administrator allows it in Server & APIs.', min: 2, max: 2,
     lazy: (a, ctx) => { const v = evaluate(a[1], ctx); needHooks().setEngine(s(evaluate(a[0], ctx)), v); return v; } }],
+  ['memory-lookup', { group: 'Variables', sig: "memory-lookup('Table', key, 'field'?)", help: 'A row of a memory table of the project, by key, or one field of it; empty when the row is not in memory. Reads memory only, so it never waits: use it in mappings for fast lookups (Memory get also fetches missing rows).', min: 2, max: 3,
+    lazy: (a, ctx) => { const h = needHooks(); if (!h.memoryLookup) throw new ExprError('Memory tables are not available here'); return h.memoryLookup(ctx.process?.project ?? null, s(evaluate(a[0], ctx)), s(evaluate(a[1], ctx)), a[2] ? s(evaluate(a[2], ctx)) : undefined); } }],
   // Earlier names, still accepted; not listed in the function library.
   ['get-engine-variable', { group: 'Variables', hidden: true, sig: "get-engine-variable('NAME')", help: 'Same as get-sengine-variable.', min: 1, max: 1,
     lazy: (a, ctx) => needHooks().getEngine(s(evaluate(a[0], ctx))) }],

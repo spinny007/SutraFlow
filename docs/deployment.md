@@ -153,10 +153,10 @@ Laragon's MySQL works as a DB Ops connection (driver mysql, host 127.0.0.1, port
 One image serves both roles:
 
 ```
-docker build -t sutraflow:1.6.0 .
-docker run -p 4800:4800 -p 8080:8080 -v sutra-data:/data sutraflow:1.6.0                    # studio
+docker build -t sutraflow:1.7.5 .
+docker run -p 4800:4800 -p 8080:8080 -v sutra-data:/data sutraflow:1.7.5                    # studio
 docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=... \
-           -v ./deploy:/deploy:ro -p 8080:8080 -p 8443:8443 sutraflow:1.6.0                  # engine
+           -v ./deploy:/deploy:ro -p 8080:8080 -p 8443:8443 sutraflow:1.7.5                  # engine
 ```
 
 - Runs as the non-root `node` user, with `tini` as init so `docker stop` drains running steps.
@@ -164,7 +164,7 @@ docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=...
 - JSON logs on standard output.
 - `docker-compose.yml`: a studio and an engine. `docker-compose.cluster.yml`: PostgreSQL, a studio and two engines.
 
-**Immutable releases**: `FROM sutraflow:1.6.0` + `COPY orders-1.4.0.sutra /deploy/` makes each release one image.
+**Immutable releases**: `FROM sutraflow:1.7.5` + `COPY orders-1.4.0.sutra /deploy/` makes each release one image.
 
 Keep `SUTRA_MASTER_KEY` in your secret store: it decrypts the vault. With it set, the vault survives replacing containers. Without it, the key file in `/data` must be kept.
 

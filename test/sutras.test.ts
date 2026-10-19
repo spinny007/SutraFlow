@@ -1,3 +1,12 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -331,4 +340,13 @@ test('every sample uses only pipes and functions that exist', async () => {
     for (const e of d.edges) walk(e, `${a.name} / connection`);
   }
   assert.deepEqual(bad, []);
+});
+
+test('every source file carries the copyright and AGPL licence header with its version', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const r = spawnSync(process.execPath, [path.join(root, 'tools', 'add-headers.mjs'), '--check'], { cwd: root, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const guide = fs.readFileSync(path.join(root, 'docs', 'sutraflow-user-guide.html'), 'utf8').slice(0, 400);
+  assert.match(guide, /Copyright \(c\) 2026-27 Surya Partap Singh .*MixAgile\.com .*AGPL-3\.0-only/);
 });

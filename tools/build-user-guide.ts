@@ -1,3 +1,12 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 /**
  * Builds docs/sutraflow-user-guide.html: one self-contained page (screenshots embedded).
  * The chapters live in tools/guide/chapters.ts and the activity advice in tools/guide/activities.ts;
@@ -209,6 +218,7 @@ function build() {
   const body = all.map((c, i) => `<h3 id="ch-${c.id}" class="ch">${i + 1}. ${esc(c.title)}</h3>\n${expand(c.html)}`).join('\n');
 
   const html = `<!doctype html>
+<!-- SutraFlow ${version} | Copyright (c) 2026-27 Surya Partap Singh | Developer: Surya Partap Singh | Website: MixAgile.com | License: GNU AGPL v3.0 only (SPDX-License-Identifier: AGPL-3.0-only) -->
 <html lang="en">
 <head>
 <meta charset="utf-8">

@@ -1,4 +1,15 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 import crypto from 'node:crypto';
+import { setEngineName } from './cluster.js';
+import { allMemTables, memTable, reload, memClear, memStats, memRows, memPut, memDelete } from './memtables.js';
 import * as gitAccounts from './git/accounts.js';
 import * as gitWs from './git/workspaces.js';
 import { GIT_PROVIDERS } from './git/accounts.js';
@@ -326,6 +337,30 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   // Tuning: engine values for the cluster or one engine, and per deployed Sutra.
   app.get('/api/console/tuning', async () => ({ fields: { engine: ENGINE_FIELDS, sutra: SUTRA_FIELDS }, ...engineTuning() }));
   // This machine and the settings recommended for it (sizing.ts).
+  // Memory tables: figures per table on this engine, reload and clear.
+  app.get('/api/console/memory', async (req: any) => {
+    // Filters: project, a name containing a text, failsafe or memory only.
+    const qs = req.query || {};
+    return allMemTables().filter(t => (!qs.project || t.project === qs.project) && (!qs.find || t.name.toLowerCase().includes(String(qs.find).toLowerCase())) && (!qs.keep || (qs.keep === 'memory only') === !t.failsafe));
+  });
+  // Hot reload: this engine loads again now, every other engine within the sync time.
+  app.post('/api/console/memory/:id/reload', async (req: any) => { try { const t = await memTable(req.params.id); await reload(t, true); return memStats(t); } catch (e: any) { throw bad(e.message); } });
+  app.get('/api/console/memory/:id/rows', async (req: any) => {
+    try { const qs = req.query || {}; return memRows(await memTable(req.params.id), { find: qs.find, field: qs.field, value: qs.value, offset: Number(qs.offset) || 0, limit: Number(qs.limit) || 50 }); } catch (e: any) { throw bad(e.message); }
+  });
+  // Change one value by hand (a rate, a code): saved like Memory put, so failsafe tables reach every engine.
+  app.put('/api/console/memory/:id/rows', async (req: any) => {
+    try {
+      const t = await memTable(req.params.id);
+      const row = req.body?.row;
+      if (!row || typeof row !== 'object') throw new Error('Give the row as an object');
+      return memPut(t, row, req.body?.key ? String(req.body.key) : undefined);
+    } catch (e: any) { throw bad(e.message); }
+  });
+  app.delete('/api/console/memory/:id/rows/:key', async (req: any) => { try { return { deleted: memDelete(await memTable(req.params.id), String(req.params.key)) }; } catch (e: any) { throw bad(e.message); } });
+  app.post('/api/console/memory/:id/clear', async (req: any) => { try { const t = await memTable(req.params.id); memClear(t); return memStats(t); } catch (e: any) { throw bad(e.message); } });
+  // A display name for an engine (its id stays the same).
+  app.put('/api/console/engines/:id/name', async (req: any) => ({ id: req.params.id, name: setEngineName(req.params.id, req.body?.name) }));
   app.get('/api/console/machine', async () => ({ ...machineInfo(), engine: config.engineId, database: dbKind(), memoryRuns: engine.memoryRuns, running: engine.running }));
   app.put('/api/console/tuning/engine', async (req: any) => { try { setEngineTuning(req.body?.values || {}); return engineTuning(); } catch (e: any) { throw bad(e.message); } });
   app.put('/api/console/tuning/engines/:id', async (req: any) => { try { setEngineTuning(req.body?.values || {}, req.params.id); return engineTuning(req.params.id); } catch (e: any) { throw bad(e.message); } });

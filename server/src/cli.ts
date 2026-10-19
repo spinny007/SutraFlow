@@ -1,4 +1,13 @@
 #!/usr/bin/env node
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 /**
  * sutra: release Sutras as project packages, from a shell or a CI pipeline.
  *
@@ -98,7 +107,16 @@ const HELP = `sutra <command> [options]
                 [--memory-workers n] [--poll-ms n] [--settings-refresh-ms n]
             Engine tuning, for every engine or one: workers, limits, retention, trace sampling, queue check.
   engines   machine
-            This machine's cores and memory, and the settings recommended for it.
+            The cores and memory of the machine the engine runs on (read when it starts), and the settings
+            recommended for it. Every engine reads its own machine, so each install gets its own advice.
+  engines   name <engine id> <display name>
+            The name people see for an engine in the Admin Console ("" = its id). The id stays the same.
+  memory    list [--project <name>] | rows <table> --project <name> [--find text] [--offset n] [--limit 50]
+            Memory tables with their settings and figures on this engine, and their rows a page at a time.
+  memory    reload | clear <table> --project <name>
+            Loads a memory table again from its source on every engine (hot reload), or empties it.
+  memory    set <table> --project <name> --row '{"code":"EUR","rate":1.08}' [--key EUR] | remove <table> --project <name> --key EUR
+            Changes one value by hand, or removes it.
   token     create <system account> [--name text] [--expires-days n] | list <account> | revoke <account> <id>
             API tokens of a system account, for scripts and pipelines.
   audit     [--actor name] [--outcome ok|failed|denied] [--from 2026-10-01] [--csv]
@@ -573,7 +591,7 @@ async function main(argv: string[]) {
       out(`${system ? 'System account' : 'User'} ${name} added with role ${body.grants[0].role}${project ? ' on ' + str(a, 'project') : ' on all projects'}`);
       return 0;
     }
-    case 'sutras': case 'runs': case 'approvals': case 'engines': case 'token': case 'audit': case 'gateway': case 'alerts':
+    case 'sutras': case 'runs': case 'approvals': case 'engines': case 'token': case 'audit': case 'gateway': case 'alerts': case 'memory':
       if (!call) throw new Usage(`${cmd} needs --server and --token`);
       return operate(cmd, a, call);
     case 'status': {
@@ -591,6 +609,18 @@ async function main(argv: string[]) {
 type Call = NonNullable<ReturnType<typeof remote>>;
 
 /** A deployed Sutra by project and name, through the Admin Console API. */
+/** A memory table by name in a project (the project by its name, as everywhere in the command). */
+async function findMemTable(call: Call, a: Args, name: string | undefined) {
+  if (!name) throw new Usage('Give the memory table name');
+  const project = need(a, 'project');
+  const projects: any[] = await call('GET', '/api/projects');
+  const p = projects.find(x => x.name.toLowerCase() === project.toLowerCase());
+  if (!p) throw new Error(`No project named "${project}"`);
+  const t = (await call('GET', `/api/console/memory?project=${encodeURIComponent(p.id)}`) as any[]).find(x => x.name.toLowerCase() === name.toLowerCase());
+  if (!t) throw new Error(`No memory table named "${name}" in ${p.name}`);
+  return t;
+}
+
 async function findSutra(call: Call, a: Args, name: string | undefined) {
   if (!name) throw new Usage('Give the Sutra name');
   const project = need(a, 'project');
@@ -677,6 +707,39 @@ async function operate(cmd: string, a: Args, call: Call): Promise<number> {
       out(`${m.engine}: ${m.cpus} cores (${m.cpuModel}), ${m.memoryGb} GB memory, ${m.database}`);
       out(`Recommended (${r.name}, ${r.machine}): --workers ${r.workers} --memory-workers ${r.memoryWorkers} --poll-ms ${r.pollMs} --settings-refresh-ms ${r.settingsRefreshMs}`);
       out(`Engines on this machine: ${r.engines}; Node memory per engine: ${r.nodeMemoryMb} MB; read files whole up to ${r.readWholeMb} MB, stream bigger ones in batches of ${r.batchRows} rows; database: ${r.database}`);
+      return 0;
+    }
+    case 'memory list': {
+      let qs = '';
+      if (str(a, 'project')) { const p = (await call('GET', '/api/projects') as any[]).find(x => x.name.toLowerCase() === str(a, 'project')!.toLowerCase()); if (!p) throw new Error(`No project named "${str(a, 'project')}"`); qs = `?project=${encodeURIComponent(p.id)}`; }
+      const l: any[] = await call('GET', `/api/console/memory${qs}`);
+      table([['TABLE', 'ROWS', 'MEMORY', 'HITS', 'MISSES', 'FAILSAFE', 'SOURCE', 'LOADED'], ...l.map(t => [t.name, t.notLoaded ? '-' : `${t.rows}/${t.settings.maxRows}`, t.notLoaded ? '-' : `${Math.ceil(t.bytes / 1024)} KB/${t.settings.maxMb} MB`, String(t.hits), String(t.misses), t.failsafe ? 'database copy' : 'memory only', t.source, t.loadedAt || 'not loaded here'])]);
+      return 0;
+    }
+    case 'memory rows': {
+      const t = await findMemTable(call, a, arg);
+      const qs = new URLSearchParams({ offset: String(num(a, 'offset') || 0), limit: String(num(a, 'limit') || 50), ...(str(a, 'find') ? { find: str(a, 'find')! } : {}) });
+      const r = await call('GET', `/api/console/memory/${t.id}/rows?${qs}`);
+      table([['KEY', 'ROW'], ...r.rows.map((x: any) => [x.key, JSON.stringify(x.row).slice(0, 120)])]);
+      out(`${r.total ? `${r.offset + 1} to ${r.offset + r.rows.length} of ${r.total}` : 'No rows'}`);
+      return 0;
+    }
+    case 'memory reload': { const t = await findMemTable(call, a, arg); const r = await call('POST', `/api/console/memory/${t.id}/reload`); out(`${t.name}: ${r.rows} rows loaded here; the other engines load again within a second`); return 0; }
+    case 'memory clear': { const t = await findMemTable(call, a, arg); await call('POST', `/api/console/memory/${t.id}/clear`); out(`${t.name}: cleared`); return 0; }
+    case 'memory set': {
+      const t = await findMemTable(call, a, arg);
+      let row: unknown;
+      try { row = JSON.parse(need(a, 'row')); } catch (e: any) { throw new Usage(`--row is not JSON: ${e.message}`); }
+      const r = await call('PUT', `/api/console/memory/${t.id}/rows`, { row, key: str(a, 'key') });
+      out(`${t.name}: ${r.key} ${r.action}`);
+      return 0;
+    }
+    case 'memory remove': { const t = await findMemTable(call, a, arg); const r = await call('DELETE', `/api/console/memory/${t.id}/rows/${encodeURIComponent(need(a, 'key'))}`); out(`${t.name}: ${r.deleted ? 'removed' : 'no such row'}`); return 0; }
+    case 'engines name': {
+      const name = a._[3] ?? '';
+      if (!arg) throw new Usage('Use: sutra engines name <engine id> <display name>');
+      const r = await call('PUT', `/api/console/engines/${encodeURIComponent(arg)}/name`, { name });
+      out(r.name ? `${arg} is shown as ${r.name}` : `${arg} is shown by its id`);
       return 0;
     }
     case 'engines drain': { if (!arg) throw new Usage('Give the engine name'); await call('POST', `/api/console/engines/${encodeURIComponent(arg)}/drain`); out(`${arg} drains and stops on its next heartbeat`); return 0; }

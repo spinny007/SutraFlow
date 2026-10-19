@@ -1,6 +1,15 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 import crypto from 'node:crypto';
 import { q, now } from './db.js';
-import { applyResourceOverrides, effectiveVariables, engineVariableValues } from './projects.js';
+import { applyResourceOverrides, effectiveVariables, engineVariableValues, settingsCache, onSettingsForget } from './projects.js';
 import { resolveResourceConfig } from './settings.js';
 import { CONNECTOR_KINDS } from './connectors/kinds.js';
 import { AZURE_KINDS } from './connectors/azure.js';
@@ -112,6 +121,23 @@ export const RESOURCE_KINDS: ResourceKind[] = [
     ],
   },
   {
+    kind: 'memoryTable',
+    name: 'Memory table',
+    desc: 'Small reference data kept by key in the memory of each engine, for lookups without a database round trip: codes and their meanings, rates, routing and reusable values. Loaded from a database query, filled by Sutras, or both; with a copy in the database so a restart or another engine has them too. Not for big tables or files: those stay in the database or are streamed.',
+    fields: [
+      F('key', 'Key field(s)', 'text', 'id', { help: 'The field that identifies a row, or several separated by commas (country,city).' }),
+      F('source', 'Rows come from', 'select', 'filled by Sutras', { options: ['filled by Sutras', 'database query'] }),
+      F('database', 'Database connection', 'resource', '', { resourceKind: 'database', ...when('source', 'database query') }),
+      F('loadSql', 'Load query', 'code', 'SELECT id, name, country, credit_limit\nFROM customers\nWHERE active = 1', { ...when('source', 'database query'), help: 'Loads the table at the first use and on each refresh. A WHERE clause loads only part of a big table.' }),
+      F('lookupSql', 'Lookup query for a missing row', 'code', '', { ...when('source', 'database query'), help: 'Optional: SELECT ... WHERE id = :key fetches a row that is not in memory and keeps it. :key, or the key field names for a key of several fields.' }),
+      F('refreshMinutes', 'Refresh every (minutes)', 'number', 0, { ...when('source', 'database query'), help: '0 = load once; Memory reload loads again.' }),
+      F('ttlSeconds', 'Rows expire after (seconds)', 'number', 0, { help: '0 = never.' }),
+      F('maxRows', 'Most rows kept', 'number', 10000, { help: 'Beyond this, the least recently used rows are dropped (a lookup query fetches them again). At most 100,000.' }),
+      F('maxMb', 'Most memory (MB)', 'number', 16, { help: 'The same for the size of the rows. A load query that returns more is refused: big data stays in the database. At most 256.' }),
+      F('keep', 'Failsafe', 'select', 'copy in the database', { options: ['copy in the database', 'memory only'], help: 'Copy in the database: every change is also saved in the SutraFlow database, so an engine that restarts has the rows at once and every engine of a cluster sees the changes within a second. Memory only: fastest, but each engine has its own rows and loses them on a restart.' }),
+    ],
+  },
+  {
     kind: 'aiMemory',
     name: 'AI memory store',
     desc: 'Where AI agents keep conversations between runs, per session (a chat, ticket or customer), and how much of it fits the model.',
@@ -183,7 +209,7 @@ export const RESOURCE_KINDS: ResourceKind[] = [
 /** Explorer symbols, in the same plain style as the activity symbols. */
 const ICONS: Record<string, string> = {
   httpConnection: '⇄', outboundAuth: '⚿', inboundPolicy: '⛨', aiProvider: '✦', smtp: '✉', imap: '⇩', sftp: '⇅', ftp: '⇵',
-  discord: '◙', telegram: '➤', azureDataFactory: '⛁', databricks: '◆', database: '⛁', kafka: '≋', rabbitmq: '⇶', amqp1: '⇉', firebase: '◭', oauthApp: '⚇', mcpServer: '✧', aiMemory: '❖', aiKnowledge: '❏', mcpClient: '⧉',
+  discord: '◙', telegram: '➤', azureDataFactory: '⛁', databricks: '◆', database: '⛁', kafka: '≋', rabbitmq: '⇶', amqp1: '⇉', firebase: '◭', oauthApp: '⚇', mcpServer: '✧', aiMemory: '❖', memoryTable: '⚡', aiKnowledge: '❏', mcpClient: '⧉',
 };
 for (const k of RESOURCE_KINDS) k.icon ||= ICONS[k.kind] || '⚙';
 
@@ -215,8 +241,23 @@ export function getResource(id: string): Resource | undefined {
   return r ? rowTo(r) : undefined;
 }
 
+/**
+ * Connection details as steps use them, kept for the settings refresh time like project variables:
+ * a step does not read and resolve its connection again each time. A change on this engine, a deploy
+ * or a change of variables clears them at once.
+ */
+const resourceCache = new Map<string, { at: number; r: Resource | undefined }>();
+onSettingsForget.push(() => resourceCache.clear());
+
 /** As used at run time: ops overrides and ${env:X} applied. */
 export function effectiveResource(id: string): Resource | undefined {
+  const c = resourceCache.get(id);
+  if (c && Date.now() - c.at < settingsCache.ms) return c.r;
+  const r = resolveResource(id);
+  if (settingsCache.ms > 0) resourceCache.set(id, { at: Date.now(), r });
+  return r;
+}
+function resolveResource(id: string): Resource | undefined {
   const r = getResource(id);
   if (!r) return undefined;
   // Ops overrides, ${env:X}, then {{gv.X}} / = formulas with the project's and engine's variables.
@@ -258,7 +299,7 @@ export function deleteResource(id: string) {
   onResourceChange.forEach(fn => fn(id));
 }
 
-export const onResourceChange: Array<(id: string) => void> = [];
+export const onResourceChange: Array<(id: string) => void> = [resourceCache.delete.bind(resourceCache)];
 
 /** kv fields are stored as [{k, v}] rows. */
 export function kvToObject(rows: unknown, map: (v: string) => string = v => v): Record<string, string> {

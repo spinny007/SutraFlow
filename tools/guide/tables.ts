@@ -1,3 +1,12 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -19,6 +28,8 @@ export const TABLE_TEXT: Record<string, string> = {
   projects: 'Projects with their variables, logging and deployment config.',
   schemas: 'Shared schemas and WSDLs of each project.',
   counters: 'Counter activity values per project.',
+  mem_rows: 'The database copy of memory tables kept with a failsafe: key, row, expiry, and the version of the change that wrote it (a removed row keeps its key with no row).',
+  mem_meta: 'Per memory table: the latest change version and when it was last loaded from its source, so engines pick up each other\'s changes.',
   package_deployments: 'Package history per project: version, checksum, who deployed it, the report and the package itself (for rollback).',
   engines: 'Engines of the cluster: host, process, mode, version, heartbeat, workers, active steps, draining.',
   leases: 'Cluster-wide locks with an expiry: the leader lease and the deploy-folder lock.',
@@ -48,7 +59,7 @@ export const TABLE_TEXT: Record<string, string> = {
 
 /** The tables by what they are for, in the order the guide shows them. */
 export const TABLE_GROUPS: [string, string[]][] = [
-  ['Projects and Sutras', ['projects', 'flows', 'flow_versions', 'deployments', 'resources', 'schemas', 'folders', 'counters']],
+  ['Projects and Sutras', ['projects', 'flows', 'flow_versions', 'deployments', 'resources', 'schemas', 'folders', 'counters', 'mem_rows', 'mem_meta']],
   ['Runs and the work queue', ['runs', 'tasks']],
   ['Releases and the cluster', ['package_deployments', 'engines', 'leases']],
   ['People, access and audit', ['users', 'roles', 'grants', 'api_tokens', 'audit']],

@@ -1,3 +1,12 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 import { useState } from 'react';
 import { useToast } from '../src/ui';
 import { Err, Confirm, useLoad, can, useMe } from './shared';
@@ -99,11 +108,12 @@ function Machine({ readOnly, cluster, onApplied }: { readOnly: boolean; cluster:
   return (
     <div className="c-card c-machine">
       <h3>This machine</h3>
+      <p className="hint">Read when the engine starts from the machine it runs on, so every install (a laptop, an Azure or Google VM, a container) shows its own cores and memory and gets its own profile. In a cluster, each engine reads its own machine.</p>
       <p className="muted">{m.data.engine}: {m.data.cpus} cores ({m.data.cpuModel}), {m.data.memoryGb} GB memory ({m.data.freeGb} GB free), {m.data.database === 'postgres' ? 'PostgreSQL' : 'SQLite'}. Steps running now: {m.data.running}, runs in memory: {m.data.memoryRuns}.</p>
       <table className="c-table">
         <tbody>
           <tr><th>Profile</th><td>{r.name} ({r.machine})</td></tr>
-          <tr><th>Steps at once</th><td>{r.workers} (in memory {r.memoryWorkers})</td></tr>
+          <tr><th>Steps at once</th><td>{r.workers} activity steps running together, across all runs (in memory {r.memoryWorkers})</td></tr>
           <tr><th>Queue check</th><td>{r.pollMs} ms</td></tr>
           <tr><th>Settings refresh</th><td>{r.settingsRefreshMs} ms</td></tr>
           <tr><th>Engines on this machine</th><td>{r.engines} with PostgreSQL (1 with SQLite)</td></tr>

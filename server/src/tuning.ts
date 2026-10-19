@@ -1,3 +1,12 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 import { q, getSetting, setSetting } from './db.js';
 import { config } from './config.js';
 import { settingsCache } from './projects.js';
@@ -14,12 +23,12 @@ import { settingsCache } from './projects.js';
 export interface Field { k: string; name: string; help: string; type: 'number' | 'select'; min?: number; max?: number; step?: number; unit?: string; options?: string[]; perEngine?: boolean }
 
 export const ENGINE_FIELDS: Field[] = [
-  { k: 'workers', name: 'Steps at once', help: 'Steps one engine runs at the same time across all runs. 0 = this engine runs nothing (a studio in a cluster).', type: 'number', min: 0, max: 512, unit: 'steps', perEngine: true },
+  { k: 'workers', name: 'Steps at once', help: 'How many steps one engine runs at the same moment, across all runs of all Sutras. A step is one activity box running in one run; this is not a number of Sutras or palettes. 0 = this engine runs nothing (a studio in a cluster).', type: 'number', min: 0, max: 512, unit: 'steps', perEngine: true },
   { k: 'maxStepsPerRun', name: 'Steps per run limit', help: 'A run that takes more steps is stopped: protects against loops that never end.', type: 'number', min: 10, max: 1000000, unit: 'steps' },
   { k: 'replyTimeoutMs', name: 'Reply wait', help: 'How long REST, SOAP and MCP callers wait for a reply step before they get 504.', type: 'number', min: 1000, max: 600000, step: 1000, unit: 'ms' },
   { k: 'runRetentionDays', name: 'Keep finished runs', help: 'Finished runs older than this are deleted with their steps. 0 = keep.', type: 'number', min: 0, max: 3650, unit: 'days' },
   { k: 'auditRetentionDays', name: 'Keep audit entries', help: 'Audit entries older than this are deleted. 0 = keep.', type: 'number', min: 0, max: 3650, unit: 'days' },
-  { k: 'memoryWorkers', name: 'Steps at once in memory', help: 'Steps one engine runs at the same time for Sutras that run in memory. 0 = the same as Steps at once.', type: 'number', min: 0, max: 512, unit: 'steps', perEngine: true },
+  { k: 'memoryWorkers', name: 'Steps at once in memory', help: 'The same, for Sutras that run in memory. 0 = the same as Steps at once.', type: 'number', min: 0, max: 512, unit: 'steps', perEngine: true },
   { k: 'pollMs', name: 'Queue check', help: 'How often an idle engine looks for due steps. Lower answers sooner and costs more database reads; steps started on the same engine begin at once either way.', type: 'number', min: 20, max: 10000, step: 10, unit: 'ms', perEngine: true },
   { k: 'settingsRefreshMs', name: 'Settings refresh', help: 'How long an engine keeps Project and Sengine variables before reading them again. 0 = read on every step.', type: 'number', min: 0, max: 60000, step: 100, unit: 'ms' },
   { k: 'traceSampling', name: 'Trace sampling', help: 'Share of runs sent to the OpenTelemetry collector: 1 = every run, 0.1 = one in ten.', type: 'number', min: 0, max: 1, step: 0.05 },

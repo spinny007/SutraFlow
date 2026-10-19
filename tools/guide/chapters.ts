@@ -1,3 +1,12 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 /**
  * User guide chapters. Plain HTML with a few markers the builder expands:
  *   [[img:name|Caption]]   a screenshot from docs/guide-images/name.jpg
@@ -24,7 +33,16 @@ export const CHAPTERS: Chapter[] = [
     id: 'start', title: 'Install and start the server',
     html: `
 <p>SutraFlow needs Node.js 22.13 or later; version 24 is recommended. Nothing else is installed: the database is SQLite, built into Node.</p>
-<p class="h">Procedure</p>
+<p class="h">From a release (servers)</p>
+<p>Each release comes as <code>sutraflow-&lt;version&gt;-windows.zip</code> and <code>sutraflow-&lt;version&gt;-linux.tar.gz</code>, already built, each with a <code>.sha256</code> file; offline archives with the packages inside are there for servers without access to the npm registry. <code>RELEASE-NOTES.md</code> in the archive has the steps for each system and for upgrades.</p>
+<ol>
+<li>Check the download: <code>sha256sum -c sutraflow-1.7.5-linux.tar.gz.sha256</code>, or on Windows <code>Get-FileHash sutraflow-1.7.5-windows.zip -Algorithm SHA256</code> against the <code>.sha256</code> file.</li>
+<li>Unpack it: <code>tar -xzf sutraflow-1.7.5-linux.tar.gz -C /opt/sutraflow</code>, or <code>Expand-Archive sutraflow-1.7.5-windows.zip C:\\SutraFlow</code>.</li>
+<li>In the unpacked folder: <code>bin/sutraflow setup</code> (Windows: <code>bin\\sutraflow.cmd setup</code>) installs the runtime packages and makes <code>sutraflow.env</code>.</li>
+<li><code>bin/sutraflow start</code>, then open <code>http://127.0.0.1:4800</code> and create the administrator account.</li>
+</ol>
+<p>To upgrade, stop gracefully, back up the data folder (with <code>master.key</code>), unpack the new release beside the old one, bring over <code>sutraflow.env</code> and the data folder, run <code>setup</code> and start; the database is upgraded at start. In a cluster, upgrade every engine before starting any of them.</p>
+<p class="h">From the source</p>
 <ol>
 <li>Open a terminal in the SutraFlow folder.</li>
 <li>Install and build: <code>bin/sutraflow setup</code> (Windows: <code>bin\\sutraflow.cmd setup</code>). It runs <code>npm install</code> and <code>npm run build</code>, and makes <code>sutraflow.env</code>, where the ports, the data folder and the database are set.</li>
@@ -764,6 +782,43 @@ curl http://127.0.0.1:8080/orders/A-1001 -H "Authorization: Bearer ACCESS_TOKEN"
 </ul>`,
   },
   {
+    id: 'memory', title: 'Memory tables: fast reference data',
+    html: `
+<p>A <strong>memory table</strong> keeps small reference data in the memory of each engine, so a step or a mapping finds a value without a database round trip: currency rates, product and country codes, routing rules, limits per customer, reusable values that many Sutras read again and again. It is made like a connection (Resources &rarr; New &rarr; <em>Memory table</em>) and used with the [[memGet]], [[memPut]], [[memDelete]], [[memQuery]] and [[memReload]] steps, or with <code>=memory-lookup('Table', key, 'field')</code> in any mapping or setting.</p>
+[[note:Small data only|Memory tables are for values looked up often, not for big tables or files: each has a limit of rows and megabytes (10,000 rows and 16 MB by default, at most 100,000 and 256 MB), and a load query that returns more is refused. Big data stays in the database; big files are streamed in batches.]]
+<p class="h">Where the rows come from</p>
+<ul>
+<li><strong>A load query</strong> on a database connection loads the table at first use, and again every <em>Refresh every</em> minutes. A <code>WHERE</code> clause loads only the part that is looked up often (active products, this year's rates).</li>
+<li><strong>A lookup query</strong> (optional) fetches a row that is not in memory, such as <code>SELECT ... WHERE code = :key</code>, and keeps it: the rest of a table is read only when asked for.</li>
+<li><strong>Sutras</strong> add and change rows with [[memPut]]; an administrator can change a value by hand in the Admin Console.</li>
+<li>Rows can expire after a time (<em>Rows expire after</em>), and when the table is full the least recently used rows go first.</li>
+</ul>
+<p class="h">Failsafe</p>
+<table class="t"><thead><tr><th></th><th>Copy in the database (default)</th><th>Memory only</th></tr></thead><tbody>
+<tr><td>A change (put, delete, by hand)</td><td>Saved in memory and in the SutraFlow database</td><td>In memory of this engine only</td></tr>
+<tr><td>Other engines of a cluster</td><td>See the change within a second</td><td>Have their own rows</td></tr>
+<tr><td>An engine restarts</td><td>Has every row at once, from the copy (the source is not asked)</td><td>Loads from the source again; rows put by Sutras are gone</td></tr>
+<tr><td>Cost of a change</td><td>One small database write</td><td>None</td></tr>
+</tbody></table>
+<p class="h">How it works</p>
+<ul>
+<li>Each engine keeps a table as a key-value map in its own Node.js process (a JavaScript <code>Map</code> that also keeps the order of use, for dropping the least recently used rows). There is no extra server to run.</li>
+<li>The failsafe copy is two tables of the SutraFlow database (SQLite or PostgreSQL): <code>mem_rows</code> holds each row with the version of the change that wrote it, <code>mem_meta</code> the latest version per table. An engine compares versions at most once a second (<code>SUTRA_MEMORY_SYNC_MS</code>) and reads only the rows changed since.</li>
+<li>Reads (Memory get, memory-lookup) cost no database work while the table is in sync.</li>
+<li>Connection details and Project and Sengine variables are kept in memory the same way, for the <em>Settings refresh</em> time, and cleared at once when they change.</li>
+</ul>
+<p class="h">The Admin Console</p>
+[[img:console-memory|Admin Console, Memory tables: each table with its rows, memory and hit rate; an open table with its settings and rows, a page at a time]]
+<p><strong>Operate &rarr; Memory tables</strong> lists every table with its project, rows and memory against its limits, hit rate, when it was loaded and its failsafe, filtered by project, name or failsafe. Open a table to see its settings (key, source, queries, refresh, expiry, limits) and its rows a page at a time, found by text or by a field's value.</p>
+<ul>
+<li><strong>Reload</strong> is a hot reload: this engine loads the table again now, and every other engine within a second. Sutras keep running.</li>
+<li><strong>Edit</strong>, <strong>Add row</strong> and <strong>Remove</strong> change a single value by hand, such as a rate, without a deploy.</li>
+<li><strong>Clear</strong> empties the table; a lookup query fills it again as rows are asked for.</li>
+<li>The same from a command line: <code>sutra memory list</code>, <code>rows</code>, <code>reload</code>, <code>clear</code>, <code>set</code> and <code>remove</code>.</li>
+</ul>
+[[tip:Good uses|Values read on almost every run and changed rarely: rates, codes, mappings between systems, limits, feature switches. Keep it durable in your own database too when it matters (the memory table is a fast copy), and prefer a load query with a WHERE clause plus a lookup query over loading a whole table.]]`,
+  },
+  {
     id: 'code', title: 'Custom code, HTML and AI',
     html: `
 <ul>
@@ -1315,7 +1370,7 @@ stages:
   post { success { archiveArtifacts 'release.zip' } }
 }</pre>
 <p class="h">Container images</p>
-<p>For immutable production, bake the release into an engine image: <code>FROM sutraflow:1.6.0</code>, <code>COPY release.zip /deploy/</code>, and start it with <code>SUTRA_MODE=engine SUTRA_DEPLOY_DIR=/deploy</code>; the engine deploys every package in the folder at start. A new release is a new image.</p>
+<p>For immutable production, bake the release into an engine image: <code>FROM sutraflow:1.7.5</code>, <code>COPY release.zip /deploy/</code>, and start it with <code>SUTRA_MODE=engine SUTRA_DEPLOY_DIR=/deploy</code>; the engine deploys every package in the folder at start. A new release is a new image.</p>
 [[tip:Good practice|One zip, many environments: build once, deploy the same artifact to UAT and production.<br>Give each environment its own system account and token, with Deploy on the project only.<br>Let the pipeline fail on <code>sutra check</code> before anything changes; keep rollback one command away.<br>Store the zip with the pipeline run: it is the record of exactly what went live.]]`,
   },
   {
@@ -1534,12 +1589,13 @@ tools/migrate-to-postgres.sh --url "postgres://sutra:password@db.example.com:543
 <p class="h">Headless engines</p>
 <p>The same program started with <code>SUTRA_MODE=engine</code> runs Sutras without the studio: no designer pages and no editing. It keeps <code>/health</code>, <code>/ready</code> and <code>/metrics</code>, the Admin Console at <code>/admin</code> for its users, and an automation API for API tokens (the admin token or system account tokens). Packages in <code>SUTRA_DEPLOY_DIR</code> are deployed when it starts; a package that cannot be deployed stops the start.</p>
 <p class="h">Docker</p>
-<pre>docker build -t sutraflow:1.6.0 .
+<pre>docker build -t sutraflow:1.7.5 .
 docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=... \\
-           -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:1.6.0</pre>
+           -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:1.7.5</pre>
 <p>The image runs as a non-root user, checks its own health, and writes JSON logs. <code>docker-compose.yml</code> has a studio and an engine; <code>docker-compose.cluster.yml</code> has PostgreSQL, a studio and two engines.</p>
 <p class="h">Clusters</p>
 <p>Several engines share one database (<code>SUTRA_DB=postgres://...</code>), each with its own <code>SUTRA_ENGINE_ID</code> and all with the same <code>SUTRA_MASTER_KEY</code>.</p>
+<p><strong>Engine names.</strong> <code>SUTRA_ENGINE_ID</code> is an engine's identity in the cluster: the steps it runs record it as their owner, and the leader uses it to hand a stopped engine's steps to the others. Without it, the launcher uses the computer name (<code>vm-west-01-studio</code>, <code>vm-west-01-engine</code>); the Laragon set-up names its engines <code>laragon</code> and <code>laragon-engine</code>. Set it once per engine (in <code>sutraflow.env</code>: <code>STUDIO_ENGINE_ID</code>, <code>ENGINE_ENGINE_ID</code>) and keep it. For the name people see, use <strong>Rename</strong> in <em>Admin Console &rarr; Engines</em> or <code>sutra engines name &lt;id&gt; "Azure West Europe 1"</code>: a display name that can change at any time.</p>
 <ul>
 <li>Work is shared, and each step is run by exactly one engine.</li>
 <li>One engine leads and runs timers and folder, mailbox, queue and Drive listeners, so they fire once. If it stops, another takes over within a few heartbeats.</li>
@@ -1602,7 +1658,8 @@ docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=...
 [[tip:Choosing|In memory suits short request-reply Sutras (REST, SOAP and MCP services, lookups, mappings, validations) where a lost run is simply retried by the caller. Keep durable everything that moves money or data one way (orders, payments, file transfers, queue consumers that acknowledge), everything that waits, and every long run.]]
 
 <p class="h">Machine profiles</p>
-<p>When the environment does not set them, an engine takes its <em>Steps at once</em>, <em>Queue check</em> and <em>Settings refresh</em> from the profile of the machine it runs on: the smaller of what its cores and its memory allow. <em>Admin Console &gt; Engines &gt; Tuning &gt; This machine</em> shows the profile of the server, with <strong>Apply recommended tuning</strong>; <code>sutra engines machine</code> prints it.</p>
+<p>When the environment does not set them, an engine takes its <em>Steps at once</em>, <em>Queue check</em> and <em>Settings refresh</em> from the profile of the machine it runs on: the smaller of what its cores and its memory allow. The engine reads its machine each time it starts, so the advice is for each install: a laptop, an Azure or Google VM of 2 vCPU, a container held to 1 core (a container limit counts). In a cluster, each engine reads its own machine.</p>
+<p><em>Steps at once</em> counts steps, not Sutras or palettes: a step is one activity box running in one run. With 32, an engine runs up to 32 boxes at the same moment, from any runs of any Sutras; the rest wait in the queue for a moment. <em>Admin Console &gt; Engines &gt; Tuning &gt; This machine</em> shows the profile of the server, with <strong>Apply recommended tuning</strong>; <code>sutra engines machine</code> prints it.</p>
 [[img:console-machine|Admin Console, Engines: the profile of this machine and its recommended tuning]]
 [[profiles]]
 <ul>

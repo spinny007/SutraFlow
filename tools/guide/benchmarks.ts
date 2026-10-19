@@ -1,3 +1,12 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 import fs from 'node:fs';
 import path from 'node:path';
 import { PROFILES } from '../../server/src/sizing.js';
@@ -29,7 +38,7 @@ function scenarios(r: any, caption: string) {
 
 export function benchmarksSection(root: string) {
   const parts = [
-    scenarios(read(root, 'pg-before'), 'Before this release (1.6.0 as first released): PostgreSQL'),
+    scenarios(read(root, 'pg-before'), 'Before the load work (1.6.0 as first released): PostgreSQL'),
     scenarios(read(root, 'pg-after'), 'This release: PostgreSQL, durable and in memory'),
     scenarios(read(root, 'pg-spread'), 'This release: REST calls spread over the engines (as behind a load balancer)'),
     scenarios(read(root, 'pg-workers32'), 'This release: 32 steps at once on one engine'),
@@ -42,6 +51,15 @@ export function benchmarksSection(root: string) {
     const s = k.scenarios[0];
     const by = Object.entries(s.byEngine || {}).map(([e, n]) => `${esc(e)} ${n}`).join(', ');
     parts.push(`<p class="h">An engine killed under load</p><p>Two engines, ${s.runs} REST calls spread over both gateways; the second engine was killed (no drain) when a third of the runs were done. Result: <strong>every run done, ${s.failed} failed</strong>, in ${s.seconds} s (steps finished per engine: ${by}). ${s.startErrors ? `${s.startErrors} calls that were in flight to the killed engine failed for their caller and were sent again to the other one, as a load balancer or a client retry does. ` : ''}The leader saw the dead engine after three missed heartbeats (15 s), put its running steps back in the queue, and the first engine finished them, also the runs of the calls that had failed. So a caller that retries can start a second run: make such Sutras safe to repeat (an idempotency key from the caller), as with any at-least-once system.</p>`);
+  }
+  const soak = read(root, 'soak')?.soak, trend = read(root, 'soak-memory')?.soak;
+  if (soak) {
+    const by = (soak.byStatus as string[]).map(esc).join('; ');
+    parts.push(`<p class="h">${soak.soakMinutes} minutes of mixed work</p><p>Two engines for ${soak.soakMinutes} minutes: a timer every 5 seconds, a Sutra that waits 2 seconds, one that always fails after two retries, the 5-step benchmark Sutra, and a redeploy halfway. <strong>${soak.started.toLocaleString('en')} runs</strong> were started; ${by}. Runs still open at the end: <strong>${soak.stillOpen}</strong>. The timer ran exactly once per 5 seconds in the whole cluster (from the leader only).</p>`);
+  }
+  if (trend?.memEveryMinuteMb?.length) {
+    const first = trend.memEveryMinuteMb.map((m: number[]) => m[0]);
+    parts.push(`<p>Memory of the busier engine, every minute of a ${trend.soakMinutes}-minute soak (MB): ${first.join(', ')}. It grows while caches and the heap warm up in the first minutes, then stays level: no leak.</p>`);
   }
   const b = read(root, 'bigfile');
   if (b) parts.push(`<p class="h">A big file streamed on a small heap</p><p>One engine with Node held to <strong>${b.heapLimitMb} MB</strong> read a <strong>${b.fileMb} MB</strong> CSV file with Stream in batches (${b.batchRows} rows per batch, a step per batch): <strong>${esc(b.status)}</strong> in ${b.seconds} s (${b.mbPerSec} MB/s), ${b.steps} steps, peak memory of the process <strong>${b.rssPeakMb} MB</strong> (${b.rssStartMb} MB at the start), database ${b.dbMb} MB at the end with <em>Step data in history: none</em>.</p>`);

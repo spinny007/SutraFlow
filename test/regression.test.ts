@@ -1,3 +1,12 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -299,4 +308,11 @@ test('a model call failed with ECONNRESET when the server closed an idle keep-al
     assert.equal((await httpCall({ method: 'POST', url, headers: {}, body: '{}', timeoutMs: 5000, parse: 'json', retryReset: true })).body.ok, true, 'a POST marked safe is sent again');
     await assert.rejects(httpCall({ method: 'POST', url, headers: {}, body: '{}', timeoutMs: 5000, parse: 'json' }), /ECONNRESET|socket|closed/i, 'another POST is not repeated');
   } finally { srv.close(); }
+});
+
+test('a single backslash in a guide chapter (C:\\SutraFlow) vanished in the page: chapters are template strings', () => {
+  const src = fs.readFileSync(path.join(root, 'tools', 'guide', 'chapters.ts'), 'utf8');
+  // A backslash before a letter that is not doubled: the template string drops it (\S becomes S).
+  const bad = src.split('\n').map((l, i) => [i + 1, l] as const).filter(([, l]) => /(^|[^\\])\\(?![\\nrtu0`$'"])[A-Za-z]/.test(l)).map(([n, l]) => `${n}: ${l.trim().slice(0, 80)}`);
+  assert.deepEqual(bad, []);
 });

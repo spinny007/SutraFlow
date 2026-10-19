@@ -1,10 +1,19 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 import { useCallback, useState } from 'react';
 import { useToast } from '../src/ui';
 import { PageHead, State, Err, Confirm, useLoad, useEvery, ago, when, can, useMe } from './shared';
 import { act, type Action } from './log';
 import { EngineTuning } from './Tuning';
 
-interface EngineRow { id: string; host: string; pid: number; mode: string; version: string; startedAt: string; alive: boolean; heartbeatAgeMs: number; workers: number; running: number; draining: boolean; leader: boolean }
+interface EngineRow { id: string; name: string; host: string; pid: number; mode: string; version: string; startedAt: string; alive: boolean; heartbeatAgeMs: number; workers: number; running: number; draining: boolean; leader: boolean }
 interface ClusterData { self: string; leader: string | null; engines: EngineRow[]; tasks: { pending: number; running: number; waiting: number; paused: number } }
 
 const drainCmd = (id: string): Action => ({ label: `Drain ${id}`, method: 'POST', url: `/api/console/engines/${encodeURIComponent(id)}/drain`, cli: ['engines', 'drain', id] });
@@ -17,6 +26,14 @@ export function Engines() {
   const { data, error, reload } = useLoad<ClusterData>('/api/engine/status');
   useEvery(useCallback(() => { reload(); }, [reload]), 5000);
   const [drain, setDrain] = useState<EngineRow | null>(null);
+  const [rename, setRename] = useState<{ id: string; name: string } | null>(null);
+  const toastR = useToast();
+  const saveName = async () => {
+    if (!rename) return;
+    await act({ label: `Name engine ${rename.id}`, method: 'PUT', url: `/api/console/engines/${encodeURIComponent(rename.id)}/name`, body: { name: rename.name }, cli: ['engines', 'name', rename.id, rename.name || '""'] });
+    toastR(rename.name ? `${rename.id} is shown as ${rename.name}` : `${rename.id} is shown by its id`);
+    setRename(null); reload();
+  };
   const [cleanup, setCleanup] = useState(false);
   const manage = can(me, 'engines');
   return (
@@ -37,7 +54,11 @@ export function Engines() {
             <thead><tr><th>Engine</th><th>State</th><th>Host</th><th>Mode</th><th>Version</th><th className="right">Steps</th><th>Heartbeat</th><th>Started</th><th /></tr></thead>
             <tbody>{data.engines.map(e => (
               <tr key={e.id}>
-                <td><code>{e.id}</code>{e.leader && <span className="c-badge">leader</span>}{e.id === data.self && <span className="c-badge soft">this one</span>}</td>
+                <td>
+                  {e.name ? <><b>{e.name}</b><div className="muted xs">id <code>{e.id}</code></div></> : <code>{e.id}</code>}
+                  {e.leader && <span className="c-badge">leader</span>}{e.id === data.self && <span className="c-badge soft">this one</span>}
+                  {manage && <button className="btn link xs" onClick={() => setRename({ id: e.id, name: e.name })}>Rename</button>}
+                </td>
                 <td>{!e.alive ? <State kind="err">silent</State> : e.draining ? <State kind="warn">draining</State> : <State kind="ok">alive</State>}</td>
                 <td>{e.host} <span className="muted xs">pid {e.pid}</span></td>
                 <td>{e.mode === 'engine' ? 'headless' : e.mode}</td>
@@ -49,6 +70,14 @@ export function Engines() {
               </tr>
             ))}</tbody>
           </table></div>
+          {rename && (
+            <div className="c-card">
+              <div className="fld"><label htmlFor="en-name">Display name of {rename.id}</label>
+                <input id="en-name" className="inp" value={rename.name} maxLength={60} placeholder="Azure West Europe 1" onChange={e => setRename({ ...rename, name: e.target.value })} /></div>
+              <p className="hint">What people see in the console. The engine id stays the same: it is the engine's identity in the cluster (running steps and recovery use it) and is set with SUTRA_ENGINE_ID, by default the computer name. Empty = show the id.</p>
+              <div className="c-actions"><button className="btn primary small" onClick={saveName}>Save</button><button className="btn small" onClick={() => setRename(null)}>Cancel</button></div>
+            </div>
+          )}
           <p className="muted xs">An engine silent for three heartbeats is presumed stopped; the leader gives its unfinished steps to the others.</p>
         </>
       )}

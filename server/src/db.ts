@@ -1,3 +1,12 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { Worker, MessageChannel, receiveMessageOnPort, type MessagePort } from 'node:worker_threads';
@@ -151,6 +160,11 @@ create table if not exists projects(
 create table if not exists schemas(
   id text primary key, project_id text not null, name text not null, kind text not null,
   root text, text text not null, updated_at text not null);
+create table if not exists mem_rows(
+  store_id text not null, k text not null, value text, expires_at integer not null default 0, version integer not null,
+  primary key(store_id, k));
+create index if not exists mem_rows_version on mem_rows(store_id, version);
+create table if not exists mem_meta(store_id text primary key, version integer not null, loaded_at integer not null default 0, reload_at integer not null default 0);
 create table if not exists counters(
   project_id text not null, name text not null, value real not null, updated_at text not null, primary key(project_id, name));
 create table if not exists package_deployments(

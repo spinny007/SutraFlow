@@ -1,4 +1,13 @@
 #!/usr/bin/env node
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 /**
  * SutraFlow load test: how many steps a server or cluster completes per second, how long steps wait
  * in the queue and take, what the database does meanwhile, and whether killing an engine under load
@@ -292,7 +301,11 @@ async function soak(minutes) {
     const q = await dbClient(db.url, dataDir);
     const mem0 = procs.map(e => usage(e.p.pid).mem);
     let redeployed = false, n = 0;
+    // Memory of each engine every minute: steady or saw-tooth is healthy, a straight climb is a leak.
+    const memTrend = [];
+    let nextSample = Date.now();
     while (Date.now() < until) {
+      if (Date.now() >= nextSample) { memTrend.push(procs.map(e => Math.round(usage(e.p.pid).mem / 1048576))); nextSample += 60000; }
       for (const k of ['Soak wait', 'Soak flaky', 'Load 5x1KB']) { await api(studio, 'POST', `/api/flows/${ids[k]}/run`, { input: { n: ++n } }).catch(() => {}); }
       if (!redeployed && Date.now() > until - (minutes * 60000) / 2) { redeployed = true; await api(studio, 'POST', `/api/flows/${ids['Load 5x1KB']}/deploy`, {}); }
       await sleep(250);
@@ -302,7 +315,7 @@ async function soak(minutes) {
     const stuck = await q.all("select count(*) n from runs where status in ('running', 'waiting') and flow_name <> 'Soak timer'");
     const mem1 = procs.map(e => usage(e.p.pid).mem);
     await q.end();
-    return { soakMinutes: minutes, engines: procs.length, started: n, byStatus: rows.map(r => `${r.flow_name}: ${r.status} ${r.n}`), stillOpen: Number(stuck[0].n), memStartMb: mem0.map(m => Math.round(m / 1048576)), memEndMb: mem1.map(m => Math.round(m / 1048576)) };
+    return { soakMinutes: minutes, engines: procs.length, started: n, byStatus: rows.map(r => `${r.flow_name}: ${r.status} ${r.n}`), stillOpen: Number(stuck[0].n), memStartMb: mem0.map(m => Math.round(m / 1048576)), memEndMb: mem1.map(m => Math.round(m / 1048576)), memEveryMinuteMb: memTrend };
   } finally {
     for (const e of procs) { try { e.p.kill(); } catch { /* gone */ } }
     await sleep(1500);

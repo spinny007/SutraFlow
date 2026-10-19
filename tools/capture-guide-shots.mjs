@@ -1,3 +1,12 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 // Captures the screenshots used by the user guide from a running SutraFlow studio.
 // Uses headless Microsoft Edge (or Chrome) through the DevTools protocol, with its own
 // temporary profile. Sign-in: SUTRA_GUIDE_USER / SUTRA_GUIDE_PASS, or data/dev-admin.txt.
@@ -213,6 +222,19 @@ async function main() {
     await js(`[...document.querySelectorAll('.c-nav a')].find(a => a.textContent.trim() === 'Engines')?.click(); await new Promise(r => setTimeout(r, 2000));
       const m = document.querySelector('.c-machine'); m?.scrollIntoView({ block: 'start' }); let sc = m?.parentElement; while (sc && sc.scrollHeight <= sc.clientHeight) sc = sc.parentElement; (sc || window).scrollBy(0, -90); await new Promise(r => setTimeout(r, 500));`);
     await shot('console-machine');
+
+    // Admin Console: Memory tables, with a small table of rates (made once on the dev server).
+    await js(`const j = async (m, u, b) => (await fetch(u, { method: m, headers: { 'x-sutra': '1', 'content-type': 'application/json' }, body: b ? JSON.stringify(b) : undefined })).json();
+      const projects = await j('GET', '/api/projects');
+      const pid = projects[0]?.id;
+      let t = (await j('GET', '/api/console/memory')).find(x => x.name === 'Currency rates');
+      if (!t && pid) t = await j('POST', '/api/resources', { kind: 'memoryTable', name: 'Currency rates', project_id: pid, config: { key: 'code', refreshMinutes: 0, maxRows: 1000, maxMb: 4, keep: 'copy in the database' } });
+      for (const r of [['EUR', 'Euro', 1.08], ['GBP', 'Pound sterling', 1.27], ['INR', 'Indian rupee', 0.012], ['JPY', 'Yen', 0.0067], ['CHF', 'Swiss franc', 1.13], ['AUD', 'Australian dollar', 0.66]])
+        await j('PUT', '/api/console/memory/' + t.id + '/rows', { row: { code: r[0], name: r[1], rate: r[2] } });
+      location.hash = 'memory'; await new Promise(r => setTimeout(r, 1500));
+      [...document.querySelectorAll('.c-nav a')].find(a => a.textContent.trim() === 'Memory tables')?.click(); await new Promise(r => setTimeout(r, 1500));
+      [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Currency rates')?.click(); await new Promise(r => setTimeout(r, 1500));`);
+    await shot('console-memory');
 
     ws.close();
   } finally {

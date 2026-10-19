@@ -1,3 +1,12 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 import os from 'node:os';
 import { q, getSetting, setSetting, now } from './db.js';
 import { config, version } from './config.js';
@@ -110,11 +119,26 @@ export function stopCluster() {
 }
 
 /** Engines, leader, queue: for /api/engine/status and the command-line tool. */
+/**
+ * Display names of engines, set in the Admin Console. The engine id (SUTRA_ENGINE_ID, by default the
+ * host name and process) stays the engine's identity: running steps record it as their owner and the
+ * leader recovers by it, so it is not renamed; the display name is what people see.
+ */
+export const engineNames = () => getSetting<Record<string, string>>('engineNames', {});
+export function setEngineName(id: string, name: string) {
+  const all = engineNames();
+  const n = String(name || '').trim().slice(0, 60);
+  if (n) all[id] = n; else delete all[id];
+  setSetting('engineNames', all);
+  return n;
+}
+
 export function clusterStatus() {
   const t = Date.now();
+  const names = engineNames();
   const lease = q.get<{ holder: string; expires_at: number }>(`select holder, expires_at from leases where name = 'leader'`);
   const engines = q.all<any>('select * from engines order by started_at').map(e => ({
-    id: e.id, host: e.host, pid: Number(e.pid), mode: e.mode, version: e.version, startedAt: e.started_at,
+    id: e.id, name: names[e.id] || '', host: e.host, pid: Number(e.pid), mode: e.mode, version: e.version, startedAt: e.started_at,
     alive: Number(e.heartbeat_at) >= t - deadAfter(), heartbeatAgeMs: t - Number(e.heartbeat_at), workers: Number(e.workers), running: Number(e.active), draining: !!Number(e.draining),
     leader: !!lease && lease.holder === e.id && Number(lease.expires_at) >= t,
   }));

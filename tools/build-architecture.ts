@@ -1,3 +1,12 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 /**
  * Builds docs/sutraflow-architecture.html: how SutraFlow works, what every file does, deployments and
  * features, with diagrams and a search box. Served by the studio at /architecture.
@@ -100,6 +109,8 @@ const FILES: Group[] = [
       ['server/src/guard.ts', 'The permission of every admin API route and the project it applies to. The server refuses to start when a route has no rule. Also writes each change and each refusal to the audit log, without passwords or secret values.'],
       ['server/src/console.ts', 'Data for the Admin Console: the overview (engines, deployed Sutras, runs of the last day, failures, approvals, gateway), deployed applications with their triggers and run counts, starting and stopping a deployed Sutra, and drain requests for any engine. Always limited to the projects the caller may see.'],
       ['server/src/tuning.ts', 'Tuning parameters: engine values for the cluster or one engine (steps at once, in memory too, steps per run, reply wait, retention, trace sampling, queue check, settings refresh) and per deployed Sutra (execution durable or in memory, runs at once, priority, run time limit, default retries, step data in history, retention). Stored in settings and deployments, applied by every engine on the next beat. Refuses in memory for Sutras with steps that wait.'],
+      ['server/src/memtables.ts', 'Memory tables: small reference data each engine keeps in a JavaScript Map (in order of use, for dropping the least recently used), loaded by a query, filled by Sutras or fetched on a miss (lookup query), with row and MB limits. Failsafe: every change also written to mem_rows with a version per table (mem_meta); engines read the changes since their version at most every SUTRA_MEMORY_SYNC_MS and reload when a reload was asked for anywhere (hot reload).'],
+      ['server/src/palettes/memory.ts', 'Memory tables palette: Memory get (read-through), put, delete, query and reload.'],
       ['server/src/sizing.ts', 'Machine profiles from 1 vCPU / 1 GB up, measured with tools/loadtest.mjs: steps at once, queue check, settings refresh, engines per machine, Node memory, files read whole, rows per streamed batch, database. Engine defaults and the Admin Console panel This machine come from here.'],
       ['server/src/alerts.ts', 'Alerts: channels (email, signed webhook, a Sutra), rules of nine kinds checked by the cluster leader every 30 seconds, alerts that open, remind, are acknowledged and resolve, delivery records, and the runs timeline of the Overview.'],
       ['server/src/audit.ts', 'The audit log: record, search, CSV export, and deletion after <code>SUTRA_AUDIT_RETENTION_DAYS</code>.'],
@@ -224,6 +235,7 @@ const FILES: Group[] = [
       ['web/admin/People.tsx', 'Users and system accounts: add, roles per project, disable, unlock, passwords, sign out everywhere, delete; API tokens shown once.'],
       ['web/admin/Roles.tsx', 'Permission matrix of all roles; custom roles.'],
       ['web/admin/Database.tsx', 'Database page: the database in use, the PostgreSQL connection with Test connection, Migrate now, and the progress through the restart.'],
+      ['web/admin/Memory.tsx', 'Memory tables: every table with rows and memory against its limits, hit rate, failsafe, filtered by project, name and failsafe; the settings and rows of a table, a page at a time with filters; hot reload on every engine, clear, and values changed by hand.'],
       ['web/admin/Releases.tsx', 'Releases: upload a release zip, see its check (Sutras, secrets, source, config), deploy it; the package history of each project with rollback.'],
       ['web/admin/Audit.tsx', 'Audit log with filters, plain-word actions, details and CSV export.'],
       ['web/admin/console.css', 'Console layout on the studio colour tokens, light and dark, one column on phones.'],
@@ -235,6 +247,9 @@ const FILES: Group[] = [
       ['tools/migrate-to-postgres.mjs', 'The SQLite to PostgreSQL move for Windows (.cmd) and Linux (.sh): stops SutraFlow with the launcher, copies and counts every table (sutra db migrate), switches sutraflow.env, starts SutraFlow, checks it, and puts SQLite back on any failure.'],
       ['tools/migrate-to-postgres.cmd', 'Windows wrapper of migrate-to-postgres.mjs: finds Node.js from sutraflow.env and passes the settings file.'],
       ['tools/migrate-to-postgres.sh', 'Linux and macOS wrapper of migrate-to-postgres.mjs: finds Node.js from sutraflow.env and passes the settings file.'],
+      ['tools/add-headers.mjs', 'Puts the copyright and licence header (developer, website, years, file version, AGPL-3.0-only) on every source file that lacks it; with --check, lists files without it (a test runs this). Each file keeps its own version.'],
+      ['tools/build-release.mjs', 'Builds the release archives: sutraflow-<version>-windows.zip and -linux.tar.gz (launcher and shell scripts executable) with SHA-256 files, holding the built server, launcher, docs, samples, deployment templates, runtime tools and licences; with --offline also an archive with the runtime packages for the system it runs on.'],
+      ['.github/workflows/release.yml', 'GitHub release workflow: on a v* tag, tests, builds the archives on Windows and Linux (with offline archives), and attaches them with RELEASE-NOTES.md to a GitHub Release.'],
       ['tools/loadtest.mjs', 'Load test: starts a studio and engines on their own temporary database, runs a benchmark Sutra (durable or in memory, small or big outputs), and reports steps and runs per second, queue wait and step time percentiles, database lock waits and transactions, CPU and memory; can kill an engine to check recovery, limit cores and memory, or soak. Results in docs/benchmarks.'],
       ['tools/bigfiletest.mjs', 'Big file test: one engine with a small memory limit streams a generated CSV file of any size through a Sutra (Read file, Stream in batches) and reports the time and the peak memory of the process.'],
       ['tools/build-sample-projects.ts', 'Builds the sample project zips in samples/ (<code>npm run samples</code>): whole projects as release zips with their files, listed in samples/index.json for New project.'],
@@ -272,6 +287,7 @@ const FILES: Group[] = [
       ['docs/architecture.md', 'Short text notes on the architecture (this page is the full version).'],
       ['docs/sutraflow-user-guide.html', 'The generated user guide, served at /guide.'],
       ['README.md', 'Project introduction and quick start.'],
+      ['RELEASE-NOTES.md', 'Release notes of the current version: what is new, requirements, install steps for Windows and Linux, upgrade steps, known limitations. The release archives require it.'],
     ],
   },
   {
@@ -340,6 +356,7 @@ const SETTINGS: [string, string, string][] = [
   ['SUTRA_SETTINGS_REFRESH_MS', 'by machine', 'How long an engine keeps project and Sengine variables before reading them again; 0 reads them on every step.'],
   ['SUTRA_MAX_STEPS', '10000', 'Safety limit of steps per run.'],
   ['SUTRA_REPLY_TIMEOUT_MS', '60000', 'How long REST and SOAP callers wait for a reply step.'],
+  ['SUTRA_MEMORY_SYNC_MS', '1000', 'How often an engine checks the database copy of memory tables for changes and reloads asked for elsewhere.'],
   ['SUTRA_KEEPALIVE_MS', '65000', 'How long the admin and gateway servers keep an idle connection; longer than the idle time of a load balancer in front.'],
   ['SUTRA_HEARTBEAT_MS', '5000', 'Heartbeat interval; an engine silent for three beats is dead.'],
   ['SUTRA_DRAIN_MS', '30000', 'Time running steps get to finish on a graceful stop.'],
@@ -402,6 +419,7 @@ ${DIAGRAMS.runtime}
 <li><strong>Engine</strong> runs steps in worker slots (<code>SUTRA_WORKERS</code>, set by the machine size by default). Slots take tasks from the database. Sutras tuned to run <em>in memory</em> go to a second engine in the same process whose runs live in a private in-memory database and are written to the database in one transaction when they end.</li>
 <li><strong>Timers and listeners</strong> start runs from schedules, folders, mailboxes, queues and Drive. In a cluster they run on the leader only, so nothing starts twice.</li>
 <li><strong>Cluster beat</strong> writes this engine\'s heartbeat, holds or watches the leader lease, recovers dead engines' steps, and reloads routes after deploys elsewhere.</li>
+<li><strong>Memory tables</strong> keep small reference data (rates, codes, routing, reusable values) in each engine: a JavaScript <code>Map</code> per table inside the Node.js process, in order of use so the least recently used rows go first beyond the row and MB limits. No extra server: the failsafe copy is the <code>mem_rows</code> and <code>mem_meta</code> tables of the same database, with a version per change; engines read only the rows changed since their version, at most once a second, and reload when a reload is asked for anywhere. Connection details and variables are cached in memory the same way for the settings refresh time.</li>
 <li><strong>Storage</strong> is SQLite in the data folder, or PostgreSQL for several machines. Sutras, runs, tasks, the vault, settings and cluster state all live there.</li>
 </ul>
 <h3 id="ports">Ports and addresses</h3>
@@ -629,6 +647,7 @@ const toc = S.map((s, i) => {
 const body = S.map(s => `<section id="${s.id}"><h2>${esc(s.title)}</h2>${s.html}</section>`).join('\n');
 
 const html = `<!doctype html>
+<!-- SutraFlow ${version} | Copyright (c) 2026-27 Surya Partap Singh | Developer: Surya Partap Singh | Website: MixAgile.com | License: GNU AGPL v3.0 only (SPDX-License-Identifier: AGPL-3.0-only) -->
 <html lang="en">
 <head>
 <meta charset="utf-8">

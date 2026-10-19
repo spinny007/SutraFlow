@@ -1,3 +1,12 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 import { coreActivities } from './core.js';
 import { agentActivities } from './agent.js';
 import { httpActivities } from './http.js';
@@ -19,6 +28,7 @@ import { microsoftActivities } from '../connectors/microsoft.js';
 import { remoteActivities } from '../connectors/remote.js';
 import { azureActivities } from '../connectors/azure.js';
 import { chatActivities } from '../connectors/chat.js';
+import { memoryActivities } from './memory.js';
 
 /** Palette order in the studio. New palettes (connectors) register here. */
 export const PALETTES = [
@@ -30,6 +40,7 @@ export const PALETTES = [
   { id: 'files', name: 'Files', color: 'data' },
   { id: 'remote', name: 'SFTP / FTP', color: 'data' },
   { id: 'db', name: 'DB Ops', color: 'data' },
+  { id: 'memory', name: 'Memory tables', color: 'data' },
   { id: 'bus', name: 'Service Bus', color: 'flow' },
   { id: 'email', name: 'Email', color: 'general' },
   { id: 'firebase', name: 'Firebase', color: 'ai' },
@@ -43,7 +54,7 @@ export const PALETTES = [
 ];
 
 export const allActivities = [
-  ...coreActivities, ...processActivities, ...transformActivities, ...httpActivities, ...soapActivities, ...fileActivities, ...remoteActivities, ...dbActivities, ...busActivities,
+  ...coreActivities, ...processActivities, ...transformActivities, ...httpActivities, ...soapActivities, ...fileActivities, ...remoteActivities, ...dbActivities, ...memoryActivities, ...busActivities,
   ...emailActivities, ...firebaseActivities, ...saasActivities, ...chatActivities, ...azureActivities, ...microsoftActivities, ...codeActivities, ...scriptActivities, ...releaseActivities, ...aiActivities, ...agentActivities, ...mcpActivities,
 ];
 

@@ -1,0 +1,78 @@
+# SutraFlow
+# Copyright (c) 2026-27 Surya Partap Singh
+# Developer: Surya Partap Singh | Website: MixAgile.com
+# File version: 1.7.5
+# License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+# A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+# Release: pushing a tag such as v1.7.5 tests SutraFlow, builds the release archives on Windows and
+# Linux (each with an offline archive holding the runtime packages for that system), and attaches
+# them with their SHA-256 files and RELEASE-NOTES.md to a GitHub Release.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+
+  build:
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            only: windows
+          - os: ubuntu-latest
+            only: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - name: The tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
+      - run: node tools/build-release.mjs --offline --only=${{ matrix.only }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.os }}
+          path: release/
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la out
+          gh release create "${GITHUB_REF_NAME}" out/* --title "SutraFlow ${GITHUB_REF_NAME#v}" --notes-file RELEASE-NOTES.md

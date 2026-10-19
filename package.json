@@ -1,6 +1,6 @@
 {
   "name": "sutraflow",
-  "version": "1.6.0",
+  "version": "1.7.5",
   "description": "SutraFlow: visual integration designer and engine (palettes, mapping, SOAP/WS-Security, REST, exposed secured APIs, TLS/Let's Encrypt).",
   "private": true,
   "license": "AGPL-3.0-only",
@@ -75,7 +75,9 @@
     "vite": "^8.3.4"
   },
   "allowScripts": {
-    "esbuild@0.28.2": true
+    "esbuild@0.28.2": true,
+    "ssh2": false,
+    "oracledb": false
   },
   "bin": {
     "sutra": "dist/server/cli.js",

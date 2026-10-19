@@ -2,7 +2,7 @@
 
 **A visual integration designer and engine.** Drag activities onto a canvas, map data between steps, test and debug, and deploy *Sutras* (integration processes) that run as REST, SOAP and MCP services, on schedules, or on events: files, queues, mail, cloud drives, chat messages and more.
 
-![Version](https://img.shields.io/badge/version-1.6.0-2f6fd8)
+![Version](https://img.shields.io/badge/version-1.7.5-2f6fd8)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Commercial licence available](https://img.shields.io/badge/commercial%20licence-available-orange)](COMMERCIAL-LICENSE.md)
 ![Node.js](https://img.shields.io/badge/node-%E2%89%A5%2022.13-339933?logo=node.js&logoColor=white)
@@ -16,6 +16,7 @@
 ## Contents
 
 - [Features](#features)
+- [Download](#download)
 - [Quick start](#quick-start)
 - [Documentation](#documentation)
 - [Palettes](#palettes)
@@ -35,6 +36,7 @@
 
 - **Visual designer**: 118 activities in 18 palettes, drag-and-drop data mapping with For-Each, Where, Group by and Sort by, more than 100 formula functions, JSONata, live previews, step-by-step debugging with breakpoints, undo and redo, folders, and a description on every step.
 - **Durable engine**: every step is checkpointed in the database; approvals and long waits cost nothing while they wait; runs survive restarts and resume where they stopped; retries with backoff, error branches, an Error handler, loops, Merge, sub-Sutras, and resubmitting failed runs from the failed step. Short request-reply Sutras can run **in memory** instead, saved once when they end, several times faster.
+- **Memory tables**: small reference data (rates, codes, routing, reusable values) in each engine's memory for lookups without a database round trip, loaded from a query or filled by Sutras, with a failsafe copy, hot reload from the Admin Console and enforced limits.
 - **Big files on small servers**: CSV and line files of any size are streamed in batches of rows, each batch a step of its own, so memory depends on the batch, not the file.
 - **APIs and gateway**: REST and SOAP services with generated WSDL and OpenAPI; security policies (API keys, Basic, JWT, mutual TLS, WS-Security UsernameToken, IP allow lists, rate limits, CORS); gateway apps with keys, OAuth client-credentials tokens, plans and a firewall; TLS with your own certificate or Let's Encrypt.
 - **AI**: AI steps (prompt, classify, route, extract, summarize, translate, sentiment) on Claude, OpenAI, Gemini, Ollama and other providers; AI agents with tools, memory, guardrails, people in the loop and hand-offs; knowledge bases for RAG (built-in, pgvector, Qdrant, Chroma, Pinecone); Sutras published as MCP tools for Claude and other assistants; agents as chat pages, an OpenAI-compatible API and A2A.
@@ -44,6 +46,10 @@
 - **Documentation from the design**: each Sutra and project produces its own documentation (HTML and Markdown) from its steps and their descriptions.
 
 ![The Admin Console: deployed applications and their Sutras](docs/guide-images/console-apps.jpg)
+
+## Download
+
+Each release has a Windows zip and a Linux tar.gz, already built, with SHA-256 files and offline archives (packages included) on the GitHub Releases page. Unpack, run `bin/sutraflow setup` (Windows: `bin\sutraflow.cmd setup`), then `bin/sutraflow start`. Steps for each system and for upgrades: [RELEASE-NOTES.md](RELEASE-NOTES.md).
 
 ## Quick start
 

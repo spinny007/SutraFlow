@@ -1,3 +1,12 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 import { q } from './db.js';
 import { can, PERMISSIONS, type Caller } from './access.js';
 import { audit } from './audit.js';
@@ -61,6 +70,13 @@ export const RULES: Record<string, Rule> = {
   'GET /api/engine/status': R(null),
   'POST /api/engine/drain': R('engines'),
   'GET /api/console/machine': R('engines'),
+  'PUT /api/console/engines/:id/name': R('engines'),
+  'GET /api/console/memory': R('view'),
+  'POST /api/console/memory/:id/reload': R('deploy', 'resource'),
+  'POST /api/console/memory/:id/clear': R('deploy', 'resource'),
+  'GET /api/console/memory/:id/rows': R('view', 'resource'),
+  'PUT /api/console/memory/:id/rows': R('deploy', 'resource'),
+  'DELETE /api/console/memory/:id/rows/:key': R('deploy', 'resource'),
   'POST /api/engine/housekeeping': R('engines'),
   'GET /api/releases/policy': R(null),
   'PUT /api/releases/policy': R('server'),

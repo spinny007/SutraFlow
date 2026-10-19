@@ -4,3 +4,4 @@ data/
 *.log
 .env
 sutraflow.env
+release/

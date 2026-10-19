@@ -1,3 +1,12 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 /**
  * User guide text for each activity. The settings tables, ports and descriptions are read
  * from the activities themselves; this file adds the advice a person needs to choose and use them.
@@ -329,6 +338,42 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     output: ['Always the file\'s details (for delete, from before it was removed), plus <code>action</code>, <code>from</code> and <code>to</code>.'],
   },
   /* ---------------- DB Ops ---------------- */
+  memGet: {
+    scope: ['One row of a memory table by its key, from memory: no database round trip.', 'A row not in memory is fetched with the table\'s lookup query (when it has one) and kept.'],
+    outScope: ['Big tables and files: memory tables hold small reference data. Use [[dbQuery]] or stream files.', 'Searching by other fields: [[memQuery]].'],
+    use: ['Currency rates, product codes and their names, routing rules, a customer\'s credit limit looked up on every order.'],
+    steps: ['Pick the memory table (a Memory table resource).', 'Map the key, such as <code>{{input.currency}}</code>; for a key of several fields join the values with <code>|</code>.', 'Connect <em>found</em> and <em>missing</em>.'],
+    output: ['<code>row</code>, <code>found</code>, <code>key</code>.'],
+    guide: ['In a mapping or a setting, <code>=memory-lookup(\'Rates\', {input.currency}, \'rate\')</code> reads the same row from memory without a step.'],
+  },
+  memPut: {
+    scope: ['Adds or replaces one row, or a list of rows, in a memory table.', 'With a copy in the database (failsafe), the change is saved there too and reaches every engine within a second.'],
+    outScope: ['Saving business data: write it to your database with [[dbUpdate]]; a memory table is a fast copy of reference values.'],
+    use: ['Keeping the latest rate received from an API; caching a token or a looked-up value for a while (Keep for).'],
+    steps: ['Pick the memory table.', 'Map the row (it must have the key fields), or a list of rows.', 'Optionally a key, and how long to keep the row.'],
+    output: ['<code>count</code>, <code>keys</code>, <code>added</code>, <code>updated</code>.'],
+  },
+  memDelete: {
+    scope: ['Removes one row by key, or every row of a memory table.'],
+    outScope: ['Loading the table again from its source: [[memReload]].'],
+    use: ['Dropping a value that is no longer valid, such as a withdrawn product code.'],
+    steps: ['Pick the memory table.', 'Choose one row (and map its key) or every row.'],
+    output: ['<code>deleted</code> and the key, or the number of rows removed.'],
+  },
+  memQuery: {
+    scope: ['Finds rows of a memory table: fields equal to values, and an optional condition per row such as <code>={row.rate} &gt; 1</code>.', 'Reads memory only.'],
+    outScope: ['Queries over big data: run them in the database with [[dbQuery]].'],
+    use: ['All active codes of a country; the rates above a threshold.'],
+    steps: ['Pick the memory table.', 'Add fields and values to match, and or a condition on <code>{row.field}</code>.', 'Connect <em>empty</em> for no match.'],
+    output: ['<code>rows</code> (repeating) and <code>count</code>.'],
+  },
+  memReload: {
+    scope: ['Loads a memory table again from its load query on this engine, and gives its figures.'],
+    outScope: ['Every engine at once: Reload in the Admin Console (Memory tables) or <code>sutra memory reload</code>.'],
+    use: ['After a Sutra changed the source table, so lookups see the new values at once.'],
+    steps: ['Pick the memory table.'],
+    output: ['<code>rows</code>, <code>bytes</code>, <code>hits</code>, <code>misses</code>, <code>loadedAt</code>.'],
+  },
   dbQuery: {
     scope: ['A SELECT on PostgreSQL, MySQL/MariaDB, SQL Server, Oracle or SQLite.', 'Named parameters <code>:name</code>, always bound, never pasted into the SQL.', 'A maximum row count.'],
     outScope: ['Changes: use [[dbUpdate]] or [[dbTransaction]].'],

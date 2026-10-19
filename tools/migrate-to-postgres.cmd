@@ -1,4 +1,11 @@
 @echo off
+@rem SutraFlow
+@rem Copyright (c) 2026-27 Surya Partap Singh
+@rem Developer: Surya Partap Singh | Website: MixAgile.com
+@rem File version: 1.7.5
+@rem License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+@rem A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+@rem SPDX-License-Identifier: AGPL-3.0-only
 rem Moves SutraFlow from SQLite to PostgreSQL on Windows: stops it, copies the data, points
 rem sutraflow.env at PostgreSQL, starts it again and checks it (back to SQLite if anything fails).
 rem The PostgreSQL connection is the one saved on the Admin Console's Database page, or give

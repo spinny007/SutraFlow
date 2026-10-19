@@ -1,4 +1,13 @@
 #!/usr/bin/env node
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 // SutraFlow launcher: start, stop, status and the rest, on Windows and Linux, with or without Docker.
 // Settings come from sutraflow.env in the SutraFlow folder (made on first use from sutraflow.env.example),
 // or from the file named by SUTRAFLOW_ENV. Run "sutraflow help" for the commands.
@@ -201,7 +210,10 @@ function openPage(cfg, what) {
 }
 
 function runSync(cmd, args, o = {}) {
-  const r = spawnSync(cmd, args, { cwd: HOME, stdio: 'inherit', shell: WIN, ...o });
+  // Windows runs npm.cmd through the shell: one quoted command line (arguments next to shell: true
+  // are deprecated, as they are not quoted).
+  const line = [cmd, ...args].map(x => (/[\s"&|<>^]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x)).join(' ');
+  const r = WIN ? spawnSync(line, { cwd: HOME, stdio: 'inherit', shell: true, ...o }) : spawnSync(cmd, args, { cwd: HOME, stdio: 'inherit', ...o });
   if (r.error) fail(`${cmd}: ${r.error.message}`);
   return r.status ?? 1;
 }
@@ -265,7 +277,7 @@ WantedBy=multi-user.target
 
 // ---------- Docker ----------
 function compose(args, file) {
-  const has = spawnSync('docker', ['compose', 'version'], { stdio: 'ignore', shell: WIN });
+  const has = WIN ? spawnSync('docker compose version', { stdio: 'ignore', shell: true }) : spawnSync('docker', ['compose', 'version'], { stdio: 'ignore' });
   if (has.status !== 0) fail('Docker with the compose plugin is needed: https://docs.docker.com/get-docker/');
   return runSync('docker', ['compose', ...(file ? ['-f', file] : []), ...args]);
 }

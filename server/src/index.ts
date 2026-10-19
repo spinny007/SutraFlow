@@ -1,4 +1,14 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.5
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 import { openDb, q } from './db.js';
+import { memTableByName, memPeek, stopMemTables } from './memtables.js';
 import { fileSamplesOnce } from './samples.js';
 import { engine } from './engine/engine.js';
 import { allActivities } from './palettes/index.js';
@@ -83,6 +93,11 @@ export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gatew
     setProject: (pid, name, value) => setRuntimeVariable(pid, name, value),
     getEngine: name => engineVariableValues()[name],
     setEngine: (name, value) => setEngineVariable(name, value),
+    memoryLookup: (pid, table, key, field) => {
+      const t = memTableByName(pid, table);
+      const row = t ? memPeek(t, key) : undefined;
+      return row === undefined ? null : field ? row?.[field] ?? null : row;
+    },
   });
   loadOpsFiles(m => console.log(m));
   fileSamplesOnce();
@@ -131,6 +146,7 @@ export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gatew
     await closeBusPublishers();
     await closeDbPools();
     engine.stop();
+    stopMemTables();
     await flushTracing();
     stopCluster();
     await closeServer(admin);
