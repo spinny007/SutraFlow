@@ -46,7 +46,7 @@ test('set up: two projects with deployed Sutras, an administrator, a viewer of o
   const failing = flows.saveFlow(undefined, { name: 'Payroll', nodes: [s, bad], edges: [edge(s, bad)] }, hr);
   flows.deploy(failing.id);
   const d = flows.deployedFlows().find(x => x.flowId === failing.id)!;
-  const id = engine.startRun({ doc: d.doc, flowId: d.flowId, projectId: hr, version: d.version, source: 'api' });
+  const id = await engine.startRun({ doc: d.doc, flowId: d.flowId, projectId: hr, version: d.version, source: 'api' });
   await engine.waitFor(id, 10000);
   for (const [u, role, project, who] of [['vic', 'viewer', shop, viewer], ['olga', 'operator', '', ops]] as const) {
     await call(admin, 'POST', '/api/access/users', { username: u, password: 'Console-user-77', mustChange: false, grants: [{ role, project }] });

@@ -22,11 +22,8 @@ export function rebuildSchedules() {
   for (const d of deployedFlows()) {
     for (const n of d.doc.nodes.filter(x => x.type === 'timer')) {
       const fire = () => {
-        try {
-          engine.startRun({ doc: d.doc, flowId: d.flowId, projectId: d.projectId, version: d.version, triggerNodeId: n.id, input: { firedAt: new Date().toISOString() }, source: 'timer' });
-        } catch (e: any) {
-          schedulerErrors.push(`${d.doc.name} / ${n.name}: ${e.message}`);
-        }
+        engine.startRun({ doc: d.doc, flowId: d.flowId, projectId: d.projectId, version: d.version, triggerNodeId: n.id, input: { firedAt: new Date().toISOString() }, source: 'timer' })
+          .catch((e: any) => { schedulerErrors.push(`${d.doc.name} / ${n.name}: ${e.message}`); });
       };
       try {
         if (n.config.mode === 'interval') {

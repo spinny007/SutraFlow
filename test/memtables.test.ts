@@ -46,7 +46,7 @@ const rates = saveResource({ kind: 'memoryTable', name: 'Rates', project_id: sho
 const deployed = (name: string, nodes: any[], edges: any[]) => { const f = flows.saveFlow(undefined, { name, nodes, edges }, shop); flows.deploy(f.id); return f.id; };
 const run = async (flowId: string, input: any = {}) => {
   const d = flows.deployedFlows().find(x => x.flowId === flowId)!;
-  const id = engine.startRun({ doc: d.doc, flowId, projectId: shop, version: d.version, source: 'api', input });
+  const id = await engine.startRun({ doc: d.doc, flowId, projectId: shop, version: d.version, source: 'api', input });
   const status = await engine.waitFor(id, 15000);
   return { status, out: JSON.parse(q.get<any>('select state from runs where id = ?', id).state).outputs, error: q.get<any>('select error from runs where id = ?', id).error };
 };

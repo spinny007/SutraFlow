@@ -1,0 +1,267 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.6
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { createRequire } from 'node:module';
+import { config } from './config.js';
+import { asyncTxScope, getDb, lockId, onDbClose, singleConnection, toPg, type Backend } from './db.js';
+
+/**
+ * Asynchronous storage for the engine's hot path (claiming steps, completing them, settling runs).
+ *
+ *  - PostgreSQL (SUTRA_DB=postgres://...): a connection pool on the main thread. Many steps can have
+ *    database work in flight at once, instead of the engine waiting for each answer of the one
+ *    synchronous connection in db.ts. SUTRA_PG_ASYNC=0 turns it off (everything through db.ts).
+ *  - SQLite, PGlite (tests) and the in-memory engine: one connection, used directly; transactions
+ *    take turns.
+ *
+ * Transactions are explicit: transaction(key, async tx => ...) hands the body a query object bound to
+ * the transaction, and only that object may be used inside it. A synchronous write through db.ts
+ * while a transaction is open is refused (db.ts checks asyncTxScope), so a transaction can never be
+ * split over two connections. Bodies must not wait for anything but their own queries: no calls to
+ * other services inside a transaction.
+ *
+ * Fewer round trips (PostgreSQL): a transaction may name a first query, sent together with begin and
+ * the lock, and its body may end with commitWith(), sent together with commit. A step is then
+ * completed in three round trips instead of six or more. On one-connection stores both run as
+ * ordinary statements; the outcome is the same.
+ */
+
+/** Queries bound to a transaction, or autocommit queries on a store. */
+export interface TxQ {
+  get<T = any>(sql: string, ...args: any[]): Promise<T | undefined>;
+  all<T = any>(sql: string, ...args: any[]): Promise<T[]>;
+  run(sql: string, ...args: any[]): Promise<{ changes: number }>;
+}
+
+/** The query object of a transaction body. */
+export interface TxBody extends TxQ {
+  /** Runs a last statement and commits, in one round trip; the body uses the transaction no more after it. */
+  commitWith<T = any>(sql: string, ...args: any[]): Promise<T | undefined>;
+}
+
+export interface AsyncStore extends TxQ {
+  readonly kind: 'database' | 'memory';
+  readonly backend: 'sqlite' | 'postgres';
+  /** True for the PostgreSQL pool (transactions run at the same time). */
+  readonly pooled: boolean;
+  /**
+   * A write transaction. With a key ("run:<id>", "flow:<id>"), PostgreSQL locks only that key; without
+   * one, the shared lock of db.ts. first: a query whose first row the body receives, sent with begin.
+   * A deadlock or serialization failure is tried again (twice).
+   */
+  transaction<T>(key: string | undefined, fn: (tx: TxBody, first?: any) => Promise<T>, first?: { sql: string; args: any[] }): Promise<T>;
+  /** The synchronous connection of a local store (in-memory runs), for quick reads. */
+  readonly sync?: Backend;
+}
+
+/** Figures of the pool, for /metrics and the Admin Console. */
+export const poolFigures = {
+  size: 0, total: 0, idle: 0, waiting: 0,
+  acquireMs: { count: 0, sum: 0, max: 0 }, txMs: { count: 0, sum: 0, max: 0 }, queryMs: { count: 0, sum: 0, max: 0 },
+  retries: 0,
+};
+const note = (f: { count: number; sum: number; max: number }, ms: number) => { f.count++; f.sum += ms; if (ms > f.max) f.max = ms; };
+
+const nested = (store: unknown) => {
+  const s = asyncTxScope.getStore();
+  return !!s?.open && s.store === store;
+};
+const NESTED_QUERY = 'Inside a transaction, query through its transaction object';
+const AFTER_COMMIT = 'The transaction has been committed (commitWith ends it)';
+
+// ---------- one connection: SQLite, PGlite, the in-memory engine ----------
+
+/**
+ * A store over one synchronous connection. Transactions and autocommit queries take turns (a chain of
+ * promises), so nothing else uses the connection while a transaction is open.
+ */
+export function singleStore(conn: { get(sql: string, a: any[]): any; all(sql: string, a: any[]): any[]; run(sql: string, a: any[]): { changes: number }; begin(key?: string): void; commit(): void; rollback(): void },
+  kind: 'database' | 'memory', backend: 'sqlite' | 'postgres', sync?: Backend): AsyncStore {
+  let turn: Promise<unknown> = Promise.resolve();
+  const inTurn = <T>(fn: () => Promise<T> | T): Promise<T> => {
+    const next = turn.then(fn, fn);
+    turn = next.catch(() => {});
+    return next;
+  };
+  const store: AsyncStore = {
+    kind, backend, pooled: false, sync,
+    get: (sql, ...a) => (nested(store) ? Promise.reject(new Error(NESTED_QUERY)) : inTurn(() => conn.get(sql, a))),
+    all: (sql, ...a) => (nested(store) ? Promise.reject(new Error(NESTED_QUERY)) : inTurn(() => conn.all(sql, a))),
+    run: (sql, ...a) => (nested(store) ? Promise.reject(new Error(NESTED_QUERY)) : inTurn(() => conn.run(sql, a))),
+    transaction<T>(key: string | undefined, fn: (tx: TxBody, first?: any) => Promise<T>, first?: { sql: string; args: any[] }) {
+      if (nested(store)) return Promise.reject(new Error('A transaction inside a transaction: pass the transaction object on'));
+      return inTurn(async () => {
+        const t0 = performance.now();
+        conn.begin(key);
+        const scope = { open: true, store };
+        let done = false;
+        const live = () => { if (done) throw new Error(AFTER_COMMIT); };
+        const body: TxBody = {
+          get: async (sql, ...a) => { live(); return conn.get(sql, a); },
+          all: async (sql, ...a) => { live(); return conn.all(sql, a); },
+          run: async (sql, ...a) => { live(); return conn.run(sql, a); },
+          commitWith: async (sql, ...a) => { live(); const r = conn.get(sql, a); done = true; return r; },
+        };
+        try {
+          const row = first ? conn.get(first.sql, first.args) : undefined;
+          const r = await asyncTxScope.run(scope, () => fn(body, row));
+          scope.open = false;
+          conn.commit();
+          return r;
+        } catch (e) {
+          scope.open = false;
+          try { conn.rollback(); } catch { /* none open */ }
+          throw e;
+        } finally {
+          note(poolFigures.txMs, performance.now() - t0);
+        }
+      });
+    },
+  };
+  return store;
+}
+
+// ---------- PostgreSQL: a pool ----------
+
+const require = createRequire(import.meta.url);
+const RETRY = new Set(['40P01', '40001']); // deadlock, serialization failure
+const params = (a: any[]) => a.map(v => (typeof v === 'boolean' ? (v ? 1 : 0) : v === undefined ? null : v));
+const plain = (v: any) => (typeof v === 'bigint' ? Number(v) : v instanceof Date ? v.toISOString() : v);
+const rowsOf = (r: any) => (r?.rows || []).map((row: any) => { for (const k of Object.keys(row)) row[k] = plain(row[k]); return row; });
+
+/**
+ * A statement with its values written in, for the simple-query protocol (several statements in one
+ * round trip take no parameters). Strings go through the driver's escapeLiteral.
+ */
+export function inline(sql: string, args: any[], escapeLiteral: (s: string) => string) {
+  const lit = (v: any): string => {
+    if (v === null || v === undefined) return 'NULL';
+    if (typeof v === 'boolean') return v ? '1' : '0';
+    if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL';
+    if (typeof v === 'bigint') return String(v);
+    if (v instanceof Date) return escapeLiteral(v.toISOString());
+    return escapeLiteral(String(v));
+  };
+  let i = 0, out = '', quote = '';
+  for (const ch of sql) {
+    if (quote) { if (ch === quote) quote = ''; out += ch; continue; }
+    if (ch === "'" || ch === '"') { quote = ch; out += ch; continue; }
+    out += ch === '?' ? lit(args[i++]) : ch;
+  }
+  if (i !== args.length) throw new Error(`The statement has ${i} placeholders for ${args.length} values`);
+  return out;
+}
+
+/** The pool size: enough for the steps that finish at the same moment, within PostgreSQL's limits. */
+export function poolSize() {
+  const set = Number(process.env.SUTRA_PG_POOL || 0);
+  return set > 0 ? set : Math.min(20, Math.max(4, Math.ceil(config.workerConcurrency / 2)));
+}
+
+function poolStore(url: string): AsyncStore & { end(): Promise<void> } {
+  const pg = require('pg');
+  pg.types.setTypeParser(20, (v: string) => Number(v)); // bigint
+  pg.types.setTypeParser(1700, (v: string) => Number(v)); // numeric
+  const size = poolSize();
+  const password = process.env.SUTRA_DB_PASSWORD;
+  const pool = new pg.Pool({ connectionString: url, max: size, application_name: 'sutraflow', ...(password ? { password } : {}) });
+  pool.on('error', (e: Error) => console.error('PostgreSQL pool: an idle connection failed:', e.message));
+  poolFigures.size = size;
+  const figures = () => { poolFigures.total = pool.totalCount; poolFigures.idle = pool.idleCount; poolFigures.waiting = pool.waitingCount; };
+  const timed = async (c: any, q: any) => {
+    const t0 = performance.now();
+    try { return await c.query(q); } finally { note(poolFigures.queryMs, performance.now() - t0); }
+  };
+  const query = (c: any, sql: string, a: any[]) => timed(c, { text: toPg(sql), values: params(a) });
+  const auto: TxQ = {
+    get: async (sql, ...a) => rowsOf(await query(pool, sql, a))[0],
+    all: async (sql, ...a) => rowsOf(await query(pool, sql, a)),
+    run: async (sql, ...a) => ({ changes: (await query(pool, sql, a)).rowCount ?? 0 }),
+  };
+  const store: AsyncStore & { end(): Promise<void> } = {
+    kind: 'database', backend: 'postgres', pooled: true,
+    get: (sql, ...a) => (nested(store) ? Promise.reject(new Error(NESTED_QUERY)) : auto.get(sql, ...a)),
+    all: (sql, ...a) => (nested(store) ? Promise.reject(new Error(NESTED_QUERY)) : auto.all(sql, ...a)),
+    run: (sql, ...a) => (nested(store) ? Promise.reject(new Error(NESTED_QUERY)) : auto.run(sql, ...a)),
+    async transaction<T>(key: string | undefined, fn: (tx: TxBody, first?: any) => Promise<T>, first?: { sql: string; args: any[] }): Promise<T> {
+      if (nested(store)) throw new Error('A transaction inside a transaction: pass the transaction object on');
+      for (let attempt = 0; ; attempt++) {
+        const a0 = performance.now();
+        const client = await pool.connect();
+        note(poolFigures.acquireMs, performance.now() - a0);
+        figures();
+        const t0 = performance.now();
+        const scope = { open: true, store };
+        let committed = false, broken: Error | undefined;
+        const live = () => { if (committed) throw new Error(AFTER_COMMIT); };
+        const esc = (s: string) => client.escapeLiteral(s);
+        const body: TxBody = {
+          get: async (sql, ...a) => { live(); return rowsOf(await query(client, sql, a))[0]; },
+          all: async (sql, ...a) => { live(); return rowsOf(await query(client, sql, a)); },
+          run: async (sql, ...a) => { live(); return { changes: (await query(client, sql, a)).rowCount ?? 0 }; },
+          commitWith: async (sql, ...a) => {
+            live();
+            const res = await timed(client, `${inline(sql, a, esc)}; commit`);
+            committed = true;
+            return rowsOf(Array.isArray(res) ? res[0] : res)[0];
+          },
+        };
+        try {
+          // Begin, the lock and the first query in one round trip.
+          const head = `begin; select pg_advisory_xact_lock(${key ? lockId(key) : 424242})${first ? `; ${inline(first.sql, first.args, esc)}` : ''}`;
+          const res = await timed(client, head);
+          const row = first ? rowsOf(Array.isArray(res) ? res[res.length - 1] : res)[0] : undefined;
+          const r = await asyncTxScope.run(scope, () => fn(body, row));
+          scope.open = false;
+          if (!committed) await client.query('commit');
+          return r;
+        } catch (e: any) {
+          scope.open = false;
+          if (!committed) await client.query('rollback').catch((re: Error) => { broken = re; });
+          if (RETRY.has(e?.code) && attempt < 2 && !committed) { poolFigures.retries++; continue; }
+          throw e;
+        } finally {
+          client.release(broken);
+          note(poolFigures.txMs, performance.now() - t0);
+          figures();
+        }
+      }
+    },
+    end: () => pool.end(),
+  };
+  return store;
+}
+
+// ---------- the database store of this server ----------
+
+let current: { db: Backend; store: AsyncStore & { end?(): Promise<void> } } | null = null;
+onDbClose.push(() => { const c = current; current = null; void c?.store.end?.().catch(() => {}); });
+
+/** The asynchronous store of the open database (made on first use). */
+export function asyncDatabase(): AsyncStore {
+  const d = getDb();
+  if (current && current.db === d) return current.store;
+  const url = singleConnection.url();
+  const store = d.kind === 'postgres' && /^postgres(ql)?:/.test(url) && process.env.SUTRA_PG_ASYNC !== '0'
+    ? poolStore(url)
+    : singleStore({
+      get: (sql, a) => d.get(sql, a), all: (sql, a) => d.all(sql, a), run: (sql, a) => d.run(sql, a),
+      begin: key => singleConnection.begin(key), commit: () => singleConnection.commit(), rollback: () => singleConnection.rollback(),
+    }, 'database', d.kind);
+  current = { db: d, store };
+  return store;
+}
+
+/** An asynchronous store over a private synchronous one (the in-memory engine). */
+export function localStore(b: Backend): AsyncStore {
+  return singleStore({
+    get: (sql, a) => b.get(sql, a), all: (sql, a) => b.all(sql, a), run: (sql, a) => b.run(sql, a),
+    begin: () => b.begin(), commit: () => b.commit(), rollback: () => b.rollback(),
+  }, 'memory', 'sqlite', b);
+}

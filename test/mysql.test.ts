@@ -41,7 +41,7 @@ before(async () => {
   if (u!.password) setSecret('MYSQL_TEST_PW', decodeURIComponent(u!.password));
   conn = saveResource({ kind: 'database', name: 'Laragon MySQL', config: { driver: 'mysql', host: u!.hostname, port: Number(u!.port) || 3306, database: dbName, user: decodeURIComponent(u!.username), passwordSecret: u!.password ? 'MYSQL_TEST_PW' : '', poolMax: 4 } }).id;
   run = async (nodes, edges) => {
-    const id = engine.startRun({ doc: { name: 'MySQL test', nodes, edges } });
+    const id = await engine.startRun({ doc: { name: 'MySQL test', nodes, edges } });
     await engine.waitFor(id, 30000);
     const r: any = q.get('select status, error, state from runs where id = ?', id);
     return { status: r.status, error: r.error, out: JSON.parse(r.state).outputs };

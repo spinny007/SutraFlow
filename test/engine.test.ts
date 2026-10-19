@@ -23,7 +23,7 @@ before(async () => { srv = await boot({ listenAdmin: false }); });
 after(async () => { await srv.stop(); });
 
 async function run(nodes: any[], edges: any[], input?: any) {
-  const id = engine.startRun({ doc: { name: 'T', nodes, edges }, input });
+  const id = await engine.startRun({ doc: { name: 'T', nodes, edges }, input });
   const status = await engine.waitFor(id, 20000, true);
   const r: any = q.get('select * from runs where id = ?', id);
   const tasks = q.all<any>('select * from tasks where run_id = ? order by id', id);
@@ -85,11 +85,11 @@ test('human approval waits as saved state and resumes on decision', async () => 
   const a = node('approval', 'Approve', { message: 'OK {{input.orderId}}?' });
   const ok = node('log', 'Approved', { message: 'yes' });
   const nok = node('log', 'Rejected', { message: 'no' });
-  const id = engine.startRun({ doc: { name: 'T', nodes: [s, a, ok, nok], edges: [edge(s, a), edge(a, ok, 'approved'), edge(a, nok, 'rejected')] } });
+  const id = await engine.startRun({ doc: { name: 'T', nodes: [s, a, ok, nok], edges: [edge(s, a), edge(a, ok, 'approved'), edge(a, nok, 'rejected')] } });
   assert.equal(await engine.waitFor(id, 10000, true), 'waiting');
   const t: any = q.get(`select * from tasks where run_id = ? and status = 'waiting'`, id);
   assert.equal(JSON.parse(t.wait).message, 'OK A-9?');
-  engine.decide(t.id, true, 'tester', 'fine');
+  await engine.decide(t.id, true, 'tester', 'fine');
   assert.equal(await engine.waitFor(id), 'done');
   const st = JSON.parse((q.get('select state from runs where id = ?', id) as any).state);
   assert.equal(st.outputs.Approve.approval.by, 'tester');
@@ -149,7 +149,7 @@ test('HTTP 500 fails the step with the response detail', async () => {
 test('durable wait over 5 seconds is deferred, not held in memory', async () => {
   const s = node('start', 'Start', { payload: '{}' });
   const w = node('wait', 'Long wait', { ms: 5200 });
-  const id = engine.startRun({ doc: { name: 'T', nodes: [s, w], edges: [edge(s, w)] } });
+  const id = await engine.startRun({ doc: { name: 'T', nodes: [s, w], edges: [edge(s, w)] } });
   await new Promise(r => setTimeout(r, 600));
   const t: any = q.get(`select * from tasks where run_id = ? and node_id = ?`, id, w.id);
   assert.equal(t.status, 'pending');

@@ -2,14 +2,14 @@
 
 **A visual integration designer and engine.** Drag activities onto a canvas, map data between steps, test and debug, and deploy *Sutras* (integration processes) that run as REST, SOAP and MCP services, on schedules, or on events: files, queues, mail, cloud drives, chat messages and more.
 
-![Version](https://img.shields.io/badge/version-1.7.5-2f6fd8)
+![Version](https://img.shields.io/badge/version-1.7.6-2f6fd8)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Commercial licence available](https://img.shields.io/badge/commercial%20licence-available-orange)](COMMERCIAL-LICENSE.md)
 ![Node.js](https://img.shields.io/badge/node-%E2%89%A5%2022.13-339933?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-7-3178c6?logo=typescript&logoColor=white)
 ![Database](https://img.shields.io/badge/database-SQLite%20%7C%20PostgreSQL-4169e1?logo=postgresql&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Docker-555)
-![Tests](https://img.shields.io/badge/tests-275-success)
+![Tests](https://img.shields.io/badge/tests-303-success)
 
 ![The SutraFlow designer: palettes, canvas and the step inspector](docs/guide-images/designer.jpg)
 
@@ -212,9 +212,11 @@ Tested against stand-in services that answer like the real ones, but not yet aga
 
 ## Roadmap
 
-- **Asynchronous PostgreSQL storage**: the biggest remaining gain, and the reason SQLite is about four times faster on one server. Today each PostgreSQL statement is answered through a worker thread while the engine waits; an asynchronous storage layer with a connection pool would let one engine overlap the database work of many steps. It is a large change.
-- **Leaner run state**: each step currently rewrites the run state with the outputs of earlier steps, which costs Sutras that pass big data along. Keeping outputs only in the step rows removes that cost.
+- **Leaner run state**: each step currently rewrites the run state with the outputs of earlier steps, which costs Sutras that pass big data along (64 KB outputs measured about a third of the throughput of small ones). Keeping outputs only in the step rows removes that cost.
 - **Waking engines on new work**: PostgreSQL can notify engines when work arrives (LISTEN/NOTIFY), instead of them polling the queue.
+- **Longer soak tests**: 8 to 24 hours on a cluster with PostgreSQL on its own machine.
+
+Done in 1.7.6: asynchronous PostgreSQL storage (a connection pool, explicit transactions, fencing of claimed steps, three round trips per step).
 
 ## Contributing
 

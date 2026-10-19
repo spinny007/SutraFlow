@@ -95,7 +95,10 @@ export function EngineTuning({ engines }: { engines: { id: string }[] }) {
 }
 
 interface Profile { name: string; machine: string; workers: number; memoryWorkers: number; pollMs: number; settingsRefreshMs: number; engines: number; nodeMemoryMb: number; readWholeMb: number; batchRows: number; database: string }
-interface MachineData { engine: string; cpus: number; cpuModel: string; memoryGb: number; freeGb: number; platform: string; node: string; database: string; memoryRuns: number; running: number; recommended: Profile; profiles: Profile[] }
+interface MachineData { engine: string; cpus: number; cpuModel: string; memoryGb: number; freeGb: number; platform: string; node: string; database: string; memoryRuns: number; running: number; recommended: Profile; profiles: Profile[]; pool?: Pool | null }
+interface Figure { count: number; sum: number; max: number }
+interface Pool { size: number; total: number; idle: number; waiting: number; acquireMs: Figure; txMs: Figure; queryMs: Figure; retries: number }
+const avg = (f: Figure) => (f.count ? (f.sum / f.count).toFixed(1) : '0');
 
 /** The machine of the engine serving this console, and the tuning recommended for it. */
 function Machine({ readOnly, cluster, onApplied }: { readOnly: boolean; cluster: Record<string, number>; onApplied(): void }) {
@@ -120,6 +123,7 @@ function Machine({ readOnly, cluster, onApplied }: { readOnly: boolean; cluster:
           <tr><th>Node memory per engine</th><td>{r.nodeMemoryMb} MB (node --max-old-space-size)</td></tr>
           <tr><th>Files read whole</th><td>up to {r.readWholeMb} MB; bigger CSV and line files: Stream in batches of {r.batchRows} rows</td></tr>
           <tr><th>Database</th><td>{r.database}</td></tr>
+          {m.data.pool && <tr><th>Database connections</th><td>{m.data.pool.total} open of {m.data.pool.size} ({m.data.pool.idle} idle, {m.data.pool.waiting} waiting); transactions {avg(m.data.pool.txMs)} ms on average (longest {Math.round(m.data.pool.txMs.max)}), waits for a connection {avg(m.data.pool.acquireMs)} ms, retries {m.data.pool.retries}</td></tr>}
         </tbody>
       </table>
       <p className="hint">Engines start with these values unless environment variables set others. The user guide chapter Sizing and performance has the measurements behind them.</p>

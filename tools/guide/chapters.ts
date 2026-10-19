@@ -36,8 +36,8 @@ export const CHAPTERS: Chapter[] = [
 <p class="h">From a release (servers)</p>
 <p>Each release comes as <code>sutraflow-&lt;version&gt;-windows.zip</code> and <code>sutraflow-&lt;version&gt;-linux.tar.gz</code>, already built, each with a <code>.sha256</code> file; offline archives with the packages inside are there for servers without access to the npm registry. <code>RELEASE-NOTES.md</code> in the archive has the steps for each system and for upgrades.</p>
 <ol>
-<li>Check the download: <code>sha256sum -c sutraflow-1.7.5-linux.tar.gz.sha256</code>, or on Windows <code>Get-FileHash sutraflow-1.7.5-windows.zip -Algorithm SHA256</code> against the <code>.sha256</code> file.</li>
-<li>Unpack it: <code>tar -xzf sutraflow-1.7.5-linux.tar.gz -C /opt/sutraflow</code>, or <code>Expand-Archive sutraflow-1.7.5-windows.zip C:\\SutraFlow</code>.</li>
+<li>Check the download: <code>sha256sum -c sutraflow-1.7.6-linux.tar.gz.sha256</code>, or on Windows <code>Get-FileHash sutraflow-1.7.6-windows.zip -Algorithm SHA256</code> against the <code>.sha256</code> file.</li>
+<li>Unpack it: <code>tar -xzf sutraflow-1.7.6-linux.tar.gz -C /opt/sutraflow</code>, or <code>Expand-Archive sutraflow-1.7.6-windows.zip C:\\SutraFlow</code>.</li>
 <li>In the unpacked folder: <code>bin/sutraflow setup</code> (Windows: <code>bin\\sutraflow.cmd setup</code>) installs the runtime packages and makes <code>sutraflow.env</code>.</li>
 <li><code>bin/sutraflow start</code>, then open <code>http://127.0.0.1:4800</code> and create the administrator account.</li>
 </ol>
@@ -1370,7 +1370,7 @@ stages:
   post { success { archiveArtifacts 'release.zip' } }
 }</pre>
 <p class="h">Container images</p>
-<p>For immutable production, bake the release into an engine image: <code>FROM sutraflow:1.7.5</code>, <code>COPY release.zip /deploy/</code>, and start it with <code>SUTRA_MODE=engine SUTRA_DEPLOY_DIR=/deploy</code>; the engine deploys every package in the folder at start. A new release is a new image.</p>
+<p>For immutable production, bake the release into an engine image: <code>FROM sutraflow:1.7.6</code>, <code>COPY release.zip /deploy/</code>, and start it with <code>SUTRA_MODE=engine SUTRA_DEPLOY_DIR=/deploy</code>; the engine deploys every package in the folder at start. A new release is a new image.</p>
 [[tip:Good practice|One zip, many environments: build once, deploy the same artifact to UAT and production.<br>Give each environment its own system account and token, with Deploy on the project only.<br>Let the pipeline fail on <code>sutra check</code> before anything changes; keep rollback one command away.<br>Store the zip with the pipeline run: it is the record of exactly what went live.]]`,
   },
   {
@@ -1511,7 +1511,7 @@ sutra user list</pre>`,
     id: 'move-postgres', title: 'Moving to PostgreSQL',
     html: `
 <p>SutraFlow keeps its own data (projects, Sutras, runs, people, the vault) in SQLite until you move it to PostgreSQL. PostgreSQL lets several engines share the data and holds more. The move takes a minute and is one button in the Admin Console, or one script on Windows and Linux.</p>
-[[note:Do you need to move?|On a single server, SQLite is faster than PostgreSQL (about four times the steps a second in our measurements) and needs no database server. Move when you add engines, need failover, or must run the database apart. See <a href="#ch-sizing">Sizing and performance</a>.]]
+[[note:Do you need to move?|On a single server, SQLite needs no database server and handles about 420 small steps a second. Move when you add engines, need failover, need more throughput on one busy server, or must run the database apart. See <a href="#ch-sizing">Sizing and performance</a>.]]
 <p class="h">1. Prepare PostgreSQL</p>
 <ul>
 <li>On this machine (Laragon includes PostgreSQL), on another server, or hosted: Azure Database for PostgreSQL, Amazon RDS, Google Cloud SQL. Version 14 or later.</li>
@@ -1589,12 +1589,25 @@ tools/migrate-to-postgres.sh --url "postgres://sutra:password@db.example.com:543
 <p class="h">Headless engines</p>
 <p>The same program started with <code>SUTRA_MODE=engine</code> runs Sutras without the studio: no designer pages and no editing. It keeps <code>/health</code>, <code>/ready</code> and <code>/metrics</code>, the Admin Console at <code>/admin</code> for its users, and an automation API for API tokens (the admin token or system account tokens). Packages in <code>SUTRA_DEPLOY_DIR</code> are deployed when it starts; a package that cannot be deployed stops the start.</p>
 <p class="h">Docker</p>
-<pre>docker build -t sutraflow:1.7.5 .
+<pre>docker build -t sutraflow:1.7.6 .
 docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=... \\
-           -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:1.7.5</pre>
+           -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:1.7.6</pre>
 <p>The image runs as a non-root user, checks its own health, and writes JSON logs. <code>docker-compose.yml</code> has a studio and an engine; <code>docker-compose.cluster.yml</code> has PostgreSQL, a studio and two engines.</p>
 <p class="h">Clusters</p>
 <p>Several engines share one database (<code>SUTRA_DB=postgres://...</code>), each with its own <code>SUTRA_ENGINE_ID</code> and all with the same <code>SUTRA_MASTER_KEY</code>.</p>
+<p class="h">A cluster needs a load balancer</p>
+<ul>
+<li><strong>Put a load balancer in front of the engines' gateways</strong> (Apache, nginx, IIS, a cloud load balancer) and send every caller of REST, SOAP, MCP and agent services to it, with <code>/ready</code> on the admin port as the health check. A run starts on the engine that receives its call. Measured: four engines did about three times the work of one with calls spread over them, and little more than one when every call went to the same engine.</li>
+<li>Timers, folder and mailbox listeners run on the leader only, so they never start twice; the steps that follow are shared by every engine.</li>
+<li>Sutras that run in memory stay on the engine that started them: only a load balancer spreads them.</li>
+</ul>
+<p class="h">Database connections</p>
+<ul>
+<li>On PostgreSQL each engine runs its steps through a pool of connections (<code>SUTRA_PG_POOL</code>, by default half of <em>Steps at once</em>, from 4 to 20) and keeps one more for everything else. Many steps then have their database work in flight at once.</li>
+<li>Keep <em>engines &times; (pool + 1)</em>, plus the studio and your own tools, under PostgreSQL's <code>max_connections</code> (100 by default). Four engines with a pool of 8 use 36.</li>
+<li><code>/metrics</code> shows the pool: <code>sutra_db_pool_connections</code>, <code>sutra_db_pool_waiting</code> (transactions waiting for a connection), <code>sutra_db_pool_acquire_ms</code> and <code>sutra_db_transaction_ms</code>. Waiting that grows means the pool is too small for the work; transactions that grow mean the database is the limit.</li>
+<li><code>SUTRA_PG_ASYNC=0</code> runs the engine through one synchronous connection as before 1.7.6: a fallback, several times slower.</li>
+</ul>
 <p><strong>Engine names.</strong> <code>SUTRA_ENGINE_ID</code> is an engine's identity in the cluster: the steps it runs record it as their owner, and the leader uses it to hand a stopped engine's steps to the others. Without it, the launcher uses the computer name (<code>vm-west-01-studio</code>, <code>vm-west-01-engine</code>); the Laragon set-up names its engines <code>laragon</code> and <code>laragon-engine</code>. Set it once per engine (in <code>sutraflow.env</code>: <code>STUDIO_ENGINE_ID</code>, <code>ENGINE_ENGINE_ID</code>) and keep it. For the name people see, use <strong>Rename</strong> in <em>Admin Console &rarr; Engines</em> or <code>sutra engines name &lt;id&gt; "Azure West Europe 1"</code>: a display name that can change at any time.</p>
 <ul>
 <li>Work is shared, and each step is run by exactly one engine.</li>
@@ -1666,15 +1679,16 @@ docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=...
 <li><strong>Steps at once</strong> is more than the cores because most steps wait for a network or a database, and an engine runs other steps meanwhile. It does not speed up steps that only compute: in the measurements below, 32 steps at once did no better than 16. Raise it for Sutras that mostly wait (APIs, AI); lower it when steps compute (big mappings, scripts) and the engine CPU is near 1 core.</li>
 <li>One engine is one Node.js process and uses about one core for its own work. To use more cores, run <strong>more engines</strong> on the same machine against PostgreSQL (the launcher starts them: <code>sutraflow start engine</code>), not more steps at once.</li>
 <li><strong>Node memory</strong> is the heap limit to give each engine: <code>NODE_OPTIONS=--max-old-space-size=384</code> on the smallest machines, so the operating system and the database keep the rest.</li>
-<li><strong>SQLite is the fastest database for one server</strong>: it runs inside the engine, with no network in between, and measured about four times the steps per second of PostgreSQL on the same machine. Use it on small machines (a PostgreSQL server needs its own few hundred MB) and for any single server. Use <strong>PostgreSQL</strong> for several engines or machines, for failover, or when the database must be managed apart, ideally on a machine (or a managed service) of its own.</li>
+<li><strong>SQLite</strong> runs inside the engine, with nothing to install: about 420 small steps a second on one engine. Use it on small machines (a PostgreSQL server needs its own few hundred MB) and for most single servers. <strong>PostgreSQL</strong> runs many steps' database work at the same time through a pool: about 720 small steps a second on one engine on the same machine, and 1,600 with four. Use it for several engines or machines, for failover, for a busy single server, or when the database must be managed apart, ideally on a machine (or a managed service) of its own.</li>
 </ul>
 
 <p class="h">SQLite or PostgreSQL</p>
-<p><strong>For smaller workloads and for speed, use SQLite.</strong> It is the default, needs nothing installed, and is the fastest choice for a single server: the database runs inside the engine, so a step costs no network round trips. Measured on the same machine, one engine on SQLite ran about <strong>520 small steps a second</strong>, against about 120 on PostgreSQL. Held to one core and 512 MB, it still ran 365 a second durable and 750 in memory.</p>
+<p><strong>For smaller workloads, use SQLite.</strong> It is the default, needs nothing installed and nothing to look after: the database runs inside the engine. Measured with REST calls on one engine, SQLite ran about <strong>420 small steps a second</strong>; held to one core and 512 MB, 365 a second durable and 750 in memory. PostgreSQL on the same machine ran about 720 on one engine (since 1.7.6 the engine works with PostgreSQL through a pool of connections) and 1,600 with four engines, so a busy server with a PostgreSQL server to hand gains from it.</p>
 <table class="t"><thead><tr><th>Use SQLite when</th><th>Use PostgreSQL when</th></tr></thead><tbody>
 <tr><td>One server runs SutraFlow (a VM, a desktop, a Raspberry Pi class box)</td><td>Several engines share the work, on one machine or several</td></tr>
 <tr><td>Small and medium workloads: up to millions of steps a day</td><td>You need failover: another engine takes over when one stops</td></tr>
-<tr><td>Fast request-reply APIs and short Sutras, where every millisecond counts</td><td>Runs must survive the loss of the whole machine (PostgreSQL replicated or managed)</td></tr>
+<tr><td>Request-reply APIs and short Sutras at moderate volume</td><td>Runs must survive the loss of the whole machine (PostgreSQL replicated or managed)</td></tr>
+<tr><td>Steady load up to a few hundred steps a second</td><td>A busy server that needs more (PostgreSQL ran about 70% more on one engine, four times as much with four)</td></tr>
 <tr><td>Small machines (1 to 2 GB): no database server to feed</td><td>Your company requires databases to be run, backed up and monitored by its DBAs</td></tr>
 <tr><td>Development, testing, demos, edge sites, departments</td><td>Run history must be queried by other tools while SutraFlow runs</td></tr>
 </tbody></table>
@@ -1686,7 +1700,7 @@ docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=...
 <li>Back up while it runs with <code>sqlite3 sutra.db ".backup copy.db"</code>, or stop SutraFlow and copy the data folder, together with <code>master.key</code> kept apart.</li>
 <li>When you outgrow it (several engines, failover), the move to PostgreSQL is one button: see <a href="#ch-move-postgres">Moving to PostgreSQL</a>. Nothing in the Sutras changes.</li>
 </ul>
-[[tip:Rule of thumb|One server: SQLite, for the best speed with the least to look after. More than one engine, or a need for failover: PostgreSQL, on a machine of its own.]]
+[[tip:Rule of thumb|One server with a moderate load: SQLite, with the least to look after. A busy server, more than one engine, or a need for failover: PostgreSQL, ideally on a machine of its own.]]
 
 <p class="h">What to run on which machine</p>
 <table class="t"><thead><tr><th>Machine</th><th>Good for</th><th>Avoid</th></tr></thead><tbody>

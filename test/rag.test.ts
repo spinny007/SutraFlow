@@ -195,7 +195,7 @@ test('SharePoint: list a library folder, read a Word file as text, feed a knowle
   const each = node('forEach', 'Each', { list: '{{input.items}}' });
   const read = node('msFiles', 'Read', { ...place, op: 'read', path: '{{input.path}}', readAs: 'document text' });
   const add = node('knowledgeAdd', 'Add', { knowledge: kb, source: '{{input.path}}', text: '{{input.text}}', meta: [{ k: 'url', v: '{{input.webUrl}}' }] });
-  const id = engine.startRun({ doc: { name: 'Feed', nodes: [s, list, each, read, add], edges: [edge(s, list), edge(list, each), edge(each, read, 'item'), edge(read, add)] }, projectId: pid });
+  const id = await engine.startRun({ doc: { name: 'Feed', nodes: [s, list, each, read, add], edges: [edge(s, list), edge(list, each), edge(each, read, 'item'), edge(read, add)] }, projectId: pid });
   await engine.waitFor(id, 20000);
   const r: any = q.get('select status, error, state from runs where id = ?', id);
   assert.equal(r.status, 'done', r.error);

@@ -68,7 +68,7 @@ before(async () => {
 after(async () => { await srv.stop(); fake.close(); });
 
 const run = async (doc: any, input?: any, ms = 30000) => {
-  const id = engine.startRun({ doc, projectId: pid, input });
+  const id = await engine.startRun({ doc, projectId: pid, input });
   await engine.waitFor(id, ms);
   const r: any = q.get('select status, error, state from runs where id = ?', id);
   const st = JSON.parse(r.state);
@@ -112,8 +112,10 @@ test('messages of one session are handled one at a time, in arrival order; other
   delayFor = p => (/Now:\nuser: msg1\b/.test(p) ? 8000 : 0);
   script = p => ({ answer: `answer to ${/user: (msg\d)/.exec(p.split('Now:')[1] || '')?.[1]}` });
   const doc = agentDoc({ tools: 'none' });
-  const ids = ['msg1', 'msg2', 'msg3'].map(m => engine.startRun({ doc, projectId: pid, input: { message: m, sessionId: 'queue-1' } }));
-  const other = engine.startRun({ doc, projectId: pid, input: { message: 'msg9', sessionId: 'queue-2' } });
+  // One after another: arrival order is what the session queue must keep.
+  const ids: string[] = [];
+  for (const m of ['msg1', 'msg2', 'msg3']) ids.push(await engine.startRun({ doc, projectId: pid, input: { message: m, sessionId: 'queue-1' } }));
+  const other = await engine.startRun({ doc, projectId: pid, input: { message: 'msg9', sessionId: 'queue-2' } });
   for (const id of [...ids, other]) await engine.waitFor(id, 60000);
   delayMs = 0;
   delayFor = () => 0;
@@ -144,14 +146,14 @@ test('the agent asks a person; the answer comes back through Ask a person', asyn
   const yes = node('log', 'Answered', { message: 'GOT {{input.answer}}' });
   const no = node('log', 'Declined', { message: 'DECLINED' });
   const doc = agentDoc({}, { nodes: [ask, yes, no], edges: a => [edge(a, ask, 'needs a person'), edge(ask, yes, 'answered'), edge(ask, no, 'declined')] });
-  const id = engine.startRun({ doc, projectId: pid, input: { message: 'Refund A-1 please', sessionId: 'ask-1' } });
+  const id = await engine.startRun({ doc, projectId: pid, input: { message: 'Refund A-1 please', sessionId: 'ask-1' } });
   let task: any;
   for (let i = 0; i < 100 && !task; i++) { await new Promise(r => setTimeout(r, 50)); task = q.get(`select id, wait from tasks where run_id = ? and status = 'waiting'`, id); }
   assert.ok(task, 'waiting for a person');
   assert.equal(JSON.parse(task.wait).question, true);
   assert.equal(JSON.parse(task.wait).message, 'May I refund 500 rupees for A-1?');
-  assert.throws(() => engine.decide(task.id, true, 'meera', '  '), /Write the answer first/);
-  engine.decide(task.id, true, 'meera', 'Yes, refund it.');
+  await assert.rejects(engine.decide(task.id, true, 'meera', '  '), /Write the answer first/);
+  await engine.decide(task.id, true, 'meera', 'Yes, refund it.');
   await engine.waitFor(id, 10000);
   const st = JSON.parse(q.get<any>('select state from runs where id = ?', id).state);
   assert.equal(st.outputs.Ask.answer, 'Yes, refund it.');

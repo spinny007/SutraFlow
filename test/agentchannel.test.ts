@@ -162,7 +162,7 @@ test('MCP client over a command; Call MCP tool; an agent uses outside tools; han
   const call = node('mcpCall', 'Add', { mcp: cmd.id, action: 'call a tool', tool: 'add', arguments: '{"a": 4, "b": 5}' });
   const bad = node('mcpCall', 'Bad add', { mcp: cmd.id, action: 'call a tool', tool: 'add', arguments: '{"a": "x"}' });
   const errLog = node('log', 'Tool error', { message: 'TOOLERR {{input.text}}' });
-  let id = engine.startRun({ doc: { name: 'MCP', nodes: [s, call, bad, errLog], edges: [edge(s, call), edge(call, bad), edge(bad, errLog, 'tool error')] }, projectId: pid });
+  let id = await engine.startRun({ doc: { name: 'MCP', nodes: [s, call, bad, errLog], edges: [edge(s, call), edge(call, bad), edge(bad, errLog, 'tool error')] }, projectId: pid });
   await engine.waitFor(id, 20000);
   let st = JSON.parse(q.get<any>('select state from runs where id = ?', id).state);
   assert.deepEqual(st.outputs.Add.result, { sum: 9 });
@@ -170,7 +170,7 @@ test('MCP client over a command; Call MCP tool; an agent uses outside tools; han
 
   // An agent with the calculator's tools.
   const ag = node('aiAgent', 'Calc agent', { provider: prov, task: 'add two and three', mcp: cmd.id, tools: 'none', maxSteps: 4 });
-  id = engine.startRun({ doc: { name: 'Calc', nodes: [s, ag], edges: [edge(s, ag)] }, projectId: pid });
+  id = await engine.startRun({ doc: { name: 'Calc', nodes: [s, ag], edges: [edge(s, ag)] }, projectId: pid });
   await engine.waitFor(id, 20000);
   st = JSON.parse(q.get<any>('select state from runs where id = ?', id).state);
   assert.equal(st.outputs['Calc agent'].answer, 'The sum is 5');
@@ -178,7 +178,7 @@ test('MCP client over a command; Call MCP tool; an agent uses outside tools; han
 
   // Hand off: a supervisor Sutra passes the conversation to the order desk agent.
   const h = node('agentHandoff', 'To order desk', { process: agentFlow, use: 'draft', message: 'Handed over', sessionId: 'handoff-1', note: 'customer asks about A-1' });
-  id = engine.startRun({ doc: { name: 'Supervisor', nodes: [s, h], edges: [edge(s, h)] }, projectId: pid });
+  id = await engine.startRun({ doc: { name: 'Supervisor', nodes: [s, h], edges: [edge(s, h)] }, projectId: pid });
   await engine.waitFor(id, 20000);
   st = JSON.parse(q.get<any>('select state from runs where id = ?', id).state);
   assert.match(st.outputs['To order desk'].answer, /^You said "Handed over/);

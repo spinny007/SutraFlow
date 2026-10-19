@@ -9,7 +9,8 @@
  */
 import crypto from 'node:crypto';
 import { restrictedReason } from '../git/restricted.js';
-import { now, dbKind, databaseStore, memoryStore, type Store } from '../db.js';
+import { now, dbKind, memoryStore } from '../db.js';
+import { asyncDatabase, localStore, type AsyncStore, type TxQ } from '../asyncdb.js';
 import { config } from '../config.js';
 import { resolve, resolveDeep } from '../template.js';
 import { getSecret, maskSecrets } from '../secrets.js';
@@ -38,6 +39,12 @@ import type { Activity, FlowDoc, FlowEdge, FlowNode, ReplyPayload, StepResult } 
  * Branches: every connection carries either a live token or a skip token. Merge
  * steps fire once every incoming connection has delivered one, so a branch that
  * was not taken does not block the merge (dead-path elimination).
+ *
+ * Storage is asynchronous (asyncdb.ts): on PostgreSQL many steps have their database work in flight
+ * at once. Every transition is one explicit transaction keyed by its run, and every change to a
+ * claimed step is fenced: it applies only while the step is still running here under the claim that
+ * started it (the claim number counts up each time a step is claimed). A step recovered by another
+ * engine, handed back in a drain, or cancelled meanwhile is therefore never completed twice.
  */
 
 export interface RunState {
@@ -74,6 +81,8 @@ interface TaskRow {
   phase: string | null;
   wait: string | null;
   released: number;
+  /** The claim number this engine holds the step under (fencing). */
+  claim: number;
 }
 
 export interface DebugState { stepping: boolean; breakpoints: string[] }
@@ -83,8 +92,37 @@ interface ReplyHandle {
   done: boolean;
 }
 
+export interface StartOptions {
+  doc: FlowDoc;
+  flowId?: string;
+  version?: number;
+  triggerNodeId?: string;
+  input?: any;
+  source?: string;
+  projectId?: string | null;
+  onReply?: ReplyHandle['resolve'];
+  /** Called once when the run ends (done, failed or cancelled), e.g. to acknowledge a queue message. */
+  onFinish?: (status: string, runId: string) => void;
+  /** Step-by-step debugging: pause before steps (stepping) or at breakpoints. */
+  debug?: DebugState;
+  /** Preset run id (Call process records it before the run starts). */
+  id?: string;
+  depth?: number;
+  /** W3C traceparent of the caller, to continue its trace. */
+  traceparent?: string;
+}
+
+/** A transition found its step no longer held here (recovered, handed back, cancelled): it changes nothing. */
+class StaleStep extends Error { constructor() { super('The step is no longer held by this engine'); } }
+
+/** What one transition did: steps it queued (so it knows the run goes on). */
+interface Turn { queued: number }
+
 const MAX_LOGS = 500;
 const DEFAULT_TIMEOUT_MS = 120000;
+const OPEN = `('running', 'waiting', 'paused', 'queued')`;
+
+type Loaded = { row: any; doc: FlowDoc; state: RunState };
 
 export class Engine {
   private activities = new Map<string, Activity>();
@@ -95,6 +133,8 @@ export class Engine {
   private finishers = new Map<string, (status: string, runId: string) => void>();
   private controllers = new Map<number, AbortController>();
   private pumping = false;
+  private pumpAgain = false;
+  private checking = false;
   /** Shutting down: no new tasks are claimed. */
   private draining = false;
   /** Tasks handed back to the queue during a drain: their late results are ignored. */
@@ -104,8 +144,7 @@ export class Engine {
   /** Listeners notified when a run changes (for live status in the studio). */
   readonly listeners = new Set<(runId: string) => void>();
   concurrency = config.workerConcurrency;
-  private q: Store['q'];
-  private tx: Store['tx'];
+  private readonly own?: AsyncStore;
 
   /**
    * The engine of this server keeps runs in the database (durable). Sutras tuned to run in memory go
@@ -113,23 +152,24 @@ export class Engine {
    * are written to the database in one transaction when the run ends: far fewer writes per step, but a
    * run that is open when the server stops is lost, and such runs cannot wait.
    */
-  constructor(store: Store = databaseStore, private readonly parent?: Engine) {
-    this.q = store.q;
-    this.tx = store.tx;
+  constructor(store?: AsyncStore, private readonly parent?: Engine) {
+    this.own = store;
     if (parent) { this.activities = parent.activities; this.listeners = parent.listeners; }
   }
+  /** The store: the in-memory one, or the database's (opened after this engine is made). */
+  private get a(): AsyncStore { return this.own ?? asyncDatabase(); }
   private memoryEngine?: Engine;
   /** PostgreSQL: engines pass over a task another engine is claiming instead of waiting for it. */
   private get skipLocked() { return !this.parent && dbKind() === 'postgres' ? ' for update skip locked' : ''; }
   /** The in-memory engine, made and started on first use. */
   get memory() {
-    if (!this.memoryEngine) { this.memoryEngine = new Engine(memoryStore(), this); if (this.timer) this.memoryEngine.start(); }
+    if (!this.memoryEngine) { this.memoryEngine = new Engine(localStore(memoryStore().backend!), this); if (this.timer) void this.memoryEngine.start(); }
     return this.memoryEngine;
   }
   /** Runs open in memory now. */
   get memoryRuns(): number {
     const m = this.parent ? this : this.memoryEngine;
-    return m ? Number(m.q.get<any>(`select count(*) n from runs where status in ('running', 'waiting', 'paused', 'queued')`)?.n || 0) : 0;
+    return m ? Number(m.a.sync!.get(`select count(*) n from runs where status in ${OPEN}`, [])?.n || 0) : 0;
   }
   /** Whether a run of this Sutra runs in memory: deployed runs of Sutras tuned so (never tests or debugging). */
   private inMemory(o: { flowId?: string; source?: string; debug?: unknown }) {
@@ -137,11 +177,11 @@ export class Engine {
   }
   /** A run open in memory: its row (status, steps, timing), or undefined. */
   memoryRun(runId: string): any {
-    return this.memoryEngine?.q.get('select id, flow_id, project_id, flow_name, version, status, source, trigger_node, error, steps, started_at, finished_at from runs where id = ?', runId);
+    return this.memoryEngine?.a.sync!.get('select id, flow_id, project_id, flow_name, version, status, source, trigger_node, error, steps, started_at, finished_at from runs where id = ?', [runId]);
   }
   /** The in-memory engine when it holds this run. */
   private memoryHolding(runId: string) {
-    return !this.parent && this.memoryEngine?.q.get('select 1 from runs where id = ?', runId) ? this.memoryEngine : undefined;
+    return !this.parent && this.memoryEngine?.a.sync!.get('select 1 from runs where id = ?', [runId]) ? this.memoryEngine : undefined;
   }
 
   register(list: Activity[]) {
@@ -160,20 +200,24 @@ export class Engine {
     return a.noErrorPort || a.trigger ? ps : [...ps, 'error'];
   }
 
-  start() {
+  async start() {
     this.draining = false;
     // Steps this engine (same name) or an unnamed one was running when it stopped go back to the queue.
     // Steps of other engines are recovered by the cluster leader when their heartbeat stops.
-    this.q.run(`update tasks set status = 'pending', owner = null where status = 'running' and (owner = ? or owner is null)`, this.id);
-    this.timer = setInterval(() => { this.pump(); this.checkRemoteWaiters(); }, config.pollMs);
-    this.timer.unref?.();
-    this.memoryEngine?.start();
+    await this.a.run(`update tasks set status = 'pending', owner = null where status = 'running' and (owner = ? or owner is null)`, this.id);
+    this.startTimer();
+    if (this.memoryEngine) await this.memoryEngine.start();
     this.pump();
+  }
+  private startTimer() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = setInterval(() => { this.pump(); void this.checkRemoteWaiters(); }, config.pollMs);
+    this.timer.unref?.();
   }
   /** Applies a changed queue check interval (tuning). */
   setPollMs(ms: number) {
     config.pollMs = ms;
-    if (this.timer) { clearInterval(this.timer); this.timer = setInterval(() => { this.pump(); this.checkRemoteWaiters(); }, config.pollMs); this.timer.unref?.(); }
+    if (this.timer) this.startTimer();
     this.memoryEngine?.setPollMs(ms);
   }
 
@@ -190,10 +234,10 @@ export class Engine {
     // Runs in memory are not handed over (they would be lost): they get the drain time to finish.
     if (this.memoryEngine) await this.memoryEngine.drainMemory(end);
     while (this.active > 0 && Date.now() < end) await new Promise(r => setTimeout(r, 50));
-    const left = this.q.all<{ id: number }>(`select id from tasks where status = 'running' and owner = ?`, this.id);
+    const left = await this.a.all<{ id: number }>(`select id from tasks where status = 'running' and owner = ?`, this.id);
     for (const t of left) {
       this.handedOver.add(Number(t.id));
-      this.q.run(`update tasks set status = 'pending', owner = null where id = ? and status = 'running'`, t.id);
+      await this.a.run(`update tasks set status = 'pending', owner = null where id = ? and status = 'running' and owner = ?`, t.id, this.id);
       this.controllers.get(Number(t.id))?.abort();
     }
     return { finished: left.length === 0, handedOver: left.length };
@@ -212,25 +256,7 @@ export class Engine {
 
   // ---------- starting runs ----------
 
-  startRun(o: {
-    doc: FlowDoc;
-    flowId?: string;
-    version?: number;
-    triggerNodeId?: string;
-    input?: any;
-    source?: string;
-    projectId?: string | null;
-    onReply?: ReplyHandle['resolve'];
-    /** Called once when the run ends (done, failed or cancelled), e.g. to acknowledge a queue message. */
-    onFinish?: (status: string, runId: string) => void;
-    /** Step-by-step debugging: pause before steps (stepping) or at breakpoints. */
-    debug?: DebugState;
-    /** Preset run id (Call process records it before the run starts). */
-    id?: string;
-    depth?: number;
-    /** W3C traceparent of the caller, to continue its trace. */
-    traceparent?: string;
-  }): string {
+  async startRun(o: StartOptions): Promise<string> {
     // Runs of Sutras tuned to run in memory go to the in-memory engine, and the other way round.
     if (!this.parent && this.inMemory(o)) return this.memory.startRun(o);
     if (this.parent && !this.inMemory(o)) return this.parent.startRun(o);
@@ -245,87 +271,137 @@ export class Engine {
     // Tuning of the deployed Sutra (test and debug runs of drafts are not tuned).
     const tuning = o.flowId && o.source !== 'test' && o.source !== 'debug' ? sutraTuning(o.flowId) : {};
     const maxRuns = Number(tuning.maxRuns) || 0;
-    this.tx(() => {
-      // Over its "Runs at once" limit, the run waits in a queue and starts when another one ends.
-      // Runs started by Call Sutra always start (they count): their caller already holds a place and
-      // waits for them, so queuing them could wait forever.
-      const queued = maxRuns > 0 && o.source !== 'sutra' && o.source !== 'process' && Number(this.q.get<any>(`select count(*) n from runs where flow_id = ? and status in ('running', 'waiting', 'paused') and source not in ('test', 'debug')`, o.flowId)?.n || 0) >= maxRuns;
-      this.q.run(
-        `insert into runs(id, flow_id, project_id, flow_name, version, doc, status, source, trigger_node, input, state, debug, started_at, priority)
-         values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        id, o.flowId ?? null, o.projectId ?? null, o.doc.name, o.version ?? 0, JSON.stringify(o.doc), queued ? 'queued' : 'running', o.source || 'manual', trig.id,
-        o.input === undefined ? null : JSON.stringify(o.input), JSON.stringify(state), o.debug ? JSON.stringify(o.debug) : null, now(), Number(tuning.priority) || 0,
-      );
-      this.insertTask(id, trig.id, o.input === undefined ? null : o.input, 0, queued ? 'queued' : 'pending');
-    }, maxRuns > 0 && o.flowId ? `flow:${o.flowId}` : `run:${id}`);
+    // The reply and finish handlers are in place before any step can run.
     this.docs.set(id, o.doc);
     if (o.onReply) this.replies.set(id, { resolve: o.onReply, done: false });
     if (o.onFinish) this.finishers.set(id, o.onFinish);
+    try {
+      await this.a.transaction(maxRuns > 0 && o.flowId ? `flow:${o.flowId}` : `run:${id}`, async tx => {
+        // Over its "Runs at once" limit, the run waits in a queue and starts when another one ends.
+        // Runs started by Call Sutra always start (they count): their caller already holds a place and
+        // waits for them, so queuing them could wait forever.
+        const queued = maxRuns > 0 && o.source !== 'sutra' && o.source !== 'process'
+          && Number((await tx.get<any>(`select count(*) n from runs where flow_id = ? and status in ('running', 'waiting', 'paused') and source not in ('test', 'debug')`, o.flowId))?.n || 0) >= maxRuns;
+        await tx.run(
+          `insert into runs(id, flow_id, project_id, flow_name, version, doc, status, source, trigger_node, input, state, debug, started_at, priority)
+           values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          id, o.flowId ?? null, o.projectId ?? null, o.doc.name, o.version ?? 0, JSON.stringify(o.doc), queued ? 'queued' : 'running', o.source || 'manual', trig.id,
+          o.input === undefined ? null : JSON.stringify(o.input), JSON.stringify(state), o.debug ? JSON.stringify(o.debug) : null, now(), Number(tuning.priority) || 0,
+        );
+        await this.insertTask(tx, null, id, trig.id, o.input === undefined ? null : o.input, 0, queued ? 'queued' : 'pending', Number(tuning.priority) || 0);
+      });
+    } catch (e) {
+      this.docs.delete(id); this.replies.delete(id); this.finishers.delete(id);
+      throw e;
+    }
     metrics.runsStarted.inc({ sutra: o.doc.name, source: o.source || 'manual' });
     projectLog(o.projectId, { level: 'info', msg: `Run started (${o.source || 'manual'}${o.version ? `, v${o.version}` : ', draft'})`, flow: o.doc.name, run: id, origin: runOrigin(o.source, o.version) });
     this.notify(id);
-    queueMicrotask(() => this.pump());
+    this.pump();
     return id;
   }
 
-  /** Tasks this engine has queued, so a step can tell it queued a next one. */
-  private queued = 0;
-  private insertTask(runId: string, nodeId: string, input: any, notBefore = 0, status = 'pending') {
-    this.queued++;
-    this.q.run(`insert into tasks(run_id, node_id, input, status, not_before, priority, queued_at) values(?, ?, ?, ?, ?, coalesce((select priority from runs where id = ?), 0), ?)`,
-      runId, nodeId, input === undefined ? null : JSON.stringify(input), status, notBefore, runId, Date.now());
+  /** Queues a step. priority: the run's, when the caller knows it (saves a lookup). */
+  private async insertTask(tx: TxQ, turn: Turn | null, runId: string, nodeId: string, input: any, notBefore = 0, status = 'pending', priority?: number) {
+    if (turn) turn.queued++;
+    await tx.run(`insert into tasks(run_id, node_id, input, status, not_before, priority, queued_at) values(?, ?, ?, ?, ?, ${priority === undefined ? 'coalesce((select priority from runs where id = ?), 0)' : '?'}, ?)`,
+      runId, nodeId, input === undefined ? null : JSON.stringify(input), status, notBefore, priority === undefined ? runId : priority, Date.now());
   }
 
   // ---------- worker loop ----------
 
+  /** Claims due steps while slots are free. Calls while it runs are not lost: it goes round again. */
   pump() {
-    if (this.pumping) return;
+    if (this.pumping) { this.pumpAgain = true; return; }
     this.pumping = true;
-    try {
-      const limit = this.parent ? (config.memoryWorkers || this.parent.concurrency) : this.concurrency;
-      while (!this.draining && this.active < limit) {
-        // Claim the next due task in one statement: with several engines on one database, only one
-        // of them changes the row from pending to running, and it records itself as the owner.
-        const t = this.q.get<TaskRow>(
-          `update tasks set status = 'running', started_at = ?, owner = ?
-           where id = (select id from tasks where status = 'pending' and not_before <= ? order by priority desc, id limit 1${this.skipLocked}) and status = 'pending'
-           returning *`, now(), this.id, Date.now());
-        if (!t) {
-          if (this.q.get(`select 1 from tasks where status = 'pending' and not_before <= ? limit 1`, Date.now())) continue; // another engine won; try the next
-          break;
-        }
-        t.id = Number(t.id);
-        this.active++;
-        this.execute(t).finally(() => {
-          this.active--;
-          this.pump();
-        });
+    void (async () => {
+      try {
+        do {
+          this.pumpAgain = false;
+          const limit = this.parent ? (config.memoryWorkers || this.parent.concurrency) : this.concurrency;
+          let contended = 0;
+          while (!this.draining && this.active < limit) {
+            // As many steps as there are free slots, in one statement: with a database far away, one
+            // round trip per claim would hold the engine back.
+            const got = await this.claim(Math.min(16, limit - this.active));
+            if (!got.length) {
+              // Another engine won the race for the next step: try the next, a few times.
+              if (contended++ < 5 && await this.a.get(`select 1 from tasks where status = 'pending' and not_before <= ? limit 1`, Date.now())) continue;
+              break;
+            }
+            for (const t of got) {
+              this.active++;
+              this.execute(t)
+                .catch(e => console.error(`Step ${t.id} of run ${t.run_id}: ${e?.message || e}`))
+                .finally(() => { this.active--; this.pump(); });
+            }
+          }
+        } while (this.pumpAgain && !this.draining);
+      } catch (e: any) {
+        console.error('Claiming steps failed:', e?.message || e);
+      } finally {
+        this.pumping = false;
       }
-    } finally {
-      this.pumping = false;
-    }
+    })();
   }
 
-  private loadRun(runId: string) {
-    const r = this.q.get<any>('select * from runs where id = ?', runId);
+  /**
+   * Claims up to n due steps in one statement: with several engines on one database, only one of them
+   * changes a step from pending to running; it records itself as the owner and counts the claim up.
+   */
+  private async claim(n: number): Promise<(TaskRow & { run_row?: any })[]> {
+    const limit = Math.max(1, Math.floor(n));
+    const update = `update tasks set status = 'running', started_at = ?, owner = ?, claim = claim + 1
+       where id in (select id from tasks where status = 'pending' and not_before <= ? order by priority desc, id limit ?${this.skipLocked}) and status = 'pending'
+       returning *`;
+    // PostgreSQL: each step's run comes back with it (one round trip instead of two).
+    const rows = this.a.backend === 'postgres' && !this.parent
+      ? await this.a.all<TaskRow & { run_row?: any }>(`with t as (${update}) select t.*, row_to_json(r) as run_row from t left join runs r on r.id = t.run_id order by t.priority desc, t.id`, now(), this.id, Date.now(), limit)
+      : (await this.a.all<TaskRow>(update, now(), this.id, Date.now(), limit)).sort((a, b) => Number(a.id) - Number(b.id));
+    for (const t of rows) { t.id = Number(t.id); t.claim = Number(t.claim); t.attempt = Number(t.attempt); }
+    return rows;
+  }
+
+  /** A run row as the engine uses it (the document cached per run). */
+  private loaded(r: any): Loaded | undefined {
     if (!r) return undefined;
-    let doc = this.docs.get(runId);
-    if (!doc) { doc = JSON.parse(r.doc) as FlowDoc; this.docs.set(runId, doc); }
-    return { row: r, doc, state: JSON.parse(r.state) as RunState };
+    let doc = this.docs.get(r.id);
+    if (!doc) { doc = (typeof r.doc === 'string' ? JSON.parse(r.doc) : r.doc) as FlowDoc; this.docs.set(r.id, doc); }
+    return { row: r, doc, state: (typeof r.state === 'string' ? JSON.parse(r.state) : r.state) as RunState };
+  }
+  private static RUN = 'select * from runs where id = ?';
+
+  /** The condition under which this engine may change a step: still running here under its claim, or still waiting. */
+  private fence(t: TaskRow): [string, any[]] {
+    return t.status === 'waiting'
+      ? [`id = ? and status = 'waiting'`, [t.id]]
+      : [`id = ? and status = 'running' and owner = ? and claim = ?`, [t.id, this.id, t.claim]];
+  }
+  /** Changes a step under the fence; a step no longer held here ends the transition (StaleStep). */
+  private async fenced(tx: TxQ, t: TaskRow, set: string, ...args: any[]) {
+    const [where, w] = this.fence(t);
+    const r = await tx.run(`update tasks set ${set} where ${where}`, ...args, ...w);
+    if (r.changes !== 1) throw new StaleStep();
   }
 
-  private async execute(t: TaskRow) {
-    const run = this.loadRun(t.run_id);
+  private async loadRun(db: TxQ, runId: string): Promise<Loaded | undefined> {
+    return this.loaded(await db.get<any>(Engine.RUN, runId));
+  }
+
+  private async execute(t: TaskRow & { run_row?: any }) {
+    const run = 'run_row' in t ? this.loaded(t.run_row) : await this.loadRun(this.a, t.run_id);
     if (!run || !['running', 'waiting', 'paused'].includes(run.row.status)) {
-      this.q.run(`update tasks set status = 'cancelled', finished_at = ? where id = ?`, now(), t.id);
+      const [where, w] = this.fence(t);
+      await this.a.run(`update tasks set status = 'cancelled', finished_at = ? where ${where}`, now(), ...w);
       return;
     }
     // Debugging: pause before the step (the run row was read anyway, so no query of its own).
     if (!t.released && run.row.debug) {
       const d = JSON.parse(run.row.debug) as DebugState;
       if (d.stepping || d.breakpoints.includes(t.node_id)) {
-        this.q.run(`update tasks set status = 'paused', owner = null where id = ?`, t.id);
-        this.settle(t.run_id);
+        const [where, w] = this.fence(t);
+        await this.a.run(`update tasks set status = 'paused', owner = null where ${where}`, ...w);
+        await this.settle(t.run_id);
         return;
       }
     }
@@ -333,7 +409,7 @@ export class Engine {
     const act = node && this.activities.get(node.type);
     const input = t.input == null ? null : JSON.parse(t.input);
     if (!node || !act) {
-      this.fail(t, run.doc, node, new Error(`Step ${t.node_id} has an unknown type`));
+      await this.fail(t, run.doc, node, new Error(`Step ${t.node_id} has an unknown type`));
       return;
     }
     const started = Date.now();
@@ -372,8 +448,8 @@ export class Engine {
     const varsSet: Record<string, any> = {};
     const clock = { restart: () => {} };
     let replied: ReplyPayload | undefined;
+    let res: StepResult | void;
     try {
-      let res: StepResult | void;
       const blocked = restrictedReason(run.row.project_id, node);
       if (blocked) throw new Error(blocked);
       if (s.disabled) {
@@ -411,24 +487,25 @@ export class Engine {
         const exec = s.loop === 'for each item' || s.loop === 'repeat while' ? this.loop(node, s, scope, once, ac.signal) : once();
         res = await withTimeout(Promise.resolve(exec), timeoutMs, ac, `${node.name} did not finish within ${timeoutMs} ms`, clock);
       }
-      this.controllers.delete(t.id);
-      for (const l of logs) projectLog(run.row.project_id, { level: l.level as any, msg: maskSecrets(l.msg, revealed), flow: run.doc.name, run: t.run_id, step: node.name, origin: runOrigin(run.row.source, run.row.version) });
-      if (wantsStepData(run.row.project_id)) projectLog(run.row.project_id, { level: 'debug', msg: 'Step finished', flow: run.doc.name, run: t.run_id, step: node.name, origin: runOrigin(run.row.source, run.row.version), data: maskSecrets({ input, output: (res as any)?.out ?? (res as any)?.store }, revealed) });
-      if (this.handedOver.delete(t.id)) return;
-      if (this.wasCancelled(t.id)) return this.settle(t.run_id);
-      this.complete(t, run.doc, node, res || {}, { ms: Date.now() - started, revealed, logs, varsSet, replied });
     } catch (e: any) {
       this.controllers.delete(t.id);
       // Handed back during a drain: another engine runs it again.
       if (this.handedOver.delete(t.id)) return;
-      // Stopped by another branch (End: stop process) or by a person: not a failure of this step.
-      if (this.wasCancelled(t.id)) return this.settle(t.run_id);
+      // Stopped by another branch (End: stop process) or by a person: fail() finds the step cancelled
+      // (its fence no longer holds) and changes nothing.
       const msg = maskSecrets(String(e?.message || e), revealed);
       projectLog(run.row.project_id, { level: t.attempt < (Number(s.retries) || 0) ? 'warn' : 'error', msg, flow: run.doc.name, run: t.run_id, step: node.name, origin: runOrigin(run.row.source, run.row.version) });
       // Activities may attach what they captured (a script's output and error output) for the error branch.
       const failure = Object.assign(new Error(msg), e?.details !== undefined ? { details: maskSecrets(e.details, revealed) } : {});
-      this.fail(t, run.doc, node, failure, { ms: Date.now() - started, logs });
+      await this.fail(t, run.doc, node, failure, { ms: Date.now() - started, logs });
+      return;
     }
+    this.controllers.delete(t.id);
+    for (const l of logs) projectLog(run.row.project_id, { level: l.level as any, msg: maskSecrets(l.msg, revealed), flow: run.doc.name, run: t.run_id, step: node.name, origin: runOrigin(run.row.source, run.row.version) });
+    if (wantsStepData(run.row.project_id)) projectLog(run.row.project_id, { level: 'debug', msg: 'Step finished', flow: run.doc.name, run: t.run_id, step: node.name, origin: runOrigin(run.row.source, run.row.version), data: maskSecrets({ input, output: (res as any)?.out ?? (res as any)?.store }, revealed) });
+    if (this.handedOver.delete(t.id)) return;
+    // A step cancelled meanwhile: complete() finds its fence gone and changes nothing.
+    await this.complete(t, run.doc, node, res || {}, { ms: Date.now() - started, revealed, logs, varsSet, replied });
   }
 
   /**
@@ -475,89 +552,103 @@ export class Engine {
     throw new Error(`${node.name}: still repeating after ${max} times (loop maximum)`);
   }
 
-  private complete(
+  private async complete(
     t: TaskRow, doc: FlowDoc, node: FlowNode, res: StepResult,
     extra: { ms: number; revealed: Set<string>; logs: RunState['logs']; varsSet: Record<string, any>; replied?: ReplyPayload },
-  ) {
+  ): Promise<void> {
     let replyToSend: ReplyPayload | undefined;
     let childId: string | undefined;
     let callError: string | undefined;
     let finished = true;
     let trace: RunState['trace'];
     let runStatus = '';
-    const queuedBefore = this.queued;
+    let depth = 0;
+    const turn: Turn = { queued: 0 };
     const call = res.call;
     if (this.parent && (res.wait || res.call?.wait)) {
       return this.fail(t, doc, node, new Error(`${node.name} waits (${res.call ? 'for a called Sutra' : 'for a decision, a message or a time'}). A Sutra that runs in memory cannot wait: set its Execution tuning to durable.`), { ms: extra.ms });
     }
-    this.tx(() => {
-      const run = this.loadRun(t.run_id)!;
-      const st = run.state;
-      trace = st.trace;
-      st.logs.push(...extra.logs.map(l => ({ ...l, msg: maskSecrets(l.msg, extra.revealed) })));
-      if (st.logs.length > MAX_LOGS) st.logs.splice(0, st.logs.length - MAX_LOGS);
-      Object.assign(st.vars, maskSecrets(extra.varsSet, extra.revealed));
-      if (extra.replied && !st.reply) { st.reply = maskSecrets(extra.replied, new Set()); replyToSend = extra.replied; }
+    let over: RunState | undefined;
+    try {
+      await this.a.transaction(`run:${t.run_id}`, async (tx, row) => {
+        const run = this.loaded(row);
+        if (!run) throw new StaleStep();
+        const st = run.state;
+        trace = st.trace;
+        depth = st.depth || 0;
+        st.logs.push(...extra.logs.map(l => ({ ...l, msg: maskSecrets(l.msg, extra.revealed) })));
+        if (st.logs.length > MAX_LOGS) st.logs.splice(0, st.logs.length - MAX_LOGS);
+        Object.assign(st.vars, maskSecrets(extra.varsSet, extra.revealed));
+        if (extra.replied && !st.reply) { st.reply = maskSecrets(extra.replied, new Set()); replyToSend = extra.replied; }
 
-      if (res.wait) {
-        finished = false;
-        this.q.run(`update tasks set status = 'waiting', wait = ?, ms = ? where id = ?`, JSON.stringify(res.wait), extra.ms, t.id);
-        this.saveState(t.run_id, st);
-        return;
-      }
-      if (res.deferUntil) {
-        finished = false;
-        this.q.run(`update tasks set status = 'pending', phase = 'resume', not_before = ? where id = ?`, res.deferUntil, t.id);
-        this.saveState(t.run_id, st);
-        return;
-      }
-      if (res.call) {
-        if ((st.depth || 0) >= MAX_CALL_DEPTH) { callError = `Sutras call each other more than ${MAX_CALL_DEPTH} levels deep. Check for a Sutra that calls itself.`; return; }
-        childId = crypto.randomUUID();
-        if (res.call.wait) {
+        if (res.wait) {
           finished = false;
-          this.q.run(`update tasks set status = 'waiting', wait = ?, ms = ? where id = ?`, JSON.stringify({ kind: 'process', child: childId, name: res.call.name, ...(res.call.resume ? { resume: true } : {}) }), extra.ms, t.id);
-          st.logs.push({ t: now(), level: 'info', msg: `${node.name}: calling ${res.call.name}`, step: node.name });
-          this.saveState(t.run_id, st);
+          await this.fenced(tx, t, `status = 'waiting', wait = ?, ms = ?`, JSON.stringify(res.wait), extra.ms);
+          await tx.commitWith('update runs set state = ? where id = ?', JSON.stringify(st), t.run_id);
           return;
         }
-        res = { out: { runId: childId, process: res.call.name, started: true } };
-      }
-      if ('result' in res) st.result = maskSecrets(res.result, extra.revealed);
-      const emits = res.emits || [{ port: res.port || 'out', out: res.out }];
-      const stored = maskSecrets('store' in res ? res.store : emits.length ? emits[emits.length - 1].out : undefined, extra.revealed);
-      st.outputs[node.name] = stored;
-      st.last = stored;
-      // Step data "none": the step's input and output are not kept, also not until the run ends (a
-      // streamed file of many batches would otherwise fill the disk first).
-      const keep = sutraTuning(run.row.flow_id).stepData !== 'none' || run.row.source === 'test' || run.row.source === 'debug';
-      this.q.run(`update tasks set status = 'done', port = ?, output = ?, ms = ?, finished_at = ?${keep ? '' : ', input = null'} where id = ?`,
-        emits.map(e => e.port).filter((p, i, a) => a.indexOf(p) === i).join(','), keep ? cap(stored) : null, extra.ms, now(), t.id);
-      if (res.stop) {
-        this.cancelOpen(t.run_id);
-        if (res.stop.status === 'failed') {
-          st.failed = true;
-          this.q.run(`update runs set error = ? where id = ?`, `${node.name}: ${res.stop.message || 'Sutra stopped with an error'}`, t.run_id);
+        if (res.deferUntil) {
+          finished = false;
+          await this.fenced(tx, t, `status = 'pending', phase = 'resume', not_before = ?`, res.deferUntil);
+          await tx.commitWith('update runs set state = ? where id = ?', JSON.stringify(st), t.run_id);
+          return;
         }
-        st.logs.push({ t: now(), level: res.stop.status === 'failed' ? 'error' : 'info', msg: `${node.name}: Sutra stopped (${res.stop.status === 'failed' ? 'error' : 'success'})${res.stop.message ? `: ${res.stop.message}` : ''}`, step: node.name });
-      } else this.route(t.run_id, doc, st, node, emits.map(e => ({ port: e.port, out: maskSecrets(e.out, extra.revealed) })));
-      // State, step count and the count back in one statement.
-      const steps = Number(this.q.get<{ steps: number }>('update runs set state = ?, steps = steps + 1 where id = ? returning steps', JSON.stringify(st), t.run_id)!.steps);
-      runStatus = run.row.status;
-      if (steps > config.maxStepsPerRun) {
-        st.failed = true;
-        this.cancelOpen(t.run_id);
-        this.q.run(`update runs set error = ? where id = ?`, `Stopped after ${config.maxStepsPerRun} steps. Check for a loop.`, t.run_id);
-        this.saveState(t.run_id, st);
-      }
-    }, `run:${t.run_id}`);
+        if (res.call) {
+          if ((st.depth || 0) >= MAX_CALL_DEPTH) { callError = `Sutras call each other more than ${MAX_CALL_DEPTH} levels deep. Check for a Sutra that calls itself.`; return; }
+          childId = crypto.randomUUID();
+          if (res.call.wait) {
+            finished = false;
+            await this.fenced(tx, t, `status = 'waiting', wait = ?, ms = ?`, JSON.stringify({ kind: 'process', child: childId, name: res.call.name, ...(res.call.resume ? { resume: true } : {}) }), extra.ms);
+            st.logs.push({ t: now(), level: 'info', msg: `${node.name}: calling ${res.call.name}`, step: node.name });
+            await tx.commitWith('update runs set state = ? where id = ?', JSON.stringify(st), t.run_id);
+            return;
+          }
+          res = { out: { runId: childId, process: res.call.name, started: true } };
+        }
+        if ('result' in res) st.result = maskSecrets(res.result, extra.revealed);
+        const emits = res.emits || [{ port: res.port || 'out', out: res.out }];
+        const stored = maskSecrets('store' in res ? res.store : emits.length ? emits[emits.length - 1].out : undefined, extra.revealed);
+        st.outputs[node.name] = stored;
+        st.last = stored;
+        // Step data "none": the step's input and output are not kept, also not until the run ends (a
+        // streamed file of many batches would otherwise fill the disk first).
+        const keep = sutraTuning(run.row.flow_id).stepData !== 'none' || run.row.source === 'test' || run.row.source === 'debug';
+        await this.fenced(tx, t, `status = 'done', port = ?, output = ?, ms = ?, finished_at = ?${keep ? '' : ', input = null'}`,
+          emits.map(e => e.port).filter((p, i, a) => a.indexOf(p) === i).join(','), keep ? cap(stored) : null, extra.ms, now());
+        if (res.stop) {
+          await this.cancelOpen(tx, t.run_id);
+          if (res.stop.status === 'failed') {
+            st.failed = true;
+            await tx.run(`update runs set error = ? where id = ?`, `${node.name}: ${res.stop.message || 'Sutra stopped with an error'}`, t.run_id);
+          }
+          st.logs.push({ t: now(), level: res.stop.status === 'failed' ? 'error' : 'info', msg: `${node.name}: Sutra stopped (${res.stop.status === 'failed' ? 'error' : 'success'})${res.stop.message ? `: ${res.stop.message}` : ''}`, step: node.name });
+        } else await this.route(tx, turn, run, st, node, emits.map(e => ({ port: e.port, out: maskSecrets(e.out, extra.revealed) })));
+        // State, step count and the count back in one statement, sent with the commit.
+        const steps = Number((await tx.commitWith<{ steps: number }>('update runs set state = ?, steps = steps + 1 where id = ? returning steps', JSON.stringify(st), t.run_id))!.steps);
+        runStatus = run.row.status;
+        if (steps > config.maxStepsPerRun) over = st;
+      }, { sql: Engine.RUN, args: [t.run_id] });
+    } catch (e) {
+      if (e instanceof StaleStep) { this.notify(t.run_id); return; }
+      throw e;
+    }
+    if (over) {
+      // A run past its step limit stops: a transaction of its own after the step's.
+      const st = over;
+      st.failed = true;
+      await this.a.transaction(`run:${t.run_id}`, async tx => {
+        await this.cancelOpen(tx, t.run_id);
+        await tx.run(`update runs set error = ? where id = ?`, `Stopped after ${config.maxStepsPerRun} steps. Check for a loop.`, t.run_id);
+        await tx.commitWith('update runs set state = ? where id = ?', JSON.stringify(st), t.run_id);
+      });
+      runStatus = '';
+    }
     if (replyToSend) this.sendReply(t.run_id, replyToSend);
     if (callError) return this.fail(t, doc, node, new Error(callError), { ms: extra.ms });
     if (finished) this.observeStep(t, node, extra.ms, 'done', trace);
     if (call && childId) {
-      const depth = (this.loadRun(t.run_id)?.state.depth || 0) + 1;
       try {
-        this.startRun({ doc: call.doc, flowId: call.flowId, version: call.version, projectId: call.projectId, input: call.input, source: 'sutra', id: childId, depth, triggerNodeId: call.triggerNodeId });
+        await this.startRun({ doc: call.doc, flowId: call.flowId, version: call.version, projectId: call.projectId, input: call.input, source: 'sutra', id: childId, depth: depth + 1, triggerNodeId: call.triggerNodeId });
       } catch (e: any) {
         if (call.wait) return this.fail({ ...t, status: 'waiting' }, doc, node, new Error(`${call.name}: ${e.message}`), { ms: extra.ms });
         throw e;
@@ -565,67 +656,77 @@ export class Engine {
     }
     // The step queued a next step of a running run: the run goes on, nothing to recount. A branch that
     // ends (or waits, stops, or calls) settles the run as before.
-    if (finished && !res.stop && !call && runStatus === 'running' && this.queued > queuedBefore) { this.notify(t.run_id); return; }
-    this.settle(t.run_id);
+    if (finished && !res.stop && !call && runStatus === 'running' && turn.queued > 0) { this.notify(t.run_id); this.pump(); return; }
+    await this.settle(t.run_id);
+    this.pump();
   }
 
   /** A called process ended: resume the step that is waiting for it. */
-  private resumeCaller(childRunId: string, status: string) {
-    const t = this.q.get<TaskRow>(`select * from tasks where status = 'waiting' and wait like ?`, `%"child":"${childRunId}"%`);
+  private async resumeCaller(childRunId: string, status: string) {
+    const t = await this.a.get<TaskRow>(`select * from tasks where status = 'waiting' and wait like ?`, `%"child":"${childRunId}"%`);
     if (!t) return;
-    const run = this.loadRun(t.run_id);
+    t.id = Number(t.id); t.claim = Number(t.claim); t.attempt = Number(t.attempt);
+    const run = await this.loadRun(this.a, t.run_id);
     const node = run?.doc.nodes.find(n => n.id === t.node_id);
-    const child = this.loadRun(childRunId);
+    const child = await this.loadRun(this.a, childRunId);
     if (!run || !node || !child) return;
     const wait = JSON.parse(t.wait || '{}');
     const name = (wait.name as string) || 'Called Sutra';
     if (wait.resume) {
       // The step asked to continue itself (an AI agent after a tool): run it again with the outcome.
-      const err = status === 'done' ? undefined : this.q.get<{ error: string }>('select error from runs where id = ?', childRunId)?.error || status;
+      const err = status === 'done' ? undefined : child.row.error || status;
       const outcome = { status, name, ...(status === 'done' ? { result: child.state.result !== undefined ? child.state.result : child.state.last ?? null } : { error: err }) };
-      this.q.run(`update tasks set status = 'pending', phase = 'resume', not_before = 0, wait = ? where id = ? and status = 'waiting'`, JSON.stringify({ ...wait, outcome }), t.id);
+      await this.a.run(`update tasks set status = 'pending', phase = 'resume', not_before = 0, wait = ? where id = ? and status = 'waiting'`, JSON.stringify({ ...wait, outcome }), t.id);
       this.pump();
       return;
     }
     if (status === 'done') {
       const result = child.state.result !== undefined ? child.state.result : child.state.last;
-      this.complete(t, run.doc, node, { out: result ?? null }, { ms: 0, revealed: new Set(), logs: [{ t: now(), level: 'info', msg: `${node.name}: ${name} finished`, step: node.name }], varsSet: {} });
+      await this.complete(t, run.doc, node, { out: result ?? null }, { ms: 0, revealed: new Set(), logs: [{ t: now(), level: 'info', msg: `${node.name}: ${name} finished`, step: node.name }], varsSet: {} });
     } else {
-      const err = this.q.get<{ error: string }>('select error from runs where id = ?', childRunId)?.error;
-      this.fail(t, run.doc, node, new Error(`${name} ${status === 'cancelled' ? 'was cancelled' : `failed: ${err || 'unknown error'}`}`));
+      await this.fail(t, run.doc, node, new Error(`${name} ${status === 'cancelled' ? 'was cancelled' : `failed: ${child.row.error || 'unknown error'}`}`));
     }
     this.pump();
+  }
+
+  /** A step sends one output while it goes on (see StepContext.emit). */
+  private async emitNow(t: TaskRow, node: FlowNode, port: string, out: any) {
+    try {
+      await this.a.transaction(`run:${t.run_id}`, async tx => {
+        const [where, w] = this.fence(t);
+        if (!(await tx.get(`select 1 as x from tasks where ${where}`, ...w))) throw new StaleStep();
+        const run = await this.loadRun(tx, t.run_id);
+        if (!run) throw new StaleStep();
+        // The run state keeps a summary (a batch number, a count, the file), not the rows: the rows go
+        // with the next steps' input, and the state stays small however many batches there are.
+        run.state.outputs[node.name] = out && typeof out === 'object' && !Array.isArray(out)
+          ? Object.fromEntries(Object.entries(out).filter(([, v]) => !Array.isArray(v))) : out;
+        await this.route(tx, null, run, run.state, node, [{ port, out }], true);
+        await this.saveState(tx, t.run_id, run.state);
+      });
+    } catch (e) {
+      if (e instanceof StaleStep) throw new Error('Step was cancelled');
+      throw e;
+    }
+    this.notify(t.run_id);
+    this.pump();
+    // Back pressure: a fast reader waits while more of this run's steps wait than the engine runs at once.
+    const limit = Math.max(4, this.concurrency * 2);
+    while (Number((await this.a.get<any>(`select count(*) n from tasks where run_id = ? and status = 'pending'`, t.run_id))?.n || 0) > limit) {
+      if (await this.wasCancelled(t.id)) throw new Error('Step was cancelled');
+      await new Promise(r => setTimeout(r, 20));
+    }
   }
 
   /**
    * Delivers live tokens on emitted ports and skip tokens on the rest. A connection may have a
    * condition on the output ({input.x}): "when" connections are taken when it is true, and
    * "otherwise" connections when no "when" connection of the same output was taken.
+   * partial: other ports are not passed over (the step goes on).
    */
-  /** A step sends one output while it goes on (see StepContext.emit). */
-  private async emitNow(t: TaskRow, node: FlowNode, port: string, out: any) {
-    if (this.wasCancelled(t.id)) throw new Error('Step was cancelled');
-    this.tx(() => {
-      const run = this.loadRun(t.run_id)!;
-      // The run state keeps a summary (a batch number, a count, the file), not the rows: the rows go
-      // with the next steps' input, and the state stays small however many batches there are.
-      run.state.outputs[node.name] = out && typeof out === 'object' && !Array.isArray(out)
-        ? Object.fromEntries(Object.entries(out).filter(([, v]) => !Array.isArray(v))) : out;
-      this.route(t.run_id, run.doc, run.state, node, [{ port, out }], true);
-      this.saveState(t.run_id, run.state);
-    }, `run:${t.run_id}`);
-    this.notify(t.run_id);
-    queueMicrotask(() => this.pump());
-    // Back pressure: a fast reader waits while more of this run's steps wait than the engine runs at once.
-    const limit = Math.max(4, this.concurrency * 2);
-    while (Number(this.q.get<any>(`select count(*) n from tasks where run_id = ? and status = 'pending'`, t.run_id)?.n || 0) > limit) {
-      if (this.wasCancelled(t.id)) throw new Error('Step was cancelled');
-      await new Promise(r => setTimeout(r, 20));
-    }
-  }
-
-  /** Starts the steps connected to the emitted ports. partial: other ports are not passed over (the step goes on). */
-  private route(runId: string, doc: FlowDoc, st: RunState, node: FlowNode, emits: { port: string; out: any }[], partial = false) {
+  private async route(tx: TxQ, turn: Turn | null, run: Loaded, st: RunState, node: FlowNode, emits: { port: string; out: any }[], partial = false) {
+    const doc = run.doc;
+    const runId = run.row.id as string;
     const outgoing = doc.edges.filter(e => e.from === node.id);
     const emitted = new Set(emits.map(e => e.port));
     for (const em of emits) {
@@ -633,7 +734,7 @@ export class Engine {
       const conditional = onPort.filter(x => x.when === 'when');
       const taken = new Set<string>();
       if (conditional.length) {
-        const scope = this.conditionScope(runId, st, em.out);
+        const scope = this.conditionScope(run, st, em.out);
         for (const e of conditional) {
           let ok = false;
           try { ok = truthy(resolve(e.condition || 'false', scope)); } catch (err: any) {
@@ -644,26 +745,25 @@ export class Engine {
       }
       for (const e of onPort) {
         const live = e.when === 'when' ? taken.has(e.id) : e.when === 'otherwise' ? taken.size === 0 : true;
-        this.deliver(runId, doc, st, e, live, live ? em.out : undefined);
+        await this.deliver(tx, turn, runId, doc, st, e, live, live ? em.out : undefined, run.row.priority);
       }
     }
-    if (!partial) for (const e of outgoing.filter(x => !emitted.has(x.port))) this.deliver(runId, doc, st, e, false, undefined);
+    if (!partial) for (const e of outgoing.filter(x => !emitted.has(x.port))) await this.deliver(tx, turn, runId, doc, st, e, false, undefined, run.row.priority);
   }
 
   /** What a connection condition can read: the output as {input}, earlier activities, variables. */
-  private conditionScope(runId: string, st: RunState, out: any) {
-    const row = this.q.get<{ project_id: string | null; trigger_node: string }>('select project_id, trigger_node from runs where id = ?', runId);
-    const doc = this.docs.get(runId);
-    const trig = doc?.nodes.find(n => n.id === row?.trigger_node)?.name;
-    return { input: out, output: out, nodes: st.outputs, vars: st.vars, gv: effectiveVariables(row?.project_id ?? null).values, ev: engineVariableValues(), trigger: trig ? st.outputs[trig] : undefined, now: new Date().toISOString() };
+  private conditionScope(run: Loaded, st: RunState, out: any) {
+    const trig = run.doc.nodes.find(n => n.id === run.row.trigger_node)?.name;
+    return { input: out, output: out, nodes: st.outputs, vars: st.vars, gv: effectiveVariables(run.row.project_id ?? null).values, ev: engineVariableValues(), trigger: trig ? st.outputs[trig] : undefined, now: new Date().toISOString() };
   }
 
-  private deliver(runId: string, doc: FlowDoc, st: RunState, edge: FlowEdge, live: boolean, out: any) {
+  private async deliver(tx: TxQ, turn: Turn | null, runId: string, doc: FlowDoc, st: RunState, edge: FlowEdge, live: boolean, out: any, priority?: number) {
     const target = doc.nodes.find(n => n.id === edge.to);
     if (!target) return;
     const act = this.activities.get(target.type);
     const inbound = doc.edges.filter(e => e.to === target.id);
     const from = doc.nodes.find(n => n.id === edge.from)?.name || edge.from;
+    const prio = priority === undefined || priority === null ? undefined : Number(priority);
     if (act?.join) {
       const j = (st.joins[target.id] ||= {});
       j[edge.id] = { live, from, out };
@@ -672,82 +772,88 @@ export class Engine {
         delete st.joins[target.id];
         if (lives.length) {
           st.live[target.id] = true;
-          this.insertTask(runId, target.id, Object.fromEntries(lives.map(x => [x.from, x.out])));
-        } else this.skipNode(runId, doc, st, target);
+          await this.insertTask(tx, turn, runId, target.id, Object.fromEntries(lives.map(x => [x.from, x.out])), 0, 'pending', prio);
+        } else await this.skipNode(tx, turn, runId, doc, st, target, prio);
       }
       return;
     }
     if (live) {
       st.live[target.id] = true;
-      this.insertTask(runId, target.id, out);
+      await this.insertTask(tx, turn, runId, target.id, out, 0, 'pending', prio);
       return;
     }
     const s = (st.skips[target.id] ||= []);
     if (!s.includes(edge.id)) s.push(edge.id);
-    if (!st.live[target.id] && inbound.every(e => s.includes(e.id))) this.skipNode(runId, doc, st, target);
+    if (!st.live[target.id] && inbound.every(e => s.includes(e.id))) await this.skipNode(tx, turn, runId, doc, st, target, prio);
   }
 
-  private skipNode(runId: string, doc: FlowDoc, st: RunState, node: FlowNode) {
+  private async skipNode(tx: TxQ, turn: Turn | null, runId: string, doc: FlowDoc, st: RunState, node: FlowNode, priority?: number) {
     if (st.skipped[node.id]) return;
     st.skipped[node.id] = true;
-    for (const e of doc.edges.filter(x => x.from === node.id)) this.deliver(runId, doc, st, e, false, undefined);
+    for (const e of doc.edges.filter(x => x.from === node.id)) await this.deliver(tx, turn, runId, doc, st, e, false, undefined, priority);
   }
 
-  private fail(t: TaskRow, doc: FlowDoc, node: FlowNode | undefined, err: Error, extra: { ms?: number; logs?: RunState['logs'] } = {}) {
+  private async fail(t: TaskRow, doc: FlowDoc, node: FlowNode | undefined, err: Error, extra: { ms?: number; logs?: RunState['logs'] } = {}): Promise<void> {
     const s = node?.settings || {};
     // A step's own retry settings win; otherwise the Sutra's tuning, if any.
     const unset = (v: unknown) => v === undefined || v === null || v === '';
-    const tuned = unset(s.retries) || unset(s.retryDelayMs) ? sutraTuning(this.q.get<any>('select flow_id, source from runs where id = ?', t.run_id)?.flow_id) : {};
+    const tuned = unset(s.retries) || unset(s.retryDelayMs) ? sutraTuning((await this.a.get<any>('select flow_id from runs where id = ?', t.run_id))?.flow_id) : {};
     const retries = Math.max(0, Math.min(20, Number(unset(s.retries) ? tuned.retries : s.retries) || 0));
-    if (node && t.attempt < retries) {
-      const delay = Math.max(0, Number(unset(s.retryDelayMs) ? (tuned.retryDelayMs ?? 1000) : s.retryDelayMs)) * 2 ** t.attempt;
-      metrics.retries.inc({ activity: node.type });
-      this.tx(() => {
-        this.q.run(`update tasks set status = 'pending', attempt = attempt + 1, not_before = ?, error = ? where id = ?`, Date.now() + delay, err.message, t.id);
-        this.appendLogs(t.run_id, [...(extra.logs || []), { t: now(), level: 'warn', msg: `${node.name}: ${err.message}. Retry ${t.attempt + 1} of ${retries} in ${delay} ms.`, step: node.name }]);
-      }, `run:${t.run_id}`);
-      this.notify(t.run_id);
-      return;
-    }
-    this.tx(() => {
-      const run = this.loadRun(t.run_id)!;
-      const st = run.state;
-      st.logs.push(...(extra.logs || []), { t: now(), level: 'error', msg: `${node?.name ?? t.node_id}: ${err.message}`, step: node?.name });
-      const errorEdges = node ? doc.edges.filter(e => e.from === node.id && e.port === 'error') : [];
-      if (node) this.observeStep(t, node, extra.ms ?? 0, errorEdges.length ? 'error' : 'failed', st.trace, err.message);
-      const input = t.input == null ? null : JSON.parse(t.input);
-      const details = (err as any).details;
-      const errOut = { error: { message: err.message, step: node?.name, type: node?.type, at: now(), ...(details !== undefined ? { details } : {}) }, input };
-      if (node && errorEdges.length) {
-        st.outputs[node.name] = errOut;
-        this.q.run(`update tasks set status = 'error', port = 'error', error = ?, output = ?, ms = ?, finished_at = ? where id = ?`,
-          err.message, cap(errOut), extra.ms ?? null, now(), t.id);
-        this.route(t.run_id, doc, st, node, [{ port: 'error', out: errOut }]);
-      } else {
-        this.q.run(`update tasks set status = 'failed', error = ?, ms = ?, finished_at = ? where id = ?`, err.message, extra.ms ?? null, now(), t.id);
-        this.cancelOpen(t.run_id);
-        const handler = !st.caught && doc.nodes.find(n => this.activities.get(n.type)?.noInput);
-        if (handler) {
-          // The error handler takes over: other branches stop, and its path decides how the run ends.
-          st.caught = true;
-          st.live[handler.id] = true;
-          st.logs.push({ t: now(), level: 'warn', msg: `${handler.name}: handling the error from ${node?.name ?? t.node_id}`, step: handler.name });
-          this.insertTask(t.run_id, handler.id, errOut);
-        } else {
-          st.failed = true;
-          this.q.run(`update runs set error = ? where id = ?`, `${node?.name ?? t.node_id}: ${err.message}`, t.run_id);
-        }
+    try {
+      if (node && t.attempt < retries) {
+        const delay = Math.max(0, Number(unset(s.retryDelayMs) ? (tuned.retryDelayMs ?? 1000) : s.retryDelayMs)) * 2 ** t.attempt;
+        metrics.retries.inc({ activity: node.type });
+        await this.a.transaction(`run:${t.run_id}`, async tx => {
+          await this.fenced(tx, t, `status = 'pending', attempt = attempt + 1, not_before = ?, error = ?`, Date.now() + delay, err.message);
+          await this.appendLogs(tx, t.run_id, [...(extra.logs || []), { t: now(), level: 'warn', msg: `${node.name}: ${err.message}. Retry ${t.attempt + 1} of ${retries} in ${delay} ms.`, step: node.name }]);
+        });
+        this.notify(t.run_id);
+        return;
       }
-      this.saveState(t.run_id, st);
-    }, `run:${t.run_id}`);
-    this.settle(t.run_id);
+      await this.a.transaction(`run:${t.run_id}`, async (tx, row) => {
+        const run = this.loaded(row);
+        if (!run) throw new StaleStep();
+        const st = run.state;
+        st.logs.push(...(extra.logs || []), { t: now(), level: 'error', msg: `${node?.name ?? t.node_id}: ${err.message}`, step: node?.name });
+        const errorEdges = node ? doc.edges.filter(e => e.from === node.id && e.port === 'error') : [];
+        const input = t.input == null ? null : JSON.parse(t.input);
+        const details = (err as any).details;
+        const errOut = { error: { message: err.message, step: node?.name, type: node?.type, at: now(), ...(details !== undefined ? { details } : {}) }, input };
+        if (node && errorEdges.length) {
+          st.outputs[node.name] = errOut;
+          await this.fenced(tx, t, `status = 'error', port = 'error', error = ?, output = ?, ms = ?, finished_at = ?`, err.message, cap(errOut), extra.ms ?? null, now());
+          await this.route(tx, null, run, st, node, [{ port: 'error', out: errOut }]);
+        } else {
+          await this.fenced(tx, t, `status = 'failed', error = ?, ms = ?, finished_at = ?`, err.message, extra.ms ?? null, now());
+          await this.cancelOpen(tx, t.run_id);
+          const handler = !st.caught && doc.nodes.find(n => this.activities.get(n.type)?.noInput);
+          if (handler) {
+            // The error handler takes over: other branches stop, and its path decides how the run ends.
+            st.caught = true;
+            st.live[handler.id] = true;
+            st.logs.push({ t: now(), level: 'warn', msg: `${handler.name}: handling the error from ${node?.name ?? t.node_id}`, step: handler.name });
+            await this.insertTask(tx, null, t.run_id, handler.id, errOut, 0, 'pending', Number(run.row.priority) || 0);
+          } else {
+            st.failed = true;
+            await tx.run(`update runs set error = ? where id = ?`, `${node?.name ?? t.node_id}: ${err.message}`, t.run_id);
+          }
+        }
+        await tx.commitWith('update runs set state = ? where id = ?', JSON.stringify(st), t.run_id);
+        if (node) this.observeStep(t, node, extra.ms ?? 0, errorEdges.length ? 'error' : 'failed', st.trace, err.message);
+      }, { sql: Engine.RUN, args: [t.run_id] });
+    } catch (e) {
+      if (e instanceof StaleStep) { this.notify(t.run_id); return; }
+      throw e;
+    }
+    await this.settle(t.run_id);
   }
 
-  private cancelOpen(runId: string) {
-    this.q.run(`update tasks set status = 'cancelled', finished_at = ? where run_id = ? and status in ('pending', 'waiting', 'paused', 'queued')`, now(), runId);
-    for (const r of this.q.all<{ id: number }>(`select id from tasks where run_id = ? and status = 'running'`, runId)) {
-      this.q.run(`update tasks set status = 'cancelled', finished_at = ? where id = ?`, now(), r.id);
-      this.controllers.get(r.id)?.abort();
+  /** Cancels a run's open steps; steps of it running on this engine are stopped. */
+  private async cancelOpen(tx: TxQ, runId: string) {
+    await tx.run(`update tasks set status = 'cancelled', finished_at = ? where run_id = ? and status in ('pending', 'waiting', 'paused', 'queued')`, now(), runId);
+    for (const r of await tx.all<{ id: number }>(`select id from tasks where run_id = ? and status = 'running'`, runId)) {
+      await tx.run(`update tasks set status = 'cancelled', finished_at = ? where id = ?`, now(), r.id);
+      this.controllers.get(Number(r.id))?.abort();
     }
   }
 
@@ -776,8 +882,8 @@ export class Engine {
   }
 
   /** The traceparent to return to a caller: the run's trace and root span. */
-  traceparentOf(runId: string) {
-    const r = this.q.get<{ state: string }>('select state from runs where id = ?', runId);
+  async traceparentOf(runId: string) {
+    const r = await this.a.get<{ state: string }>('select state from runs where id = ?', runId);
     const st = r ? (JSON.parse(r.state) as RunState) : undefined;
     return tp(st?.trace?.traceId || traceIdFor(runId), runSpanId(runId));
   }
@@ -786,91 +892,97 @@ export class Engine {
    * Runs a failed run again from the step that failed: the same input, attempt 0, with everything
    * the earlier steps produced kept. Only for runs that failed on a step (not ended by End: error).
    */
-  resubmit(runId: string, by = 'someone') {
-    const run = this.loadRun(runId);
+  async resubmit(runId: string, by = 'someone') {
+    const run = await this.loadRun(this.a, runId);
     if (!run) throw new Error('Run not found');
     if (run.row.status !== 'failed') throw new Error(`Only failed runs can be run again (this one is ${run.row.status})`);
-    const failedTasks = this.q.all<TaskRow>(`select * from tasks where run_id = ? and status = 'failed' order by id`, runId);
-    if (!failedTasks.length) throw new Error('This run did not fail on a step (it was stopped on purpose), so there is no step to run again');
-    this.tx(() => {
+    let count = 0;
+    await this.a.transaction(`run:${runId}`, async tx => {
+      const failedTasks = await tx.all<TaskRow>(`select * from tasks where run_id = ? and status = 'failed' order by id`, runId);
+      if (!failedTasks.length) throw new Error('This run did not fail on a step (it was stopped on purpose), so there is no step to run again');
+      count = failedTasks.length;
       const st = run.state;
       st.failed = false;
       st.logs.push({ t: now(), level: 'info', msg: `Run again from ${failedTasks.map(x => run.doc.nodes.find(n => n.id === x.node_id)?.name || x.node_id).join(', ')} by ${by}` });
       for (const ft of failedTasks) {
-        this.q.run(`update tasks set status = 'resubmitted' where id = ?`, ft.id);
-        this.q.run(`insert into tasks(run_id, node_id, input, status, not_before) values(?, ?, ?, 'pending', 0)`, runId, ft.node_id, ft.input);
+        await tx.run(`update tasks set status = 'resubmitted' where id = ?`, ft.id);
+        await tx.run(`insert into tasks(run_id, node_id, input, status, not_before) values(?, ?, ?, 'pending', 0)`, runId, ft.node_id, ft.input);
       }
       // Branches cancelled when the step failed run again too.
-      const cancelled = this.q.all<TaskRow>(`select * from tasks where run_id = ? and status = 'cancelled'`, runId);
-      for (const ct of cancelled) {
-        this.q.run(`update tasks set status = 'resubmitted' where id = ?`, ct.id);
-        this.q.run(`insert into tasks(run_id, node_id, input, status, not_before) values(?, ?, ?, 'pending', 0)`, runId, ct.node_id, ct.input);
+      for (const ct of await tx.all<TaskRow>(`select * from tasks where run_id = ? and status = 'cancelled'`, runId)) {
+        await tx.run(`update tasks set status = 'resubmitted' where id = ?`, ct.id);
+        await tx.run(`insert into tasks(run_id, node_id, input, status, not_before) values(?, ?, ?, 'pending', 0)`, runId, ct.node_id, ct.input);
       }
-      this.q.run(`update runs set status = 'running', error = null, finished_at = null, state = ? where id = ?`, JSON.stringify(st), runId);
-    }, `run:${runId}`);
+      await tx.run(`update runs set status = 'running', error = null, finished_at = null, state = ? where id = ?`, JSON.stringify(st), runId);
+    });
     this.docs.set(runId, run.doc);
     this.notify(runId);
-    queueMicrotask(() => this.pump());
-    return { runId, resubmitted: failedTasks.length };
+    this.pump();
+    return { runId, resubmitted: count };
   }
 
   /** A run cancelled on another engine: stop the steps of it running here. */
-  abortCancelledHere() {
-    const mine = [...this.controllers.keys()];
-    if (!mine.length) return;
-    for (const r of this.q.all<{ id: number }>(`select id from tasks where owner = ? and status = 'cancelled'`, this.id)) this.controllers.get(Number(r.id))?.abort();
+  async abortCancelledHere() {
+    if (!this.controllers.size) return;
+    for (const r of await this.a.all<{ id: number }>(`select id from tasks where owner = ? and status = 'cancelled'`, this.id)) this.controllers.get(Number(r.id))?.abort();
   }
 
-  private wasCancelled(taskId: number) {
-    const r = this.q.get<{ status: string }>('select status from tasks where id = ?', taskId);
+  private async wasCancelled(taskId: number) {
+    const r = await this.a.get<{ status: string }>('select status from tasks where id = ?', taskId);
     // In memory, a step whose run already ended and was written to the database is gone.
     return r ? r.status === 'cancelled' : !!this.parent;
   }
 
-  private saveState(runId: string, st: RunState) {
-    this.q.run('update runs set state = ? where id = ?', JSON.stringify(st), runId);
+  private async saveState(tx: TxQ, runId: string, st: RunState) {
+    await tx.run('update runs set state = ? where id = ?', JSON.stringify(st), runId);
   }
 
-  private appendLogs(runId: string, logs: RunState['logs']) {
-    const run = this.loadRun(runId);
-    if (!run) return;
-    run.state.logs.push(...logs);
-    this.saveState(runId, run.state);
+  private async appendLogs(tx: TxQ, runId: string, logs: RunState['logs']) {
+    const r = await tx.get<{ state: string }>('select state from runs where id = ?', runId);
+    if (!r) return;
+    const st = JSON.parse(r.state) as RunState;
+    st.logs.push(...logs);
+    await this.saveState(tx, runId, st);
   }
 
-  /** Works out the run status from its tasks. */
-  private settle(runId: string) {
-    const counts = Object.fromEntries(
-      this.q.all<{ status: string; n: number }>('select status, count(*) n from tasks where run_id = ? group by status', runId).map(r => [r.status, r.n]),
-    );
-    const run = this.loadRun(runId);
-    if (!run || ['done', 'failed', 'cancelled'].includes(run.row.status)) { this.notify(runId); return; }
-    let status: string;
-    if (counts.pending || counts.running) status = 'running';
-    else if (counts.paused) status = 'paused';
-    else if (counts.waiting) status = 'waiting';
-    else status = run.state.failed ? 'failed' : 'done';
-    const finished = status === 'done' || status === 'failed';
-    this.q.run('update runs set status = ?, finished_at = ? where id = ?', status, finished ? now() : null, runId);
-    if (finished) {
+  /**
+   * Works out the run status from its tasks. The change is conditional on the run still being open, so
+   * of two engines settling the same run at once, one ends it (and answers its caller), never both.
+   */
+  private async settle(runId: string) {
+    const out = await this.a.transaction(`run:${runId}`, async (tx, row) => {
+      const run = this.loaded(row);
+      if (!run || ['done', 'failed', 'cancelled'].includes(run.row.status)) return null;
+      const counts = Object.fromEntries((await tx.all<{ status: string; n: number }>('select status, count(*) n from tasks where run_id = ? group by status', runId)).map(r => [r.status, Number(r.n)]));
+      let status: string;
+      if (counts.pending || counts.running) status = 'running';
+      else if (counts.paused) status = 'paused';
+      else if (counts.waiting) status = 'waiting';
+      else status = run.state.failed ? 'failed' : 'done';
+      if (status === run.row.status) return null;
+      const finished = status === 'done' || status === 'failed';
+      const r = await tx.commitWith<{ id: string }>(`update runs set status = ?, finished_at = ? where id = ? and status not in ('done', 'failed', 'cancelled') returning id`, status, finished ? now() : null, runId);
+      return r ? { run, status, finished } : null;
+    }, { sql: Engine.RUN, args: [runId] });
+    if (out?.finished) {
+      const { run, status } = out;
       this.docs.delete(runId);
-      this.resolveReply(runId, run.state, run.row.error);
-      const err = this.q.get<{ error: string }>('select error from runs where id = ?', runId)?.error;
+      const err = run.row.error;
+      this.resolveReply(runId, run.state, err);
       projectLog(run.row.project_id, { level: status === 'failed' ? 'error' : 'info', msg: status === 'failed' ? `Run failed: ${err}` : 'Run finished', flow: run.doc.name, run: runId, origin: runOrigin(run.row.source, run.row.version) });
       this.observeRun(runId, run.doc.name, status, run.row.started_at, run.row.source, run.state.trace, status === 'failed' ? err : undefined);
       this.finish(runId, status);
-      this.runEnded(runId, run.row.flow_id, run.row.source, status);
-      if (run.row.source === 'sutra' || run.row.source === 'process') queueMicrotask(() => this.resumeCaller(runId, status));
+      await this.runEnded(runId, run.row.flow_id, run.row.source, status);
+      if (run.row.source === 'sutra' || run.row.source === 'process') void this.resumeCaller(runId, status).catch(e => console.error(`Resuming the caller of ${runId}: ${e?.message || e}`));
     }
     this.notify(runId);
   }
 
   /** The answer for a caller waiting on this run: its reply step's reply, or its outcome when it ended without one. */
-  private resolveReply(runId: string, st: RunState, rowError?: string | null) {
+  private resolveReply(runId: string, st: RunState, err?: string | null) {
     const h = this.replies.get(runId);
     if (h && !h.done) {
       h.done = true;
-      const err = rowError || this.q.get<{ error: string }>('select error from runs where id = ?', runId)?.error;
       if (st.reply) h.resolve({ ...st.reply, runId });
       else h.resolve(st.failed
         ? { runId, failed: true, error: err || 'Sutra failed', status: 500, body: { error: err || 'Sutra failed' } }
@@ -881,93 +993,104 @@ export class Engine {
 
   /**
    * Callers wait on the engine that received them, but in a cluster another engine may run the reply
-   * step or the last step. Every 250 ms this engine looks up the runs it is waiting on.
+   * step or the last step. Every queue check this engine looks up the runs it is waiting on.
    */
-  private checkRemoteWaiters() {
+  private async checkRemoteWaiters() {
     const ids = [...new Set([...this.replies.keys(), ...this.finishers.keys()])];
-    if (!ids.length) return;
-    for (const runId of ids) {
-      const r = this.q.get<{ status: string; state: string; error: string | null }>('select status, state, error from runs where id = ?', runId);
-      if (!r) continue;
-      const st = JSON.parse(r.state) as RunState;
-      const h = this.replies.get(runId);
-      if (h && !h.done && st.reply) { h.done = true; h.resolve({ ...st.reply, runId }); this.replies.delete(runId); }
-      if (['done', 'failed', 'cancelled'].includes(r.status)) {
-        if (this.replies.has(runId)) this.resolveReply(runId, st, r.error);
-        if (this.finishers.has(runId)) this.finish(runId, r.status);
+    if (!ids.length || this.checking) return;
+    this.checking = true;
+    try {
+      for (const runId of ids) {
+        const r = await this.a.get<{ status: string; state: string; error: string | null }>('select status, state, error from runs where id = ?', runId);
+        if (!r) continue;
+        const st = JSON.parse(r.state) as RunState;
+        const h = this.replies.get(runId);
+        if (h && !h.done && st.reply) { h.done = true; h.resolve({ ...st.reply, runId }); this.replies.delete(runId); }
+        if (['done', 'failed', 'cancelled'].includes(r.status)) {
+          if (this.replies.has(runId)) this.resolveReply(runId, st, r.error);
+          if (this.finishers.has(runId)) this.finish(runId, r.status);
+        }
       }
+    } catch (e: any) {
+      console.error('Checking waiting callers failed:', e?.message || e);
+    } finally {
+      this.checking = false;
     }
   }
 
   /** After a run of a deployed Sutra ends: trim its step data as tuned, and start queued runs. */
-  private runEnded(runId: string, flowId: string | null, source: string, status: string) {
+  private async runEnded(runId: string, flowId: string | null, source: string, status: string) {
     if (!flowId || source === 'test' || source === 'debug') return;
     const t = sutraTuning(flowId);
-    if (t.stepData === 'none' || (t.stepData === 'errors only' && status === 'done')) this.q.run('update tasks set input = null, output = null where run_id = ?', runId);
-    if (this.parent) this.persist(runId);
-    this.promoteQueued(flowId);
+    if (t.stepData === 'none' || (t.stepData === 'errors only' && status === 'done')) await this.a.run('update tasks set input = null, output = null where run_id = ?', runId);
+    if (this.parent) await this.persist(runId);
+    await this.promoteQueued(flowId);
   }
 
   /**
    * A run in memory ended: its run row and step rows go to the database in one transaction and leave
    * memory. When the database cannot be written, the run stays in memory and is tried again.
    */
-  private persist(runId: string, attempt = 0) {
-    const run = this.q.get<any>('select * from runs where id = ?', runId);
+  private async persist(runId: string, attempt = 0): Promise<void> {
+    const run = await this.a.get<any>('select * from runs where id = ?', runId);
     if (!run) return;
-    const tasks = this.q.all<any>('select * from tasks where run_id = ? order by id', runId).map(({ id: _id, ...t }) => t);
-    const insert = (table: string, rows: any[]) => {
+    const tasks = (await this.a.all<any>('select * from tasks where run_id = ? order by id', runId)).map(({ id: _id, ...t }) => t);
+    const insert = async (tx: TxQ, table: string, rows: any[]) => {
       if (!rows.length) return;
       const cols = Object.keys(rows[0]);
       // Several rows per statement, within PostgreSQL's limit of parameters per statement.
       const per = Math.max(1, Math.floor(30000 / cols.length));
       for (let i = 0; i < rows.length; i += per) {
         const part = rows.slice(i, i + per);
-        databaseStore.q.run(`insert into ${table}(${cols.join(', ')}) values ${part.map(() => `(${cols.map(() => '?').join(', ')})`).join(', ')}`, ...part.flatMap(r => cols.map(c => r[c])));
+        await tx.run(`insert into ${table}(${cols.join(', ')}) values ${part.map(() => `(${cols.map(() => '?').join(', ')})`).join(', ')}`, ...part.flatMap(r => cols.map(c => r[c])));
       }
     };
     try {
-      databaseStore.tx(() => { insert('runs', [run]); insert('tasks', tasks); }, `run:${runId}`);
+      await this.parent!.a.transaction(`run:${runId}`, async tx => { await insert(tx, 'runs', [run]); await insert(tx, 'tasks', tasks); });
     } catch (e: any) {
       if (attempt === 0) projectLog(run.project_id, { level: 'error', msg: `Run in memory could not be written to the database, trying again: ${e?.message || e}`, flow: run.flow_name, run: runId, origin: runOrigin(run.source, run.version) });
-      setTimeout(() => this.persist(runId, attempt + 1), Math.min(60000, 1000 * 2 ** attempt)).unref?.();
+      setTimeout(() => { void this.persist(runId, attempt + 1); }, Math.min(60000, 1000 * 2 ** attempt)).unref?.();
       return;
     }
-    this.q.run('delete from tasks where run_id = ?', runId);
-    this.q.run('delete from runs where id = ?', runId);
+    await this.a.transaction(undefined, async tx => {
+      await tx.run('delete from tasks where run_id = ?', runId);
+      await tx.run('delete from runs where id = ?', runId);
+    });
   }
 
   /** Starts queued runs while their Sutra is under its "Runs at once" limit (all Sutras when flowId is empty). */
-  promoteQueued(flowId?: string) {
-    const flows = flowId ? [flowId] : this.q.all<any>(`select distinct flow_id from runs where status = 'queued'`).map(r => r.flow_id as string);
+  async promoteQueued(flowId?: string) {
+    const flows = flowId ? [flowId] : (await this.a.all<any>(`select distinct flow_id from runs where status = 'queued'`)).map(r => r.flow_id as string);
     let started = 0;
+    const promoted: string[] = [];
     for (const f of flows) {
       const max = Number(sutraTuning(f).maxRuns) || 0;
-      this.tx(() => {
-        let active = Number(this.q.get<any>(`select count(*) n from runs where flow_id = ? and status in ('running', 'waiting', 'paused') and source not in ('test', 'debug')`, f)?.n || 0);
+      await this.a.transaction(`flow:${f}`, async tx => {
+        let active = Number((await tx.get<any>(`select count(*) n from runs where flow_id = ? and status in ('running', 'waiting', 'paused') and source not in ('test', 'debug')`, f))?.n || 0);
         while (max === 0 || active < max) {
-          const next = this.q.get<{ id: string }>(`select id from runs where flow_id = ? and status = 'queued' order by started_at, id limit 1`, f);
+          const next = await tx.get<{ id: string }>(`select id from runs where flow_id = ? and status = 'queued' order by started_at, id limit 1`, f);
           if (!next) break;
-          this.q.run(`update runs set status = 'running' where id = ? and status = 'queued'`, next.id);
-          this.q.run(`update tasks set status = 'pending' where run_id = ? and status = 'queued'`, next.id);
+          await tx.run(`update runs set status = 'running' where id = ? and status = 'queued'`, next.id);
+          await tx.run(`update tasks set status = 'pending' where run_id = ? and status = 'queued'`, next.id);
           active++; started++;
-          queueMicrotask(() => this.notify(next.id));
+          promoted.push(next.id);
         }
-      }, `flow:${f}`);
+      });
     }
-    if (started) queueMicrotask(() => this.pump());
+    for (const id of promoted) this.notify(id);
+    if (started) this.pump();
     return started;
   }
 
   /** Cancels runs of tuned Sutras that are open longer than their run time limit (the leader calls this). */
-  enforceRunTimeouts(nowMs = Date.now()) {
+  async enforceRunTimeouts(nowMs = Date.now()) {
     let n = 0;
     for (const [flowId, t] of tunedSutras()) {
       const min = Number(t.runTimeoutMin) || 0;
       if (!min) continue;
       const cutoff = new Date(nowMs - min * 60000).toISOString();
-      for (const r of this.q.all<{ id: string }>(`select id from runs where flow_id = ? and status in ('running', 'waiting', 'paused') and source not in ('test', 'debug') and started_at < ?`, flowId, cutoff)) {
-        if (this.cancel(r.id, `Run time limit of ${min} min reached`)) n++;
+      for (const r of await this.a.all<{ id: string }>(`select id from runs where flow_id = ? and status in ('running', 'waiting', 'paused') and source not in ('test', 'debug') and started_at < ?`, flowId, cutoff)) {
+        if (await this.cancel(r.id, `Run time limit of ${min} min reached`)) n++;
       }
     }
     return n;
@@ -990,65 +1113,71 @@ export class Engine {
 
   // ---------- operator actions ----------
 
-  decide(taskId: number, approved: boolean, by: string, comment = '') {
-    const t = this.q.get<TaskRow>('select * from tasks where id = ?', taskId);
+  async decide(taskId: number, approved: boolean, by: string, comment = '') {
+    const t = await this.a.get<TaskRow>('select * from tasks where id = ?', taskId);
     if (!t || t.status !== 'waiting') throw new Error('This approval is no longer waiting');
-    const run = this.loadRun(t.run_id);
+    t.id = Number(t.id); t.claim = Number(t.claim); t.attempt = Number(t.attempt);
+    const run = await this.loadRun(this.a, t.run_id);
     const node = run?.doc.nodes.find(n => n.id === t.node_id);
     if (!run || !node) throw new Error('Run not found');
     const input = t.input == null ? null : JSON.parse(t.input);
     const question = !!JSON.parse(t.wait || '{}').question;
     if (question && approved && !comment.trim()) throw new Error('Write the answer first');
     const out = { ...(input && typeof input === 'object' && !Array.isArray(input) ? input : { value: input }), ...(question ? { answer: approved ? comment : '' } : {}), approval: { approved, by, comment, at: now() } };
-    this.complete(t, run.doc, node, { port: question ? (approved ? 'answered' : 'declined') : approved ? 'approved' : 'rejected', out }, { ms: 0, revealed: new Set(), logs: [{ t: now(), level: 'info', msg: `${node.name}: ${approved ? 'approved' : 'rejected'} by ${by}${comment ? ` (${comment})` : ''}`, step: node.name }], varsSet: {} });
+    await this.complete(t, run.doc, node, { port: question ? (approved ? 'answered' : 'declined') : approved ? 'approved' : 'rejected', out }, { ms: 0, revealed: new Set(), logs: [{ t: now(), level: 'info', msg: `${node.name}: ${approved ? 'approved' : 'rejected'} by ${by}${comment ? ` (${comment})` : ''}`, step: node.name }], varsSet: {} });
     this.pump();
   }
 
-  cancel(runId: string, reason?: string): boolean {
+  async cancel(runId: string, reason?: string): Promise<boolean> {
     const m = this.memoryHolding(runId);
     if (m) return m.cancel(runId, reason);
-    const run = this.loadRun(runId);
-    if (!run || !['running', 'waiting', 'paused', 'queued'].includes(run.row.status)) return false;
-    this.tx(() => {
-      this.cancelOpen(runId);
+    let run: Loaded | undefined;
+    const children: string[] = [];
+    const done = await this.a.transaction(`run:${runId}`, async tx => {
+      run = await this.loadRun(tx, runId);
+      if (!run || !['running', 'waiting', 'paused', 'queued'].includes(run.row.status)) return false;
+      // A step waiting for a called process: that process is cancelled too.
+      for (const w of await tx.all<{ wait: string }>(`select wait from tasks where run_id = ? and status = 'waiting' and wait like '%"kind":"process"%'`, runId)) {
+        try { const c = JSON.parse(w.wait).child; if (c) children.push(c); } catch { /* ignore */ }
+      }
+      await this.cancelOpen(tx, runId);
       run.state.logs.push({ t: now(), level: 'warn', msg: reason ? `Run cancelled: ${reason}` : 'Run cancelled' });
-      this.saveState(runId, run.state);
-      this.q.run(`update runs set status = 'cancelled', finished_at = ?${reason ? ', error = ?' : ''} where id = ?`, now(), ...(reason ? [reason] : []), runId);
-    }, `run:${runId}`);
+      await this.saveState(tx, runId, run.state);
+      await tx.run(`update runs set status = 'cancelled', finished_at = ?${reason ? ', error = ?' : ''} where id = ?`, now(), ...(reason ? [reason] : []), runId);
+      return true;
+    });
+    if (!done || !run) return false;
     const h = this.replies.get(runId);
     if (h && !h.done) h.resolve({ runId, failed: true, error: 'Run cancelled', status: 503, body: { error: 'Run cancelled' } });
     this.replies.delete(runId);
     this.docs.delete(runId);
     this.finish(runId, 'cancelled');
-    this.runEnded(runId, run.row.flow_id, run.row.source, 'cancelled');
-    if (run.row.source === 'sutra' || run.row.source === 'process') queueMicrotask(() => this.resumeCaller(runId, 'cancelled'));
+    await this.runEnded(runId, run.row.flow_id, run.row.source, 'cancelled');
+    if (run.row.source === 'sutra' || run.row.source === 'process') void this.resumeCaller(runId, 'cancelled').catch(() => {});
     this.observeRun(runId, run.doc.name, 'cancelled', run.row.started_at, run.row.source, run.state.trace, 'Run cancelled');
-    // A step waiting for a called process: cancel that process too.
-    for (const w of this.q.all<{ wait: string }>(`select wait from tasks where run_id = ? and status = 'cancelled' and wait like '%"kind":"process"%'`, runId)) {
-      try { const c = JSON.parse(w.wait).child; if (c) this.cancel(c); } catch { /* ignore */ }
-    }
+    for (const c of children) await this.cancel(c);
     this.notify(runId);
     return true;
   }
 
   /** Debugger: step (run the next paused step), continue (run until a breakpoint), pause, or set breakpoints. */
-  debug(runId: string, action: 'step' | 'continue' | 'pause' | 'breakpoints', breakpoints?: string[]) {
-    const r = this.q.get<{ debug: string | null; status: string }>('select debug, status from runs where id = ?', runId);
+  async debug(runId: string, action: 'step' | 'continue' | 'pause' | 'breakpoints', breakpoints?: string[]) {
+    const r = await this.a.get<{ debug: string | null; status: string }>('select debug, status from runs where id = ?', runId);
     if (!r) throw new Error('Run not found');
     if (!r.debug) throw new Error('This run was not started in debug mode');
     const d = JSON.parse(r.debug) as DebugState;
     if (breakpoints) d.breakpoints = breakpoints.map(String);
     if (action === 'step' || action === 'pause') d.stepping = true;
     if (action === 'continue') d.stepping = false;
-    this.tx(() => {
-      this.q.run('update runs set debug = ? where id = ?', JSON.stringify(d), runId);
+    await this.a.transaction(`run:${runId}`, async tx => {
+      await tx.run('update runs set debug = ? where id = ?', JSON.stringify(d), runId);
       if (action === 'step') {
-        const next = this.q.get<{ id: number }>(`select id from tasks where run_id = ? and status = 'paused' order by id limit 1`, runId);
-        if (next) this.q.run(`update tasks set status = 'pending', released = 1 where id = ?`, next.id);
+        const next = await tx.get<{ id: number }>(`select id from tasks where run_id = ? and status = 'paused' order by id limit 1`, runId);
+        if (next) await tx.run(`update tasks set status = 'pending', released = 1 where id = ?`, next.id);
       }
-      if (action === 'continue') this.q.run(`update tasks set status = 'pending', released = 1 where run_id = ? and status = 'paused'`, runId);
-      if ((action === 'step' || action === 'continue') && r.status === 'paused') this.q.run(`update runs set status = 'running' where id = ?`, runId);
-    }, `run:${runId}`);
+      if (action === 'continue') await tx.run(`update tasks set status = 'pending', released = 1 where run_id = ? and status = 'paused'`, runId);
+      if ((action === 'step' || action === 'continue') && r.status === 'paused') await tx.run(`update runs set status = 'running' where id = ?`, runId);
+    });
     this.notify(runId);
     this.pump();
     return d;
@@ -1057,17 +1186,22 @@ export class Engine {
   /** Resolves when the run leaves running/waiting (tests and synchronous API calls). */
   waitFor(runId: string, timeoutMs = 30000, untilWaiting = false): Promise<any> {
     return new Promise((res, rej) => {
-      const check = () => {
-        const r = this.q.get<any>('select status from runs where id = ?', runId);
-        if (r && (!['running', 'waiting', 'paused', 'queued'].includes(r.status) || (untilWaiting && (r.status === 'waiting' || r.status === 'paused')))) {
-          this.listeners.delete(fn); clearTimeout(to); res(r.status); return true;
+      let over = false;
+      const check = async () => {
+        if (over) return;
+        const r = await this.a.get<any>('select status from runs where id = ?', runId).catch(() => undefined);
+        if (!over && r && (!['running', 'waiting', 'paused', 'queued'].includes(r.status) || (untilWaiting && (r.status === 'waiting' || r.status === 'paused')))) {
+          over = true;
+          this.listeners.delete(fn); clearTimeout(to); clearInterval(poll); res(r.status);
         }
-        return false;
       };
-      const fn = (id: string) => { if (id === runId) check(); };
-      const to = setTimeout(() => { this.listeners.delete(fn); rej(new Error('Timed out waiting for run')); }, timeoutMs);
+      const fn = (id: string) => { if (id === runId) void check(); };
+      const to = setTimeout(() => { over = true; this.listeners.delete(fn); clearInterval(poll); rej(new Error('Timed out waiting for run')); }, timeoutMs);
+      // Runs ended by another engine send no notice here: look now and then too.
+      const poll = setInterval(() => void check(), 500);
+      poll.unref?.();
       this.listeners.add(fn);
-      check();
+      void check();
     });
   }
 }

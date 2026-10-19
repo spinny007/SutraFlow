@@ -261,7 +261,7 @@ async function deliver(ch: Channel, body: ReturnType<typeof payload>) {
   }
   const d = deployedFlows().find(x => x.flowId === c.flowId);
   if (!d) throw new Error('The Sutra is not deployed (or stopped)');
-  const runId = engine.startRun({ doc: d.doc, flowId: d.flowId, projectId: d.projectId, version: d.version, input: body, source: 'alert' });
+  const runId = await engine.startRun({ doc: d.doc, flowId: d.flowId, projectId: d.projectId, version: d.version, input: body, source: 'alert' });
   return `run ${runId}`;
 }
 

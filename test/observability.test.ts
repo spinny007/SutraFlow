@@ -39,7 +39,7 @@ before(async () => {
 after(async () => { await srv.stop(); await collector.close(); });
 
 async function run(name: string, nodes: any[], edges: any[], input?: any) {
-  const id = engine.startRun({ doc: { name, nodes, edges }, projectId: pid, input, source: 'test' });
+  const id = await engine.startRun({ doc: { name, nodes, edges }, projectId: pid, input, source: 'test' });
   await engine.waitFor(id, 20000);
   return { id, ...(q.get('select status, error from runs where id = ?', id) as any) };
 }
@@ -148,7 +148,7 @@ test('retention: finished runs older than the limit are deleted with their steps
   const old1 = await run('Old', [s, l], [edge(s, l)]);
   const recent = await run('Recent', [s, l], [edge(s, l)]);
   const ap = node('approval', 'Wait for me', { message: 'ok?' });
-  const waiting = engine.startRun({ doc: { name: 'Waiting', nodes: [s, ap], edges: [edge(s, ap)] }, projectId: pid });
+  const waiting = await engine.startRun({ doc: { name: 'Waiting', nodes: [s, ap], edges: [edge(s, ap)] }, projectId: pid });
   await engine.waitFor(waiting, 10000, true);
   const long = new Date(Date.now() - 40 * 86400000).toISOString();
   q.run('update runs set started_at = ?, finished_at = ? where id = ?', long, long, old1.id);
@@ -161,7 +161,7 @@ test('retention: finished runs older than the limit are deleted with their steps
   assert.equal(q.get('select 1 as x from tasks where run_id = ?', old1.id), undefined, 'its steps deleted');
   assert.ok(q.get('select 1 as x from runs where id = ?', recent.id), 'recent run kept');
   assert.ok(q.get('select 1 as x from runs where id = ?', waiting), 'waiting run kept');
-  engine.cancel(waiting);
+  await engine.cancel(waiting);
 });
 
 test('run again from the failed step: the failed HTTP call is repeated once the service is back', async () => {
@@ -195,6 +195,6 @@ test('run again from the failed step: the failed HTTP call is repeated once the 
     assert.match(again.json().error, /Only failed runs/);
     const e = node('end', 'Stop', { stop: 'Sutra: error', result: '', message: 'on purpose' });
     const stopped = await run('Stopped', [s, e], [edge(s, e)]);
-    assert.throws(() => engine.resubmit(stopped.id), /stopped on purpose/);
+    await assert.rejects(engine.resubmit(stopped.id), /stopped on purpose/);
   } finally { await svc.close(); }
 });

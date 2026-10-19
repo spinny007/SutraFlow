@@ -35,7 +35,7 @@ function deployFlow(name: string, nodes: any[], edges: any[]) {
   return f;
 }
 async function runFlow(nodes: any[], edges: any[]) {
-  const id = engine.startRun({ doc: { name: 'Client', nodes, edges } });
+  const id = await engine.startRun({ doc: { name: 'Client', nodes, edges } });
   await engine.waitFor(id, 20000);
   const r: any = q.get('select * from runs where id = ?', id);
   return { status: r.status, error: r.error, outputs: JSON.parse(r.state).outputs };

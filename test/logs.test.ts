@@ -73,10 +73,10 @@ test('project log: developers read it by level and words, and clear it and their
   const doc = { name: 'Logs', nodes: [s, a, b], edges: [edge(s, a), edge(a, b)] };
   const f = (await call(dev, 'POST', '/api/flows', { doc, projectId: shop })).json();
   for (let i = 0; i < 2; i++) {
-    const id = engine.startRun({ doc, flowId: f.id, projectId: shop, source: 'test' });
+    const id = await engine.startRun({ doc, flowId: f.id, projectId: shop, source: 'test' });
     await engine.waitFor(id, 10000);
   }
-  const live = engine.startRun({ doc, flowId: f.id, projectId: shop, source: 'rest' });
+  const live = await engine.startRun({ doc, flowId: f.id, projectId: shop, source: 'rest' });
   await engine.waitFor(live, 10000);
 
   let log = (await call(dev, 'GET', `/api/projects/${shop}/log`)).json();
@@ -104,9 +104,9 @@ test('log lines and audit entries say which server, which kind of run, and name 
   const s = node('start', 'Start'), a = node('log', 'Say', { message: 'origin check' });
   const doc = { name: 'Origins', nodes: [s, a], edges: [edge(s, a)] };
   const f = (await call(dev, 'POST', '/api/flows', { doc, projectId: shop })).json();
-  await engine.waitFor(engine.startRun({ doc, flowId: f.id, projectId: shop, source: 'test' }), 10000);
+  await engine.waitFor(await engine.startRun({ doc, flowId: f.id, projectId: shop, source: 'test' }), 10000);
   await call(admin, 'POST', `/api/flows/${f.id}/deploy`, {});
-  await engine.waitFor(engine.startRun({ doc, flowId: f.id, projectId: shop, source: 'rest', version: 1 }), 10000);
+  await engine.waitFor(await engine.startRun({ doc, flowId: f.id, projectId: shop, source: 'rest', version: 1 }), 10000);
 
   const lines: string[] = (await call(dev, 'GET', `/api/projects/${shop}/log?q=origin%20check`)).json().lines;
   assert.ok(lines.some(l => l.includes('{development, editor test}')), 'a designer test run');

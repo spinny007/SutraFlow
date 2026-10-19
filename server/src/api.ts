@@ -8,6 +8,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 import crypto from 'node:crypto';
+import { asyncDatabase, poolFigures } from './asyncdb.js';
 import { setEngineName } from './cluster.js';
 import { allMemTables, memTable, reload, memClear, memStats, memRows, memPut, memDelete } from './memtables.js';
 import * as gitAccounts from './git/accounts.js';
@@ -129,6 +130,7 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   // ---------- health and readiness (no sign-in: probes) ----------
   app.get('/health', async () => health());
   app.get('/ready', async (_req, reply) => { const r = readiness(); return reply.code(r.ready ? 200 : 503).send(r); });
+  const figureValues = (f: { count: number; sum: number; max: number }) => [{ labels: { of: 'count' }, v: f.count }, { labels: { of: 'total' }, v: Math.round(f.sum) }, { labels: { of: 'max' }, v: Math.round(f.max) }];
   // Prometheus metrics: counters and histograms of this engine, gauges read now.
   app.get('/metrics', async (req, reply) => {
     if (config.metricsToken && String(req.headers.authorization || '') !== `Bearer ${config.metricsToken}`) return reply.code(401).send('metrics token required');
@@ -145,6 +147,13 @@ export async function buildAdmin(): Promise<FastifyInstance> {
       { name: 'sutra_listeners', help: 'Polling listeners on this engine by state.', values: Object.entries(listeners).map(([state, v]) => ({ labels: { state }, v })) },
       { name: 'sutra_traces_exported_total', help: 'Spans sent to the OpenTelemetry collector.', values: [{ v: tracingStats.exported }] },
       { name: 'sutra_traces_failed_total', help: 'Spans the collector did not accept.', values: [{ v: tracingStats.failed }] },
+      // The engine's storage: PostgreSQL pool connections, waits and transaction times (asyncdb.ts).
+      { name: 'sutra_db_pool_connections', help: 'Pool connections by state (size = the most it opens).', values: [{ labels: { state: 'size' }, v: poolFigures.size }, { labels: { state: 'open' }, v: poolFigures.total }, { labels: { state: 'idle' }, v: poolFigures.idle }] },
+      { name: 'sutra_db_pool_waiting', help: 'Transactions waiting for a pool connection now.', values: [{ v: poolFigures.waiting }] },
+      { name: 'sutra_db_pool_acquire_ms', help: 'Waiting for a pool connection: count, total and longest, in ms.', values: figureValues(poolFigures.acquireMs) },
+      { name: 'sutra_db_transaction_ms', help: 'Engine transactions: count, total and longest, in ms.', values: figureValues(poolFigures.txMs) },
+      { name: 'sutra_db_query_ms', help: 'Pool queries: count, total and longest, in ms.', values: figureValues(poolFigures.queryMs) },
+      { name: 'sutra_db_transaction_retries_total', help: 'Transactions run again after a deadlock or serialization failure.', values: [{ v: poolFigures.retries }] },
     ]));
   });
 
@@ -361,7 +370,7 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.post('/api/console/memory/:id/clear', async (req: any) => { try { const t = await memTable(req.params.id); memClear(t); return memStats(t); } catch (e: any) { throw bad(e.message); } });
   // A display name for an engine (its id stays the same).
   app.put('/api/console/engines/:id/name', async (req: any) => ({ id: req.params.id, name: setEngineName(req.params.id, req.body?.name) }));
-  app.get('/api/console/machine', async () => ({ ...machineInfo(), engine: config.engineId, database: dbKind(), memoryRuns: engine.memoryRuns, running: engine.running }));
+  app.get('/api/console/machine', async () => ({ ...machineInfo(), engine: config.engineId, database: dbKind(), memoryRuns: engine.memoryRuns, running: engine.running, pool: asyncDatabase().pooled ? { ...poolFigures } : null }));
   app.put('/api/console/tuning/engine', async (req: any) => { try { setEngineTuning(req.body?.values || {}); return engineTuning(); } catch (e: any) { throw bad(e.message); } });
   app.put('/api/console/tuning/engines/:id', async (req: any) => { try { setEngineTuning(req.body?.values || {}, req.params.id); return engineTuning(req.params.id); } catch (e: any) { throw bad(e.message); } });
   app.get('/api/console/sutras/:id/tuning', async (req: any) => ({ fields: SUTRA_FIELDS, values: sutraTuning(req.params.id) }));
@@ -670,7 +679,7 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     const v = flows.validateDoc(doc);
     if (v.errors.length) throw bad(v.errors.join('\n'));
     const debug = req.body?.debug ? { stepping: req.body.debug.stepping !== false, breakpoints: (req.body.debug.breakpoints || []).map(String) } : undefined;
-    const runId = engine.startRun({ doc, flowId: f.id, projectId: f.project_id, version: 0, triggerNodeId: req.body?.triggerNodeId, input: req.body?.input, source: debug ? 'debug' : 'test', debug });
+    const runId = await engine.startRun({ doc, flowId: f.id, projectId: f.project_id, version: 0, triggerNodeId: req.body?.triggerNodeId, input: req.body?.input, source: debug ? 'debug' : 'test', debug });
     return { runId, warnings: v.warnings };
   });
 
@@ -686,7 +695,7 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.post('/api/flows/:id/run', async (req: any) => {
     const d = flows.deployedFlows().find(x => x.flowId === req.params.id);
     if (!d) throw bad('This Sutra is not deployed');
-    const runId = engine.startRun({ doc: d.doc, flowId: d.flowId, projectId: d.projectId, version: d.version, triggerNodeId: req.body?.triggerNodeId, input: req.body?.input, source: 'api' });
+    const runId = await engine.startRun({ doc: d.doc, flowId: d.flowId, projectId: d.projectId, version: d.version, triggerNodeId: req.body?.triggerNodeId, input: req.body?.input, source: 'api' });
     if (req.query?.wait) await engine.waitFor(runId, Math.min(120000, Number(req.query.wait) || 30000)).catch(() => {});
     return runDetail(runId);
   });
@@ -705,17 +714,17 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.get('/api/runs/:id', async (req: any) => runDetail(req.params.id));
   /** Runs a failed run again from the step that failed. */
   app.post('/api/runs/:id/resubmit', async (req: any) => {
-    try { return engine.resubmit(req.params.id, req.user?.u); } catch (e: any) { throw bad(e.message); }
+    try { return await engine.resubmit(req.params.id, req.user?.u); } catch (e: any) { throw bad(e.message); }
   });
   /** Deletes finished runs older than the retention period now (the leader also does it every minute). */
   app.post('/api/engine/housekeeping', async (req: any) => {
     return housekeeping({ retentionDays: req.body?.retentionDays !== undefined ? Number(req.body.retentionDays) : undefined });
   });
-  app.post('/api/runs/:id/cancel', async (req: any) => ({ ok: engine.cancel(req.params.id) }));
+  app.post('/api/runs/:id/cancel', async (req: any) => ({ ok: await engine.cancel(req.params.id) }));
   app.post('/api/runs/:id/debug', async (req: any) => {
     const a = String(req.body?.action || '');
     if (!['step', 'continue', 'pause', 'breakpoints'].includes(a)) throw bad('action must be step, continue, pause or breakpoints');
-    return engine.debug(req.params.id, a as any, Array.isArray(req.body?.breakpoints) ? req.body.breakpoints : undefined);
+    try { return await engine.debug(req.params.id, a as any, Array.isArray(req.body?.breakpoints) ? req.body.breakpoints : undefined); } catch (e: any) { throw bad(e.message); }
   });
   app.get('/api/approvals', async req => {
     const ok = seen(req);
@@ -726,7 +735,7 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     });
   });
   app.post('/api/approvals/:id', async (req: any) => {
-    engine.decide(Number(req.params.id), !!req.body?.approved, req.user.u, String(req.body?.comment || ''));
+    try { await engine.decide(Number(req.params.id), !!req.body?.approved, req.user.u, String(req.body?.comment || '')); } catch (e: any) { throw bad(e.message); }
     return { ok: true };
   });
 

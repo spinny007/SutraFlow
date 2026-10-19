@@ -75,7 +75,7 @@ test('in memory: steps run without database writes and the whole run is saved wh
   const s = node('start', 'Start'), a = node('jsonata', 'Add', { source: '{{input}}', expression: '{ "n": n + 1 }' }), b = node('jsonata', 'Double', { source: '{{input}}', expression: '{ "n": n * 2, "g": $gv.GREETING }' });
   const id = deployed('Fast lane', [s, a, b], [edge(s, a), edge(a, b)]);
   await inMemory(id);
-  const runId = start(id, { n: 4 });
+  const runId = await start(id, { n: 4 });
   assert.equal(q.get('select 1 from runs where id = ?', runId), undefined, 'not in the database while it runs');
   const open = (await call('GET', `/api/runs/${runId}`)).json();
   assert.equal(open.inMemory, true, 'the run API knows it while it is in memory');
@@ -89,7 +89,8 @@ test('in memory: steps run without database writes and the whole run is saved wh
   assert.deepEqual(tasks.map(t => t.status), ['done', 'done', 'done'], 'every step is in the history');
   assert.equal(engine.memoryRuns, 0, 'nothing left in memory');
   // Many at once.
-  const many = Array.from({ length: 40 }, (_, i) => start(id, { n: i }));
+  // Many at once: started together, so their steps run side by side.
+  const many = await Promise.all(Array.from({ length: 40 }, (_, i) => start(id, { n: i })));
   for (const r of many) assert.equal(await engine.waitFor(r, 20000), 'done');
   assert.equal(Number(q.get<any>(`select count(*) n from tasks where run_id in (${many.map(() => '?').join(',')})`, ...many).n), 120);
 });
@@ -98,14 +99,14 @@ test('in memory: tests and debugging stay durable; retries and the error port wo
   const s = node('start', 'Start'), a = node('jsonata', 'Same', { source: '{{input}}', expression: '$' });
   const id = deployed('Fast but tested', [s, a], [edge(s, a)]);
   await inMemory(id);
-  const t = start(id, {}, 'test');
+  const t = await start(id, {}, 'test');
   assert.ok(q.get('select 1 from runs where id = ?', t), 'a test run is written at once');
   assert.equal(await engine.waitFor(t, 10000), 'done');
 
   const s2 = node('start', 'Start'), boom = node('throw', 'Boom', { message: 'no' }, { retries: 2, retryDelayMs: 10 }), fix = node('jsonata', 'Handled', { source: '{{input}}', expression: '{ "handled": error.message }' });
   const id2 = deployed('Fast retries', [s2, boom, fix], [edge(s2, boom), edge(boom, fix, 'error')]);
   await inMemory(id2);
-  const r2 = start(id2);
+  const r2 = await start(id2);
   assert.equal(await engine.waitFor(r2, 10000), 'done');
   assert.equal(q.get<any>(`select attempt from tasks where run_id = ? and node_id = ?`, r2, boom.id).attempt, 2, 'retried twice in memory');
   assert.equal(JSON.parse(q.get<any>('select state from runs where id = ?', r2).state).outputs.Handled.handled, 'no');
@@ -118,7 +119,7 @@ test('in memory: tests and debugging stay durable; retries and the error port wo
   // Tuned before the waiting step was added (or by hand): the step fails with the reason instead.
   q.run('update deployments set tuning = ? where flow_id = ?', JSON.stringify({ execution: 'in memory' }), id3);
   (await import('../server/src/tuning.js')).loadSutraTuning();
-  const r3 = start(id3);
+  const r3 = await start(id3);
   assert.equal(await engine.waitFor(r3, 10000), 'failed');
   assert.match(q.get<any>('select error from runs where id = ?', r3).error, /runs in memory cannot wait/);
 });
@@ -127,8 +128,8 @@ test('in memory: a run can be cancelled while it is in memory', async () => {
   const s = node('start', 'Start'), slow = node('jsonata', 'Slow', { source: '{{input}}', expression: '$count([1..3000000])' });
   const id = deployed('Fast cancel', [s, slow], [edge(s, slow)]);
   await inMemory(id);
-  const r = start(id);
-  assert.equal(engine.cancel(r, 'stop'), true);
+  const r = await start(id);
+  assert.equal(await engine.cancel(r, 'stop'), true);
   assert.equal(await engine.waitFor(r, 10000), 'cancelled');
   assert.equal(q.get<any>('select status from runs where id = ?', r).status, 'cancelled');
 });
@@ -217,7 +218,7 @@ test('Read file with Stream in batches: each batch starts the steps on the batch
   const sum = node('jsonata', 'Sum batch', { source: '{{input}}', expression: '{ "batch": batch, "rows": count, "qty": $sum(rows.qty) }' });
   const done = node('jsonata', 'Totals', { source: '{{input}}', expression: '{ "count": count, "batches": batches }' });
   const id = deployed('Stream orders', [s, read, sum, done], [edge(s, read), edge(read, sum, 'batch'), edge(read, done, 'out')]);
-  const runId = start(id);
+  const runId = await start(id);
   assert.equal(await engine.waitFor(runId, 20000), 'done');
   const sums = q.all<any>('select output from tasks where run_id = ? and node_id = ? order by id', runId, sum.id).map(t => JSON.parse(t.output));
   assert.deepEqual(sums.map(x => x.rows), [1000, 1000, 500]);
@@ -228,7 +229,7 @@ test('Read file with Stream in batches: each batch starts the steps on the batch
   const whole = node('fileRead', 'Read whole', { folder: dir, path: 'orders.csv', format: 'CSV rows', maxMb: 0.001 });
   const s2 = node('start', 'Start');
   const id2 = deployed('Too big', [s2, whole], [edge(s2, whole)]);
-  const r2 = start(id2);
+  const r2 = await start(id2);
   assert.equal(await engine.waitFor(r2, 10000), 'failed');
   assert.match(q.get<any>('select error from runs where id = ?', r2).error, /Stream it in batches/);
 });
@@ -254,7 +255,7 @@ test('streaming with step data none: batch steps keep no input or output; the re
   const id = deployed('Stream none', [s, read, slow], [edge(s, read), edge(read, slow, 'batch')]);
   assert.equal((await call('PUT', `/api/console/sutras/${id}/tuning`, { values: { stepData: 'none' } })).statusCode, 200);
   let most = 0;
-  const runId = start(id);
+  const runId = await start(id);
   const watch = setInterval(() => { most = Math.max(most, Number(q.get<any>(`select count(*) n from tasks where run_id = ? and status = 'pending'`, runId)?.n || 0)); }, 5);
   try { assert.equal(await engine.waitFor(runId, 60000), 'done'); } finally { clearInterval(watch); }
   assert.ok(most <= Math.max(4, engine.concurrency * 2) + 2, `at most a few batches wait (saw ${most})`);

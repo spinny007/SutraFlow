@@ -60,8 +60,8 @@ export function beat() {
   if (cluster.leader) {
     recoverOrphans(t);
     // Sutra tuning: run time limits, and queued runs whose turn came on another engine.
-    engine.enforceRunTimeouts(t);
-    engine.promoteQueued();
+    engine.enforceRunTimeouts(t).catch(e => console.error('Run time limits:', e?.message || e));
+    engine.promoteQueued().catch(e => console.error('Starting queued runs:', e?.message || e));
     // Engines that stopped without saying goodbye (killed, crashed) are forgotten after ten minutes.
     q.run('delete from engines where heartbeat_at < ? and id != ?', t - Math.max(deadAfter() * 2, FORGET_MS), config.engineId);
     if (beats % 6 === 0) hooks.alerts?.();
@@ -69,7 +69,7 @@ export function beat() {
   }
   const gen = getSetting<number>('deployGen', 0);
   if (gen !== cluster.gen) { cluster.gen = gen; hooks.deploymentsChanged(); }
-  engine.abortCancelledHere();
+  engine.abortCancelledHere().catch(() => {});
   // The Admin Console asked this engine to drain and stop.
   if (!cluster.draining && Number(q.get<any>('select drain_requested from engines where id = ?', config.engineId)?.drain_requested)) hooks.drainRequested?.();
 }

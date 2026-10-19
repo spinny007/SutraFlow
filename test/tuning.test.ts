@@ -70,7 +70,7 @@ test('Runs at once: extra runs wait in a queue and start when one ends', async (
   const s = node('start', 'Start'), w = node('wait', 'Pause', { ms: 250 });
   const id = deployed('Queue me', [s, w], [edge(s, w)]);
   assert.equal((await call('PUT', `/api/console/sutras/${id}/tuning`, { values: { maxRuns: 1 } })).statusCode, 200);
-  const runs = [start(id), start(id), start(id)];
+  const runs = [await start(id), await start(id), await start(id)];
   assert.deepEqual(runs.map(r => status(r).status), ['running', 'queued', 'queued']);
   await engine.waitFor(runs[0], 10000);
   await new Promise(r => setTimeout(r, 30));
@@ -87,7 +87,7 @@ test('priority: steps of higher priority Sutras are taken from the queue first',
   const low = mk('Low'), high = mk('High');
   await call('PUT', `/api/console/sutras/${high}/tuning`, { values: { priority: 5 } });
   engine.concurrency = 0;
-  const a = start(low), b = start(high);
+  const a = await start(low), b = await start(high);
   engine.concurrency = 1;
   engine.pump();
   await engine.waitFor(a, 10000); await engine.waitFor(b, 10000);
@@ -100,7 +100,7 @@ test('default retries for steps without their own; run time limit; step data kep
   const s = node('start', 'Start'), boom = node('throw', 'Boom', { message: 'nope' });
   const id = deployed('Flaky', [s, boom], [edge(s, boom)]);
   await call('PUT', `/api/console/sutras/${id}/tuning`, { values: { retries: 2, retryDelayMs: 10, stepData: 'none' } });
-  const r = start(id, { secret: 'card 4111' });
+  const r = await start(id, { secret: 'card 4111' });
   await engine.waitFor(r, 10000);
   assert.equal(status(r).status, 'failed');
   const t = q.get<any>(`select attempt, input, output from tasks where run_id = ? and node_id = ?`, r, boom.id);
@@ -110,10 +110,10 @@ test('default retries for steps without their own; run time limit; step data kep
   const s2 = node('start', 'Start'), ap = node('approval', 'Sign off', { message: 'ok?' });
   const id2 = deployed('Slow sign-off', [s2, ap], [edge(s2, ap)]);
   await call('PUT', `/api/console/sutras/${id2}/tuning`, { values: { runTimeoutMin: 1 } });
-  const r2 = start(id2);
+  const r2 = await start(id2);
   await engine.waitFor(r2, 10000, true);
-  assert.equal(engine.enforceRunTimeouts(Date.now() + 30000), 0, 'not yet');
-  assert.equal(engine.enforceRunTimeouts(Date.now() + 61000), 1);
+  assert.equal(await engine.enforceRunTimeouts(Date.now() + 30000), 0, 'not yet');
+  assert.equal(await engine.enforceRunTimeouts(Date.now() + 61000), 1);
   assert.equal(status(r2).status, 'cancelled');
   assert.equal(status(r2).error, 'Run time limit of 1 min reached');
 });
@@ -121,7 +121,7 @@ test('default retries for steps without their own; run time limit; step data kep
 test('per-Sutra run retention; restart keeps it started; viewers may not tune', async () => {
   const s = node('start', 'Start'), l = node('log', 'Log', { message: 'hi' });
   const id = deployed('Short memory', [s, l], [edge(s, l)]);
-  const r = start(id);
+  const r = await start(id);
   await engine.waitFor(r, 10000);
   await call('PUT', `/api/console/sutras/${id}/tuning`, { values: { retentionDays: 1 } });
   housekeeping({ retentionDays: 0, now: Date.now() + 2 * 86400000 });

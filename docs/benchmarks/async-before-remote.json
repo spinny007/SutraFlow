@@ -1,0 +1,111 @@
+{
+  "label": "1.7.5 remote 2 ms",
+  "at": "2026-10-19T17:57:59.053Z",
+  "database": "PostgreSQL",
+  "node": "v24.21.0",
+  "settings": {},
+  "scenarios": [
+    {
+      "engines": 1,
+      "kb": 0.1,
+      "exec": "durable",
+      "kill": false,
+      "spread": true,
+      "dbLatencyMs": 1,
+      "runs": 400,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 1290.4,
+      "startSeconds": 1290.4,
+      "runsPerSec": 0.3,
+      "stepsPerSec": 3.4,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 4400
+      },
+      "startErrors": 118,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 76,
+        "p95": 140,
+        "p99": 163
+      },
+      "queueMs": {
+        "p50": 64,
+        "p95": 88,
+        "p99": 95
+      },
+      "runMs": {
+        "p50": 2861,
+        "p95": 3459,
+        "p99": 3560
+      },
+      "engineCpuCores": 0.03,
+      "engineMaxMemMb": 140,
+      "db": {
+        "maxConns": 3,
+        "maxLockWaits": 0,
+        "avgLockWaits": 0,
+        "maxTxSeconds": 0.135,
+        "avgTps": 31
+      },
+      "dbMb": 14.7
+    },
+    {
+      "engines": 4,
+      "kb": 0.1,
+      "exec": "durable",
+      "kill": false,
+      "spread": true,
+      "dbLatencyMs": 1,
+      "runs": 400,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 255.8,
+      "startSeconds": 255.8,
+      "runsPerSec": 1.6,
+      "stepsPerSec": 17.7,
+      "failed": 0,
+      "repeated": 125,
+      "byEngine": {
+        "load-1": 1119,
+        "load-2": 1128,
+        "load-3": 1156,
+        "load-0": 1120,
+        "?": 2
+      },
+      "startErrors": 2,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 239,
+        "p95": 814,
+        "p99": 1161
+      },
+      "queueMs": {
+        "p50": 50,
+        "p95": 120,
+        "p99": 178
+      },
+      "runMs": {
+        "p50": 4747,
+        "p95": 7516,
+        "p99": 8295
+      },
+      "engineCpuCores": 0.15,
+      "engineMaxMemMb": 140,
+      "db": {
+        "maxConns": 6,
+        "maxLockWaits": 1,
+        "avgLockWaits": 0,
+        "maxTxSeconds": 0.13,
+        "avgTps": 156
+      },
+      "dbMb": 15.3
+    }
+  ]
+}

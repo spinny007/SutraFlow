@@ -29,7 +29,7 @@ export interface ListenerContext {
   doc: FlowDoc;
   node: FlowNode;
   /** Starts a run. onFinish lets queue listeners acknowledge only after the flow succeeded. */
-  fire(input: unknown, onFinish?: (status: string, runId: string) => void): string;
+  fire(input: unknown, onFinish?: (status: string, runId: string) => void): Promise<string>;
   status(state: 'ok' | 'error', message: string): void;
 }
 export type ListenerStarter = (c: ListenerContext) => Promise<() => void | Promise<void>> | (() => void | Promise<void>);

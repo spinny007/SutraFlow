@@ -1,0 +1,53 @@
+{
+  "label": "1.7.5 SQLite",
+  "at": "2026-10-19T18:43:07.532Z",
+  "database": "SQLite",
+  "node": "v24.21.0",
+  "settings": {},
+  "scenarios": [
+    {
+      "engines": 1,
+      "kb": 0.1,
+      "exec": "durable",
+      "kill": false,
+      "spread": true,
+      "dbLatencyMs": null,
+      "dbRttMs": null,
+      "runs": 600,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 16.7,
+      "startSeconds": 16.7,
+      "runsPerSec": 36,
+      "stepsPerSec": 395.6,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 6600
+      },
+      "startErrors": 0,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 0,
+        "p95": 1,
+        "p99": 3
+      },
+      "queueMs": {
+        "p50": 0,
+        "p95": 1,
+        "p99": 9
+      },
+      "runMs": {
+        "p50": 16,
+        "p95": 30,
+        "p99": 49
+      },
+      "engineCpuCores": 0.96,
+      "engineMaxMemMb": 356,
+      "db": null,
+      "dbMb": 10
+    }
+  ]
+}

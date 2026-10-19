@@ -7,9 +7,11 @@
  * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
  * SPDX-License-Identifier: AGPL-3.0-only
  */
+import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { Worker, MessageChannel, receiveMessageOnPort, type MessagePort } from 'node:worker_threads';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { config, ensureDataDir } from './config.js';
 
 /**
@@ -21,7 +23,7 @@ import { config, ensureDataDir } from './config.js';
  *    cluster-wide lock, matching SQLite, so engines never overwrite each other's run state.
  *    SUTRA_DB=pglite:memory runs PostgreSQL inside Node, used by the tests.
  */
-interface Backend {
+export interface Backend {
   kind: 'sqlite' | 'postgres';
   get(sql: string, args: any[]): any;
   all(sql: string, args: any[]): any[];
@@ -47,12 +49,25 @@ function sqliteBackend(file: string): Backend {
       Atomics.wait(nap, 0, 0, 50);
     }
   }
+  // Compiled statements are kept by their text: the engine sends the same few statements for every
+  // step, and compiling them each time cost more than running them. A bound on the cache keeps
+  // statements built with values in their text from piling up.
+  const cache = new Map<string, ReturnType<DatabaseSync['prepare']>>();
+  const st = (sql: string) => {
+    let s = cache.get(sql);
+    if (!s) {
+      if (cache.size >= 500) cache.clear();
+      s = d.prepare(sql);
+      cache.set(sql, s);
+    }
+    return s;
+  };
   return {
     kind: 'sqlite',
-    get: (sql, a) => d.prepare(sql).get(...a),
-    all: (sql, a) => d.prepare(sql).all(...a),
-    run: (sql, a) => { const r = d.prepare(sql).run(...a); return { changes: Number(r.changes) }; },
-    exec: sql => d.exec(sql),
+    get: (sql, a) => st(sql).get(...a),
+    all: (sql, a) => st(sql).all(...a),
+    run: (sql, a) => { const r = st(sql).run(...a); return { changes: Number(r.changes) }; },
+    exec: sql => { cache.clear(); d.exec(sql); },
     begin: () => d.exec('begin immediate'),
     commit: () => d.exec('commit'),
     rollback: () => d.exec('rollback'),
@@ -61,7 +76,7 @@ function sqliteBackend(file: string): Backend {
 }
 
 /** ? placeholders to $1, $2 ... (outside quoted text). */
-function toPg(sql: string) {
+export function toPg(sql: string) {
   let n = 0, out = '', quote = '';
   for (const ch of sql) {
     if (quote) { if (ch === quote) quote = ''; out += ch; continue; }
@@ -88,7 +103,10 @@ function postgresBackend(url: string): Backend {
   worker.unref();
   const nap = new Int32Array(new SharedArrayBuffer(4));
   let seq = 0;
+  const tally = process.env.SUTRA_COUNT_SYNC_SQL ? new Map<string, number>() : null;
+  if (tally) setInterval(() => { fs.writeFileSync(process.env.SUTRA_COUNT_SYNC_SQL!, JSON.stringify([...tally].sort((a, b) => b[1] - a[1]).slice(0, 40), null, 1)); }, 3000).unref();
   const call = (sql: string, params: any[], mode: string) => {
+    if (tally) { const k = sql.replace(/\s+/g, ' ').slice(0, 90); tally.set(k, (tally.get(k) || 0) + 1); }
     const id = ++seq;
     Atomics.store(flag, 0, 0);
     port1.postMessage({ id, sql: mode === 'exec' ? sql : toPg(sql), params: params.map(v => (typeof v === 'boolean' ? (v ? 1 : 0) : v === undefined ? null : v)), mode });
@@ -231,6 +249,7 @@ create index if not exists audit_actor on audit(actor, at);
 `;
 
 export function openDb(file?: string) {
+  for (const f of onDbClose) { try { f(); } catch { /* reopening anyway */ } }
   if (db) { try { db.close(); } catch { /* already closed */ } }
   const url = config.dbUrl;
   if (!file && /^(postgres(ql)?:|pglite:)/.test(url)) {
@@ -291,6 +310,8 @@ function migrate(d = getDb()) {
   add('runs', 'priority', 'priority integer not null default 0');
   add('tasks', 'priority', 'priority integer not null default 0');
   add('tasks', 'queued_at', 'queued_at integer');
+  // Each claim of a step counts up: a transition applies only for the claim that made it (fencing).
+  add('tasks', 'claim', 'claim integer not null default 0');
   add('engines', 'drain_requested', 'drain_requested integer not null default 0');
   add('users', 'kind', "kind text not null default 'user'");
   add('users', 'display_name', 'display_name text');
@@ -329,14 +350,28 @@ export function getDb() {
   return db;
 }
 
+/**
+ * The asynchronous transaction a piece of code runs in (asyncdb.ts). While one is open, a synchronous
+ * write here would go to another connection (PostgreSQL) or join it by accident (SQLite), so it is
+ * refused: code inside a transaction uses the transaction object only.
+ */
+export const asyncTxScope = new AsyncLocalStorage<{ open: boolean; store: unknown }>();
+const WRITE = /^\s*(insert|update|delete|with|create|drop|alter)\b/i;
+function guard(sql: string) {
+  if (asyncTxScope.getStore()?.open && WRITE.test(sql)) throw new Error(`A storage write outside the open transaction (use the transaction object): ${sql.trim().slice(0, 60)}`);
+}
+
 export const q = {
   get<T = any>(sql: string, ...args: any[]): T | undefined {
+    guard(sql);
     return getDb().get(sql, args) as T | undefined;
   },
   all<T = any>(sql: string, ...args: any[]): T[] {
+    guard(sql);
     return getDb().all(sql, args) as T[];
   },
   run(sql: string, ...args: any[]) {
+    guard(sql);
     return getDb().run(sql, args);
   },
 };
@@ -349,6 +384,7 @@ let txDepth = 0;
  * against every other keyless transaction.
  */
 export function tx<T>(fn: () => T, key?: string): T {
+  if (asyncTxScope.getStore()?.open) throw new Error('A synchronous transaction inside an asynchronous one: use the transaction object');
   // Inside a transaction already (a whole pull, say, that deletes Sutras): the inner work joins it.
   if (txDepth > 0) return fn();
   const d = getDb();
@@ -366,8 +402,20 @@ export function tx<T>(fn: () => T, key?: string): T {
   }
 }
 
+/**
+ * The synchronous connection for asyncdb.ts on single-connection backends (SQLite, PGlite): begin and
+ * end mark the transaction depth, so a synchronous tx() reached meanwhile joins instead of nesting.
+ */
+export const singleConnection = {
+  backend: () => getDb(),
+  begin(key?: string) { getDb().begin(key); txDepth++; },
+  commit() { txDepth = Math.max(0, txDepth - 1); getDb().commit(); },
+  rollback() { txDepth = 0; getDb().rollback(); },
+  url: () => config.dbUrl,
+};
+
 /** Storage calls of one engine: the database, or an in-memory one for Sutras that run in memory. */
-export interface Store { q: typeof q; tx: typeof tx; kind: 'database' | 'memory' }
+export interface Store { q: typeof q; tx: typeof tx; kind: 'database' | 'memory'; backend?: Backend }
 export const databaseStore: Store = { q, tx, kind: 'database' };
 
 /**
@@ -390,7 +438,7 @@ export function memoryStore(): Store {
     d.begin(); depth++;
     try { const r = fn(); depth--; d.commit(); return r; } catch (e) { depth = 0; d.rollback(); throw e; }
   }) as typeof tx;
-  return { q: mq, tx: mtx, kind: 'memory' };
+  return { q: mq, tx: mtx, kind: 'memory', backend: d };
 }
 
 /**
@@ -452,7 +500,10 @@ export function copyDatabase(toUrl: string, o: { replace?: boolean; log?: (m: st
   }
 }
 
+/** Called when the database closes or another opens (asyncdb.ts drops its pool). */
+export const onDbClose: Array<() => void> = [];
 export function closeDb() {
+  for (const f of onDbClose) { try { f(); } catch { /* closing anyway */ } }
   if (db) { try { db.close(); } catch { /* closed */ } db = null; }
 }
 

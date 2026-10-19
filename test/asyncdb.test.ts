@@ -1,0 +1,104 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.7.6
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { testEnv, node, edge, port } from './helpers.js';
+
+/**
+ * Asynchronous storage (asyncdb.ts) and the engine on it: explicit transactions, the rule that a
+ * transaction is never split over two connections, and fencing of claimed steps. Runs on SQLite here
+ * and on PGlite in the PostgreSQL pass; asyncpg.test.ts covers the pool on a real PostgreSQL.
+ */
+testEnv(20550);
+const { boot } = await import('../server/src/index.js');
+const { engine } = await import('../server/src/engine/engine.js');
+const { q, tx } = await import('../server/src/db.js');
+const { asyncDatabase } = await import('../server/src/asyncdb.js');
+const flows = await import('../server/src/flows.js');
+const projects = await import('../server/src/projects.js');
+
+let srv: Awaited<ReturnType<typeof boot>>;
+before(async () => { srv = await boot({ listenAdmin: false }); await srv.admin.listen({ host: '127.0.0.1', port: port(20559) }); });
+after(async () => { await srv.stop(); });
+
+let shop = '';
+function deployed(name: string, nodes: any[], edges: any[]) {
+  shop ||= projects.saveProject({ name: 'Async shop', config: { variables: [] } }).id;
+  const f = flows.saveFlow(undefined, { name, nodes, edges }, shop);
+  flows.deploy(f.id);
+  return f.id;
+}
+const start = (flowId: string, input: any = {}) => {
+  const d = flows.deployedFlows().find(x => x.flowId === flowId)!;
+  return engine.startRun({ doc: d.doc, flowId, projectId: d.projectId, version: d.version, source: 'api', input });
+};
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+test('a transaction is explicit: inside it, a synchronous write, a nested transaction or a query past its object is refused', async () => {
+  const db = asyncDatabase();
+  await assert.rejects(db.transaction('run:x', async () => { q.run(`update settings set value = value where key = 'none'`); }), /storage write outside the open transaction/);
+  await assert.rejects(db.transaction('run:x', async () => { tx(() => 1); }), /synchronous transaction inside an asynchronous one/);
+  await assert.rejects(db.transaction('run:x', async () => { await db.transaction('run:y', async () => 1); }), /transaction inside a transaction/);
+  await assert.rejects(db.transaction('run:x', async () => { await db.get('select 1 as x'); }), /through its transaction object/);
+  // Reads of settings stay allowed (they see what is committed); a rolled-back transaction leaves nothing.
+  await assert.rejects(db.transaction(undefined, async t => {
+    q.get(`select value from settings where key = 'none'`);
+    await t.run(`insert into settings(key, value) values('async-test', '1')`);
+    throw new Error('roll back');
+  }), /roll back/);
+  assert.equal(q.get(`select 1 as x from settings where key = 'async-test'`), undefined);
+  // After the transaction, the same code may write again.
+  await db.transaction(undefined, async t => { await t.run(`insert into settings(key, value) values('async-test', '2')`); });
+  q.run(`delete from settings where key = 'async-test'`);
+});
+
+test('fencing: a step taken over meanwhile (recovered by another engine) is not completed by the engine that lost it', async () => {
+  const s = node('start', 'Start'), w = node('wait', 'Slow', { ms: 1200 }), n = node('log', 'Next', { message: 'next' });
+  const id = deployed('Fenced', [s, w, n], [edge(s, w), edge(w, n)]);
+  const runId = await start(id);
+  // Wait until the slow step runs here, then do what a leader's recovery and another engine's claim do.
+  let task: any;
+  for (let i = 0; i < 100 && !task; i++) { task = q.get(`select id, claim from tasks where run_id = ? and node_id = ? and status = 'running'`, runId, w.id); if (!task) await sleep(20); }
+  assert.ok(task, 'the slow step is running');
+  // Another engine, alive (a heartbeat, so the leader does not recover its steps), now holds the step.
+  q.run(`insert into engines(id, host, pid, mode, version, started_at, heartbeat_at, workers) values('other-engine', 'h', 1, 'engine', 'x', ?, ?, 1) on conflict(id) do update set heartbeat_at = excluded.heartbeat_at`, new Date().toISOString(), Date.now() + 60000);
+  q.run(`update tasks set owner = 'other-engine', claim = claim + 1 where id = ?`, task.id);
+  await sleep(1800);
+  const after = q.get<any>('select status, owner from tasks where id = ?', task.id);
+  assert.deepEqual([after.status, after.owner], ['running', 'other-engine'], 'left to its new owner');
+  assert.equal(q.get(`select 1 as x from tasks where run_id = ? and node_id = ?`, runId, n.id), undefined, 'the next step was not queued twice');
+  assert.equal(q.get<any>('select status from runs where id = ?', runId).status, 'running');
+  await engine.cancel(runId, 'test over');
+});
+
+test('a run is ended once: settling it again changes nothing and does not answer its caller twice', async () => {
+  const s = node('start', 'Start'), a = node('jsonata', 'Same', { source: '{{input}}', expression: '$' });
+  const id = deployed('Once', [s, a], [edge(s, a)]);
+  const d = flows.deployedFlows().find(x => x.flowId === id)!;
+  let answers = 0;
+  const runId = await engine.startRun({ doc: d.doc, flowId: id, projectId: d.projectId, version: d.version, source: 'api', input: {}, onReply: () => { answers++; } });
+  assert.equal(await engine.waitFor(runId, 10000), 'done');
+  await (engine as any).settle(runId);
+  await (engine as any).settle(runId);
+  assert.equal(answers, 1);
+  assert.equal(q.get<any>('select status from runs where id = ?', runId).status, 'done');
+});
+
+test('many runs at once all finish with every step done once', async () => {
+  const s = node('start', 'Start'), a = node('jsonata', 'A', { source: '{{input}}', expression: '{ "n": n + 1 }' }), b = node('jsonata', 'B', { source: '{{input}}', expression: '{ "n": n * 2 }' });
+  const id = deployed('Many', [s, a, b], [edge(s, a), edge(a, b)]);
+  const ids = await Promise.all(Array.from({ length: 60 }, (_, i) => start(id, { n: i })));
+  for (const r of ids) assert.equal(await engine.waitFor(r, 30000), 'done');
+  const rows = q.all<any>(`select run_id, node_id, count(*) n from tasks where run_id in (${ids.map(() => '?').join(',')}) and status = 'done' group by run_id, node_id`, ...ids);
+  assert.equal(rows.length, 180);
+  assert.ok(rows.every(r => Number(r.n) === 1), 'no step done twice');
+  const out = JSON.parse(q.get<any>('select state from runs where id = ?', ids[7]).state).outputs.B.n;
+  assert.equal(out, 16);
+});

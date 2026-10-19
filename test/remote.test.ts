@@ -57,7 +57,7 @@ before(async () => {
 after(async () => { await srv.stop(); await sftp.close(); await ftp.close().catch(() => {}); });
 
 const run = async (nodes: any[], edges: any[]) => {
-  const id = engine.startRun({ doc: { name: 'Remote', nodes, edges }, projectId: shop });
+  const id = await engine.startRun({ doc: { name: 'Remote', nodes, edges }, projectId: shop });
   await engine.waitFor(id, 30000);
   const r: any = q.get('select status, error, state from runs where id = ?', id);
   return { status: r.status, error: r.error, out: JSON.parse(r.state).outputs };

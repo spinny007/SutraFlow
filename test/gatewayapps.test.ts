@@ -63,6 +63,9 @@ test('a service for gateway apps: key or token, scopes, plan limit with rate hea
   assert.equal((await get()).status, 401);
   assert.equal((await get({ 'x-api-key': 'sfk_000000000000_nope' })).status, 401);
   assert.equal((await get({ 'x-api-key': otherKey })).status, 403, 'the other app lacks orders:read');
+  // The plan counts per calendar minute: start the counted calls clear of a minute's end, or they may
+  // fall into two windows (seen under load) and the fourth is not refused.
+  if (new Date().getSeconds() > 48) await new Promise(r => setTimeout(r, (61 - new Date().getSeconds()) * 1000));
   const ok = await get({ 'x-api-key': key });
   assert.equal(ok.status, 200);
   assert.deepEqual(await ok.json(), { id: 'A-7', app: 'Partner shop' });
@@ -122,7 +125,13 @@ test('firewall: deny wins, an allow list admits only its addresses, wrong rules 
 });
 
 test('request log and statistics: services, apps, statuses, latency; filtered; old entries deleted', async () => {
-  const log = (await api('GET', '/api/gateway/requests?limit=200')).json();
+  // The gateway writes its log without waiting: give the last entries a moment to land.
+  let log: any[] = [];
+  for (let i = 0; i < 50; i++) {
+    log = (await api('GET', '/api/gateway/requests?limit=200')).json();
+    if (log.some((e: any) => e.status === 403 && e.error === 'Firewall') && log.some((e: any) => e.status === 429)) break;
+    await new Promise(r => setTimeout(r, 100));
+  }
   assert.ok(log.some((e: any) => e.route === 'Partner orders' && e.app === 'Partner shop' && e.status === 200 && e.caller === 'Partner shop' && e.runId));
   assert.ok(log.some((e: any) => e.status === 429 && /allows 3 requests/.test(e.error)));
   assert.ok(log.some((e: any) => e.status === 403 && e.error === 'Firewall'));

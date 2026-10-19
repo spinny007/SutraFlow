@@ -29,7 +29,7 @@ before(async () => {
 after(async () => { await srv.stop(); });
 
 async function run(nodes: any[], edges: any[], input?: any, name = 'P') {
-  const id = engine.startRun({ doc: { name, nodes, edges }, projectId: pid, input });
+  const id = await engine.startRun({ doc: { name, nodes, edges }, projectId: pid, input });
   await engine.waitFor(id, 15000);
   const r: any = q.get('select * from runs where id = ?', id);
   return { id, status: r.status, error: r.error, state: JSON.parse(r.state) };
@@ -53,7 +53,7 @@ test('Call Sutra waits for the called Sutra and continues with its Return result
   assert.ok(r.state.outputs.After);
 
   // Deployed runs call the deployed version: not deployed yet is a clear error.
-  const id = engine.startRun({ doc: { name: 'P2', nodes: [s, call], edges: [edge(s, call)] }, projectId: pid, version: 3, input: { amount: 1 } });
+  const id = await engine.startRun({ doc: { name: 'P2', nodes: [s, call], edges: [edge(s, call)] }, projectId: pid, version: 3, input: { amount: 1 } });
   await engine.waitFor(id, 15000);
   assert.match((q.get('select error from runs where id = ?', id) as any).error, /not deployed/);
 });

@@ -153,10 +153,10 @@ Laragon's MySQL works as a DB Ops connection (driver mysql, host 127.0.0.1, port
 One image serves both roles:
 
 ```
-docker build -t sutraflow:1.7.5 .
-docker run -p 4800:4800 -p 8080:8080 -v sutra-data:/data sutraflow:1.7.5                    # studio
+docker build -t sutraflow:1.7.6 .
+docker run -p 4800:4800 -p 8080:8080 -v sutra-data:/data sutraflow:1.7.6                    # studio
 docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=... \
-           -v ./deploy:/deploy:ro -p 8080:8080 -p 8443:8443 sutraflow:1.7.5                  # engine
+           -v ./deploy:/deploy:ro -p 8080:8080 -p 8443:8443 sutraflow:1.7.6                  # engine
 ```
 
 - Runs as the non-root `node` user, with `tini` as init so `docker stop` drains running steps.
@@ -164,7 +164,7 @@ docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=...
 - JSON logs on standard output.
 - `docker-compose.yml`: a studio and an engine. `docker-compose.cluster.yml`: PostgreSQL, a studio and two engines.
 
-**Immutable releases**: `FROM sutraflow:1.7.5` + `COPY orders-1.4.0.sutra /deploy/` makes each release one image.
+**Immutable releases**: `FROM sutraflow:1.7.6` + `COPY orders-1.4.0.sutra /deploy/` makes each release one image.
 
 Keep `SUTRA_MASTER_KEY` in your secret store: it decrypts the vault. With it set, the vault survives replacing containers. Without it, the key file in `/data` must be kept.
 
@@ -247,6 +247,8 @@ Give the orchestrator more grace time than `SUTRA_DRAIN_MS` (compose: `stop_grac
 | `SUTRA_MEMORY_WORKERS` | 0 | Steps at once for Sutras that run in memory; 0 = as `SUTRA_WORKERS` |
 | `SUTRA_POLL_MS` | by machine | How often an idle engine looks for due steps (200 to 500 ms) |
 | `SUTRA_SETTINGS_REFRESH_MS` | by machine | How long an engine keeps project and Sengine variables; 0 = every step |
+| `SUTRA_PG_POOL` | half of `SUTRA_WORKERS` (4 to 20) | Connections of the engine's PostgreSQL pool; keep engines x (pool + 1) under `max_connections` |
+| `SUTRA_PG_ASYNC` | 1 | `0` = the engine uses one synchronous connection as before 1.7.6 (fallback, slower) |
 | `SUTRA_KEEPALIVE_MS` | 65000 | Idle connections kept by the admin and gateway servers; keep it above the idle time of a load balancer in front |
 | `SUTRA_HEARTBEAT_MS` | 5000 | Heartbeat; dead after three missed |
 | `SUTRA_DRAIN_MS` | 30000 | Time running steps get on shutdown |

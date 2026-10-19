@@ -8,6 +8,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 import crypto from 'node:crypto';
+import { asyncDatabase } from '../asyncdb.js';
 import { SignJWT, jwtVerify } from 'jose';
 import { q, tx, now, getSetting, setSetting } from '../db.js';
 import { config } from '../config.js';
@@ -195,7 +196,14 @@ export function usageOf(appId: string, at = new Date()) {
 // ---------- firewall ----------
 
 export interface Firewall { allow: string[]; deny: string[] }
-export const getFirewall = (): Firewall => ({ allow: [], deny: [], ...getSetting<Partial<Firewall>>('gateway.firewall', {}) });
+/** The firewall, read at most every two seconds (it is checked on every request); a change here applies at once. */
+let firewallCache: { at: number; f: Firewall } | null = null;
+export const getFirewall = (): Firewall => {
+  if (firewallCache && Date.now() - firewallCache.at < 2000) return firewallCache.f;
+  const f = { allow: [], deny: [], ...getSetting<Partial<Firewall>>('gateway.firewall', {}) } as Firewall;
+  firewallCache = { at: Date.now(), f };
+  return f;
+};
 const IP_RULE = /^[0-9a-fA-F:.]+(\/\d{1,3})?$/;
 export function setFirewall(f: Partial<Firewall>) {
   const clean = (l: unknown) => [...new Set((Array.isArray(l) ? l : []).map(x => String(x).trim()).filter(Boolean))];
@@ -203,6 +211,7 @@ export function setFirewall(f: Partial<Firewall>) {
   const bad = [...allow, ...deny].filter(x => !IP_RULE.test(x));
   if (bad.length) throw new Error(`Not an IP address or CIDR range: ${bad.join(', ')}`);
   setSetting('gateway.firewall', { allow, deny });
+  firewallCache = null;
   return getFirewall();
 }
 /** Whether the gateway serves this address: never when denied; when an allow list exists, only those. */
@@ -226,16 +235,16 @@ export function setGatewayOptions(o: Partial<GatewayOptions>) {
 export interface RequestEntry { kind: string; method: string; path: string; route?: string; flowId?: string; projectId?: string; appId?: string; caller?: string; status: number; ms: number; bytesIn: number; bytesOut: number; ip: string; runId?: string; error?: string }
 
 let logOn = { at: 0, on: true };
-export function logRequest(e: RequestEntry) {
+/** Writes one request to the log. The gateway does not wait for it; the returned promise is for tests and tools. */
+export function logRequest(e: RequestEntry): Promise<void> {
   // The setting is read at most every few seconds; every engine logs its own requests.
   if (Date.now() - logOn.at > 5000) logOn = { at: Date.now(), on: getGatewayOptions().logRequests };
-  if (!logOn.on) return;
-  try {
-    q.run(`insert into gw_requests(at, engine, kind, method, path, route, flow_id, project_id, app_id, caller, status, ms, bytes_in, bytes_out, ip, run_id, error)
+  if (!logOn.on) return Promise.resolve();
+  // Written without waiting: the caller has its answer already, and the log must not hold the engine.
+  return asyncDatabase().run(`insert into gw_requests(at, engine, kind, method, path, route, flow_id, project_id, app_id, caller, status, ms, bytes_in, bytes_out, ip, run_id, error)
       values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    now(), config.engineId, e.kind, e.method, e.path.slice(0, 500), e.route || '', e.flowId || '', e.projectId || '', e.appId || '', (e.caller || '').slice(0, 120),
-    e.status, Math.round(e.ms), e.bytesIn, e.bytesOut, e.ip, e.runId || '', (e.error || '').slice(0, 500));
-  } catch (err) { console.error('Gateway log:', err); }
+  now(), config.engineId, e.kind, e.method, e.path.slice(0, 500), e.route || '', e.flowId || '', e.projectId || '', e.appId || '', (e.caller || '').slice(0, 120),
+  e.status, Math.round(e.ms), e.bytesIn, e.bytesOut, e.ip, e.runId || '', (e.error || '').slice(0, 500)).then(() => {}, err => { console.error('Gateway log:', err?.message || err); });
 }
 
 /** Deletes old log entries and finished usage windows (housekeeping). */

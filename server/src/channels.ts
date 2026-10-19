@@ -19,7 +19,7 @@ import { effectiveVariables, engineVariableValues } from './projects.js';
  */
 const norm = (c: unknown) => String(c ?? '').trim().toLowerCase();
 
-export function publishChannel(projectId: string | null | undefined, channel: string, message: unknown): string[] {
+export async function publishChannel(projectId: string | null | undefined, channel: string, message: unknown): Promise<string[]> {
   const out: string[] = [];
   const want = norm(channel);
   for (const d of deployedFlows()) {
@@ -29,7 +29,7 @@ export function publishChannel(projectId: string | null | undefined, channel: st
       const act = engine.activity(n.type);
       const cfg = act ? resolveSettings(act.fields, n.config, { gv: effectiveVariables(d.projectId).values, ev: engineVariableValues() }) : n.config;
       if (norm(cfg.channel) !== want) continue;
-      out.push(engine.startRun({ doc: d.doc, flowId: d.flowId, projectId: d.projectId, version: d.version, triggerNodeId: n.id, input: structuredClone(message ?? null), source: 'channelTrigger' }));
+      out.push(await engine.startRun({ doc: d.doc, flowId: d.flowId, projectId: d.projectId, version: d.version, triggerNodeId: n.id, input: structuredClone(message ?? null), source: 'channelTrigger' }));
     }
   }
   return out;

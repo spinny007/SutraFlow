@@ -166,16 +166,13 @@ function soapFault(v12: boolean, code: string, message: string) {
 
 const HIDDEN = new Set(['authorization', 'cookie', 'proxy-authorization', 'x-api-key']);
 
-function waitReply(start: (onReply: (r: any) => void) => string, timeoutMs: number) {
+/** Starts a run and waits for its reply; the reply may come before the start has returned the run id. */
+function waitReply(start: (onReply: (r: any) => void) => Promise<string>, timeoutMs: number) {
   return new Promise<{ runId: string; reply: any }>((res, rej) => {
-    let runId = '';
+    let runId = '', reply: any, replied = false;
     const to = setTimeout(() => rej(Object.assign(new Error('The Sutra did not reply in time'), { runId })), timeoutMs);
-    try {
-      runId = start(r => { clearTimeout(to); res({ runId, reply: r }); });
-    } catch (e) {
-      clearTimeout(to);
-      rej(e);
-    }
+    const done = () => { if (replied && runId) { clearTimeout(to); res({ runId, reply }); } };
+    start(r => { reply = r; replied = true; done(); }).then(id => { runId = id; done(); }, e => { clearTimeout(to); rej(e); });
   });
 }
 
@@ -490,7 +487,7 @@ function build(https?: any): FastifyInstance {
     // until the keep-alive time runs out.
     if (lifecycle.draining) reply.header('connection', 'close');
     const run = reply.getHeader('x-sutra-run');
-    if (run && !reply.getHeader('traceparent')) reply.header('traceparent', engine.traceparentOf(String(run)));
+    if (run && !reply.getHeader('traceparent')) reply.header('traceparent', await engine.traceparentOf(String(run)));
     return payload;
   });
   app.addHook('onResponse', async (req, reply) => {

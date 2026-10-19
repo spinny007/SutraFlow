@@ -268,25 +268,29 @@ function handle(c: ListenerContext, cfg: Record<string, any>, input: Record<stri
   const mode = cfg.ackMode === 'auto' || cfg.ackMode === 'on receipt' ? 'auto' : cfg.ackMode === 'explicit' ? 'explicit' : 'client';
   const max = Number(cfg.maxRedeliveries) || 0;
   const fail = () => (cfg.onFailure === 'reject (dead-letter)' || (max && deliveryCount >= max) ? settle.reject() : settle.requeue());
-  if (mode === 'auto') { c.fire(input); return Promise.resolve(); }
+  if (mode === 'auto') { c.fire(input).catch(e => c.status('error', e.message)); return Promise.resolve(); }
   return new Promise<void>(resolve => {
-    let entry: PendingAck | null = null;
-    const runId = c.fire(input, status => {
+    // The entry exists before the run starts: a run can end before its start has returned the id.
+    const entry: PendingAck | null = mode === 'explicit' ? { confirm: settle.ack, requeue: settle.requeue, reject: settle.reject, done: false } : null;
+    let runId = '';
+    c.fire(input, status => {
       Promise.resolve().then(async () => {
         if (mode === 'explicit') {
           if (entry && !entry.done) {
-            pending.delete(runId);
+            if (runId) pending.delete(runId);
             await fail();
             if (status === 'done') c.status('error', 'A run finished without Confirm message; the message was redelivered');
           }
         } else if (status === 'done') await settle.ack();
         else await fail();
       }).catch(e => c.status('error', `Acknowledgement failed: ${e.message}`)).finally(resolve);
+    }).then(id => {
+      runId = id;
+      if (entry && !entry.done) pending.set(id, entry);
+    }, e => {
+      c.status('error', `The Sutra did not start: ${e.message}`);
+      Promise.resolve(fail()).catch(() => {}).finally(resolve);
     });
-    if (mode === 'explicit') {
-      entry = { confirm: settle.ack, requeue: settle.requeue, reject: settle.reject, done: false };
-      pending.set(runId, entry);
-    }
   });
 }
 

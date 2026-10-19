@@ -76,7 +76,7 @@ test('channels: webhook (signed), email (SMTP), a Sutra; tested; wrong settings 
 
 const failRun = async () => {
   const d = flows.deployedFlows().find(x => x.flowId === failing)!;
-  const id = engine.startRun({ doc: d.doc, flowId: failing, projectId: d.projectId, version: d.version, source: 'api' });
+  const id = await engine.startRun({ doc: d.doc, flowId: failing, projectId: d.projectId, version: d.version, source: 'api' });
   await engine.waitFor(id, 10000);
 };
 
@@ -99,8 +99,10 @@ test('failed runs open one alert, notify every channel, remind, and resolve with
   assert.equal(body.event, 'firing');
   assert.match(body.text, /\[SutraFlow\] Critical: Payments failing\. 2 failed runs/);
   assert.match(mails.at(-1)!, /Critical: Payments failing/);
-  const fromSutra = q.get<any>(`select state from runs where flow_id = ? and source = 'alert'`, receiver);
-  assert.ok(fromSutra, 'the alert Sutra ran');
+  const started = q.get<any>(`select id from runs where flow_id = ? and source = 'alert'`, receiver);
+  assert.ok(started, 'the alert Sutra ran');
+  await engine.waitFor(started.id, 10000);
+  const fromSutra = q.get<any>('select state from runs where id = ?', started.id);
   assert.equal(JSON.parse(fromSutra.state).outputs.Start.alert.rule, 'Payments failing');
 
   assert.equal((await alerts.evaluate()).opened, 0, 'still open: no second alert');
@@ -135,7 +137,7 @@ test('engines, work waiting, gateway errors and latency, certificate and listene
   const wait = await mk('Queue', 'workWaiting', { minutes: 5, count: 1 });
   engine.concurrency = 0;
   const d = flows.deployedFlows().find(x => x.flowId === receiver)!;
-  const id = engine.startRun({ doc: d.doc, flowId: receiver, projectId: d.projectId, version: d.version, source: 'api' });
+  const id = await engine.startRun({ doc: d.doc, flowId: receiver, projectId: d.projectId, version: d.version, source: 'api' });
   assert.equal(alerts.check(wait).firing, false, 'just queued');
   assert.equal(alerts.check(wait, later(6)).firing, true);
   engine.concurrency = 16; engine.pump();
@@ -143,9 +145,9 @@ test('engines, work waiting, gateway errors and latency, certificate and listene
 
   const errs = await mk('Gateway errors', 'gatewayErrors', { percent: 10, minutes: 10, minRequests: 10 });
   const lat = await mk('Gateway slow', 'gatewayLatency', { ms: 500, minutes: 10, minRequests: 10 });
-  for (let i = 0; i < 8; i++) logRequest({ kind: 'rest', method: 'GET', path: '/x', route: 'Orders', status: 200, ms: 40, bytesIn: 0, bytesOut: 0, ip: '127.0.0.1' });
+  for (let i = 0; i < 8; i++) await logRequest({ kind: 'rest', method: 'GET', path: '/x', route: 'Orders', status: 200, ms: 40, bytesIn: 0, bytesOut: 0, ip: '127.0.0.1' });
   assert.match(alerts.check(errs).message, /fewer than 10/);
-  for (let i = 0; i < 4; i++) logRequest({ kind: 'rest', method: 'GET', path: '/x', route: 'Orders', status: 502, ms: 900, bytesIn: 0, bytesOut: 0, ip: '127.0.0.1' });
+  for (let i = 0; i < 4; i++) await logRequest({ kind: 'rest', method: 'GET', path: '/x', route: 'Orders', status: 502, ms: 900, bytesIn: 0, bytesOut: 0, ip: '127.0.0.1' });
   assert.equal(alerts.check(errs).firing, true);
   assert.match(alerts.check(errs).message, /33\.3% of 12 requests to the gateway failed/);
   assert.equal(alerts.check(lat).firing, true);

@@ -119,7 +119,7 @@ test('missing project variables are warnings on the step that reads them', () =>
 });
 
 const run = async (doc: any, projectId: string, input?: any) => {
-  const id = engine.startRun({ doc, projectId, input });
+  const id = await engine.startRun({ doc, projectId, input });
   await engine.waitFor(id, 30000);
   const r: any = q.get('select status, error, state from runs where id = ?', id);
   const st = JSON.parse(r.state);

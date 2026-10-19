@@ -126,7 +126,7 @@ const adfConn = (over: Record<string, any> = {}) => saveResource({ kind: 'azureD
 const dbxConn = () => saveResource({ kind: 'databricks', name: `DBX ${Math.random()}`, project_id: pid, config: { host: base, auth: 'personal access token', tokenSecret: 'DBX_TOKEN', clusterId: 'cl-1', warehouseId: 'wh-1', pollSeconds: 1 } });
 const run = async (n: ReturnType<typeof node>) => {
   const s = node('start', 'Start', { payload: JSON.stringify({ date: '2026-10-18', zip: '10001' }) });
-  const id = engine.startRun({ doc: { name: 'T', nodes: [s, n], edges: [edge(s, n)] }, projectId: pid, source: 'test' });
+  const id = await engine.startRun({ doc: { name: 'T', nodes: [s, n], edges: [edge(s, n)] }, projectId: pid, source: 'test' });
   await engine.waitFor(id, 60000);
   const r: any = q.get('select status, error, state from runs where id = ?', id);
   const st = JSON.parse(r.state);
@@ -160,7 +160,7 @@ test('a failed pipeline goes to failed with the failing activity; a rerun starts
   const s = node('start', 'Start');
   const a = node('adfRun', 'Build mart', { connection: c.id, pipeline: 'BuildMart', wait: true, waitMinutes: 2 });
   const f = node('log', 'Failed', { message: '{{input.failedActivities}}' });
-  const id = engine.startRun({ doc: { name: 'T', nodes: [s, a, f], edges: [edge(s, a), edge(a, f, 'failed')] }, projectId: pid, source: 'test' });
+  const id = await engine.startRun({ doc: { name: 'T', nodes: [s, a, f], edges: [edge(s, a), edge(a, f, 'failed')] }, projectId: pid, source: 'test' });
   await engine.waitFor(id, 60000);
   const st = JSON.parse((q.get<any>('select state from runs where id = ?', id)).state);
   assert.equal(st.outputs['Build mart'].status, 'Failed');
@@ -207,7 +207,7 @@ test('Databricks: Test connection, a notebook with parameters and its exit value
   const sub = seen.filter(s => s.url === '/api/2.1/jobs/runs/submit').pop()!.body;
   assert.deepEqual(sub.tasks[0], { task_key: 'notebook', notebook_task: { notebook_path: '/Workspace/Shared/sales/daily_totals', base_parameters: { run_date: '2026-10-18' }, source: 'WORKSPACE' }, existing_cluster_id: 'cl-1' });
   const s = node('start', 'Start'), b = node('databricksRun', 'Broken', { connection: c.id, notebookPath: '/Workspace/broken', wait: true, waitMinutes: 2 }), l = node('log', 'Why', { message: '{{input.error}}' });
-  const id = engine.startRun({ doc: { name: 'T', nodes: [s, b, l], edges: [edge(s, b), edge(b, l, 'failed')] }, projectId: pid, source: 'test' });
+  const id = await engine.startRun({ doc: { name: 'T', nodes: [s, b, l], edges: [edge(s, b), edge(b, l, 'failed')] }, projectId: pid, source: 'test' });
   await engine.waitFor(id, 60000);
   const st = JSON.parse((q.get<any>('select state from runs where id = ?', id)).state);
   assert.equal(st.outputs.Broken.error, 'ZeroDivisionError: division by zero');

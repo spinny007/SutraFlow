@@ -80,7 +80,7 @@ after(async () => { fake.close(); await srv.stop(); });
 const run = async (nodes: ReturnType<typeof node>[], input?: unknown) => {
   const s = node('start', 'Start', { payload: JSON.stringify(input ?? { orderId: 'A-7', lines: [{ amount: 100 }, { amount: 50 }] }) });
   const edges = [edge(s, nodes[0]), ...nodes.slice(1).map((n, i) => edge(nodes[i], n))];
-  const id = engine.startRun({ doc: { name: 'T', nodes: [s, ...nodes], edges }, projectId: pid, source: 'test' });
+  const id = await engine.startRun({ doc: { name: 'T', nodes: [s, ...nodes], edges }, projectId: pid, source: 'test' });
   await engine.waitFor(id, 60000);
   const r: any = q.get('select status, error, state from runs where id = ?', id);
   return { status: r.status, error: r.error, out: JSON.parse(r.state).outputs };
@@ -190,7 +190,7 @@ test('the ADF, Databricks, Python, YouTube and Twitch templates are complete, de
   assert.ok(fs.existsSync(path.join(vars.SCRIPTS_FOLDER, 'sales_report.py')));
   if (!findPython().ok) return t.skip('Python is not installed on this machine');
   const f = made.find(m => m.name === 'Sample: Python script file')!;
-  const id = engine.startRun({ doc: flows.getFlow(f.id)!.doc, flowId: f.id, projectId: p2, source: 'test' });
+  const id = await engine.startRun({ doc: flows.getFlow(f.id)!.doc, flowId: f.id, projectId: p2, source: 'test' });
   await engine.waitFor(id, 60000);
   const r: any = q.get('select status, error, state from runs where id = ?', id);
   assert.equal(r.status, 'done', r.error);

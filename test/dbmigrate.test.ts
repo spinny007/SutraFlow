@@ -170,7 +170,10 @@ test('a password-protected PostgreSQL that requires SSL: wrong password, no SSL,
   const base = { host: '127.0.0.1', port: pgPort, user: 'sutra_owner' };
   try {
     const t = async (o: any) => (await call('POST', '/api/server/database/test', { ...base, database: 'sutraflow', ...o })).json();
-    assert.match((await t({ password: 'wrong', sslMode: 'require' })).message, /refused the password of sutra_owner/);
+    // A server just started under a busy suite can reset its first SSL connections: try again briefly.
+    let wrong = await t({ password: 'wrong', sslMode: 'require' });
+    for (let i = 0; i < 10 && /ECONNRESET|ECONNREFUSED/.test(wrong.message); i++) { await new Promise(r => setTimeout(r, 500)); wrong = await t({ password: 'wrong', sslMode: 'require' }); }
+    assert.match(wrong.message, /refused the password of sutra_owner/);
     assert.match((await t({ password, sslMode: 'off' })).message, /does not accept sutra_owner from this machine.*turn SSL on/);
     assert.match((await t({ password, sslMode: 'verify' })).message, /certificate could not be checked/);
     const ok = await t({ password, sslMode: 'require' });
@@ -193,7 +196,8 @@ test('a password-protected PostgreSQL that requires SSL: wrong password, no SSL,
       await api('POST', '/api/projects', { name: 'Remote and secure' });
       const target = { ...base, database: 'sutraflow', password, sslMode: 'require' };
       assert.equal((await api('PUT', '/api/server/database/target', target)).status, 200);
-      assert.equal((await api('POST', '/api/server/database/test', { ...target, password: undefined })).body.ok, true, 'the saved password is used');
+      const saved = (await api('POST', '/api/server/database/test', { ...target, password: undefined })).body;
+      assert.equal(saved.ok, true, `the saved password is used: ${saved.message}`);
       assert.equal((await api('POST', '/api/server/database/migrate', {})).status, 200);
       // Wait for the migration tool to finish (it checks the new start itself) before looking or stopping.
       const stPath = path.join(sdir, 'data', 'migration', 'status.json');

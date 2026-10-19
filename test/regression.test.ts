@@ -55,7 +55,7 @@ before(async () => {
 after(async () => { await srv.stop(); });
 
 const run = async (doc: any, input?: any) => {
-  const id = engine.startRun({ doc, projectId: pid, input });
+  const id = await engine.startRun({ doc, projectId: pid, input });
   await engine.waitFor(id, 30000);
   const r: any = q.get('select status, error, state from runs where id = ?', id);
   const st = JSON.parse(r.state);
@@ -136,7 +136,7 @@ test('an MCP server command in a folder with spaces (Windows) did not start thro
 // ---------- AI ----------
 
 test('every AI activity had the 2-minute step limit; models often take longer, so AI steps allow 10 minutes', () => {
-  const ai = engine.activities ? [...(engine as any).activities.values()].filter((a: any) => a.palette === 'ai') : [];
+  const ai = (engine as any).activities ? [...(engine as any).activities.values()].filter((a: any) => a.palette === 'ai') : [];
   assert.ok(ai.length >= 20);
   for (const a of ai) assert.equal(a.timeoutMs, 600000, a.type);
 });
@@ -315,4 +315,28 @@ test('a single backslash in a guide chapter (C:\\SutraFlow) vanished in the page
   // A backslash before a letter that is not doubled: the template string drops it (\S becomes S).
   const bad = src.split('\n').map((l, i) => [i + 1, l] as const).filter(([, l]) => /(^|[^\\])\\(?![\\nrtu0`$'"])[A-Za-z]/.test(l)).map(([n, l]) => `${n}: ${l.trim().slice(0, 80)}`);
   assert.deepEqual(bad, []);
+});
+
+test('X.509 signing of SOAP messages used a method xml-crypto deprecated (a warning on every signed call); the signature is now placed by xml-crypto itself', async () => {
+  const { applyWss } = await import('../server/src/security/wss.js');
+  const { generate } = await import('selfsigned');
+  const pems = await generate([{ name: 'commonName', value: 'signer' }], { keySize: 2048, algorithm: 'sha256' } as any);
+  const seen: string[] = [];
+  const listen = (w: any) => seen.push(`${w.code}: ${w.message}`);
+  process.on('warning', listen);
+  const signed = applyWss(`<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><p:Ping xmlns:p="urn:p"/></soap:Body></soap:Envelope>`,
+    { x509: { keyPem: pems.private, certPem: pems.cert }, timestampTtlSec: 300 } as any, 'soap');
+  await new Promise(r => setTimeout(r, 20));
+  process.off('warning', listen);
+  assert.deepEqual(seen.filter(s => /xml.?crypto|getOriginalXmlWithIds/i.test(s)), []);
+  // One signature, inside wsse:Security, after the token and the timestamp.
+  assert.equal(signed.match(/<ds:Signature[\s>]/g)?.length, 1);
+  assert.match(signed, /<wsse:Security[^>]*>[\s\S]*<wsse:BinarySecurityToken[\s\S]*<Timestamp[\s\S]*<ds:Signature[\s\S]*<\/ds:Signature><\/wsse:Security>/);
+});
+
+test('the README test badge said 275 while the suite had grown past 300: it must match the tests in the files', () => {
+  let n = 0;
+  for (const f of fs.readdirSync(path.join(root, 'test')).filter(f => f.endsWith('.test.ts'))) n += (fs.readFileSync(path.join(root, 'test', f), 'utf8').match(/^test\(/gm) || []).length;
+  const badge = /badge\/tests-(\d+)-/.exec(fs.readFileSync(path.join(root, 'README.md'), 'utf8'))?.[1];
+  assert.equal(Number(badge), n, `README badge shows ${badge}, the files have ${n} tests`);
 });

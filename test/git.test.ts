@@ -94,11 +94,11 @@ test('a developer clones a personal copy: only they see it, it is restricted unt
   // Restricted: code does not run until trusted.
   const code = { name: 'Code', nodes: [node('start', 'Start'), node('jsCode', 'Run code', { code: 'return 1' })], edges: [] as any[] };
   code.edges = [edge(code.nodes[0], code.nodes[1])];
-  let id = engine.startRun({ doc: code, projectId: danaShop, source: 'test' });
+  let id = await engine.startRun({ doc: code, projectId: danaShop, source: 'test' });
   await engine.waitFor(id, 10000);
   assert.match(q.get<any>('select error from runs where id = ?', id).error, /restricted mode/);
   await ok(dana, 'POST', `/api/projects/${danaShop}/git/trust`);
-  id = engine.startRun({ doc: code, projectId: danaShop, source: 'test' });
+  id = await engine.startRun({ doc: code, projectId: danaShop, source: 'test' });
   await engine.waitFor(id, 10000);
   assert.equal(q.get<any>('select status from runs where id = ?', id).status, 'done');
 });

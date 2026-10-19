@@ -38,7 +38,7 @@ before(async () => {
 after(async () => { await srv.stop(); });
 
 async function runDoc(doc: any, input?: any) {
-  const id = engine.startRun({ doc, projectId: pid, input });
+  const id = await engine.startRun({ doc, projectId: pid, input });
   await engine.waitFor(id, 20000);
   const r: any = q.get('select * from runs where id = ?', id);
   return { status: r.status, error: r.error, state: JSON.parse(r.state) };

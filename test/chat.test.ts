@@ -94,7 +94,7 @@ const tg = () => saveResource({ kind: 'telegram', name: `TG ${Math.random()}`, p
 const dcBot = () => saveResource({ kind: 'discord', name: `DC ${Math.random()}`, project_id: pid, config: { mode: 'bot', botTokenSecret: 'DC_BOT', channelId: 'C1', apiBase: `${base}/discord` } });
 const run = async (n: ReturnType<typeof node>) => {
   const s = node('start', 'Start', { payload: JSON.stringify({ orderId: 'A-1001' }) });
-  const id = engine.startRun({ doc: { name: 'T', nodes: [s, n], edges: [edge(s, n)] }, projectId: pid, source: 'test' });
+  const id = await engine.startRun({ doc: { name: 'T', nodes: [s, n], edges: [edge(s, n)] }, projectId: pid, source: 'test' });
   await engine.waitFor(id, 30000);
   const r: any = q.get('select status, error, state from runs where id = ?', id);
   return { status: r.status, error: r.error, out: JSON.parse(r.state).outputs[n.name] };

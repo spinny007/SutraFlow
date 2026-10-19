@@ -1,6 +1,6 @@
 {
   "name": "sutraflow",
-  "version": "1.7.5",
+  "version": "1.7.6",
   "description": "SutraFlow: visual integration designer and engine (palettes, mapping, SOAP/WS-Security, REST, exposed secured APIs, TLS/Let's Encrypt).",
   "private": true,
   "license": "AGPL-3.0-only",
@@ -16,7 +16,7 @@
     "dev:web": "vite --config web/vite.config.ts",
     "build": "vite build --config web/vite.config.ts && tsc -p server/tsconfig.json",
     "start": "node --disable-warning=ExperimentalWarning dist/server/main.js",
-    "typecheck": "tsc -p server/tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
+    "typecheck": "tsc -p server/tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit && tsc -p test/tsconfig.json",
     "test": "node --disable-warning=ExperimentalWarning --import tsx --test --test-timeout=180000 test/*.test.ts",
     "guide": "tsx tools/build-user-guide.ts",
     "guide:shots": "node tools/capture-guide-shots.mjs",

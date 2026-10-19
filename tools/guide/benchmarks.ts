@@ -32,16 +32,22 @@ function read(root: string, name: string) {
 function scenarios(r: any, caption: string) {
   if (!r?.scenarios?.length) return '';
   const rows = r.scenarios.map((s: any) => `<tr><td>${esc(s.exec || 'durable')}</td><td>${s.engines}</td><td>${s.kb} KB</td><td><strong>${s.stepsPerSec}</strong></td><td>${s.runsPerSec}</td><td>${s.stepMs.p50} / ${s.stepMs.p95} / ${s.stepMs.p99}</td><td>${s.queueMs ? `${s.queueMs.p95}` : '-'}</td><td>${s.runMs.p95}</td><td>${s.engineCpuCores}</td><td>${s.engineMaxMemMb} MB</td><td>${s.failed}</td><td>${s.repeated}</td></tr>`).join('');
-  return `<p class="h">${esc(caption)}</p><p class="muted">${esc(r.label)}; ${esc(r.database)}; Node ${esc(r.node)}; ${r.scenarios[0].runs} runs of ${r.scenarios[0].steps} steps plus the trigger, ${r.scenarios[0].workers} steps at once per engine${r.scenarios[0].cpus ? `, each engine held to ${r.scenarios[0].cpus} core and ${r.scenarios[0].mem} MB` : ''}.</p>
+  const rtt = r.scenarios.find((s: any) => s.dbRttMs)?.dbRttMs;
+  return `<p class="h">${esc(caption)}</p><p class="muted">${esc(r.label)}; ${esc(r.database)}${rtt ? `, ${rtt} ms round trip to the database` : ''}; Node ${esc(r.node)}; ${r.scenarios[0].runs} runs of ${r.scenarios[0].steps} steps plus the trigger, ${r.scenarios[0].workers} steps at once per engine${r.scenarios[0].cpus ? `, each engine held to ${r.scenarios[0].cpus} core and ${r.scenarios[0].mem} MB` : ''}.</p>
 <table class="t"><thead><tr><th>Execution</th><th>Engines</th><th>Output per step</th><th>Steps/s</th><th>Runs/s</th><th>Step ms p50 / p95 / p99</th><th>Queue wait p95 ms</th><th>Run p95 ms</th><th>Engine CPU (cores)</th><th>Engine memory</th><th>Failed</th><th>Repeated</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 export function benchmarksSection(root: string) {
   const parts = [
+    scenarios(read(root, 'async-after-local'), '1.7.6, asynchronous PostgreSQL storage: REST calls spread over the engines'),
+    scenarios(read(root, 'async-before-local'), '1.7.5, the same scenarios (synchronous PostgreSQL connection)'),
+    scenarios(read(root, 'async-after-remote'), '1.7.6 with the database on another machine (round trip measured in the table caption)'),
+    scenarios(read(root, 'async-before-remote'), '1.7.5 with the database on another machine (the same proxy)'),
+    scenarios(read(root, 'async-after-64kb'), '1.7.6, one engine, 64 KB outputs per step'),
     scenarios(read(root, 'pg-before'), 'Before the load work (1.6.0 as first released): PostgreSQL'),
-    scenarios(read(root, 'pg-after'), 'This release: PostgreSQL, durable and in memory'),
-    scenarios(read(root, 'pg-spread'), 'This release: REST calls spread over the engines (as behind a load balancer)'),
-    scenarios(read(root, 'pg-workers32'), 'This release: 32 steps at once on one engine'),
+    scenarios(read(root, 'pg-after'), '1.7.5: PostgreSQL, durable and in memory'),
+    scenarios(read(root, 'pg-spread'), '1.7.5: REST calls spread over the engines (as behind a load balancer)'),
+    scenarios(read(root, 'pg-workers32'), '1.7.5: 32 steps at once on one engine'),
     scenarios(read(root, 'pg-1core'), 'Small server: one core and 512 MB per engine, PostgreSQL'),
     scenarios(read(root, 'sqlite'), 'SQLite, one engine'),
     scenarios(read(root, 'sqlite-1core'), 'Small server: one core and 512 MB, SQLite'),

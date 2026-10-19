@@ -91,10 +91,10 @@ export const processActivities: Activity[] = [
       F('required', 'Fail when no Sutra listens', 'bool', false),
     ],
     outputHint: { channel: '', delivered: 0, runIds: [''] },
-    execute: c => {
+    execute: async c => {
       const channel = String(c.raw('channel') || '').trim();
       if (!channel) throw new Error('Channel is not set');
-      const runIds = publishChannel(c.projectId, channel, c.v('message'));
+      const runIds = await publishChannel(c.projectId, channel, c.v('message'));
       if (!runIds.length && c.raw('required')) throw new Error(`No deployed Sutra listens on channel "${channel}"`);
       return { out: { channel, delivered: runIds.length, runIds } };
     },

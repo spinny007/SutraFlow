@@ -21,7 +21,7 @@ export const TABLE_TEXT: Record<string, string> = {
   flow_versions: 'Published, unchangeable versions of each Sutra.',
   deployments: 'Which version of each Sutra is deployed, and whether it is enabled.',
   runs: 'One row per run: the Sutra document it started with, status, trigger input, state (outputs, variables, branch tokens, logs) and times.',
-  tasks: 'One row per step execution: status, attempt, not-before time, owner engine, input, output, port, wait details, error and duration. The work queue.',
+  tasks: 'One row per step execution: status, attempt, not-before time, owner engine and claim number (counted up at each claim, for fencing), input, output, port, wait details, error and duration. The work queue.',
   resources: 'Connections, security profiles, API policies, AI providers and MCP servers (secret names only).',
   secrets: 'The vault: encrypted values with their IV and tag.',
   settings: 'Server settings and policies, gateway and TLS settings, Sengine variables, the deploy generation.',

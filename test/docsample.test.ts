@@ -60,7 +60,7 @@ after(async () => { fake.close(); await srv.stop(); });
 
 const runFlow = async (name: string, input?: any) => {
   const f = flows.listFlows(pid).find(x => x.name === name)!;
-  const id = engine.startRun({ doc: flows.getFlow(f.id)!.doc, flowId: f.id, projectId: pid, input, source: 'test' });
+  const id = await engine.startRun({ doc: flows.getFlow(f.id)!.doc, flowId: f.id, projectId: pid, input, source: 'test' });
   await engine.waitFor(id, 60000);
   const r: any = q.get('select status, error, state from runs where id = ?', id);
   return { status: r.status, error: r.error, out: JSON.parse(r.state).outputs };
@@ -177,7 +177,7 @@ test('the sample project zip imports as a new project with its documents, and it
   assert.equal(path.resolve(dir), path.resolve(projects.projectFilesDir('Shop documents'), 'documents'));
   assert.deepEqual(fs.readdirSync(dir).sort(), ['faq.md', 'returns-policy.pdf', 'shipping-guide.docx', 'tea-catalogue.pptx']);
   const feed = flows.listFlows(imported).find(x => x.name === 'Sample: Document feed from a folder')!;
-  const id = engine.startRun({ doc: flows.getFlow(feed.id)!.doc, flowId: feed.id, projectId: imported, source: 'test' });
+  const id = await engine.startRun({ doc: flows.getFlow(feed.id)!.doc, flowId: feed.id, projectId: imported, source: 'test' });
   await engine.waitFor(id, 60000);
   assert.equal((q.get<any>('select status from runs where id = ?', id)).status, 'done');
   const kb = getResource(listResources('aiKnowledge', imported)[0].id)!;

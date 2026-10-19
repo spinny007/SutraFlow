@@ -30,7 +30,7 @@ before(async () => { srv = await boot({ listenAdmin: false }); });
 after(async () => { await closeDbPools(); await srv.stop(); });
 
 async function run(nodes: any[], edges: any[], input?: any) {
-  const id = engine.startRun({ doc: { name: 'C', nodes, edges }, input });
+  const id = await engine.startRun({ doc: { name: 'C', nodes, edges }, input });
   await engine.waitFor(id, 20000, true);
   const r: any = q.get('select * from runs where id = ?', id);
   return { status: r.status, error: r.error, state: JSON.parse(r.state) };

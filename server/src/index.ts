@@ -109,7 +109,7 @@ export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gatew
   onMemoryRunProject(id => engine.memoryRun(id)?.project_id ?? undefined);
   onTuningChange(bumpDeployGen);
   applyTuning();
-  engine.start();
+  await engine.start();
   // Timers and polling listeners run once per cluster, on the leader; routes are served by every engine.
   const relisten = () => { if (cluster.leader) rebuildListeners().catch(e => console.error('Listeners:', e)); };
   const reschedule = () => { if (cluster.leader) rebuildSchedules(); };

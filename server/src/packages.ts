@@ -337,7 +337,7 @@ export async function testPackage(input: unknown, o: { skip?: string[]; timeoutM
     if (o.skip?.some(n => n.toLowerCase() === s.name.toLowerCase())) { results.push({ name: s.name, status: 'skipped', ms: 0, skipped: true }); continue; }
     const t0 = Date.now();
     try {
-      const id = engine.startRun({ doc: s.doc, projectId: project?.id ?? null, source: 'test' });
+      const id = await engine.startRun({ doc: s.doc, projectId: project?.id ?? null, source: 'test' });
       const status = await engine.waitFor(id, o.timeoutMs ?? 60000);
       const r = q.get<{ error: string | null }>('select error from runs where id = ?', id);
       results.push({ name: s.name, status, error: r?.error, ms: Date.now() - t0 });

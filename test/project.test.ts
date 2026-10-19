@@ -43,7 +43,7 @@ before(async () => {
 after(async () => { await srv.stop(); });
 
 async function run(nodes: any[], edges: any[], extra: any = {}) {
-  const id = engine.startRun({ doc: { name: 'P', nodes, edges, ...(extra.doc || {}) }, projectId: pid, ...extra.opts });
+  const id = await engine.startRun({ doc: { name: 'P', nodes, edges, ...(extra.doc || {}) }, projectId: pid, ...extra.opts });
   await engine.waitFor(id, 15000, true);
   const r: any = q.get('select * from runs where id = ?', id);
   return { id, status: r.status, error: r.error, state: JSON.parse(r.state) };
@@ -196,22 +196,22 @@ test('debugger: step one activity at a time, breakpoints, continue', async () =>
   const a = node('mapper', 'A', { mapping: { rules: { n: { expr: '{input.n} + 1' } } } });
   const b = node('mapper', 'B', { mapping: { rules: { n: { expr: '{input.n} * 10' } } } });
   const c = node('log', 'C', { message: 'done' });
-  const id = engine.startRun({ doc: { name: 'Dbg', nodes: [s, a, b, c], edges: [edge(s, a), edge(a, b), edge(b, c)] }, projectId: pid, debug: { stepping: true, breakpoints: [] } });
+  const id = await engine.startRun({ doc: { name: 'Dbg', nodes: [s, a, b, c], edges: [edge(s, a), edge(a, b), edge(b, c)] }, projectId: pid, debug: { stepping: true, breakpoints: [] } });
   const status = () => (q.get('select status from runs where id = ?', id) as any).status;
   const pausedAt = () => (q.get(`select node_id from tasks where run_id = ? and status = 'paused'`, id) as any)?.node_id;
   const settle = () => new Promise(r => setTimeout(r, 120));
   await settle();
   assert.equal(status(), 'paused');
   assert.equal(pausedAt(), s.id, 'pauses before the first activity');
-  engine.debug(id, 'step'); await settle();
+  await engine.debug(id, 'step'); await settle();
   assert.equal(pausedAt(), a.id);
-  engine.debug(id, 'step'); await settle();
+  await engine.debug(id, 'step'); await settle();
   assert.equal(pausedAt(), b.id);
   const st = JSON.parse((q.get('select state from runs where id = ?', id) as any).state);
   assert.deepEqual(st.outputs.A, { n: 2 }, 'output of the stepped activity is visible while paused');
-  engine.debug(id, 'continue', [c.id]); await settle();
+  await engine.debug(id, 'continue', [c.id]); await settle();
   assert.equal(pausedAt(), c.id, 'continue runs until the breakpoint');
-  engine.debug(id, 'continue', []);
+  await engine.debug(id, 'continue', []);
   assert.equal(await engine.waitFor(id), 'done');
 });
 

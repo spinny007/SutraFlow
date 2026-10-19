@@ -88,9 +88,29 @@ export function applyWss(xml: string, o: WssOptions, envKey?: string): string {
       digestAlgorithm: o.x509.digestAlgorithm || 'http://www.w3.org/2001/04/xmlenc#sha256',
       signerOptions: { prefix: 'ds' },
     });
+    placeSignatureInSecurity(signer);
     xml = signer.postProcess(xml, key);
   }
   return xml;
+}
+
+/**
+ * WSSecurityCert (soap) builds the token, timestamp and references, then signs; its last step reads
+ * the document back with xml-crypto's getOriginalXmlWithIds(), which xml-crypto has deprecated, and
+ * inserts the signature as text. Here xml-crypto places the signature itself, as the last child of
+ * wsse:Security (computeSignature with a location), and the old two steps hand that document on
+ * unchanged: the same message, without the deprecated call.
+ */
+function placeSignatureInSecurity(cert: unknown) {
+  const sx = (cert as { signer: any }).signer;
+  const compute = sx.computeSignature.bind(sx);
+  let signed = '';
+  sx.computeSignature = (doc: string, opts: Record<string, unknown> = {}) => {
+    compute(doc, { ...opts, location: { reference: "//*[local-name(.)='Security']", action: 'append' } });
+    signed = sx.getSignedXml();
+  };
+  sx.getOriginalXmlWithIds = () => signed;
+  sx.getSignatureXml = () => '';
 }
 
 export function detectEnvelopePrefix(xml: string) {

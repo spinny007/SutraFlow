@@ -64,16 +64,14 @@ function ask(a: AgentEntry, input: { message: string; sessionId: string; channel
         done({ status: 'working', answer: 'A person will answer this; ask again with the job id.', sessionId: input.sessionId, job: runId, waitingFor: 'a person' });
       }
     }, 300);
-    try {
-      runId = engine.startRun({
-        doc: a.doc, flowId: a.flowId, projectId: a.projectId, version: a.version, triggerNodeId: a.node.id, source: 'agent',
-        input: { ...input, history: input.history || [], agent: a.name, caller: { subject: input.caller.subject, method: input.caller.method } },
-        onReply: (r: any) => { clearTimeout(timer); done(fromReply(r, input.sessionId)); },
-      });
-    } catch (e: any) {
+    engine.startRun({
+      doc: a.doc, flowId: a.flowId, projectId: a.projectId, version: a.version, triggerNodeId: a.node.id, source: 'agent',
+      input: { ...input, history: input.history || [], agent: a.name, caller: { subject: input.caller.subject, method: input.caller.method } },
+      onReply: (r: any) => { clearTimeout(timer); done(fromReply(r, input.sessionId)); },
+    }).then(id => { runId = id; }, (e: any) => {
       clearTimeout(timer);
       done({ status: 'error', answer: null, sessionId: input.sessionId, error: e.message });
-    }
+    });
   });
 }
 function fromReply(r: any, sessionId: string): Out {

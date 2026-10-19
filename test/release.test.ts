@@ -41,7 +41,7 @@ after(async () => { await srv.stop(); });
 
 async function run(nodes: any[], edges: any[]) {
   const pid = projects.listProjects().find(p => p.name === 'Release pipelines')?.id || projects.saveProject({ name: 'Release pipelines', config: { variables: [] } }).id;
-  const id = engine.startRun({ doc: { name: 'Release', nodes, edges }, projectId: pid });
+  const id = await engine.startRun({ doc: { name: 'Release', nodes, edges }, projectId: pid });
   await engine.waitFor(id, 30000);
   const r: any = q.get('select status, error, state from runs where id = ?', id);
   return { status: r.status, error: r.error, out: JSON.parse(r.state).outputs };
@@ -120,12 +120,12 @@ test('the Release pipeline sample: build, check, deploy to test, approval, deplo
   const [f] = addSamples(pid, ['release']);
   const doc = flows.getFlow(f.id)!.doc;
   doc.nodes.find((n: any) => n.type === 'start')!.config.payload = JSON.stringify({ project: 'Shop', version: '9.0.0' });
-  const id = engine.startRun({ doc, projectId: pid });
+  const id = await engine.startRun({ doc, projectId: pid });
   await engine.waitFor(id, 30000, true);
   const task = q.get<any>(`select id from tasks where run_id = ? and status = 'waiting'`, id);
   assert.ok(task, 'waiting for the production approval');
   assert.ok(projects.listProjects().some(p => p.name === 'Shop (test)'), 'deployed to test first');
-  engine.decide(task.id, true, 'release manager', 'go');
+  await engine.decide(task.id, true, 'release manager', 'go');
   await engine.waitFor(id, 30000);
   const r: any = q.get('select status, error from runs where id = ?', id);
   assert.equal(r.status, 'done', r.error);
