@@ -1,0 +1,275 @@
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import http from 'node:http';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { testEnv, node, edge, port } from './helpers.js';
+import { sftpServer } from './sftpserver.js';
+
+/**
+ * Regression suite: one test for each defect found while building SutraFlow, so it cannot come back.
+ * Each test names the defect and how it showed. Defects whose test needs a heavy setup are covered
+ * where that setup already exists:
+ *  - two engines starting together on an empty PostgreSQL made the tables at once and one crashed
+ *    (advisory lock): postgres.test.ts "two engines share a real PostgreSQL server" (SUTRA_TEST_PG_URL);
+ *  - serial ids after copying SQLite to PostgreSQL started again at 1: dbcopy.test.ts;
+ *  - pgvector reads of a table not made yet dropped the PGlite socket connection: rag.test.ts;
+ *  - a personal Git copy wrote its own name ("Shop (dana)") into sutraflow.json: git.test.ts;
+ *  - MySQL refused CREATE PROCEDURE as a prepared statement (error 1295): mysql.test.ts and
+ *    folders.test.ts "SQL install script" (SUTRA_TEST_MYSQL_URL);
+ *  - the command line read an empty value (--workers "") as a bare flag: tuning.test.ts.
+ * This suite also runs in the PostgreSQL pass (postgres.test.ts), which covers the PostgreSQL ones
+ * among the rest (quoted camelCase names, the reserved word window).
+ */
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const env = testEnv(20050);
+process.env.SUTRA_ADMIN_PORT = String(port(20058));
+process.env.SUTRA_ADMIN_TOKEN = 'regression-admin-token-0123456789';
+const { boot } = await import('../server/src/index.js');
+const { engine } = await import('../server/src/engine/engine.js');
+const { q, tx, openDb, closeDb } = await import('../server/src/db.js');
+const { config } = await import('../server/src/config.js');
+const flows = await import('../server/src/flows.js');
+const projects = await import('../server/src/projects.js');
+const { saveResource, getResource } = await import('../server/src/resources.js');
+const { setSecret } = await import('../server/src/secrets.js');
+
+let srv: Awaited<ReturnType<typeof boot>>;
+let pid = '';
+before(async () => {
+  srv = await boot({ listenAdmin: true });
+  pid = projects.saveProject({ name: 'Regression', config: { variables: [{ name: 'INBOX', type: 'string', value: 'C:/in' }] } }).id;
+});
+after(async () => { await srv.stop(); });
+
+const run = async (doc: any, input?: any) => {
+  const id = engine.startRun({ doc, projectId: pid, input });
+  await engine.waitFor(id, 30000);
+  const r: any = q.get('select status, error, state from runs where id = ?', id);
+  const st = JSON.parse(r.state);
+  return { id, status: r.status, error: r.error, out: st.outputs, logs: (st.logs || []).map((l: any) => `${l.level} ${l.msg}`).join('\n') };
+};
+
+// ---------- storage ----------
+
+test('PostgreSQL lowercased camelCase column names; queries quote them (failures list, approvals)', async () => {
+  // Showed as empty "When" and "Sutra" cells in the Admin Console on PostgreSQL.
+  const s = node('start', 'Start'), t = node('throw', 'Fail', { message: 'boom' });
+  await run({ name: 'Fails', nodes: [s, t], edges: [edge(s, t)] });
+  const rows = (await srv.admin.inject({ method: 'GET', url: '/api/runs?status=failed', headers: { authorization: `Bearer ${process.env.SUTRA_ADMIN_TOKEN}` } })).json();
+  assert.ok(rows.length && 'flowName' in rows[0] && 'startedAt' in rows[0]);
+});
+
+test('"window" is a reserved word in PostgreSQL: plan usage is counted in a column named win', () => {
+  q.run(`insert into gw_usage(app_id, win, n, expires) values('a1', 'minute:1', 1, 0) on conflict(app_id, win) do update set n = gw_usage.n + 1`);
+  q.run(`insert into gw_usage(app_id, win, n, expires) values('a1', 'minute:1', 1, 0) on conflict(app_id, win) do update set n = gw_usage.n + 1`);
+  assert.equal(Number(q.get<any>(`select n from gw_usage where app_id = 'a1' and win = 'minute:1'`).n), 2);
+});
+
+test('a transaction inside a transaction joined it instead of failing ("cannot start a transaction within a transaction")', () => {
+  // Showed when Git discard removed a new Sutra: the pull's transaction called deleteFlow's.
+  const n = tx(() => tx(() => tx(() => 42)));
+  assert.equal(n, 42);
+  assert.throws(() => tx(() => tx(() => { throw new Error('inner'); })), /inner/);
+  assert.equal(tx(() => 7), 7, 'a failed nested transaction leaves none open');
+});
+
+test('the first folder table migrated with INSERT ... SELECT ... ON CONFLICT, a syntax error in SQLite that stopped the server', async () => {
+  // Showed as "near do: syntax error" when the dev server started on an existing database.
+  if (config.dbUrl) return; // the SQLite migration; PostgreSQL never had the old table
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-mig-')), 'old.db');
+  const { DatabaseSync } = await import('node:sqlite');
+  const d = new DatabaseSync(file);
+  d.exec(`create table projects(id text primary key, name text not null, description text, config text not null, updated_at text not null);
+    create table flows(id text primary key, name text not null, doc text not null, version integer not null default 0, updated_at text not null, project_id text);
+    create table flow_folders(project_id text not null, path text not null, primary key(project_id, path));
+    insert into flow_folders values('p1', 'Sales/Inbound');`);
+  d.close();
+  closeDb();
+  try {
+    openDb(file);
+    assert.deepEqual(q.all<any>(`select project_id, area, path from folders`).map(r => ({ ...r })), [{ project_id: 'p1', area: 'sutras', path: 'Sales/Inbound' }]);
+    assert.equal(q.get(`select name from sqlite_master where name = 'flow_folders'`), undefined, 'the old table is gone');
+  } finally { closeDb(); openDb(); }
+});
+
+// ---------- connectors ----------
+
+test('a wrong SFTP host key took 25 s to fail (the library retried); it fails at once and is not retried', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-sftp-'));
+  const s = await sftpServer(dir, { user: 'u', password: 'Sftp-pass-123' });
+  try {
+    setSecret('REG_SFTP', 'Sftp-pass-123');
+    const conn = saveResource({ kind: 'sftp', name: 'Wrong key', project_id: pid, config: { host: '127.0.0.1', port: s.port, user: 'u', auth: 'password', passwordSecret: 'REG_SFTP', hostFingerprint: 'SHA256:not-the-right-one', baseFolder: '/', attempts: 3, retryWaitSec: 5 } });
+    const { testResource } = await import('../server/src/resourceTest.js');
+    const t0 = Date.now();
+    const r = await testResource(getResource(conn.id)!).catch((e: any) => ({ ok: false, message: e.message }));
+    assert.equal((r as any).ok, false);
+    assert.ok(Date.now() - t0 < 4000, `took ${Date.now() - t0} ms`);
+  } finally { await s.close(); }
+});
+
+test('remote paths stayed inside the base folder even with base "/" and ../ in the name', async () => {
+  const { remotePath } = await import('../server/src/connectors/remote.js');
+  assert.equal(remotePath('/', '../../etc/passwd'), '/etc/passwd');
+  assert.throws(() => remotePath('/files', '../etc/passwd'), /outside the base folder/);
+});
+
+test('an MCP server command in a folder with spaces (Windows) did not start through the shell', async () => {
+  const { listMcpTools } = await import('../server/src/ai/mcpClient.js');
+  const r = saveResource({ kind: 'mcpClient', name: 'Spaces', project_id: pid, config: { transport: 'command', command: `"${process.execPath}" "${path.join(root, 'test', 'mcpstdio.mjs')}"` } });
+  assert.deepEqual((await listMcpTools(getResource(r.id)!, () => '')).map(t => t.name), ['add']);
+});
+
+// ---------- AI ----------
+
+test('every AI activity had the 2-minute step limit; models often take longer, so AI steps allow 10 minutes', () => {
+  const ai = engine.activities ? [...(engine as any).activities.values()].filter((a: any) => a.palette === 'ai') : [];
+  assert.ok(ai.length >= 20);
+  for (const a of ai) assert.equal(a.timeoutMs, 600000, a.type);
+});
+
+test('small models answered "tool": "none", "(order_status)" or "final_answer"; the agent understands them', async () => {
+  const { normalise } = await import('../server/src/ai/agent.js');
+  assert.deepEqual(normalise({ thought: 'x', tool: 'none', input: {} }).tool, '', 'none = no tool');
+  assert.equal(normalise({ tool: '(order_status)', input: { orderId: 'A-1' } }).tool, 'order_status', 'brackets dropped');
+  assert.equal(normalise({ tool: '`stock_check`' }).tool, 'stock_check', 'quotes dropped');
+  assert.equal(normalise({ final_answer: 'It is shipped.' }).answer, 'It is shipped.');
+  assert.equal(normalise({ response: 'Done' }).answer, 'Done');
+  assert.equal(normalise({ action: 'order_status', arguments: { orderId: 'A-1' } }).input.orderId, 'A-1', 'arguments as input');
+  assert.equal(normalise({ answer: 'ok', tool: 'none' }).tool, undefined, 'an answer wins');
+});
+
+test('a small model called the same tool again and again until the step limit; repeats are not run, and the limit still answers', async () => {
+  // Fake model: always asks for the same tool with the same input.
+  let calls = 0, plain = 0;
+  const fake = http.createServer((req, res) => {
+    let b = ''; req.on('data', d => (b += d)); req.on('end', () => {
+      const body = JSON.parse(b);
+      const sys = body.messages?.find((m: any) => m.role === 'system')?.content || '';
+      calls++;
+      const content = /Answer the user now in plain text/.test(sys) ? (plain++, 'A-1 is shipped with Blue Dart.') : JSON.stringify({ tool: 'order_status', input: { orderId: 'A-1' } });
+      res.end(JSON.stringify({ model: 'fake', message: { role: 'assistant', content }, prompt_eval_count: 5, eval_count: 5 }));
+    });
+  });
+  await new Promise<void>(r => fake.listen(0, '127.0.0.1', () => r()));
+  try {
+    const prov = saveResource({ kind: 'aiProvider', name: 'Fake repeat', project_id: pid, config: { engine: 'Ollama', baseUrl: `http://127.0.0.1:${(fake.address() as any).port}`, model: 'fake' } }).id;
+    const t = node('mcpTool', 'Order tool', { toolName: 'order_status', description: 'Order status', inputs: [{ k: 'orderId', v: 'id' }] });
+    const j = node('jsonata', 'Look', { source: '{{input}}', expression: '{ "status": "SHIPPED", "carrier": "Blue Dart" }' });
+    const rp = node('mcpReply', 'Reply', { source: 'value', result: '{{input}}' });
+    flows.saveFlow(undefined, { name: 'Tool: order (regression)', nodes: [t, j, rp], edges: [edge(t, j), edge(j, rp)] }, pid);
+    const s = node('start', 'Start'), a = node('aiAgent', 'Agent', { provider: prov, task: 'Where is A-1?', tools: 'chosen tools', toolNames: 'order_status', maxSteps: 4 });
+    const r = await run({ name: 'Repeat', nodes: [s, a], edges: [edge(s, a)] });
+    assert.equal(r.status, 'done', r.error);
+    assert.equal(r.out.Agent.steps.filter((x: any) => x.tool === 'order_status' && !x.error).length, 1, 'the tool ran once');
+    assert.equal(r.out.Agent.answer, 'A-1 is shipped with Blue Dart.', 'answered from the tool result at the limit');
+    assert.equal(r.out.Agent.limitReached, true);
+    assert.equal(plain, 1);
+  } finally { fake.close(); }
+});
+
+test('knowledge search missed "returns" for "return" (no stemming)', async () => {
+  const kn = await import('../server/src/ai/knowledge.js');
+  const kb = getResource(saveResource({ kind: 'aiKnowledge', name: 'Stems', project_id: pid, config: { store: 'built-in', embedWith: 'built-in' } }).id)!;
+  await kn.addKnowledge(kb, () => '', 'returns.md', 'Returns are accepted within 30 days of delivery.');
+  const hits = await kn.searchKnowledge(kb, () => '', 'How long can I return?');
+  assert.equal(hits[0]?.source, 'returns.md');
+});
+
+test('Excel text lost its column tabs (whitespace tidy collapsed them)', async () => {
+  const { documentText } = await import('../server/src/ai/documents.js');
+  const zlib = await import('node:zlib');
+  // A minimal xlsx built with stored entries.
+  const files: Record<string, string> = { 'xl/workbook.xml': '<workbook><sheets><sheet name="P"/></sheets></workbook>', 'xl/worksheets/sheet1.xml': '<sheetData><row><c r="A1" t="inlineStr"><is><t>Item</t></is></c><c r="B1"><v>240</v></c></row></sheetData>' };
+  const parts: Buffer[] = [], central: Buffer[] = [];
+  let off = 0;
+  for (const [n, t] of Object.entries(files)) {
+    const data = Buffer.from(t), nm = Buffer.from(n), crc = zlib.crc32 ? zlib.crc32(data) : 0;
+    const l = Buffer.alloc(30); l.writeUInt32LE(0x04034b50, 0); l.writeUInt32LE(crc, 14); l.writeUInt32LE(data.length, 18); l.writeUInt32LE(data.length, 22); l.writeUInt16LE(nm.length, 26);
+    const c = Buffer.alloc(46); c.writeUInt32LE(0x02014b50, 0); c.writeUInt32LE(crc, 16); c.writeUInt32LE(data.length, 20); c.writeUInt32LE(data.length, 24); c.writeUInt16LE(nm.length, 28); c.writeUInt32LE(off, 42);
+    parts.push(l, nm, data); central.push(c, nm); off += 30 + nm.length + data.length;
+  }
+  const cd = Buffer.concat(central), e = Buffer.alloc(22);
+  e.writeUInt32LE(0x06054b50, 0); e.writeUInt16LE(2, 8); e.writeUInt16LE(2, 10); e.writeUInt32LE(cd.length, 12); e.writeUInt32LE(off, 16);
+  const d = await documentText(Buffer.concat([...parts, cd, e]), { name: 'p.xlsx' });
+  assert.equal(d.text, 'Sheet P\nItem\t240');
+});
+
+test('a message waiting for a person kept the caller waiting the full answer time; it returns a job at once', async () => {
+  const s = node('agentChannel', 'Desk', { agentName: 'reg-desk', chat: true, waitSeconds: 30 });
+  const ask = node('askPerson', 'Ask', { question: 'Refund?' });
+  const f = flows.saveFlow(undefined, { name: 'Reg desk', nodes: [s, ask], edges: [edge(s, ask)] }, pid);
+  flows.deploy(f.id);
+  const t0 = Date.now();
+  const r = await fetch(`${env.http}/chat/reg-desk/api`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: 'refund please' }) });
+  const o = await r.json();
+  assert.equal(r.status, 202);
+  assert.equal(o.waitingFor, 'a person');
+  assert.ok(Date.now() - t0 < 5000, `answered in ${Date.now() - t0} ms, not after 30 s`);
+  flows.undeploy(f.id);
+});
+
+// ---------- logs and audit ----------
+
+test('clearing the audit log left two entries (the request and the clearing); now one', async () => {
+  const before = Number(q.get<any>(`select count(*) n from audit`).n);
+  const r = await srv.admin.inject({ method: 'POST', url: '/api/audit/clear', payload: { before: '2000-01-01' }, headers: { authorization: `Bearer ${process.env.SUTRA_ADMIN_TOKEN}` } });
+  assert.equal(r.statusCode, 200, r.body);
+  assert.equal(Number(q.get<any>(`select count(*) n from audit`).n), before + 1);
+});
+
+test('project variable references were found inside other words ("agv.X") after a backslash was lost in \\b', async () => {
+  const { variablesUsed } = await import('../server/src/flows.js');
+  assert.deepEqual(variablesUsed({ a: '{{gv.INBOX}} and {gv.OUTBOX} and $gv.ARCHIVE', b: "get-project-variable('LIMIT')", c: 'magv.NOPE' }).sort(), ['ARCHIVE', 'INBOX', 'LIMIT', 'OUTBOX']);
+});
+
+// ---------- Git ----------
+
+test('the built-in Git missed an edit of the same size in the same second (it trusted file times)', async () => {
+  const { engines } = await import('../server/src/git/engine.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-iso-'));
+  const g = engines.builtin;
+  await g.init(dir, 'main');
+  fs.writeFileSync(path.join(dir, 'a.json'), '{"v":1}\n');
+  await g.commitAll(dir, 'one', { name: 'A', email: 'a@x.test' });
+  fs.writeFileSync(path.join(dir, 'a.json'), '{"v":2}\n');
+  assert.deepEqual((await g.status(dir)).files.map(f => f.path), ['a.json']);
+  assert.ok(await g.commitAll(dir, 'two', { name: 'A', email: 'a@x.test' }));
+});
+
+// ---------- command line and launcher ----------
+
+test('"sutraflow help" made a settings file and printed a path of the machine', () => {
+  const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-env-')), 'none.env');
+  const r = spawnSync(process.execPath, [path.join(root, 'bin', 'sutraflow.mjs'), 'help'], { encoding: 'utf8', env: { ...process.env, SUTRAFLOW_ENV: tmp } });
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /sutraflow <command>/);
+  assert.ok(!fs.existsSync(tmp), 'no settings file made');
+  assert.ok(!r.stdout.includes(root), 'no folder of this machine in the help');
+});
+
+test('every sutra command had a description in its help (the guide listed some with none)', () => {
+  const r = spawnSync(process.execPath, ['--import', 'tsx', path.join(root, 'server', 'src', 'cli.ts'), 'help'], { cwd: root, encoding: 'utf8' });
+  const lines = r.stdout.split(/\r?\n/).slice(1);
+  const missing: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (!/^ {2}[a-z]+\s/.test(l) || l.trim().endsWith(':') || /^ {2}(Remote|Exit)/.test(l)) continue;
+    const inline = /\S\s{2,}[A-Z]/.test(l.trim().replace(/^\S+\s+/, ''));
+    let j = i + 1;
+    while (j < lines.length && /^ {16}/.test(lines[j])) j++;
+    const next = lines[j] || '';
+    if (!inline && !/^ {12}[A-Z(]/.test(next)) missing.push(l.trim());
+  }
+  assert.deepEqual(missing, []);
+});
+
+test('the user guide had no text for new activities (the guide build listed them as missing)', async () => {
+  const { ACTIVITY_TEXT } = await import('../tools/guide/activities.js');
+  const without = [...(engine as any).activities.keys()].filter((t: string) => !(t in ACTIVITY_TEXT));
+  assert.deepEqual(without, []);
+});
