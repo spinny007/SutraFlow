@@ -44,7 +44,7 @@ export const CHAPTERS: Chapter[] = [
 <tr><td><code>docker up|down|status|logs|build</code>, <code>docker cluster up|down|...</code></td><td>The studio and an engine in Docker, or PostgreSQL with a studio and two engines. Missing passwords and the master key are made once into <code>.env</code>.</td></tr>
 </tbody></table>
 <p>For development with automatic reload, run <code>npm run dev</code> and open <code>http://localhost:5173</code>. The tests run with <code>npm test</code>.</p>
-[[tip:Guidelines|Back up the <code>data</code> folder, and above all <code>data/master.key</code>: without it the encrypted secrets cannot be read.<br>Keep the studio on 127.0.0.1. Publish APIs through the gateway ports, not the studio port.]]
+[[tip:Guidelines|Back up the <code>data</code> folder, and above all <code>data/master.key</code>: without it the encrypted secrets cannot be read (see <em>Where SutraFlow keeps its data</em>).<br>Keep the studio on 127.0.0.1: port 4800 is for your team (designer, Admin Console, admin API). Everything others call goes through the API gateway: ports 8080 (HTTP) and 8443 (HTTPS), which serve only deployed Sutras (see <em>The API gateway</em>).]]
 <p class="h">Server settings</p>
 <table class="t"><thead><tr><th>Environment variable</th><th>Default</th><th>Meaning</th></tr></thead><tbody>
 <tr><td><code>SUTRA_DATA_DIR</code></td><td><code>./data</code></td><td>Database, master key, deployment config files.</td></tr>
@@ -404,6 +404,58 @@ export const CHAPTERS: Chapter[] = [
 <li>Connections and project variables used; Sutra variables; and the steps still without a description.</li>
 </ul>
 [[tip:Writing good descriptions|Say why, not only what: "Skips unchanged files so no vectors are made again" beats "Add to knowledge".<br>Name the business rule a step carries out and who owns it.<br>Describe triggers for the people who call them: address, input, who may call.]]`,
+  },
+  {
+    id: 'gateway', title: 'The API gateway',
+    html: `
+<p>SutraFlow listens on two kinds of ports, each for its own people. The <strong>studio port</strong> is for the team that builds and runs SutraFlow. The <strong>gateway</strong> is the front door for everyone and everything that uses your Sutras: other systems, websites, partners, mobile apps, AI assistants.</p>
+<table class="t"><thead><tr><th>Port</th><th>Default</th><th>Serves</th><th>Who reaches it</th></tr></thead><tbody>
+<tr><td>Studio (admin)</td><td><code>127.0.0.1:4800</code></td><td>The designer, the Admin Console (<code>/admin</code>), this guide, and the admin API (<code>/api/...</code>) used by the designer, the console and the <code>sutra</code> command</td><td>Only your team: keep it on 127.0.0.1, or reach it over a VPN or an internal reverse proxy with HTTPS</td></tr>
+<tr><td>Gateway HTTP</td><td><code>8080</code> (all addresses)</td><td>The deployed Sutras: REST and SOAP services, MCP, AI agents, access tokens</td><td>Callers. Point a load balancer or reverse proxy here, or use HTTPS</td></tr>
+<tr><td>Gateway HTTPS</td><td><code>8443</code> (all addresses)</td><td>The same, with TLS (a self-signed, your own or a Let's Encrypt certificate)</td><td>Callers over the internet</td></tr>
+<tr><td>Headless engine</td><td>admin <code>4801</code>, gateway <code>9080</code> / <code>9443</code></td><td>An engine without the designer: its Admin Console and its own gateway, serving the same deployed Sutras</td><td>Admin port: operations; gateway: callers</td></tr>
+</tbody></table>
+<p>The ports are set in <code>sutraflow.env</code> (<code>STUDIO_PORT</code>, <code>STUDIO_GATEWAY_HTTP</code>, <code>STUDIO_GATEWAY_HTTPS</code>, and <code>ENGINE_...</code> for an engine); <strong>Server &amp; APIs</strong> in the designer shows the gateway's addresses and every service on it. A Laragon installation uses for example studio 4810 and gateway 8090 and 8453, with Apache forwarding <code>http://sutra.test</code> to the studio.</p>
+<p class="h">What the gateway serves</p>
+<table class="t"><thead><tr><th>Address on the gateway</th><th>What</th><th>Made by</th></tr></thead><tbody>
+<tr><td>Your paths, for example <code>GET /orders/:id</code></td><td>REST services</td><td>A deployed Sutra that starts with [[restService]]</td></tr>
+<tr><td>Your paths, for example <code>/soap/orders</code>, and <code>?wsdl</code></td><td>SOAP services and their WSDL</td><td>[[soapService]]</td></tr>
+<tr><td><code>/mcp</code>, or an MCP server's address such as <code>/mcp/orders</code></td><td>Tools for AI assistants (Model Context Protocol)</td><td>[[mcpTool]] Sutras and published agents</td></tr>
+<tr><td><code>/chat/&lt;name&gt;</code>, <code>/chat/&lt;name&gt;/api</code>, <code>/chat/&lt;name&gt;/widget.js</code></td><td>An agent's chat page, its API, and a chat button for any website</td><td>[[agentChannel]]</td></tr>
+<tr><td><code>/v1/models</code>, <code>/v1/chat/completions</code></td><td>Agents as OpenAI-compatible models</td><td>[[agentChannel]] with OpenAI-compatible ticked</td></tr>
+<tr><td><code>/a2a/&lt;name&gt;</code></td><td>Agent-to-agent (A2A) with its agent card</td><td>[[agentChannel]] with A2A ticked</td></tr>
+<tr><td><code>POST /oauth/token</code></td><td>Access tokens for gateway apps (client credentials)</td><td>Admin Console &rarr; Gateway &rarr; Apps and keys</td></tr>
+<tr><td><code>/openapi.json</code></td><td>The OpenAPI description of the REST services, for Postman, Swagger UI or code generators</td><td>When publishing is switched on (Admin Console &rarr; Gateway &rarr; APIs)</td></tr>
+<tr><td><code>/health</code></td><td>Up or not, for load balancers</td><td>Always</td></tr>
+</tbody></table>
+<p>The gateway never serves the designer, the Admin Console or the admin API; and a Sutra is on the gateway only while it is deployed. In the designer, <strong>Test</strong> runs a Sutra without the gateway.</p>
+<p class="h">Publish a REST API: step by step</p>
+<ol>
+<li>New Sutra; first step [[restService]]: method <code>GET</code>, path <code>/orders/:id</code>. Its test request lets you run it in the designer.</li>
+<li>Do the work: a database query, a call to another system, a mapping.</li>
+<li>End with [[httpResponse]]: status 200 and the JSON to return; a second response for errors (404, 400).</li>
+<li>Choose an <strong>API security policy</strong> on the trigger (next section); Deploy.</li>
+<li>Call it on the gateway:</li>
+</ol>
+<pre>curl http://127.0.0.1:8080/orders/A-1001 -H "X-API-Key: your-key"
+Invoke-RestMethod http://127.0.0.1:8080/orders/A-1001 -Headers @{ "X-API-Key" = "your-key" }</pre>
+<p>Server &amp; APIs lists the service with its full address; the Admin Console's Applications shows it running, and Gateway &rarr; Traffic shows its calls.</p>
+<p class="h">Who may call, and how much</p>
+<p>Every request passes through, in order: the <strong>firewall</strong> (addresses allowed or refused for the whole gateway), the service's <strong>API security policy</strong> (HTTPS only, IP allow list, authentication, a rate limit per caller, CORS for browsers), and for gateway apps their <strong>plan</strong>. A refused request gets 403, 401 or 429 and never starts the Sutra.</p>
+<ul>
+<li><strong>Simple</strong>: a policy with API keys (vault secrets) or Basic sign-in; see <em>Exposing APIs: security and TLS</em>.</li>
+<li><strong>For many callers</strong>: Admin Console &rarr; Gateway. Make a <strong>plan</strong> (requests per minute, hour, day and a monthly quota), an <strong>app</strong> per caller (partner, mobile app, team) with its scopes and plan, and give it a <strong>key</strong> (<code>sfk_...</code>, shown once, stored as a hash). Set the policy to <em>Gateway apps</em>. Callers send the key in <code>X-API-Key</code>, or exchange it for a short-lived token:</li>
+</ul>
+<pre>curl -X POST http://127.0.0.1:8080/oauth/token -d "grant_type=client_credentials&amp;client_id=APP_ID&amp;client_secret=sfk_..."
+curl http://127.0.0.1:8080/orders/A-1001 -H "Authorization: Bearer ACCESS_TOKEN"</pre>
+<p>Disabling an app, or deleting a key, stops it at once on every engine. Gateway &rarr; Traffic shows requests, errors and time taken by service and app; the request log keeps every call (path, app, status, time, run) for the days set there.</p>
+<p class="h">HTTPS and the internet</p>
+<ul>
+<li>Give the gateway a certificate in Server &amp; APIs: your own, or Let's Encrypt (the gateway's HTTP port must answer as port 80 for the domain while the certificate is made and renewed).</li>
+<li>Or put a reverse proxy or load balancer in front (Apache, nginx, IIS, Azure Application Gateway, AWS ALB) that ends TLS and forwards to the gateway's HTTP port; send <code>/health</code> as its health check, and <code>/ready</code> on the admin port for engines.</li>
+<li>Open only the gateway port in the firewall, never the studio port.</li>
+</ul>
+[[tip:Good practice|Every public service gets a policy; a service without one is open to anyone who reaches the gateway, and the designer warns about it.<br>Use an app per caller, so one can be throttled or switched off without touching the others.<br>Keep the studio port private; the gateway is the only door you open.]]`,
   },
   {
     id: 'expose', title: 'Exposing APIs: security and TLS',
@@ -1229,6 +1281,39 @@ tools/migrate-to-postgres.sh --url "postgres://sutra:password@db.example.com:543
 <li>Back up PostgreSQL (<code>pg_dump</code>, or the hosted service's backups); the master key in the data folder still decrypts the vault and must be kept with the backups.</li>
 <li>More engines on other machines use the same <code>SUTRA_DB</code>, <code>SUTRA_DB_PASSWORD</code> and master key (see <em>Running in production</em>).</li>
 <li>To go back to SQLite: stop SutraFlow, put the kept <code>sutraflow.env.sqlite-...</code> file back, start it (changes made on PostgreSQL stay there).</li>
+</ul>`,
+  },
+  {
+    id: 'data', title: 'Where SutraFlow keeps its data',
+    html: `
+<p>Everything SutraFlow knows is in one database and one data folder. This chapter says what is where, what is encrypted, what grows, and how to back it up. Look, but change things through the designer, the Admin Console or the <code>sutra</code> command: they check permissions, write the audit log and keep the engines in step, which a direct database change does not.</p>
+<p class="h">The database</p>
+<ul>
+<li><strong>SQLite</strong> (the start): the file <code>&lt;data&gt;/sutra.db</code>. Open it read-only with DB Browser for SQLite or HeidiSQL, ideally from a copy.</li>
+<li><strong>PostgreSQL</strong> (after <em>Moving to PostgreSQL</em>): the database named in <code>SUTRA_DB</code>, for example <code>sutraflow</code>, schema <code>public</code>. In HeidiSQL or pgAdmin, open that database; the server's other databases (such as <code>postgres</code>) hold nothing of SutraFlow.</li>
+</ul>
+<p>Text columns hold JSON and ISO dates, so the same tables work on both databases and move between them as they are. The Admin Console's Database page shows which database is in use and its main row counts.</p>
+<p class="h">The data folder</p>
+<table class="t"><thead><tr><th>In <code>&lt;data&gt;</code></th><th>What</th></tr></thead><tbody>
+<tr><td><code>master.key</code></td><td>The key that encrypts the vault, OAuth and Git tokens and the TLS key (made with the first secret). Without it those values cannot be read: back it up apart from the database, and keep it secret. <code>SUTRA_MASTER_KEY</code> can give it instead.</td></tr>
+<tr><td><code>sutra.db</code></td><td>The SQLite database (kept as a backup after a move to PostgreSQL).</td></tr>
+<tr><td><code>admin-token.txt</code></td><td>The local admin token the launcher uses to stop and query the server.</td></tr>
+<tr><td><code>logs/</code></td><td>Project logs and the server's output log.</td></tr>
+<tr><td><code>files/&lt;project&gt;/</code></td><td>Each project's files folder (<code>\${files}</code> in variables): documents, scripts and files that release zips bring.</td></tr>
+<tr><td><code>workspaces/</code></td><td>Git working copies of projects in Git.</td></tr>
+<tr><td><code>knowledge/</code></td><td>Knowledge bases kept in a folder.</td></tr>
+<tr><td><code>config/</code></td><td>Deployment configs dropped here as <code>&lt;project&gt;.json</code> are loaded at start.</td></tr>
+<tr><td><code>run/</code>, <code>migration/</code></td><td>The launcher's process ids; the status and log of a move to PostgreSQL.</td></tr>
+</tbody></table>
+<p class="h">The tables</p>
+<p>36 tables, by what they are for. <em>Encrypted</em> marks values only readable with the master key; <em>Grows</em> marks tables that get longer with use, and what keeps them in check.</p>
+[[tables]]
+<p class="h">Backups</p>
+<ul>
+<li><strong>SQLite</strong>: stop SutraFlow (or use <code>sqlite3 sutra.db ".backup copy.db"</code> while it runs) and copy the whole data folder.</li>
+<li><strong>PostgreSQL</strong>: <code>pg_dump -Fc sutraflow &gt; sutraflow.dump</code> (or the hosted service's backups), plus the data folder without <code>sutra.db</code>.</li>
+<li>Always <code>master.key</code>, kept apart from the database backup: a stolen database backup without the key reveals no secrets.</li>
+<li>Restore: put the folder and the key back (and <code>pg_restore</code> for PostgreSQL), then start SutraFlow.</li>
 </ul>`,
   },
   {

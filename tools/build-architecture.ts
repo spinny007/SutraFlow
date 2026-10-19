@@ -6,6 +6,7 @@
  *
  *   npm run architecture
  */
+import { TABLE_TEXT, schemaTables } from './guide/tables.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -233,6 +234,7 @@ const FILES: Group[] = [
       ['tools/migrate-to-postgres.sh', 'Linux and macOS wrapper of migrate-to-postgres.mjs: finds Node.js from sutraflow.env and passes the settings file.'],
       ['tools/build-sample-projects.ts', 'Builds the sample project zips in samples/ (<code>npm run samples</code>): whole projects as release zips with their files, listed in samples/index.json for New project.'],
       ['tools/build-user-guide.ts', 'Builds docs/sutraflow-user-guide.html (<code>npm run guide</code>): chapters, every activity with its settings table, connection types, functions, pipes and samples, read from the server code.'],
+      ['tools/guide/tables.ts', 'The tables of SutraFlow itself, for the guide and this page: what each holds, groups, what is encrypted or grows, and the columns read from db.ts (the schema and the columns later versions add).'],
       ['tools/guide/chapters.ts', 'User guide chapters.'],
       ['tools/guide/activities.ts', 'Advice text for every activity in the user guide.'],
       ['tools/guide/logo.ts', 'The SutraFlow mark used by both pages.'],
@@ -291,54 +293,7 @@ for (const f of described) if (!fs.existsSync(path.join(root, f))) problems.push
 // ---------------------------------------------------------------------------------------------
 // Generated tables.
 // ---------------------------------------------------------------------------------------------
-function tablesFromSchema() {
-  const src = read('server/src/db.ts');
-  const schema = /const SCHEMA = `([\s\S]*?)`;/.exec(src)?.[1] || '';
-  const out: { name: string; cols: string[] }[] = [];
-  for (const m of schema.matchAll(/create table if not exists (\w+)\(([\s\S]*?)\);/g)) {
-    const cols = m[2].replace(/\s+/g, ' ').split(/,(?![^(]*\))/).map(c => c.trim()).filter(c => c && !/^primary key/.test(c)).map(c => c.split(' ')[0]);
-    out.push({ name: m[1], cols });
-  }
-  return out;
-}
-const TABLE_TEXT: Record<string, string> = {
-  flows: 'Sutra drafts: the document being edited and its latest version number.',
-  flow_versions: 'Published, unchangeable versions of each Sutra.',
-  deployments: 'Which version of each Sutra is deployed, and whether it is enabled.',
-  runs: 'One row per run: the Sutra document it started with, status, trigger input, state (outputs, variables, branch tokens, logs) and times.',
-  tasks: 'One row per step execution: status, attempt, not-before time, owner engine, input, output, port, wait details, error and duration. The work queue.',
-  resources: 'Connections, security profiles, API policies, AI providers and MCP servers (secret names only).',
-  secrets: 'The vault: encrypted values with their IV and tag.',
-  settings: 'Server settings and policies, gateway and TLS settings, Sengine variables, the deploy generation.',
-  projects: 'Projects with their variables, logging and deployment config.',
-  schemas: 'Shared schemas and WSDLs of each project.',
-  counters: 'Counter activity values per project.',
-  package_deployments: 'Package history per project: version, checksum, who deployed it, the report and the package itself (for rollback).',
-  engines: 'Engines of the cluster: host, process, mode, version, heartbeat, workers, active steps, draining.',
-  leases: 'Cluster-wide locks with an expiry: the leader lease and the deploy-folder lock.',
-  alert_channels: 'Where alerts go: email (an SMTP connection and addresses), webhook (address and signing secret name), or a Sutra.',
-  alert_rules: 'What to watch: kind, settings, severity, channels, on or off, tell when resolved, reminder minutes.',
-  alerts: 'Alerts: rule, severity, state (firing, acknowledged, resolved), message and details, times, who acknowledged, what was sent where.',
-  gw_plans: 'Gateway plans: requests per minute, hour and day, and a monthly quota.',
-  gw_apps: 'Gateway apps: name, contact, scopes, plan, disabled.',
-  gw_keys: 'API keys of gateway apps: hash, name, expiry and last use. Key values are never stored.',
-  gw_usage: 'Requests per app in the current minute, hour, day and month windows, shared by every engine.',
-  git_accounts: 'Git accounts of each person: provider, host, login, encrypted token, author name and email.',
-  git_workspaces: 'Projects connected to Git: the working copy folder, remote, branch, team or personal, owner, trusted.',
-  git_ids: 'Per workspace, repository ids of Sutras, connections and schemas against the ids of its project here.',
-  ai_sessions: 'One row per conversation of an AI memory store: running summary, last turn number, counts, and which run holds it.',
-  ai_memory: 'Turns of AI conversations kept in the built-in memory store (role, text or sealed text, tokens).',
-  ai_session_queue: 'Runs waiting for a conversation, in arrival order; the first one holds it.',
-  ai_agent_state: 'Progress of an AI agent step in a run (tool steps, tokens, the tool it waits for), removed when the step finishes.',
-  ai_knowledge: 'Passages of built-in knowledge bases with their source, details and vector.',
-  folders: 'Explorer folders of a project kept while nothing is in them, per area (sutras, resources, schemas, wsdl); each item keeps its own folder in a folder column.',
-  gw_requests: 'The gateway request log: time, engine, method, path, service, app, caller, status, time taken, sizes, address, run and error.',
-  users: 'People and system accounts: password hash, name, email, disabled, must change password, failed sign-ins, lock, sessions valid after, last sign-in.',
-  roles: 'Built-in and custom roles with their permissions.',
-  grants: 'Which role each account holds, for all projects (empty project) or one project.',
-  api_tokens: 'API tokens of system accounts: hash, name, expiry and last use. Token values are never stored.',
-  audit: 'Audit log: time, actor, address, action, target, project, status, outcome and safe details.',
-};
+const tablesFromSchema = () => schemaTables(root);
 
 function apiRoutes() {
   const routes = [...read('server/src/api.ts').matchAll(/app\.(get|post|put|delete|patch)\('([^']+)'/g)].map(m => ({ method: m[1].toUpperCase(), path: m[2] }));

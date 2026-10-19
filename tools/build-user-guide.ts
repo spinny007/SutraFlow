@@ -19,6 +19,7 @@ import { CHAPTERS } from './guide/chapters.js';
 import { ACTIVITY_TEXT } from './guide/activities.js';
 import { SAMPLES } from '../server/src/samples.js';
 import { LOGO_URI } from './guide/logo.js';
+import { TABLE_TEXT, TABLE_GROUPS, TABLE_NOTES, schemaTables } from './guide/tables.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const IMG = path.join(root, 'docs', 'guide-images');
@@ -74,11 +75,29 @@ function commandTable(text: string, tool: string) {
   return `<table class="t cmds"><thead><tr><th>Command</th><th>What it does</th></tr></thead><tbody>${body}</tbody></table>${notes.map(n => `<p class="cmdnote">${esc(n)}</p>`).join('')}`;
 }
 
+/** SutraFlow's own tables by group: what each holds, its columns, and what is encrypted or grows. */
+function tablesSection() {
+  const all = schemaTables(root);
+  const grouped = new Set(TABLE_GROUPS.flatMap(g => g[1]));
+  for (const t of all) {
+    if (!grouped.has(t.name)) missing.push(`table ${t.name} in a group of tools/guide/tables.ts`);
+    if (!TABLE_TEXT[t.name]) missing.push(`description of table ${t.name}`);
+  }
+  return TABLE_GROUPS.map(([group, names]) => `<p class="h">${esc(group)}</p><table class="t"><thead><tr><th>Table</th><th>Holds</th><th>Columns</th></tr></thead><tbody>${names.map(n => {
+    const t = all.find(x => x.name === n);
+    if (!t) { missing.push(`table ${n} (listed, but not in the schema)`); return ''; }
+    const note = TABLE_NOTES[n];
+    const extra = [note?.encrypted ? `<span class="cond">Encrypted: ${esc(note.encrypted)}.</span>` : '', note?.grows ? `<span class="cond">Grows: ${esc(note.grows)}.</span>` : ''].filter(Boolean).join(' ');
+    return `<tr><td><code>${esc(n)}</code></td><td>${esc(TABLE_TEXT[n] || '')}${extra ? ` ${extra}` : ''}</td><td class="cols">${t.cols.map(c => `<code>${esc(c)}</code>`).join(' ')}</td></tr>`;
+  }).join('')}</tbody></table>`).join('');
+}
+
 /** Expands [[img:..]], [[note:..]], [[tip:..]] and [[type]] markers. */
 function expand(html: string): string {
   return html
     .replace('[[commands:sutraflow]]', () => commandTable(helpText([path.join(root, 'bin', 'sutraflow.mjs'), 'help']), 'sutraflow'))
     .replace('[[commands:sutra]]', () => commandTable(helpText(['--import', 'tsx', path.join(root, 'server', 'src', 'cli.ts'), 'help']), 'sutra'))
+    .replace('[[tables]]', () => tablesSection())
     .replace('[[samples]]', () => `<table class="t"><thead><tr><th>Sample</th><th>What it shows</th><th>Palettes</th></tr></thead><tbody>${SAMPLES.map(x => `<tr><td><strong>${esc(x.name)}</strong></td><td>${esc(x.desc)}${x.needs ? ` <span class="cond">Needs ${esc(x.needs)}.</span>` : ''}</td><td>${esc(x.palettes)}</td></tr>`).join('')}</tbody></table>`)
     .replace(/\[\[img:([\w-]+)\|([^\]]*)\]\]/g, (_m, name, cap) => {
       const f = path.join(IMG, `${name}.jpg`);
