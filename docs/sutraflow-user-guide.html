@@ -1451,6 +1451,7 @@ sutra user list</pre>
 <h3 id="ch-move-postgres" class="ch">37. Moving to PostgreSQL</h3>
 
 <p>SutraFlow keeps its own data (projects, Sutras, runs, people, the vault) in SQLite until you move it to PostgreSQL. PostgreSQL lets several engines share the data and holds more. The move takes a minute and is one button in the Admin Console, or one script on Windows and Linux.</p>
+<div class="note"><strong>Do you need to move?</strong><p>On a single server, SQLite is faster than PostgreSQL (about four times the steps a second in our measurements) and needs no database server. Move when you add engines, need failover, or must run the database apart. See <a href="#ch-sizing">Sizing and performance</a>.</p></div>
 <p class="h">1. Prepare PostgreSQL</p>
 <ul>
 <li>On this machine (Laragon includes PostgreSQL), on another server, or hosted: Azure Database for PostgreSQL, Amazon RDS, Google Cloud SQL. Version 14 or later.</li>
@@ -1599,6 +1600,25 @@ docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=...
 <li><strong>Node memory</strong> is the heap limit to give each engine: <code>NODE_OPTIONS=--max-old-space-size=384</code> on the smallest machines, so the operating system and the database keep the rest.</li>
 <li><strong>SQLite is the fastest database for one server</strong>: it runs inside the engine, with no network in between, and measured about four times the steps per second of PostgreSQL on the same machine. Use it on small machines (a PostgreSQL server needs its own few hundred MB) and for any single server. Use <strong>PostgreSQL</strong> for several engines or machines, for failover, or when the database must be managed apart, ideally on a machine (or a managed service) of its own.</li>
 </ul>
+
+<p class="h">SQLite or PostgreSQL</p>
+<p><strong>For smaller workloads and for speed, use SQLite.</strong> It is the default, needs nothing installed, and is the fastest choice for a single server: the database runs inside the engine, so a step costs no network round trips. Measured on the same machine, one engine on SQLite ran about <strong>520 small steps a second</strong>, against about 120 on PostgreSQL. Held to one core and 512 MB, it still ran 365 a second durable and 750 in memory.</p>
+<div class="tw"><table class="t"><thead><tr><th>Use SQLite when</th><th>Use PostgreSQL when</th></tr></thead><tbody>
+<tr><td>One server runs SutraFlow (a VM, a desktop, a Raspberry Pi class box)</td><td>Several engines share the work, on one machine or several</td></tr>
+<tr><td>Small and medium workloads: up to millions of steps a day</td><td>You need failover: another engine takes over when one stops</td></tr>
+<tr><td>Fast request-reply APIs and short Sutras, where every millisecond counts</td><td>Runs must survive the loss of the whole machine (PostgreSQL replicated or managed)</td></tr>
+<tr><td>Small machines (1 to 2 GB): no database server to feed</td><td>Your company requires databases to be run, backed up and monitored by its DBAs</td></tr>
+<tr><td>Development, testing, demos, edge sites, departments</td><td>Run history must be queried by other tools while SutraFlow runs</td></tr>
+</tbody></table></div>
+<p>Getting the most out of SQLite:</p>
+<ul>
+<li>Keep the data folder on a <strong>local disk</strong>, ideally an SSD. Never on a network share (SMB, NFS): SQLite's locking is not safe there, and every write waits for the network.</li>
+<li>Run <strong>one engine</strong> per data folder; for more throughput on the same machine, use Sutras that run <em>in memory</em> and raise <em>Steps at once</em> before you think of more engines. (Several engines on one SQLite file work, but they take turns to write, so they add little.)</li>
+<li>Keep the database small: <em>Keep finished runs</em> at 7 to 30 days, and <em>Step data in history</em> on <em>errors only</em> or <em>none</em> for busy Sutras. A small database stays fast and backs up in seconds.</li>
+<li>Back up while it runs with <code>sqlite3 sutra.db ".backup copy.db"</code>, or stop SutraFlow and copy the data folder, together with <code>master.key</code> kept apart.</li>
+<li>When you outgrow it (several engines, failover), the move to PostgreSQL is one button: see <a href="#ch-move-postgres">Moving to PostgreSQL</a>. Nothing in the Sutras changes.</li>
+</ul>
+<div class="tip"><strong>Rule of thumb</strong><p>One server: SQLite, for the best speed with the least to look after. More than one engine, or a need for failover: PostgreSQL, on a machine of its own.</p></div>
 
 <p class="h">What to run on which machine</p>
 <div class="tw"><table class="t"><thead><tr><th>Machine</th><th>Good for</th><th>Avoid</th></tr></thead><tbody>
