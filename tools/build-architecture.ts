@@ -130,6 +130,7 @@ const FILES: Group[] = [
     files: [
       ['server/src/security/inbound.ts', 'API policies on gateway services: none, API key, Basic, JWT, mutual TLS, WS-Security UsernameToken; refusals become HTTP errors or SOAP faults.'],
       ['server/src/security/outbound.ts', 'Outbound security profiles for HTTP and SOAP calls: Basic, bearer, API key, OAuth client credentials, client certificates and TLS options.'],
+      ['server/src/security/validate.ts', 'Checks on what callers send to REST and SOAP services before a run starts: threat protection from the API security policy (nesting depth on the raw text, fields, list items, text length, body size, no DOCTYPE) and validation against the service schema (JSON Schema with ajv; XSD elements and JSON samples as schema trees).'],
       ['server/src/security/wss.ts', 'WS-Security headers for SOAP calls: UsernameToken, timestamps, X.509 signatures and SAML assertions; verification of signed requests. The X.509 signature is placed in wsse:Security by xml-crypto while signing (no deprecated calls).'],
       ['server/src/security/breaker.ts', 'Circuit breaker per HTTP connection: after a number of failures in a row, calls fail at once for a while, then one trial call decides.'],
     ],

@@ -18,6 +18,7 @@ import { deployedFlows } from '../flows.js';
 import { effectiveResource, getResource } from '../resources.js';
 import { authorize, corsHeaders, PolicyError, type Caller } from '../security/inbound.js';
 import { xmlParser } from '../security/outbound.js';
+import { checkParsed, checkRaw, limitsOf, MessageRejected, validateMessage } from '../security/validate.js';
 import { NS } from '../security/wss.js';
 import { listOf } from '../palettes/common.js';
 import { acmeChallenge, getCert, getTls } from './tls.js';
@@ -253,6 +254,10 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
     const fault = (status: number, code: string, msg: string, v12 = v12cfg) =>
       reply.code(status).type(v12 ? 'application/soap+xml; charset=utf-8' : 'text/xml; charset=utf-8').send(soapFault(v12, code, msg));
     if (method !== 'POST') return fault(405, 'soap:Client', 'SOAP requests must use POST');
+    const limits = limitsOf(policy?.config);
+    const soapMaxKb = Number(policy?.config.maxBodyKb) || 0;
+    if (soapMaxKb && Buffer.byteLength(raw) > soapMaxKb * 1024) { gw.error = 'Body too large'; return fault(413, 'soap:Client', `Body is larger than ${soapMaxKb} KB`); }
+    try { checkRaw(raw, 'xml', limits); } catch (e: any) { gw.error = e.message; return fault(e.status || 400, 'soap:Client', e.message); }
     let env: any;
     try { env = xmlParser.parse(raw)?.Envelope; } catch { /* handled below */ }
     if (!env?.Body) return fault(400, 'soap:Client', 'Request is not a SOAP envelope');
@@ -271,6 +276,17 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
     }
     const ops = listOf(n.config.operations);
     if (ops.length && !ops.some(o => o.toLowerCase() === opName.toLowerCase())) return fault(400, 'soap:Client', `Unknown operation ${opName}`, v12);
+    try {
+      checkParsed(env.Body, limits);
+      if (n.config.validateBody === 'reject invalid' && n.config.bodySchema) {
+        const errs = validateMessage(String(n.config.bodySchema), env.Body[opName], opName);
+        if (errs.length) throw new MessageRejected(`The request does not match the schema: ${errs.join('; ')}`, 400, errs);
+      }
+    } catch (e: any) {
+      if (!(e instanceof MessageRejected)) throw e;
+      gw.error = e.message;
+      return fault(e.status, 'soap:Client', e.message, v12);
+    }
     const header = { ...(env.Header || {}) };
     delete header.Security;
     const input = { operation: ops.find(o => o.toLowerCase() === opName.toLowerCase()) || opName, body: env.Body[opName], header, headers, soapAction: req.headers.soapaction, auth: caller, client };
@@ -303,10 +319,23 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
     if (pe.headers) reply.headers(pe.headers);
     return reply.code(pe.status || 500).send({ error: pe.message });
   }
-  const maxKb = Number(route.node.config.maxBodyKb) || 1024;
-  if (Buffer.byteLength(raw) > maxKb * 1024) return reply.code(413).send({ error: `Body is larger than ${maxKb} KB` });
+  const policyKb = Number(policy?.config.maxBodyKb) || 0;
+  const maxKb = Math.min(Number(route.node.config.maxBodyKb) || 1024, policyKb || Infinity);
+  if (Buffer.byteLength(raw) > maxKb * 1024) { gw.error = 'Body too large'; return reply.code(413).send({ error: `Body is larger than ${maxKb} KB` }); }
+  const limits = limitsOf(policy?.config);
   let body;
-  try { body = parseRestBody(raw, ct); } catch (e: any) { return reply.code(400).send({ error: e.message }); }
+  try {
+    checkRaw(raw, ct.includes('json') ? 'json' : ct.includes('xml') ? 'xml' : 'other', limits);
+    body = parseRestBody(raw, ct);
+    checkParsed(body, limits);
+    if (route.node.config.validateBody === 'reject invalid' && route.node.config.bodySchema) {
+      const errs = validateMessage(String(route.node.config.bodySchema), body);
+      if (errs.length) throw new MessageRejected('The request does not match the schema', 400, errs);
+    }
+  } catch (e: any) {
+    gw.error = e.message;
+    return reply.code(e.status || 400).send({ error: e.message, ...(e.errors?.length ? { errors: e.errors } : {}) });
+  }
   const m = path.match(route.re)!;
   const params = Object.fromEntries(route.keys.map((k, i) => [k, m[i + 1]]));
   const input = { method, path, params, query: Object.fromEntries(url.searchParams), headers, body, auth: caller, client };

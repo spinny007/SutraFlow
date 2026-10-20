@@ -102,6 +102,11 @@ export const RESOURCE_KINDS: ResourceKind[] = [
       F('ipAllow', 'Allowed IP addresses', 'list', [], { help: 'Exact IPs or IPv4 CIDR such as 10.0.0.0/8. Empty = any.' }),
       F('rateLimitPerMinute', 'Rate limit (requests per minute per caller, 0 = off)', 'number', 120),
       F('corsOrigins', 'CORS origins', 'list', [], { help: 'Browser origins allowed to call this API. Empty = none.' }),
+      F('maxBodyKb', 'Max body size (KB)', 'number', 0, { group: 'Threat protection', help: '0 = the service\'s own limit (REST: its Max body size; SOAP: the gateway\'s 50 MB).' }),
+      F('maxDepth', 'Max nesting depth', 'number', 64, { group: 'Threat protection', help: 'Objects, lists or XML elements inside each other. Checked before the message is parsed.' }),
+      F('maxFields', 'Max fields per message', 'number', 50000, { group: 'Threat protection', help: 'Object keys, XML elements and attributes in the whole message.' }),
+      F('maxItems', 'Max items per list', 'number', 50000, { group: 'Threat protection' }),
+      F('maxStringKb', 'Max text value (KB)', 'number', 1024, { group: 'Threat protection', help: 'The longest single text value. XML with a DOCTYPE is always refused (no entity expansion).' }),
     ],
   },
   {

@@ -1,0 +1,109 @@
+{
+  "label": "AMD Ryzen 7 7435HS, 16 threads, 24 GB",
+  "at": "2026-10-20T02:42:08.257Z",
+  "database": "PostgreSQL",
+  "node": "v24.21.0",
+  "settings": {},
+  "scenarios": [
+    {
+      "engines": 1,
+      "kb": 256,
+      "exec": "durable",
+      "kill": false,
+      "spread": true,
+      "dbLatencyMs": null,
+      "dbRttMs": 0.3,
+      "runs": 40,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 10.8,
+      "startSeconds": 10.8,
+      "runsPerSec": 3.7,
+      "stepsPerSec": 40.7,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 440
+      },
+      "startErrors": 0,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 10,
+        "p95": 17,
+        "p99": 21
+      },
+      "queueMs": {
+        "p50": 68,
+        "p95": 118,
+        "p99": 129
+      },
+      "runMs": {
+        "p50": 2016,
+        "p95": 2454,
+        "p99": 2470
+      },
+      "engineCpuCores": 0.98,
+      "engineMaxMemMb": 468,
+      "db": {
+        "maxConns": 10,
+        "maxLockWaits": 0,
+        "avgLockWaits": 0,
+        "maxTxSeconds": 0.114,
+        "avgTps": 132
+      },
+      "dbMb": 16.4
+    },
+    {
+      "engines": 1,
+      "kb": 1024,
+      "exec": "durable",
+      "kill": false,
+      "spread": true,
+      "dbLatencyMs": null,
+      "dbRttMs": 0.3,
+      "runs": 40,
+      "steps": 10,
+      "workers": 16,
+      "cpus": null,
+      "mem": null,
+      "seconds": 56.8,
+      "startSeconds": 56.8,
+      "runsPerSec": 0.7,
+      "stepsPerSec": 7.7,
+      "failed": 0,
+      "repeated": 0,
+      "byEngine": {
+        "load-0": 440
+      },
+      "startErrors": 0,
+      "startsLost": 0,
+      "stepMs": {
+        "p50": 41,
+        "p95": 73,
+        "p99": 86
+      },
+      "queueMs": {
+        "p50": 467,
+        "p95": 637,
+        "p99": 787
+      },
+      "runMs": {
+        "p50": 11150,
+        "p95": 11581,
+        "p99": 11698
+      },
+      "engineCpuCores": 1.32,
+      "engineMaxMemMb": 1193,
+      "db": {
+        "maxConns": 10,
+        "maxLockWaits": 1,
+        "avgLockWaits": 0,
+        "maxTxSeconds": 0.812,
+        "avgTps": 35
+      },
+      "dbMb": 24.7
+    }
+  ]
+}
