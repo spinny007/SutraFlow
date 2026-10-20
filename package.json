@@ -5,7 +5,10 @@
   "private": true,
   "license": "AGPL-3.0-only",
   "author": "Surya Partap Singh",
-  "repository": { "type": "git", "url": "https://github.com/spinny007/SutraFlow.git" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/spinny007/SutraFlow.git"
+  },
   "type": "module",
   "engines": {
     "node": ">=22.13"
@@ -51,10 +54,11 @@
     "rhea": "^3.0.5",
     "selfsigned": "^5.5.0",
     "soap": "^1.14.0",
-    "xml-crypto": "^6.3.3",
     "ssh2-sftp-client": "^11.0.0",
     "undici": "^8.11.2",
-    "unpdf": "^1.9.0"
+    "unpdf": "^1.9.0",
+    "ws": "^8.22.0",
+    "xml-crypto": "^6.3.3"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.16",
@@ -67,6 +71,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/smtp-server": "^3.5.13",
+    "@types/ws": "^8.18.2",
     "@vitejs/plugin-react": "^6.1.2",
     "@xyflow/react": "^12.12.0",
     "concurrently": "^10.0.6",

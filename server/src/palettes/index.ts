@@ -29,12 +29,14 @@ import { remoteActivities } from '../connectors/remote.js';
 import { azureActivities } from '../connectors/azure.js';
 import { chatActivities } from '../connectors/chat.js';
 import { memoryActivities } from './memory.js';
+import { wsActivities } from '../connectors/websocket.js';
 
 /** Palette order in the studio. New palettes (connectors) register here. */
 export const PALETTES = [
   { id: 'triggers', name: 'Triggers', color: 'auto' },
   { id: 'http', name: 'HTTP / REST', color: 'general' },
   { id: 'soap', name: 'SOAP / Web services', color: 'soap' },
+  { id: 'websocket', name: 'WebSocket', color: 'general' },
   { id: 'data', name: 'Data & mapping', color: 'data' },
   { id: 'flow', name: 'Flow control', color: 'flow' },
   { id: 'files', name: 'Files', color: 'data' },
@@ -54,7 +56,7 @@ export const PALETTES = [
 ];
 
 export const allActivities = [
-  ...coreActivities, ...processActivities, ...transformActivities, ...httpActivities, ...soapActivities, ...fileActivities, ...remoteActivities, ...dbActivities, ...memoryActivities, ...busActivities,
+  ...coreActivities, ...processActivities, ...transformActivities, ...httpActivities, ...soapActivities, ...wsActivities, ...fileActivities, ...remoteActivities, ...dbActivities, ...memoryActivities, ...busActivities,
   ...emailActivities, ...firebaseActivities, ...saasActivities, ...chatActivities, ...azureActivities, ...microsoftActivities, ...codeActivities, ...scriptActivities, ...releaseActivities, ...aiActivities, ...agentActivities, ...mcpActivities,
 ];
 

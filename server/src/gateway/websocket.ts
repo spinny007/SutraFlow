@@ -1,0 +1,260 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.8.0
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+/**
+ * WebSocket services on the gateway (the WebSocket service trigger).
+ *
+ *  Connect   an upgrade request on a deployed service path goes through the firewall and the
+ *            service's API security policy like a REST call. Browsers cannot set headers on a
+ *            WebSocket, so a token may come as ?access_token= and an API key under the policy's key
+ *            header name in the query. With CORS origins on the policy, a browser's Origin must be one.
+ *  Messages  each message starts a run (output "message"), in the order they came per connection
+ *            unless the service says otherwise; the open and close of a connection start runs too
+ *            when those outputs are connected. Size, nesting and schema are checked first.
+ *  Sending   the WebSocket send step writes to a connection, or to every connection of a service.
+ *            A connection lives on the engine that accepted it; a step on another engine leaves the
+ *            message in ws_outbox for that engine, which delivers it within a fraction of a second.
+ *            ws_connections lists the open connections of every engine.
+ */
+import type http from 'node:http';
+import type { Duplex } from 'node:stream';
+import crypto from 'node:crypto';
+import { WebSocketServer, WebSocket } from 'ws';
+import { config } from '../config.js';
+import { q } from '../db.js';
+import { asyncDatabase } from '../asyncdb.js';
+import { engine } from '../engine/engine.js';
+import { effectiveResource } from '../resources.js';
+import { authorize, PolicyError, type Caller } from '../security/inbound.js';
+import { checkParsed, checkRaw, limitsOf, MessageRejected, validateMessage } from '../security/validate.js';
+import { firewallAllows, getFirewall, logRequest } from './apps.js';
+import type { FlowDoc, FlowNode } from '../engine/types.js';
+
+export interface WsRoute { path: string; re: RegExp; keys: string[]; flowId: string; projectId: string; version: number; doc: FlowDoc; node: FlowNode }
+
+interface Conn {
+  id: string;
+  ws: WebSocket;
+  route: WsRoute;
+  caller: Caller;
+  client: { ip: string; secure: boolean };
+  params: Record<string, string>;
+  /** Messages waiting for the run before them (in-order services). */
+  queue: unknown[];
+  busy: boolean;
+  alive: boolean;
+}
+
+const conns = new Map<string, Conn>();
+const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 * 1024 });
+let routesOf: (path: string) => { route: WsRoute; params: Record<string, string> } | undefined = () => undefined;
+let pinger: NodeJS.Timeout | null = null;
+let poller: NodeJS.Timeout | null = null;
+
+export const openConnections = () => conns.size;
+
+/** The gateway tells this module how to find a WebSocket service for a path. */
+export function setWsRoutes(find: typeof routesOf) { routesOf = find; }
+
+function reject(socket: Duplex, status: number, message: string) {
+  const reason = { 400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found', 413: 'Payload Too Large', 429: 'Too Many Requests', 503: 'Service Unavailable' }[status] || 'Error';
+  const body = JSON.stringify({ error: message });
+  socket.write(`HTTP/1.1 ${status} ${reason}\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);
+  socket.destroy();
+}
+
+/** Accepts WebSocket upgrades on a gateway server (HTTP or HTTPS). */
+export function attachWebSockets(server: http.Server, secure: boolean) {
+  server.on('upgrade', (req: http.IncomingMessage, socket: Duplex, head: Buffer) => {
+    void upgrade(req, socket, head, secure).catch(e => reject(socket, 500, e?.message || 'Upgrade failed'));
+  });
+  startTimers();
+}
+
+async function upgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer, secure: boolean) {
+  const url = new URL(req.url || '/', 'http://x');
+  const path = decodeURIComponent(url.pathname);
+  const ip = req.socket.remoteAddress || '';
+  const log = (status: number, route?: WsRoute, caller?: Caller, error = '') => logRequest({
+    kind: 'websocket', method: 'GET', path, route: route?.doc.name, flowId: route?.flowId, projectId: route?.projectId, appId: caller?.appId, caller: caller?.subject,
+    status, ms: 0, ip, runId: '', error, bytesIn: 0, bytesOut: 0,
+  });
+  if (!firewallAllows(ip, getFirewall())) { log(403, undefined, undefined, 'Firewall'); return reject(socket, 403, 'Your address is not allowed'); }
+  const found = routesOf(path);
+  if (!found) { log(404); return reject(socket, 404, 'No WebSocket service at this path'); }
+  const { route, params } = found;
+  const policy = route.node.config.policy ? effectiveResource(route.node.config.policy) : undefined;
+  if (route.node.config.policy && !policy) { log(503, route); return reject(socket, 503, 'The service\'s security policy is missing; refusing to serve it unprotected'); }
+  // Browsers: the policy's CORS origins decide which pages may connect.
+  const origins: string[] = Array.isArray(policy?.config.corsOrigins) ? policy!.config.corsOrigins : [];
+  const origin = String(req.headers.origin || '');
+  if (origin && origins.length && !origins.includes('*') && !origins.includes(origin)) { log(403, route, undefined, 'Origin not allowed'); return reject(socket, 403, 'This page may not connect'); }
+  // A token or key in the query, where a browser cannot send headers.
+  const headers: Record<string, string | string[] | undefined> = { ...req.headers };
+  const tok = url.searchParams.get('access_token');
+  if (tok && !headers.authorization) headers.authorization = `Bearer ${tok}`;
+  const keyName = String(policy?.config.apiKeyHeader || 'X-API-Key');
+  const key = url.searchParams.get(keyName) || url.searchParams.get(keyName.toLowerCase());
+  if (key && !headers[keyName.toLowerCase()]) headers[keyName.toLowerCase()] = key;
+  let caller: Caller;
+  try {
+    caller = await authorize(policy, { headers, ip, secure, socket: req.socket, method: 'GET', path: url.pathname + url.search, rawBody: '' });
+    const need = String(route.node.config.requiredScopes || '').split(/\s+/).filter(Boolean);
+    const missing = need.filter(s => !(caller.scopes || []).includes(s));
+    if (missing.length) throw new PolicyError(403, `The caller is missing scope: ${missing.join(' ')}`);
+  } catch (e: any) {
+    log(e.status || 401, route, undefined, e.message);
+    return reject(socket, e instanceof PolicyError ? e.status : 500, e.message);
+  }
+  wss.handleUpgrade(req, socket, head, ws => opened(ws, route, caller, { ip, secure }, params));
+  log(101, route, caller);
+}
+
+const hasEdges = (r: WsRoute, port: string) => r.doc.edges.some(e => e.from === r.node.id && (e.port || 'message') === port);
+
+function fire(c: Conn, event: 'open' | 'message' | 'close', extra: Record<string, unknown>, onFinish?: () => void) {
+  const r = c.route;
+  const input = { event, connectionId: c.id, path: r.path, params: c.params, auth: c.caller, client: c.client, ...extra };
+  return engine.startRun({ doc: r.doc, flowId: r.flowId, projectId: r.projectId, version: r.version, triggerNodeId: r.node.id, input, source: 'websocket', onFinish: onFinish ? () => onFinish() : undefined })
+    .catch(e => { onFinish?.(); send(c, { error: `The message could not be handled: ${e?.message || e}` }); });
+}
+
+function send(c: Conn, data: unknown) {
+  if (c.ws.readyState !== WebSocket.OPEN) return false;
+  c.ws.send(typeof data === 'string' ? data : JSON.stringify(data));
+  return true;
+}
+
+function opened(ws: WebSocket, route: WsRoute, caller: Caller, client: Conn['client'], params: Record<string, string>) {
+  const c: Conn = { id: crypto.randomUUID(), ws, route, caller, client, params, queue: [], busy: false, alive: true };
+  conns.set(c.id, c);
+  q.run('insert into ws_connections(id, engine_id, path, flow_id, subject, opened_at) values(?, ?, ?, ?, ?, ?)', c.id, config.engineId, route.path, route.flowId, caller.subject, Date.now());
+  const cfg = route.node.config;
+  const maxBytes = Math.max(1, Number(cfg.maxMessageKb) || 256) * 1024;
+  const limits = limitsOf(route.node.config.policy ? effectiveResource(route.node.config.policy)?.config : undefined);
+  const inOrder = cfg.inOrder !== false;
+  const next = () => {
+    if (c.busy || !c.queue.length) return;
+    const message = c.queue.shift();
+    c.busy = inOrder;
+    void fire(c, 'message', { message }, inOrder ? () => { c.busy = false; next(); } : undefined);
+    if (!inOrder) next();
+  };
+  ws.on('pong', () => { c.alive = true; });
+  ws.on('message', (data, isBinary) => {
+    const size = Array.isArray(data) ? data.reduce((a, b) => a + b.length, 0) : (data as Buffer).byteLength;
+    if (size > maxBytes) return ws.close(1009, `Messages are limited to ${Math.round(maxBytes / 1024)} KB`);
+    const text = Buffer.isBuffer(data) ? data.toString('utf8') : Buffer.concat(Array.isArray(data) ? data : [Buffer.from(data as ArrayBuffer)]).toString('utf8');
+    let message: unknown = isBinary ? { base64: Buffer.from(text, 'utf8').toString('base64') } : text;
+    try {
+      if (cfg.format !== 'text' && !isBinary) {
+        checkRaw(text, 'json', limits);
+        try { message = JSON.parse(text); } catch { throw new MessageRejected('The message is not valid JSON'); }
+        checkParsed(message, limits);
+        if (cfg.validateBody === 'reject invalid' && cfg.bodySchema) {
+          const errs = validateMessage(String(cfg.bodySchema), message);
+          if (errs.length) throw new MessageRejected('The message does not match the schema', 400, errs);
+        }
+      }
+    } catch (e: any) {
+      send(c, { error: e.message, ...(e.errors?.length ? { errors: e.errors } : {}) });
+      return;
+    }
+    // A connection that floods the queue is closed rather than holding memory.
+    if (c.queue.length >= 1000) return ws.close(1008, 'Too many messages waiting');
+    c.queue.push(message);
+    next();
+  });
+  ws.on('close', (code, reason) => {
+    conns.delete(c.id);
+    q.run('delete from ws_connections where id = ?', c.id);
+    if (hasEdges(route, 'close')) void fire(c, 'close', { code, reason: reason.toString() });
+  });
+  ws.on('error', () => { /* a broken connection closes */ });
+  if (hasEdges(route, 'open')) void fire(c, 'open', {});
+}
+
+/**
+ * Sends to a connection or, with a path, to every connection of that service on every engine.
+ * Returns how many connections it reached here, and how many messages it left for other engines.
+ */
+export async function wsSend(o: { connectionId?: string; path?: string; data: unknown; close?: { code: number; reason: string } }) {
+  const payload = typeof o.data === 'string' ? o.data : JSON.stringify(o.data);
+  const act = (c: Conn) => {
+    if (o.close) { c.ws.close(o.close.code, o.close.reason); return true; }
+    return send(c, payload);
+  };
+  const db = asyncDatabase();
+  const item = JSON.stringify({ data: payload, close: o.close });
+  if (o.connectionId) {
+    const local = conns.get(o.connectionId);
+    if (local) return { delivered: act(local) ? 1 : 0, forwarded: 0 };
+    const row = await db.get<{ engine_id: string }>('select engine_id from ws_connections where id = ?', o.connectionId);
+    if (!row) throw new Error('The WebSocket connection is closed');
+    await db.run('insert into ws_outbox(engine_id, connection_id, path, item, created_at) values(?, ?, ?, ?, ?)', row.engine_id, o.connectionId, '', item, Date.now());
+    return { delivered: 0, forwarded: 1 };
+  }
+  const path = '/' + String(o.path || '').trim().replace(/^\/+|\/+$/g, '');
+  let delivered = 0;
+  for (const c of conns.values()) if (c.route.path === path && act(c)) delivered++;
+  const others = await db.all<{ engine_id: string }>('select distinct engine_id from ws_connections where path = ? and engine_id <> ?', path, config.engineId);
+  for (const e of others) await db.run('insert into ws_outbox(engine_id, connection_id, path, item, created_at) values(?, ?, ?, ?, ?)', e.engine_id, '', path, item, Date.now());
+  return { delivered, forwarded: others.length };
+}
+
+/** Messages other engines left for connections here. */
+async function deliverOutbox() {
+  if (!conns.size) return;
+  const db = asyncDatabase();
+  const rows = await db.all<{ id: number; connection_id: string; path: string; item: string }>('select id, connection_id, path, item from ws_outbox where engine_id = ? order by id limit 500', config.engineId);
+  if (!rows.length) return;
+  for (const r of rows) {
+    const { data, close } = JSON.parse(r.item);
+    const targets = r.connection_id ? [conns.get(r.connection_id)].filter(Boolean) as Conn[] : [...conns.values()].filter(c => c.route.path === r.path);
+    for (const c of targets) { if (close) c.ws.close(close.code, close.reason); else send(c, data); }
+  }
+  await db.run(`delete from ws_outbox where id in (${rows.map(() => '?').join(', ')})`, ...rows.map(r => r.id));
+}
+
+function startTimers() {
+  if (!pinger) {
+    // Every 30 seconds: a connection that did not answer the last ping is gone.
+    pinger = setInterval(() => {
+      for (const c of conns.values()) {
+        if (!c.alive) { c.ws.terminate(); continue; }
+        c.alive = false;
+        try { c.ws.ping(); } catch { /* closing */ }
+      }
+    }, 30000);
+    pinger.unref();
+  }
+  if (!poller) {
+    let busy = false;
+    poller = setInterval(() => {
+      if (busy || !conns.size) return;
+      busy = true;
+      deliverOutbox().catch(e => console.error('WebSocket outbox:', e?.message || e)).finally(() => { busy = false; });
+    }, 200);
+    poller.unref();
+  }
+}
+
+/** Closes every connection (the gateway stops or reloads); a client reconnects to another engine. */
+export function closeWebSockets(code = 1001, reason = 'Server going away') {
+  for (const c of conns.values()) { try { c.ws.close(code, reason); } catch { /* gone */ } }
+  conns.clear();
+  try { q.run('delete from ws_connections where engine_id = ?', config.engineId); } catch { /* database closed */ }
+  if (pinger) { clearInterval(pinger); pinger = null; }
+  if (poller) { clearInterval(poller); poller = null; }
+}
+
+/** At start: rows an earlier run of this engine left behind. */
+export function forgetStaleConnections() {
+  q.run('delete from ws_connections where engine_id = ?', config.engineId);
+}

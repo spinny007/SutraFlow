@@ -14,6 +14,7 @@ import { resolveResourceConfig } from './settings.js';
 import { CONNECTOR_KINDS } from './connectors/kinds.js';
 import { AZURE_KINDS } from './connectors/azure.js';
 import { CHAT_KINDS } from './connectors/chat.js';
+import { WS_KINDS } from './connectors/websocket.js';
 import { AI_ENGINES } from './ai/engines.js';
 import type { Field, ResourceKind } from './engine/types.js';
 
@@ -241,6 +242,7 @@ export const RESOURCE_KINDS: ResourceKind[] = [
   ...CONNECTOR_KINDS,
   ...AZURE_KINDS,
   ...CHAT_KINDS,
+  ...WS_KINDS,
 ];
 
 /** Explorer symbols, in the same plain style as the activity symbols. */

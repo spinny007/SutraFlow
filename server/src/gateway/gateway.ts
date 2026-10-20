@@ -30,6 +30,7 @@ import { metrics } from '../metrics.js';
 import { version as sutraVersion } from '../config.js';
 import { firewallAllows, getFirewall, getGatewayOptions, issueToken, logRequest, openApi } from './apps.js';
 import { agentMcpEndpoints, agentMcpTools, callAgentTool, handleAgents, listAgents, rebuildAgents } from './agents.js';
+import { attachWebSockets, closeWebSockets, forgetStaleConnections, setWsRoutes, type WsRoute } from './websocket.js';
 
 /**
  * The gateway serves deployed REST and SOAP services on its own HTTP and HTTPS
@@ -45,7 +46,7 @@ export const getGatewaySettings = (): GatewaySettings => ({
 export const setGatewaySettings = (s: Partial<GatewaySettings>) => setSetting('gateway', { ...getGatewaySettings(), ...s });
 
 interface Route {
-  kind: 'rest' | 'soap';
+  kind: 'rest' | 'soap' | 'ws';
   method: string;
   path: string;
   re: RegExp;
@@ -67,15 +68,21 @@ export function rebuildRoutes() {
   const out: Route[] = [];
   for (const d of deployedFlows()) {
     for (const n of d.doc.nodes) {
-      if (n.type !== 'restService' && n.type !== 'soapService') continue;
+      if (n.type !== 'restService' && n.type !== 'soapService' && n.type !== 'wsService') continue;
       const path = '/' + String(n.config.path || '').trim().replace(/^\/+|\/+$/g, '');
       const keys: string[] = [];
       const re = new RegExp('^' + path.replace(/[.+*?^${}()|[\]\\]/g, '\\$&').replace(/:([A-Za-z_]\w*)/g, (_, k) => { keys.push(k); return '([^/]+)'; }) + '/?$');
-      out.push({ kind: n.type === 'restService' ? 'rest' : 'soap', method: String(n.config.method || 'ANY').toUpperCase(), path, re, keys, flowId: d.flowId, projectId: d.projectId, version: d.version, doc: d.doc, node: n });
+      out.push({ kind: n.type === 'restService' ? 'rest' : n.type === 'soapService' ? 'soap' : 'ws', method: n.type === 'wsService' ? 'GET' : String(n.config.method || 'ANY').toUpperCase(), path, re, keys, flowId: d.flowId, projectId: d.projectId, version: d.version, doc: d.doc, node: n });
     }
   }
   // Literal paths before parameterised ones.
   routes = out.sort((a, b) => a.keys.length - b.keys.length);
+  setWsRoutes(path => {
+    const r = routes.find(x => x.kind === 'ws' && x.re.test(path));
+    if (!r) return undefined;
+    const m = path.match(r.re)!;
+    return { route: r as WsRoute, params: Object.fromEntries(r.keys.map((k, i) => [k, m[i + 1]])) };
+  });
   mcpTools = deployedFlows().flatMap(d => d.doc.nodes.filter(n => n.type === 'mcpTool').map(node => {
     const srv = node.config.server ? effectiveResource(node.config.server) : undefined;
     return { endpoint: srv ? mcpPath(srv.config.path) : '/mcp', serverId: srv?.id || '', flowId: d.flowId, projectId: d.projectId, version: d.version, doc: d.doc, node };
@@ -84,7 +91,7 @@ export function rebuildRoutes() {
 }
 
 /** Deployed REST and SOAP services, for OpenAPI and the Admin Console. */
-export const apiRoutes = () => routes.map(r => ({ kind: r.kind, method: r.method, path: r.path, flowName: r.doc.name, flowId: r.flowId, projectId: r.projectId, version: r.version, node: r.node }));
+export const apiRoutes = () => routes.filter(r => r.kind !== 'ws').map(r => ({ kind: r.kind, method: r.method, path: r.path, flowName: r.doc.name, flowId: r.flowId, projectId: r.projectId, version: r.version, node: r.node }));
 
 export function listRoutes() {
   const s = getGatewaySettings();
@@ -93,8 +100,8 @@ export function listRoutes() {
     kind: r.kind, method: r.kind === 'soap' ? 'POST' : r.method, path: r.path, flowId: r.flowId, flow: r.doc.name, version: r.version, step: r.node.name,
     policy: r.node.config.policy ? getResource(r.node.config.policy)?.name ?? '(missing)' : null,
     urls: [
-      `http://${tls.domains[0] || 'localhost'}:${s.httpPort}${r.path}`,
-      ...(tls.mode !== 'off' && getCert() ? [`https://${tls.domains[0] || 'localhost'}:${s.httpsPort}${r.path}`] : []),
+      `${r.kind === 'ws' ? 'ws' : 'http'}://${tls.domains[0] || 'localhost'}:${s.httpPort}${r.path}`,
+      ...(tls.mode !== 'off' && getCert() ? [`${r.kind === 'ws' ? 'wss' : 'https'}://${tls.domains[0] || 'localhost'}:${s.httpsPort}${r.path}`] : []),
     ],
     wsdl: r.kind === 'soap' ? `${r.path}?wsdl` : undefined,
   })).concat(mcpTools.map(t => {
@@ -217,7 +224,7 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
   if (path === '/openapi.json' && req.method === 'GET') {
     gw.route = 'OpenAPI';
     if (!getGatewayOptions().publishOpenApi) return reply.code(404).send({ error: 'OpenAPI is not published on this gateway' });
-    return reply.send(openApi(routes.map(r => ({ kind: r.kind, method: r.method, path: r.path, flowName: r.doc.name, projectId: r.projectId, version: r.version, node: r.node })), `${secure ? 'https' : 'http'}://${req.headers.host || 'localhost'}`));
+    return reply.send(openApi(routes.filter(r => r.kind !== 'ws').map(r => ({ kind: r.kind, method: r.method, path: r.path, flowName: r.doc.name, projectId: r.projectId, version: r.version, node: r.node })), `${secure ? 'https' : 'http'}://${req.headers.host || 'localhost'}`));
   }
   if (/^\/(chat|a2a)\/|^\/v1\/(models|chat\/completions)$/.test(path)) {
     const done = await handleAgents(req, reply, secure, path);
@@ -234,6 +241,7 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
   if (route === undefined) return reply.code(404).send({ error: 'No deployed service at this path' });
   if (route === null) return reply.code(405).header('allow', candidates.map(c => c.method).join(', ')).send({ error: 'Method not allowed' });
   Object.assign(gw, { kind: route.kind, route: route.doc.name, flowId: route.flowId, projectId: route.projectId });
+  if (route.kind === 'ws') return reply.code(426).header('upgrade', 'websocket').send({ error: 'This is a WebSocket service: connect with ws:// or wss://' });
 
   const policy = route.node.config.policy ? effectiveResource(route.node.config.policy) : undefined;
   if (route.node.config.policy && !policy) return reply.code(503).send({ error: 'The service\'s security policy is missing; refusing to serve it unprotected' });
@@ -562,6 +570,7 @@ function build(https?: any): FastifyInstance {
   });
   app.all('/', (req, reply) => handle(req, reply, secure));
   app.all('/*', (req, reply) => handle(req, reply, secure));
+  attachWebSockets(app.server, secure);
   return app;
 }
 
@@ -585,6 +594,7 @@ function tlsOptions() {
 
 export async function startGateway() {
   await stopGateway();
+  forgetStaleConnections();
   rebuildRoutes();
   const s = getGatewaySettings();
   gatewayStatus.error = '';
@@ -617,6 +627,7 @@ export function reloadTls() {
 }
 
 export async function stopGateway() {
+  closeWebSockets();
   await Promise.all([closeServer(httpApp), closeServer(httpsApp)]);
   httpApp = httpsApp = null;
 }
