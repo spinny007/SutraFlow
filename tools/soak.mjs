@@ -516,7 +516,8 @@ every('Called Sutra and approval', 30000, async () => {
   for (let i = 0; i < 60; i++) {
     await sleep(2000);
     const list = await api('GET', '/api/approvals');
-    const a = list.find(x => x.runId === r.id && x.nodeId === approvalNode);
+    // The approval step's entry (the called Sutra's wait is in the list too).
+    const a = list.find(x => x.runId === r.id && x.wait?.kind === 'approval');
     if (a) { await sleep(5000); await api('POST', `/api/approvals/${a.id}`, { approved: true, comment: 'soak' }); break; }
   }
   for (let i = 0; i < 60; i++) {
@@ -646,8 +647,13 @@ if (OUTAGE) setTimeout(async () => {
 
 // ---------- samples ----------
 const metric = (text, name, label) => { const re = new RegExp(`^${name}${label ? `\\{[^}]*${label}[^}]*\\}` : '(\\{[^}]*\\})?'} ([0-9.eE+-]+)$`, 'm'); const m = re.exec(text); return m ? Number(m[2] ?? m[1]) : null; };
-let lastCounts = {};
+let lastCounts = {}, lastSampleAt = Date.now(), pausedMs = 0;
 async function sample() {
+  // A long gap between samples: the computer slept (standby) or the tool was held; everything paused.
+  const gap = Date.now() - lastSampleAt;
+  const paused = gap > 180000;
+  if (paused) { pausedMs += gap - 60000; event('pause', `no sample for ${Math.round(gap / 60000)} minutes: the computer slept or this tool was held; every process was paused`); }
+  lastSampleAt = Date.now();
   const engines = [];
   for (const e of procs) {
     const u = alive(e) ? usage(e.p.pid) : { cpu: 0, mem: 0 };
@@ -666,7 +672,7 @@ async function sample() {
   const counts = Object.fromEntries(Object.values(stats).map(s => [s.name, { ok: s.ok, fail: s.fail }]));
   const perMin = Object.fromEntries(Object.entries(counts).map(([k, v]) => [k, { ok: v.ok - (lastCounts[k]?.ok || 0), fail: v.fail - (lastCounts[k]?.fail || 0) }]));
   lastCounts = counts;
-  append('samples.jsonl', { type: 'minute', at: new Date().toISOString(), min: Math.round((Date.now() - T0) / 60000), engines, db, perMin, ws: { ...wsState }, bus: { ...bus, sender: undefined }, feed: feed.sent });
+  append('samples.jsonl', { type: 'minute', at: new Date().toISOString(), min: Math.round((Date.now() - T0) / 60000), ...(paused ? { paused: true } : {}), engines, db, perMin, ws: { ...wsState }, bus: { ...bus, sender: undefined }, feed: feed.sent });
 }
 let hour = 0;
 function hourly() {
@@ -738,7 +744,8 @@ if (BIG) {
 // Event loop: how long an engine kept work waiting (a step computing without pause holds everything).
 for (const e of procs) {
   const p99s = minutesS0().map(s => s.engines[e.i]?.loopP99).filter(v => typeof v === 'number');
-  const maxes = minutesS0().map(s => s.engines[e.i]?.loopMax).filter(v => typeof v === 'number');
+  // A minute after standby measures the standby itself, not the engine.
+  const maxes = minutesS0().filter(s => !s.paused).map(s => s.engines[e.i]?.loopMax).filter(v => typeof v === 'number');
   if (p99s.length) check(`Engine ${e.i} stays responsive`, pct(p99s, 95) < 1000, `event loop delay: p99 per minute ${pct(p99s, 50)} ms typical, ${pct(p99s, 95)} ms in the worst 5% of minutes; longest single wait ${Math.max(...maxes)} ms`);
 }
 // Memory: the second half of the run, per engine; a steady climb is a leak.
@@ -755,7 +762,7 @@ for (const s of Object.values(stats).filter(x => x.hours.filter(h => h.n > 50).l
 
 const summary = {
   version: VERSION, started: new Date(T0).toISOString(), ended: new Date().toISOString(), minutes: MINUTES, engines: ENGINES, machine: `${os.cpus()[0].model.trim()}, ${os.cpus().length} threads, ${Math.round(os.totalmem() / 1073741824)} GB, ${os.platform()}`,
-  node: process.version, database: 'PostgreSQL (through a proxy)', model: AI ? `${MODEL} on Ollama` : null, sizes: SIZES, checks, faults,
+  node: process.version, pausedMinutes: Math.round(pausedMs / 60000), database: 'PostgreSQL (through a proxy)', model: AI ? `${MODEL} on Ollama` : null, sizes: SIZES, checks, faults,
   scenarios: Object.values(stats).map(s => ({ name: s.name, ok: s.ok, fail: s.fail, errors: Object.entries(s.errors).sort((a, b) => b[1] - a[1]).slice(0, 5), hours: s.hours })),
   files, ws: wsState, bus: { ...bus, sender: undefined }, feed: feed.sent,
   restarts: procs.map(e => ({ engine: e.i, restarts: e.restarts })),
@@ -842,6 +849,7 @@ function writeReport(dir) {
   md.push(`# ${title}`, '');
   if (!sum) md.push('The run did not finish: this report is made from the samples and events written so far.', '');
   else {
+    if (sum.pausedMinutes) md.push(`The computer was paused (standby) for ${sum.pausedMinutes} minutes of the run; everything resumed together.`, '');
     md.push(`${sum.started} to ${sum.ended} (${Math.round(sum.minutes / 6) / 10} hours), ${sum.engines} processes (a studio and ${sum.engines - 1} engines) on PostgreSQL, ${sum.machine}, Node ${sum.node}${sum.model ? `, AI: ${sum.model}` : ''}.`, '');
     md.push(`**${passed} of ${sum.checks.length} checks passed.**`, '', '| Check | Result | Detail |', '|---|---|---|');
     for (const c of sum.checks) md.push(`| ${c.name} | ${c.ok ? 'pass' : '**fail**'} | ${c.detail} |`);

@@ -1,3 +1,111 @@
 {"at":"2026-10-20T04:04:29.043Z","min":0,"kind":"start","message":"SutraFlow 1.8.0, 3 processes, 480 minutes, database sutra_soak_1792469068848, 16 threads, 24 GB"}
 {"at":"2026-10-20T04:04:34.772Z","min":0.1,"kind":"setup","message":"23 Sutras deployed"}
 {"at":"2026-10-20T04:04:42.785Z","min":0.2,"kind":"load","message":"19 scenarios running"}
+{"at":"2026-10-20T04:24:42.916Z","min":20.2,"kind":"file","message":"soak-24010-10mb.csv: 198000 rows to the watched folder"}
+{"at":"2026-10-20T04:34:42.917Z","min":30.2,"kind":"file","message":"soak-36022-20mb.csv: 390000 rows to the SFTP inbox"}
+{"at":"2026-10-20T04:34:43.075Z","min":30.2,"kind":"file","message":"soak-36023-30mb.csv: 582000 rows to the FTP inbox"}
+{"at":"2026-10-20T04:44:43.133Z","min":40.2,"kind":"file","message":"soak-48017-40mb.csv: 776000 rows to the watched folder"}
+{"at":"2026-10-20T05:04:44.475Z","min":60.3,"kind":"file","message":"soak-72084-60mb.csv: 1156000 rows to the SFTP inbox"}
+{"at":"2026-10-20T05:04:44.667Z","min":60.3,"kind":"file","message":"soak-72085-10mb.csv: 198000 rows to the FTP inbox"}
+{"at":"2026-10-20T05:04:44.905Z","min":60.3,"kind":"file","message":"soak-72086-20mb.csv: 390000 rows to the watched folder"}
+{"at":"2026-10-20T05:05:50.971Z","min":61.4,"kind":"document","message":"soak-doc-72083-50mb.txt: done in 67 s"}
+{"at":"2026-10-20T05:24:45.006Z","min":80.3,"kind":"file","message":"soak-96142-30mb.csv: 582000 rows to the watched folder"}
+{"at":"2026-10-20T05:34:44.208Z","min":90.3,"kind":"file","message":"soak-108181-40mb.csv: 776000 rows to the SFTP inbox"}
+{"at":"2026-10-20T05:34:44.935Z","min":90.3,"kind":"file","message":"soak-108195-50mb.csv: 968000 rows to the FTP inbox"}
+{"at":"2026-10-20T05:44:45.271Z","min":100.3,"kind":"file","message":"soak-120254-60mb.csv: 1156000 rows to the watched folder"}
+{"at":"2026-10-20T06:04:44.075Z","min":120.3,"kind":"file","message":"soak-144331-20mb.csv: 390000 rows to the SFTP inbox"}
+{"at":"2026-10-20T06:04:44.832Z","min":120.3,"kind":"file","message":"soak-144342-30mb.csv: 582000 rows to the FTP inbox"}
+{"at":"2026-10-20T06:04:45.278Z","min":120.3,"kind":"file","message":"soak-144345-40mb.csv: 776000 rows to the watched folder"}
+{"at":"2026-10-20T06:04:56.736Z","min":120.5,"kind":"document","message":"soak-doc-144308-10mb.txt: done in 14 s"}
+{"at":"2026-10-20T06:24:45.280Z","min":140.3,"kind":"file","message":"soak-168454-50mb.csv: 968000 rows to the watched folder"}
+{"at":"2026-10-20T06:34:44.374Z","min":150.3,"kind":"file","message":"soak-180491-60mb.csv: 1156000 rows to the SFTP inbox"}
+{"at":"2026-10-20T06:34:44.588Z","min":150.3,"kind":"file","message":"soak-180497-10mb.csv: 198000 rows to the FTP inbox"}
+{"at":"2026-10-20T06:44:42.796Z","min":160.2,"kind":"fault","message":"engine 2 killed on purpose"}
+{"at":"2026-10-20T06:44:45.066Z","min":160.3,"kind":"file","message":"soak-192540-20mb.csv: 390000 rows to the watched folder"}
+{"at":"2026-10-20T06:45:45.364Z","min":161.3,"kind":"fault","message":"engine 2 started again"}
+{"at":"2026-10-20T07:04:44.275Z","min":180.3,"kind":"file","message":"soak-216603-40mb.csv: 776000 rows to the SFTP inbox"}
+{"at":"2026-10-20T07:04:44.979Z","min":180.3,"kind":"file","message":"soak-216614-50mb.csv: 968000 rows to the FTP inbox"}
+{"at":"2026-10-20T07:04:45.509Z","min":180.3,"kind":"file","message":"soak-216617-60mb.csv: 1156000 rows to the watched folder"}
+{"at":"2026-10-20T07:05:19.185Z","min":180.8,"kind":"document","message":"soak-doc-216583-30mb.txt: done in 36 s"}
+{"at":"2026-10-20T07:41:28.283Z","min":217,"kind":"file","message":"soak-231168-10mb.csv: 198000 rows to the watched folder"}
+{"at":"2026-10-20T07:41:28.621Z","min":217,"kind":"file","message":"soak-231169-20mb.csv: 390000 rows to the SFTP inbox"}
+{"at":"2026-10-20T07:41:29.060Z","min":217,"kind":"file","message":"soak-231170-30mb.csv: 582000 rows to the FTP inbox"}
+{"at":"2026-10-20T08:01:28.387Z","min":237,"kind":"file","message":"soak-255233-40mb.csv: 776000 rows to the watched folder"}
+{"at":"2026-10-20T08:05:40.337Z","min":241.2,"kind":"document","message":"soak-doc-259143-50mb.txt: done in 57 s"}
+{"at":"2026-10-20T08:11:28.841Z","min":247,"kind":"file","message":"soak-267265-60mb.csv: 1156000 rows to the SFTP inbox"}
+{"at":"2026-10-20T08:11:28.945Z","min":247,"kind":"file","message":"soak-267270-10mb.csv: 198000 rows to the FTP inbox"}
+{"at":"2026-10-20T08:21:28.244Z","min":257,"kind":"file","message":"soak-279310-20mb.csv: 390000 rows to the watched folder"}
+{"at":"2026-10-20T08:41:28.374Z","min":277,"kind":"file","message":"soak-303375-30mb.csv: 582000 rows to the watched folder"}
+{"at":"2026-10-20T08:41:28.893Z","min":277,"kind":"file","message":"soak-303382-40mb.csv: 776000 rows to the SFTP inbox"}
+{"at":"2026-10-20T08:41:29.395Z","min":277,"kind":"file","message":"soak-303385-50mb.csv: 968000 rows to the FTP inbox"}
+{"at":"2026-10-20T09:01:28.607Z","min":297,"kind":"file","message":"soak-327414-60mb.csv: 1156000 rows to the watched folder"}
+{"at":"2026-10-20T09:04:57.217Z","min":300.5,"kind":"document","message":"soak-doc-331319-10mb.txt: done in 14 s"}
+{"at":"2026-10-20T09:11:28.602Z","min":307,"kind":"file","message":"soak-339443-20mb.csv: 390000 rows to the SFTP inbox"}
+{"at":"2026-10-20T09:11:29.211Z","min":307,"kind":"file","message":"soak-339450-30mb.csv: 582000 rows to the FTP inbox"}
+{"at":"2026-10-20T09:21:28.414Z","min":317,"kind":"file","message":"soak-351465-40mb.csv: 776000 rows to the watched folder"}
+{"at":"2026-10-20T09:24:42.795Z","min":320.2,"kind":"fault","message":"database cut for 20 seconds"}
+{"at":"2026-10-20T09:25:02.810Z","min":320.6,"kind":"fault","message":"database back"}
+{"at":"2026-10-20T09:25:05.637Z","min":320.6,"kind":"retry","message":"GET /api/approvals (1/5): fetch failed"}
+{"at":"2026-10-20T09:25:05.639Z","min":320.6,"kind":"retry","message":"GET /api/approvals (1/5): fetch failed"}
+{"at":"2026-10-20T09:25:05.678Z","min":320.6,"kind":"engine stopped","message":"engine 0 stopped by itself (code 1, signal null)","engine":0,"log":" unexpectedly\nPostgreSQL pool: an idle connection failed: Connection terminated unexpectedly\nPostgreSQL pool: an idle connection failed: Connection terminated unexpectedly\nPostgreSQL pool: an idle connection failed: Connection terminated unexpectedly\nPostgreSQL pool: an idle connection failed: Connection terminated unexpectedly\nPostgreSQL connection lost: Connection terminated unexpectedly\nClaiming steps failed: read ECONNRESET\nChecking waiting callers failed: read ECONNRESET\nWebSocket outbox: read ECONNRESET\nGateway log: read ECONNRESET\nC:\\Users\\kunwa\\Documents\\LocalGitHub\\SutraFlow\\node_modules\\pg-pool\\index.js:45\r\n    Error.captureStackTrace(err)\r\n          ^\r\n\r\nError: read ECONNRESET\r\n    at C:\\Users\\kunwa\\Documents\\LocalGitHub\\SutraFlow\\node_modules\\pg-pool\\index.js:45:11\r\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\r\n    at async Object.transaction (file:///C:/Users/kunwa/Documents/LocalGitHub/SutraFlow/dist/server/asyncdb.js:167:32)\r\n    at async Engine.startRun (file:///C:/Users/kunwa/Documents/LocalGitHub/SutraFlow/dist/server/engine/engine.js:224:13) {\r\n  errno: -4077,\r\n  code: 'ECONNRESET',\r\n  syscall: 'read'\r\n}\r\n\r\nNode.js v24.21.0\r\n"}
+{"at":"2026-10-20T09:25:07.645Z","min":320.6,"kind":"retry","message":"GET /api/approvals (2/5): fetch failed"}
+{"at":"2026-10-20T09:25:07.646Z","min":320.6,"kind":"retry","message":"GET /api/approvals (2/5): fetch failed"}
+{"at":"2026-10-20T09:25:08.689Z","min":320.7,"kind":"engine restarted","message":"engine 0 started again (1/10)","engine":0}
+{"at":"2026-10-20T09:25:09.661Z","min":320.7,"kind":"retry","message":"GET /api/approvals (3/5): fetch failed"}
+{"at":"2026-10-20T09:25:09.661Z","min":320.7,"kind":"retry","message":"GET /api/approvals (3/5): fetch failed"}
+{"at":"2026-10-20T09:41:28.535Z","min":337,"kind":"file","message":"soak-375075-50mb.csv: 968000 rows to the watched folder"}
+{"at":"2026-10-20T09:41:29.124Z","min":337,"kind":"file","message":"soak-375080-60mb.csv: 1156000 rows to the SFTP inbox"}
+{"at":"2026-10-20T09:41:29.222Z","min":337,"kind":"file","message":"soak-375086-10mb.csv: 198000 rows to the FTP inbox"}
+{"at":"2026-10-20T10:01:28.247Z","min":357,"kind":"file","message":"soak-399081-20mb.csv: 390000 rows to the watched folder"}
+{"at":"2026-10-20T10:05:19.255Z","min":360.8,"kind":"document","message":"soak-doc-402983-30mb.txt: done in 36 s"}
+{"at":"2026-10-20T10:11:28.923Z","min":367,"kind":"file","message":"soak-411078-40mb.csv: 776000 rows to the SFTP inbox"}
+{"at":"2026-10-20T10:11:29.566Z","min":367,"kind":"file","message":"soak-411086-50mb.csv: 968000 rows to the FTP inbox"}
+{"at":"2026-10-20T10:21:28.638Z","min":377,"kind":"file","message":"soak-423078-60mb.csv: 1156000 rows to the watched folder"}
+{"at":"2026-10-20T10:41:28.143Z","min":397,"kind":"file","message":"soak-447074-10mb.csv: 198000 rows to the watched folder"}
+{"at":"2026-10-20T10:41:28.720Z","min":397,"kind":"file","message":"soak-447085-20mb.csv: 390000 rows to the SFTP inbox"}
+{"at":"2026-10-20T10:41:29.393Z","min":397,"kind":"file","message":"soak-447096-30mb.csv: 582000 rows to the FTP inbox"}
+{"at":"2026-10-20T11:01:28.440Z","min":417,"kind":"file","message":"soak-471093-40mb.csv: 776000 rows to the watched folder"}
+{"at":"2026-10-20T11:42:13.589Z","min":457.7,"kind":"file","message":"soak-473420-60mb.csv: 1156000 rows to the SFTP inbox"}
+{"at":"2026-10-20T11:42:13.739Z","min":457.7,"kind":"file","message":"soak-473421-10mb.csv: 198000 rows to the FTP inbox"}
+{"at":"2026-10-20T11:42:13.950Z","min":457.8,"kind":"file","message":"soak-473422-20mb.csv: 390000 rows to the watched folder"}
+{"at":"2026-10-20T11:43:27.556Z","min":459,"kind":"document","message":"soak-doc-473418-50mb.txt: done in 75 s"}
+{"at":"2026-10-20T12:02:14.052Z","min":477.8,"kind":"file","message":"soak-497144-30mb.csv: 582000 rows to the watched folder"}
+{"at":"2026-10-20T12:04:32.015Z","min":480.1,"kind":"load","message":"load stopped; waiting for open runs to end (at most 10 minutes)"}
+{"at":"2026-10-20T12:04:48.408Z","min":480.3,"kind":"check","message":"FAIL No engine stopped by itself: 1 unexpected stops (see events)"}
+{"at":"2026-10-20T12:04:48.415Z","min":480.3,"kind":"check","message":"PASS No run left running: 0 runs still running 10 minutes after the load stopped"}
+{"at":"2026-10-20T12:04:57.284Z","min":480.5,"kind":"check","message":"PASS No step ran twice: 0 steps of single-pass Sutras completed more than once"}
+{"at":"2026-10-20T12:04:57.285Z","min":480.5,"kind":"check","message":"PASS Requests that failed: 444 of 500338 (0.089%), fault windows included"}
+{"at":"2026-10-20T12:04:57.319Z","min":480.5,"kind":"check","message":"FAIL Timer kept time: 2498 runs of 2880 expected (every 10 s)"}
+{"at":"2026-10-20T12:04:57.481Z","min":480.5,"kind":"check","message":"PASS Every channel message reached its subscriber: 4986 subscriber runs for 4986 published"}
+{"at":"2026-10-20T12:04:57.485Z","min":480.5,"kind":"check","message":"PASS Bus messages acknowledged: 12437 accepted, 0 released, 0 rejected of 12439 sent"}
+{"at":"2026-10-20T12:04:57.560Z","min":480.5,"kind":"check","message":"PASS WebSocket client trigger ran for the server's messages: 4995 runs for 5000 messages pushed"}
+{"at":"2026-10-20T12:04:57.562Z","min":480.5,"kind":"check","message":"PASS WebSocket broadcasts arrived: 4170 received of 4170 expected (834 broadcasts to the clients connected at the time)"}
+{"at":"2026-10-20T12:04:57.583Z","min":480.5,"kind":"check","message":"PASS Every CSV in the folder was streamed whole: 22 of 22 files with every row counted (10 MB, 40 MB, 20 MB, 30 MB, 60 MB, 40 MB, 50 MB, 20 MB, 60 MB, 10 MB, 40 MB, 20 MB, 30 MB, 60 MB, 40 MB, 50 MB, 20 MB, 60 MB, 10 MB, 40 MB, 20 MB, 30 MB)"}
+{"at":"2026-10-20T12:04:57.592Z","min":480.5,"kind":"check","message":"PASS Every SFTP CSV was streamed whole: 14 of 14 files with every row counted (20 MB, 60 MB, 40 MB, 20 MB, 60 MB, 40 MB, 20 MB, 60 MB, 40 MB, 20 MB, 60 MB, 40 MB, 20 MB, 60 MB)"}
+{"at":"2026-10-20T12:04:57.603Z","min":480.5,"kind":"check","message":"PASS Every FTP CSV was streamed whole: 14 of 14 files with every row counted (30 MB, 10 MB, 50 MB, 30 MB, 10 MB, 50 MB, 30 MB, 10 MB, 50 MB, 30 MB, 10 MB, 50 MB, 30 MB, 10 MB)"}
+{"at":"2026-10-20T12:04:57.745Z","min":480.5,"kind":"check","message":"PASS RAG passages are in the pgvector table: 328490 passages in soak_knowledge"}
+{"at":"2026-10-20T12:04:57.745Z","min":480.5,"kind":"check","message":"PASS RAG documents were learned: 50 MB done in 67 s; 10 MB done in 14 s; 30 MB done in 36 s; 50 MB done in 57 s; 10 MB done in 14 s; 30 MB done in 36 s; 50 MB done in 75 s"}
+{"at":"2026-10-20T12:04:57.765Z","min":480.5,"kind":"check","message":"PASS Engine 0 stays responsive: event loop delay: p99 per minute 35 ms typical, 48 ms in the worst 5% of minutes; longest single wait 2327872 ms"}
+{"at":"2026-10-20T12:04:57.781Z","min":480.5,"kind":"check","message":"PASS Engine 1 stays responsive: event loop delay: p99 per minute 34 ms typical, 37 ms in the worst 5% of minutes; longest single wait 2327872 ms"}
+{"at":"2026-10-20T12:04:57.796Z","min":480.5,"kind":"check","message":"PASS Engine 2 stays responsive: event loop delay: p99 per minute 34 ms typical, 36 ms in the worst 5% of minutes; longest single wait 2327872 ms"}
+{"at":"2026-10-20T12:04:57.806Z","min":480.5,"kind":"check","message":"PASS Engine 0 memory steady: 23.8 MB per hour over the second half; highest 773 MB"}
+{"at":"2026-10-20T12:04:57.807Z","min":480.5,"kind":"check","message":"FAIL Engine 1 memory steady: 60.7 MB per hour over the second half; highest 758 MB"}
+{"at":"2026-10-20T12:04:57.808Z","min":480.5,"kind":"check","message":"PASS Engine 2 memory steady: 17.4 MB per hour over the second half; highest 577 MB"}
+{"at":"2026-10-20T12:04:57.809Z","min":480.5,"kind":"check","message":"PASS REST orders stays as fast: p95 152 ms in the first period, 210 ms in the last"}
+{"at":"2026-10-20T12:04:57.810Z","min":480.5,"kind":"check","message":"PASS REST in memory stays as fast: p95 11 ms in the first period, 32 ms in the last"}
+{"at":"2026-10-20T12:04:57.811Z","min":480.5,"kind":"check","message":"PASS REST signed and validated stays as fast: p95 217 ms in the first period, 303 ms in the last"}
+{"at":"2026-10-20T12:04:57.811Z","min":480.5,"kind":"check","message":"PASS SOAP UsernameToken stays as fast: p95 215 ms in the first period, 275 ms in the last"}
+{"at":"2026-10-20T12:04:57.812Z","min":480.5,"kind":"check","message":"PASS SOAP X.509 signed and encrypted stays as fast: p95 227 ms in the first period, 289 ms in the last"}
+{"at":"2026-10-20T12:04:57.813Z","min":480.5,"kind":"check","message":"PASS WebSocket echo stays as fast: p95 214 ms in the first period, 228 ms in the last"}
+{"at":"2026-10-20T12:04:57.813Z","min":480.5,"kind":"check","message":"PASS WebSocket broadcast stays as fast: p95 428 ms in the first period, 212 ms in the last"}
+{"at":"2026-10-20T12:04:57.814Z","min":480.5,"kind":"check","message":"FAIL Channel publish stays as fast: p95 529 ms in the first period, 1110 ms in the last"}
+{"at":"2026-10-20T12:04:57.815Z","min":480.5,"kind":"check","message":"PASS Error handler stays as fast: p95 1035 ms in the first period, 1657 ms in the last"}
+{"at":"2026-10-20T12:04:57.816Z","min":480.5,"kind":"check","message":"PASS MCP tool stays as fast: p95 203 ms in the first period, 214 ms in the last"}
+{"at":"2026-10-20T12:04:57.818Z","min":480.5,"kind":"check","message":"PASS RAG search stays as fast: p95 1784 ms in the first period, 2758 ms in the last"}
+{"at":"2026-10-20T12:04:57.837Z","min":480.5,"kind":"end","message":"report written to C:\\Users\\kunwa\\Documents\\LocalGitHub\\SutraFlow\\docs\\benchmarks\\soak-1.8.0"}
+{"at":"2026-10-20T12:04:58.237Z","min":480.5,"kind":"retry","message":"GET /api/approvals (1/5): fetch failed"}
+{"at":"2026-10-20T12:04:58.251Z","min":480.5,"kind":"retry","message":"GET /api/runs/2760d7b7-16be-4942-96dd-5fa9b7d213bd (1/5): fetch failed"}
+{"at":"2026-10-20T12:04:58.252Z","min":480.5,"kind":"retry","message":"GET /api/runs/70d49f8b-dadf-4af7-be5b-fe4a77cad153 (1/5): fetch failed"}
+{"at":"2026-10-20T12:05:00.248Z","min":480.5,"kind":"retry","message":"GET /api/approvals (2/5): fetch failed"}
+{"at":"2026-10-20T12:05:00.264Z","min":480.5,"kind":"retry","message":"GET /api/runs/2760d7b7-16be-4942-96dd-5fa9b7d213bd (2/5): fetch failed"}
+{"at":"2026-10-20T12:05:00.266Z","min":480.5,"kind":"retry","message":"GET /api/runs/70d49f8b-dadf-4af7-be5b-fe4a77cad153 (2/5): fetch failed"}

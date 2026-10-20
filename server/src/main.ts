@@ -11,6 +11,10 @@ import { config } from './config.js';
 import { boot } from './index.js';
 import { gatewayStatus } from './gateway/gateway.js';
 
+// A promise that fails with nobody to catch it (a run start while the database is unreachable, say)
+// is logged; the engine keeps serving instead of stopping with every step it was running.
+process.on('unhandledRejection', e => { console.error('Unhandled error (the engine keeps running):', (e as any)?.stack || e); });
+
 boot({ exitOnDrain: true }).then(({ stop }) => {
   console.log(config.mode === 'engine'
     ? `SutraFlow engine ${config.engineId} (headless): health and automation API on http://${config.adminHost}:${config.adminPort}`

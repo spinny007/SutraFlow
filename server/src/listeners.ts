@@ -61,7 +61,10 @@ async function rebuild() {
       const resolved = act ? { ...n, config: resolveSettings(act.fields, n.config, { gv: effectiveVariables(d.projectId).values, ev: engineVariableValues() }) } : n;
       const ctx: ListenerContext = {
         flowId: d.flowId, projectId: d.projectId, version: d.version, doc: d.doc, node: resolved, status,
-        fire: (input, onFinish) => engine.startRun({ doc: d.doc, flowId: d.flowId, projectId: d.projectId, version: d.version, triggerNodeId: n.id, input, source: n.type, onFinish }),
+        // A run that cannot start (the database is unreachable) shows on the listener and is logged; the
+        // event's source keeps it (an unacknowledged message, a file not moved) to try again later.
+        fire: (input, onFinish) => engine.startRun({ doc: d.doc, flowId: d.flowId, projectId: d.projectId, version: d.version, triggerNodeId: n.id, input, source: n.type, onFinish })
+          .catch((e: any) => { status('error', `A run could not start: ${e?.message || e}`); console.error(`${d.doc.name} / ${n.name}: a run could not start:`, e?.message || e); return ''; }),
       };
       try {
         const stop = await start(ctx);
