@@ -89,6 +89,7 @@ export const httpActivities: Activity[] = [
         headers['content-type'] ||= 'application/x-www-form-urlencoded';
       }
 
+      if (auth.sign) put(auth.sign({ method, url: url.toString(), body: body ?? '' }));
       const timeoutMs = Number(conn?.config.timeoutMs) || 30000;
       const r = await guarded(conn, () => httpCall({ method, url: url.toString(), headers, body, dispatcher, timeoutMs, signal: c.signal, parse: c.raw('parse') || 'auto' }), x => x.status >= 500);
       const failOn = c.raw('failOn') || '4xx or 5xx';

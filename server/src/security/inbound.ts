@@ -15,6 +15,7 @@ import { getSecret } from '../secrets.js';
 import { kvToObject, type Resource } from '../resources.js';
 import { verifyUsernameToken, safeEqual } from './wss.js';
 import { checkTimestamp, verifySaml, verifyX509 } from './wssin.js';
+import { introspect, scopesOf, verifyRequest, type SignedParts } from './hmac.js';
 import { systemAccountMayCall } from '../access.js';
 import { appOfKey, appOfToken, consume, type App } from '../gateway/apps.js';
 
@@ -34,12 +35,18 @@ export interface InboundRequest {
   wsSecurity?: any;
   /** The SOAP message as received (after decryption), for signature checks. */
   soapXml?: string;
+  /** For HMAC signatures: the method, the path with its query, and the body as received. */
+  method?: string;
+  path?: string;
+  rawBody?: string;
 }
 
 export interface Caller {
   method: string;
   subject: string;
   claims?: Record<string, any>;
+  /** OAuth scopes the caller holds (tokens and gateway apps), for scopes per operation. */
+  scopes?: string[];
   /** Gateway apps: the app's id, and rate-limit headers for the reply. */
   appId?: string;
   responseHeaders?: Record<string, string>;
@@ -150,7 +157,39 @@ export async function authorize(policy: Resource | undefined, req: InboundReques
         const missing = need.filter(s => !have.has(s));
         if (missing.length) throw new PolicyError(403, `Token is missing scope: ${missing.join(' ')}`, { 'www-authenticate': 'Bearer error="insufficient_scope"' });
       }
-      caller = { method: 'jwt', subject: String(payload.sub || payload.client_id || 'unknown'), claims: payload };
+      caller = { method: 'jwt', subject: String(payload.sub || payload.client_id || 'unknown'), claims: payload, scopes: scopesOf(payload) };
+      break;
+    }
+    case 'oauth2Introspection': {
+      const a = h(req, 'authorization') || '';
+      if (!/^Bearer\s+/i.test(a)) throw new PolicyError(401, 'Bearer token required', { 'www-authenticate': 'Bearer' });
+      if (!c.introspectionUrl) throw new PolicyError(500, 'The policy has no introspection URL');
+      let r: any;
+      try {
+        r = await introspect({ url: c.introspectionUrl, clientId: String(c.introspectionClientId || ''), clientSecret: c.introspectionSecret ? getSecret(c.introspectionSecret) || '' : '', cacheSec: Number(c.introspectionCacheSec ?? 60) }, a.replace(/^Bearer\s+/i, ''));
+      } catch (e: any) { throw new PolicyError(503, e.message); }
+      if (r?.active !== true) throw new PolicyError(401, 'The token is not active', { 'www-authenticate': 'Bearer error="invalid_token"' });
+      if (c.introspectionAudience) {
+        const aud = Array.isArray(r.aud) ? r.aud : [r.aud];
+        if (!aud.includes(c.introspectionAudience)) throw new PolicyError(401, 'The token is meant for another audience', { 'www-authenticate': 'Bearer error="invalid_token"' });
+      }
+      const have = new Set(scopesOf(r));
+      const missing = String(c.jwtScopes || '').split(/\s+/).filter(Boolean).filter(s => !have.has(s));
+      if (missing.length) throw new PolicyError(403, `Token is missing scope: ${missing.join(' ')}`, { 'www-authenticate': 'Bearer error="insufficient_scope"' });
+      caller = { method: 'oauth2Introspection', subject: String(r.sub || r.username || r.client_id || 'unknown'), claims: r, scopes: [...have] };
+      break;
+    }
+    case 'hmac': {
+      const names: string[] = Array.isArray(c.hmacSecrets) ? c.hmacSecrets : [];
+      const secrets = names.map(name => ({ name, value: getSecret(name) })).filter((s): s is { name: string; value: string } => !!s.value);
+      if (!secrets.length) throw new PolicyError(500, 'The policy has no signing secret');
+      try {
+        const name = verifyRequest(secrets, {
+          algorithm: c.hmacAlgorithm || 'sha256', encoding: c.hmacEncoding === 'base64' ? 'base64' : 'hex', prefix: String(c.hmacPrefix || ''),
+          signed: (c.hmacSigned || 'timestamp and body') as SignedParts, maxAgeSec: Number(c.hmacMaxAgeSec) > 0 ? Number(c.hmacMaxAgeSec) : 300,
+        }, { method: req.method || 'POST', path: req.path || '/', timestamp: h(req, c.hmacTimestampHeader || 'X-Timestamp'), signature: h(req, c.hmacHeader || 'X-Signature'), body: req.rawBody ?? '' });
+        caller = { method: 'hmac', subject: name };
+      } catch (e: any) { throw new PolicyError(401, e.message); }
       break;
     }
     case 'apps': {
@@ -169,7 +208,7 @@ export async function authorize(policy: Resource | undefined, req: InboundReques
       if (missing.length) throw new PolicyError(403, `The app is missing scope: ${missing.join(' ')}`, { 'www-authenticate': 'Bearer error="insufficient_scope"' });
       const used = consume(app);
       if (!used.ok) throw new PolicyError(429, `The app's plan allows ${used.limit} requests per ${used.window}`, { 'retry-after': String(used.retryAfter) });
-      caller = { method: 'app', subject: app.name, appId: app.id, claims: { appId: app.id, plan: app.planId, scopes }, responseHeaders: used.headers };
+      caller = { method: 'app', subject: app.name, appId: app.id, claims: { appId: app.id, plan: app.planId, scopes }, scopes, responseHeaders: used.headers };
       break;
     }
     case 'wssX509':

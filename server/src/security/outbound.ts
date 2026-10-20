@@ -12,6 +12,7 @@ import https from 'node:https';
 import { XMLParser } from 'fast-xml-parser';
 import { kvToObject, type Resource } from '../resources.js';
 import type { WssOptions } from './wss.js';
+import { signRequest, type SignedParts } from './hmac.js';
 
 type SecretFn = (name: string, what?: string) => string;
 
@@ -68,6 +69,8 @@ export interface AppliedAuth {
   headers: Record<string, string>;
   query: Record<string, string>;
   wss?: WssOptions;
+  /** Headers that depend on the request itself (an HMAC signature of its body): added once the body is built. */
+  sign?: (p: { method: string; url: string; body: string }) => Record<string, string>;
 }
 
 const tokenCache = new Map<string, { token: string; exp: number }>();
@@ -102,6 +105,12 @@ export async function applyAuth(
     case 'oauth2ClientCredentials':
       out.headers.authorization = 'Bearer ' + (await clientCredentialsToken(profile, secret, opts));
       break;
+    case 'hmac': {
+      const key = secret(c.hmacSecret, 'Signing secret');
+      const o = { algorithm: c.hmacAlgorithm || 'sha256', encoding: c.hmacEncoding === 'base64' ? 'base64' as const : 'hex' as const, prefix: String(c.hmacPrefix || ''), signed: (c.hmacSigned || 'timestamp and body') as SignedParts, header: String(c.hmacHeader || 'X-Signature'), timestampHeader: String(c.hmacTimestampHeader || 'X-Timestamp') };
+      out.sign = p => signRequest(key, o, p);
+      break;
+    }
     case 'customHeaders':
       Object.assign(out.headers, kvToObject(c.headers, v => String(resolve(v) ?? '')));
       break;

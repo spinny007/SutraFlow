@@ -337,6 +337,8 @@ export function openApi(list: ApiRoute[], baseUrl: string, visible: Visible = 'a
       if (c.auth === 'basic') { schemes.basic = { type: 'http', scheme: 'basic' }; security.push({ basic: [] }); }
       if (c.auth === 'jwt') { schemes.bearer = { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }; security.push({ bearer: String(c.jwtScopes || '').split(/\s+/).filter(Boolean) }); }
       if (c.auth === 'mtls') { schemes.mutualTLS = { type: 'mutualTLS' }; security.push({ mutualTLS: [] }); }
+      if (c.auth === 'oauth2Introspection') { schemes.token = { type: 'http', scheme: 'bearer', description: 'An access token from the identity provider' }; security.push({ token: [...String(c.jwtScopes || '').split(/\s+/), ...String(r.node.config.requiredScopes || '').split(/\s+/)].filter(Boolean) }); }
+      if (c.auth === 'hmac') { schemes.signature = { type: 'apiKey', in: 'header', name: c.hmacHeader || 'X-Signature', description: `HMAC-${String(c.hmacAlgorithm || 'sha256').toUpperCase()} of the ${c.hmacSigned || 'timestamp and body'} (${c.hmacTimestampHeader || 'X-Timestamp'} header: Unix seconds)` }; security.push({ signature: [] }); }
       if (c.auth === 'apps') {
         const sc = String(c.appScopes || '').split(/\s+/).filter(Boolean);
         schemes.appKey = { type: 'apiKey', in: 'header', name: c.apiKeyHeader || 'X-API-Key', description: 'An API key of a gateway app' };

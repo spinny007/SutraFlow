@@ -1,0 +1,152 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.8.0
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import { testEnv, node, edge, port } from './helpers.js';
+
+/**
+ * HMAC request signing (incoming and outgoing, with replay protection), OAuth token introspection
+ * against a stand-in endpoint, and scopes per REST service and per SOAP operation.
+ */
+const env = testEnv(20800);
+const { boot } = await import('../server/src/index.js');
+const { setSecret } = await import('../server/src/secrets.js');
+const { saveResource } = await import('../server/src/resources.js');
+const flows = await import('../server/src/flows.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
+const { signRequest } = await import('../server/src/security/hmac.js');
+const { q } = await import('../server/src/db.js');
+const { housekeeping } = await import('../server/src/housekeeping.js');
+
+// The identity provider's introspection endpoint: tokens it knows, and how often it was asked.
+const ipPort = port(20810);
+const tokens: Record<string, any> = {
+  'tok-read': { active: true, sub: 'svc-reader', scope: 'orders:read', aud: 'orders-api', exp: Math.floor(Date.now() / 1000) + 600 },
+  'tok-write': { active: true, sub: 'svc-writer', scope: 'orders:read orders:write orders:cancel', aud: ['orders-api'], exp: Math.floor(Date.now() / 1000) + 600 },
+  'tok-other': { active: true, sub: 'elsewhere', scope: 'orders:read', aud: 'billing-api' },
+  'tok-old': { active: false },
+};
+let asked = 0;
+const ip = http.createServer(async (req, res) => {
+  let body = ''; for await (const c of req) body += c;
+  if (req.headers.authorization !== `Basic ${Buffer.from('gateway:intro-secret').toString('base64')}`) { res.writeHead(401); return res.end(); }
+  asked++;
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end(JSON.stringify(tokens[new URLSearchParams(body).get('token') || ''] || { active: false }));
+});
+
+let srv: Awaited<ReturnType<typeof boot>>;
+before(async () => { await new Promise<void>(r => ip.listen(ipPort, '127.0.0.1', r)); srv = await boot({ listenAdmin: false }); });
+after(async () => { await srv.stop(); ip.close(); });
+
+let n = 0;
+function rest(path: string, policy: Record<string, any>, extra: Record<string, any> = {}) {
+  const pol = saveResource({ kind: 'inboundPolicy', name: `Policy ${++n}`, config: { requireHttps: false, rateLimitPerMinute: 0, ...policy } });
+  const t = node('restService', `In ${n}`, { method: 'POST', path, policy: pol.id, ...extra });
+  const r = node('httpResponse', 'Reply', { status: '200', contentType: 'application/json', body: '{"who": "{{input.auth.subject}}", "how": "{{input.auth.method}}", "qty": "{{input.body.qty}}"}' });
+  const f = flows.saveFlow(undefined, { name: `Svc ${n}`, nodes: [t, r], edges: [edge(t, r)] });
+  flows.deploy(f.id);
+}
+const hmacOpts = { algorithm: 'sha256', encoding: 'hex' as const, prefix: '', signed: 'timestamp and body' as const, header: 'X-Signature', timestampHeader: 'X-Timestamp' };
+const post = (path: string, body: string, headers: Record<string, string> = {}) =>
+  fetch(`${env.http}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body });
+
+test('HMAC: signed requests pass once; changed, old, replayed or unsigned ones do not; a second secret works while one is replaced', async () => {
+  setSecret('WH_OLD', 'old-shared-secret');
+  setSecret('WH_NEW', 'new-shared-secret');
+  rest('/hooks/orders', { auth: 'hmac', hmacSecrets: ['WH_OLD', 'WH_NEW'], hmacMaxAgeSec: 300 });
+  const body = '{"qty":3}';
+  const signed = signRequest('new-shared-secret', hmacOpts, { method: 'POST', url: `${env.http}/hooks/orders`, body });
+  const ok = await post('/hooks/orders', body, signed);
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), { who: 'WH_NEW', how: 'hmac', qty: '3' });
+  const err = async (b: string, h: Record<string, string>) => { const r = await post('/hooks/orders', b, h); return [r.status, (await r.json()).error]; };
+  assert.deepEqual(await err(body, signed), [401, 'This signed request was already received (replay)']);
+  assert.deepEqual(await err('{"qty":30}', signRequest('old-shared-secret', hmacOpts, { method: 'POST', url: '/x', body }) ), [401, 'The signature does not match']);
+  assert.equal((await post('/hooks/orders', body, signRequest('old-shared-secret', hmacOpts, { method: 'POST', url: '/x', body }))).status, 200, 'the older secret still works');
+  const old = signRequest('new-shared-secret', hmacOpts, { method: 'POST', url: '/x', body: '{"qty":4}' });
+  old['x-timestamp'] = String(Math.floor(Date.now() / 1000) - 3600);
+  assert.deepEqual(await err('{"qty":4}', old), [401, 'The signature timestamp is too old or in the future']);
+  assert.deepEqual(await err(body, {}), [401, 'The request is not signed']);
+  assert.deepEqual(await err('{"qty":5}', signRequest('guess', hmacOpts, { method: 'POST', url: '/x', body: '{"qty":5}' })), [401, 'The signature does not match']);
+  // Remembered in the database (every engine sees it), and forgotten once old enough.
+  assert.ok(Number(q.get<any>('select count(*) n from replay_guard').n) >= 2);
+  housekeeping({ now: Date.now() + 3600e3 });
+  assert.equal(Number(q.get<any>('select count(*) n from replay_guard').n), 0);
+});
+
+test('HMAC variants: method and path signed too, and the body only with a sha256= prefix', async () => {
+  setSecret('WH_GH', 'gh-secret');
+  rest('/hooks/strict', { auth: 'hmac', hmacSecrets: ['WH_GH'], hmacSigned: 'method, path, timestamp and body' });
+  const o = { ...hmacOpts, signed: 'method, path, timestamp and body' as const };
+  assert.equal((await post('/hooks/strict?src=a', '{"qty":1}', signRequest('gh-secret', o, { method: 'POST', url: `${env.http}/hooks/strict?src=a`, body: '{"qty":1}' }))).status, 200);
+  assert.equal((await post('/hooks/strict?src=b', '{"qty":1}', signRequest('gh-secret', o, { method: 'POST', url: `${env.http}/hooks/strict?src=a`, body: '{"qty":1}' }))).status, 401, 'signed for another path');
+  rest('/hooks/body', { auth: 'hmac', hmacSecrets: ['WH_GH'], hmacSigned: 'body only', hmacPrefix: 'sha256=', hmacHeader: 'X-Hub-Signature-256' });
+  const b = signRequest('gh-secret', { ...hmacOpts, signed: 'body only', prefix: 'sha256=', header: 'X-Hub-Signature-256' }, { method: 'POST', url: '/', body: '{"qty":2}' });
+  assert.match(b['x-hub-signature-256'], /^sha256=[0-9a-f]{64}$/);
+  assert.equal(b['x-timestamp'], undefined);
+  assert.equal((await post('/hooks/body', '{"qty":2}', b)).status, 200);
+});
+
+test('an HTTP request step signs its body with an HMAC outbound profile', async () => {
+  setSecret('WH_OUT', 'outbound-secret');
+  rest('/hooks/from-sutra', { auth: 'hmac', hmacSecrets: ['WH_OUT'], hmacAlgorithm: 'sha512', hmacEncoding: 'base64' });
+  const auth = saveResource({ kind: 'outboundAuth', name: 'Signed hooks', config: { type: 'hmac', hmacSecret: 'WH_OUT', hmacAlgorithm: 'sha512', hmacEncoding: 'base64', hmacHeader: 'X-Signature', hmacTimestampHeader: 'X-Timestamp', hmacSigned: 'timestamp and body' } });
+  const s = node('start', 'Start', { payload: '{}' });
+  const call = node('httpRequest', 'Call', { method: 'POST', url: `${env.http}/hooks/from-sutra`, auth: auth.id, bodyType: 'json', body: '{"qty": 9}' });
+  const id = await engine.startRun({ doc: { name: 'Sender', nodes: [s, call], edges: [edge(s, call)] } });
+  assert.equal(await engine.waitFor(id, 20000), 'done', JSON.stringify(runState(id)!.logs));
+  assert.deepEqual(runState(id)!.outputs.Call.body, { who: 'WH_OUT', how: 'hmac', qty: '9' });
+});
+
+test('OAuth token introspection: active tokens with their scopes pass, answers are kept, others are refused', async () => {
+  setSecret('INTRO', 'intro-secret');
+  const base = { auth: 'oauth2Introspection', introspectionUrl: `http://127.0.0.1:${ipPort}/introspect`, introspectionClientId: 'gateway', introspectionSecret: 'INTRO', introspectionAudience: 'orders-api', jwtScopes: 'orders:read' };
+  rest('/api/orders', base);
+  rest('/api/orders/write', base, { requiredScopes: 'orders:write' });
+  const call = (path: string, tok?: string) => post(path, '{"qty":1}', tok ? { authorization: `Bearer ${tok}` } : {});
+  const ok = await call('/api/orders', 'tok-read');
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), { who: 'svc-reader', how: 'oauth2Introspection', qty: '1' });
+  const before = asked;
+  await call('/api/orders', 'tok-read');
+  assert.equal(asked, before, 'the answer was kept');
+  assert.equal((await call('/api/orders')).status, 401);
+  assert.equal((await call('/api/orders', 'tok-old')).status, 401);
+  assert.equal((await call('/api/orders', 'nope')).status, 401);
+  const other = await call('/api/orders', 'tok-other');
+  assert.equal(other.status, 401);
+  assert.equal((await other.json()).error, 'The token is meant for another audience');
+  // Scopes per service: write needs orders:write.
+  const denied = await call('/api/orders/write', 'tok-read');
+  assert.equal(denied.status, 403);
+  assert.equal((await denied.json()).error, 'The caller is missing scope: orders:write');
+  assert.match(String(denied.headers.get('www-authenticate')), /insufficient_scope/);
+  assert.equal((await call('/api/orders/write', 'tok-write')).status, 200);
+});
+
+test('scopes per SOAP operation', async () => {
+  const pol = saveResource({ kind: 'inboundPolicy', name: 'SOAP tokens', config: { auth: 'oauth2Introspection', requireHttps: false, rateLimitPerMinute: 0, introspectionUrl: `http://127.0.0.1:${ipPort}/introspect`, introspectionClientId: 'gateway', introspectionSecret: 'INTRO' } });
+  const t = node('soapService', 'Orders WS', { serviceName: 'OrderService', namespace: 'urn:sutra:orders', path: '/soap/scoped', operations: 'GetOrder, CancelOrder', soapVersion: '1.1', policy: pol.id, operationScopes: [{ k: 'CancelOrder', v: 'orders:cancel' }] });
+  const r1 = node('soapReply', 'Got', { kind: 'response', body: '{"Ok": "get"}' });
+  const r2 = node('soapReply', 'Cancelled', { kind: 'response', body: '{"Ok": "cancel"}' });
+  const f = flows.saveFlow(undefined, { name: 'Scoped SOAP', nodes: [t, r1, r2], edges: [edge(t, r1, 'GetOrder'), edge(t, r2, 'CancelOrder')] });
+  flows.deploy(f.id);
+  const call = async (op: string, tok: string) => {
+    const r = await fetch(`${env.http}/soap/scoped`, { method: 'POST', headers: { 'content-type': 'text/xml', authorization: `Bearer ${tok}` }, body: `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><o:${op} xmlns:o="urn:sutra:orders"><o:Id>1</o:Id></o:${op}></s:Body></s:Envelope>` });
+    return { status: r.status, text: await r.text() };
+  };
+  assert.equal((await call('GetOrder', 'tok-read')).status, 200);
+  const no = await call('CancelOrder', 'tok-read');
+  assert.equal(no.status, 403);
+  assert.match(no.text, /The caller is missing scope: orders:cancel/);
+  assert.match((await call('CancelOrder', 'tok-write')).text, /<Ok>cancel<\/Ok>/);
+});

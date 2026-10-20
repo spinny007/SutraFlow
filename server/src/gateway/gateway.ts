@@ -15,7 +15,7 @@ import { getSetting, setSetting } from '../db.js';
 import { engine } from '../engine/engine.js';
 import type { FlowDoc, FlowNode, ReplyPayload } from '../engine/types.js';
 import { deployedFlows } from '../flows.js';
-import { effectiveResource, getResource } from '../resources.js';
+import { effectiveResource, getResource, kvToObject } from '../resources.js';
 import { authorize, corsHeaders, PolicyError, type Caller } from '../security/inbound.js';
 import { xmlParser } from '../security/outbound.js';
 import { checkParsed, checkRaw, limitsOf, MessageRejected, validateMessage } from '../security/validate.js';
@@ -278,7 +278,7 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
     if (!opName) return fault(400, 'soap:Client', 'SOAP Body is empty', v12);
     let caller;
     try {
-      caller = await authorize(policy, { headers: req.headers, ip: req.ip, secure, socket: req.raw.socket, wsSecurity: env.Header?.Security, soapXml: xml });
+      caller = await authorize(policy, { headers: req.headers, ip: req.ip, secure, socket: req.raw.socket, wsSecurity: env.Header?.Security, soapXml: xml, method, path: url.pathname + url.search, rawBody: raw });
       noteCaller(gw, reply, caller);
     } catch (e: any) {
       const pe = e as PolicyError;
@@ -288,6 +288,9 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
     }
     const ops = listOf(n.config.operations);
     if (ops.length && !ops.some(o => o.toLowerCase() === opName.toLowerCase())) return fault(400, 'soap:Client', `Unknown operation ${opName}`, v12);
+    const opScopes = Object.entries(kvToObject(n.config.operationScopes)).find(([k]) => k.trim().toLowerCase() === opName.toLowerCase())?.[1];
+    const missingOp = missingScopes(caller, opScopes);
+    if (missingOp) { gw.error = missingOp; return fault(403, 'soap:Client', missingOp, v12); }
     try {
       checkParsed(env.Body, limits);
       if (n.config.validateBody === 'reject invalid' && n.config.bodySchema) {
@@ -323,8 +326,10 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
   // REST
   let caller;
   try {
-    caller = await authorize(policy, { headers: req.headers, ip: req.ip, secure, socket: req.raw.socket });
+    caller = await authorize(policy, { headers: req.headers, ip: req.ip, secure, socket: req.raw.socket, method, path: url.pathname + url.search, rawBody: raw });
     noteCaller(gw, reply, caller);
+    const missing = missingScopes(caller, route.node.config.requiredScopes);
+    if (missing) throw new PolicyError(403, missing, { 'www-authenticate': 'Bearer error="insufficient_scope"' });
   } catch (e: any) {
     const pe = e as PolicyError;
     gw.error = pe.message;
@@ -363,6 +368,15 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
 
 /** What the request log records about a gateway request, filled in while it is handled. */
 interface GwInfo { kind: string; route?: string; flowId?: string; projectId?: string; appId?: string; caller?: string; error?: string }
+
+/** Scopes a service or operation needs that the caller does not hold, as a message; '' when it holds them all. */
+function missingScopes(caller: Caller, needed: unknown) {
+  const need = String(needed || '').split(/\s+/).filter(Boolean);
+  if (!need.length) return '';
+  const have = new Set(caller.scopes || []);
+  const missing = need.filter(s => !have.has(s));
+  return missing.length ? `The caller is missing scope: ${missing.join(' ')}` : '';
+}
 
 function noteCaller(gw: GwInfo, reply: FastifyReply, caller: Caller) {
   gw.caller = caller.subject;
