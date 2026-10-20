@@ -198,7 +198,7 @@ export const RESOURCE_KINDS: ResourceKind[] = [
     name: 'Knowledge base (RAG)',
     desc: 'Documents split into passages with vectors, for agents and Search knowledge to find by meaning (retrieval-augmented generation).',
     fields: [
-      F('store', 'Vector store', 'select', 'built-in', { options: ['built-in', 'folder', 'PostgreSQL (pgvector)', 'Qdrant', 'Chroma', 'Pinecone'], help: 'built-in and folder need nothing else (good up to tens of thousands of passages). For more, or to share with other tools, use a vector database.' }),
+      F('store', 'Vector store', 'select', 'built-in', { options: ['built-in', 'folder', 'PostgreSQL (pgvector)', 'Qdrant', 'Chroma', 'Pinecone'], help: 'built-in and folder need nothing else: for small knowledge, up to tens of thousands of passages (each search reads them all). For big documents, many documents, or sharing with other tools, use a vector database such as PostgreSQL (pgvector).' }),
       F('folder', 'Folder', 'text', '', { ...when('store', 'folder'), help: 'Empty = knowledge in the data folder.' }),
       F('database', 'Database connection', 'resource', '', { resourceKind: 'database', ...when('store', 'PostgreSQL (pgvector)'), help: 'A PostgreSQL database with the vector extension (CREATE EXTENSION vector).' }),
       F('table', 'Table', 'text', 'sutra_knowledge', when('store', 'PostgreSQL (pgvector)')),

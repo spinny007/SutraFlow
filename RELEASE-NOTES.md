@@ -48,6 +48,8 @@ Each comes with a `.sha256` file to check the download.
 - `SUTRA_CAN_LEAD=0` keeps an engine from becoming the leader (for machines that cannot reach watched folders); the Admin Console shows *never leads*.
 - `sutra_event_loop_delay_ms` on `/metrics`: how long work waited for an engine's event loop.
 - Read remote file (SFTP, FTP) can **stream** big CSV and line files in batches, like Read file.
+- Google Drive uploads a **server file streamed** (a resumable upload), and has *Wait for each call* (5 minutes by default) for slow links; Drive steps get a 30-minute time limit.
+- Fixed: after PostgreSQL was unreachable for a moment (a restart, a network cut), an engine's synchronous connection never came back and the engine hung. It now opens the connection again (10 tries), never repeats a statement that may have run, and fails a transaction the connection was lost in until it is rolled back. Found by the soak test.
 - Built-in knowledge bases write and read through the connection pool in batches, and make vectors in slices, so learning a big document no longer holds the engine.
 - A new user guide chapter, *Setting up a cluster, step by step*: one machine, two machines, engines only, Docker; what every engine and what the leader does. And *WebSockets: live connections*.
 

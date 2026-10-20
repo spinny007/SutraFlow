@@ -19,7 +19,8 @@ import { F, when, isObj, writeFields, writeMode, appended } from '../palettes/co
 
 /** Activities for Google Sheets, Google Drive / Docs, Dropbox, YouTube, Facebook Pages, and any REST API of a connected account. */
 const conn = (help?: string) => F('connection', 'Account (OAuth connection)', 'resource', '', { resourceKind: 'oauthApp', help });
-const call = (c: ExecCtx, o: Parameters<typeof apiCall>[1]) => apiCall(c.raw('connection'), { ...o, signal: c.signal });
+// Each call waits as long as the step's "Wait for each call" says (slow links, big files), within the step's time limit.
+const call = (c: ExecCtx, o: Parameters<typeof apiCall>[1]) => apiCall(c.raw('connection'), { ...(Number(c.raw('timeoutSec')) > 0 ? { timeoutMs: Number(c.raw('timeoutSec')) * 1000 } : {}), ...o, signal: c.signal });
 const SHEETS = 'https://sheets.googleapis.com/v4/spreadsheets';
 const DRIVE = 'https://www.googleapis.com/drive/v3';
 const DRIVE_UP = 'https://www.googleapis.com/upload/drive/v3';
@@ -95,7 +96,7 @@ export const saasActivities: Activity[] = [
     },
   },
   {
-    type: 'googleDrive', palette: 'apps', name: 'Google Drive / Docs', glyph: '△', ports: ['out'],
+    type: 'googleDrive', palette: 'apps', name: 'Google Drive / Docs', glyph: '△', ports: ['out'], timeoutMs: 1800000,
     desc: 'Lists, uploads, downloads files, and exports Google Docs/Sheets as text, PDF, CSV or Word.',
     fields: [
       conn('Scope https://www.googleapis.com/auth/drive'),
@@ -106,11 +107,14 @@ export const saasActivities: Activity[] = [
       F('saveTo', 'Save to', 'select', 'step output', { options: ['step output', 'server file'], ...when('op', 'download', 'export'), help: 'server file: streamed to disk, for videos and other large files (then YouTube, SFTP or Read document text can take the file).' }),
       F('savePath', 'Server file', 'text', "=concat({gv.DOWNLOADS}, '/', {input.name})", { tpl: true, ...when('saveTo', 'server file'), help: 'Full path of the file to write; its folder is made when missing.' }),
       F('exportAs', 'Export as', 'select', 'text/plain', { options: ['text/plain', 'text/html', 'application/pdf', 'text/csv', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'], ...when('op', 'export') }),
-      F('name', 'File name', 'text', 'report.csv', { tpl: true, ...when('op', 'upload') }),
+      F('name', 'File name', 'text', 'report.csv', { tpl: true, ...when('op', 'upload'), help: 'With Upload from server file: empty = the name of the file.' }),
+      F('from', 'Upload from', 'select', 'content', { options: ['content', 'server file'], ...when('op', 'upload'), help: 'server file: streamed from disk in a resumable upload, for big files; the content is never held in memory. content: the Content below.' }),
+      F('filePath', 'Server file', 'text', '{{input.path}}', { tpl: true, ...when('from', 'server file') }),
       F('content', 'Content', 'textarea', '{{input.text}}', { tpl: true, ...when('op', 'upload') }),
       F('encoding', 'Content is', 'select', 'text', { options: ['text', 'base64'], ...when('op', 'upload') }),
       F('mimeType', 'MIME type', 'text', 'text/csv', when('op', 'upload')),
       F('convert', 'Convert to a Google Doc/Sheet', 'bool', false, when('op', 'upload')),
+      F('timeoutSec', 'Wait for each call (seconds)', 'number', 300, { help: 'How long one call to Drive may take before it fails: raise it for slow links. Streamed uploads and downloads to server files run until the step\'s time limit (Settings: 30 minutes by default).' }),
       ...writeFields({ k: 'op', in: ['upload'] }).map(f => (f.k === 'append' ? { ...f, help: 'Adds to the end of a file with the same name in the folder (not for Google Docs/Sheets).' } : f.k === 'overwrite' ? { ...f, help: 'Replaces the content of a file with the same name in the folder. Unticked: a second file with the same name is created.' } : f)),
     ],
     outputHint: { files: [{ id: '', name: '', mimeType: '', modifiedTime: '' }], count: 0 },
@@ -138,6 +142,7 @@ export const saasActivities: Activity[] = [
         const r = await call(c, { method: 'GET', url, query: op === 'export' ? { mimeType: c.raw('exportAs') } : { alt: 'media' }, parse: 'buffer' });
         return { out: { fileId: c.v('fileId'), content: textual ? r.buffer!.toString('utf8') : r.buffer!.toString('base64'), encoding: textual ? 'text' : 'base64', size: r.buffer!.length } };
       }
+      if (c.raw('from') === 'server file') return { out: await driveUploadFile(c) };
       const raw0 = c.v('content');
       const data0 = c.raw('encoding') === 'base64' ? Buffer.from(String(raw0 ?? ''), 'base64') : Buffer.from(typeof raw0 === 'string' ? raw0 : JSON.stringify(raw0));
       const mode = writeMode(c.raw);
@@ -515,3 +520,35 @@ registerListener('twitchLiveTrigger', c => {
   const t = setInterval(tick, every);
   return () => clearInterval(t);
 });
+
+/**
+ * A server file to Drive in a resumable upload: the metadata first, then the file streamed to the
+ * address Drive gives, so a file of any size is never held in memory. Overwrite replaces the content
+ * of a file with the same name in the folder; append is not possible on this path.
+ */
+async function driveUploadFile(c: ExecCtx) {
+  const f = String(c.v('filePath') || '').trim();
+  if (!f || !fs.existsSync(f)) throw new Error(`File not found on this server: ${f || '(empty)'}`);
+  const size = fs.statSync(f).size;
+  const name = String(c.v('name') || '').trim() || path.basename(f);
+  const mime = c.raw('mimeType') || 'application/octet-stream';
+  const mode = writeMode(c.raw);
+  if (mode === 'append') throw new Error('Append is not possible when uploading a server file: choose overwrite or a new file');
+  let existing: string | undefined;
+  if (mode === 'overwrite') {
+    const q = [`name = '${name.replace(/'/g, "\\'")}'`, 'trashed = false', c.v('folderId') ? `'${String(c.v('folderId')).replace(/'/g, "\\'")}' in parents` : ''].filter(Boolean).join(' and ');
+    existing = (await call(c, { method: 'GET', url: `${DRIVE}/files`, query: { q, fields: 'files(id)', pageSize: '1' } })).body.files?.[0]?.id;
+  }
+  const meta: any = existing ? {} : { name, ...(c.v('folderId') ? { parents: [String(c.v('folderId'))] } : {}) };
+  if (!existing && c.raw('convert')) meta.mimeType = mime === 'text/csv' ? 'application/vnd.google-apps.spreadsheet' : 'application/vnd.google-apps.document';
+  const start = await streamCall(c.raw('connection'), `${DRIVE_UP}/files${existing ? `/${existing}` : ''}?uploadType=resumable&fields=id,name,mimeType,size,webViewLink`, {
+    method: existing ? 'PATCH' : 'POST', signal: c.signal, body: JSON.stringify(meta),
+    headers: { 'content-type': 'application/json; charset=UTF-8', 'x-upload-content-length': String(size), 'x-upload-content-type': mime },
+  });
+  const location = start.headers.get('location');
+  if (!location) throw new Error('Google Drive did not give an upload address');
+  c.log('info', `Uploading ${name} (${(size / 1048576).toFixed(1)} MB) to Google Drive`);
+  const up = await streamCall(c.raw('connection'), location, { method: 'PUT', signal: c.signal, body: Readable.toWeb(fs.createReadStream(f)), headers: { 'content-type': mime, 'content-length': String(size) } });
+  const r: any = await up.json();
+  return { ...r, bytes: size, action: existing ? 'overwritten' : 'created' };
+}

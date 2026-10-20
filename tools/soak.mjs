@@ -36,6 +36,14 @@
  *   --files-every 20 --rag-every 60 --sftp-every 30     minutes between big files, documents, SFTP files
  *   --scale 1                   multiplies the request rates
  *   --no-ai --no-kill --no-outage --no-big                leave parts out
+ *   --share \\server\share\soak   the folder the folder trigger watches: a real shared location (a
+ *                               network share or a mounted drive); default a folder of its own here
+ *
+ * Google Drive: big files are uploaded from a server file and fetched back, both streamed, when
+ *   SOAK_GOOGLE_CLIENT_ID, SOAK_GOOGLE_CLIENT_SECRET and SOAK_DRIVE_FOLDER are set and a refresh token
+ *   is in data/soak-google.json. Make that file once, signing in yourself:
+ *     node tools/soak.mjs --google-sign-in      (prints Google's sign-in address; the OAuth client must
+ *                                                be a Desktop app, or allow http://127.0.0.1:53682/callback)
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -57,6 +65,32 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const pct = (a, p) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return Math.round(s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))]); };
 
 if (opt('report-only')) { writeReport(OUT); process.exit(0); }
+const GOOGLE_FILE = path.join(HOME, 'data', 'soak-google.json');
+if (flag('google-sign-in')) {
+  // Once, by the person who owns the account: the refresh token goes to data/ (never committed).
+  const id = process.env.SOAK_GOOGLE_CLIENT_ID, secretValue = process.env.SOAK_GOOGLE_CLIENT_SECRET;
+  if (!id || !secretValue) { console.error('Set SOAK_GOOGLE_CLIENT_ID and SOAK_GOOGLE_CLIENT_SECRET first.'); process.exit(2); }
+  const http = await import('node:http');
+  const redirect = 'http://127.0.0.1:53682/callback', state = crypto.randomBytes(12).toString('hex');
+  const u = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  for (const [k, v] of Object.entries({ client_id: id, redirect_uri: redirect, response_type: 'code', scope: 'https://www.googleapis.com/auth/drive', access_type: 'offline', prompt: 'consent', state })) u.searchParams.set(k, v);
+  console.log(`Open this address in your browser and sign in to the Google account for the soak test:\n\n  ${u}\n`);
+  await new Promise(done => {
+    const srv = http.createServer(async (req, res) => {
+      const q = new URL(req.url, redirect).searchParams;
+      if (!req.url.startsWith('/callback')) { res.writeHead(404); return res.end(); }
+      if (q.get('state') !== state || !q.get('code')) { res.end('Not signed in: ' + (q.get('error') || 'the answer does not match')); return; }
+      const t = await (await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ code: q.get('code'), client_id: id, client_secret: secretValue, redirect_uri: redirect, grant_type: 'authorization_code' }) })).json();
+      if (!t.refresh_token) { res.end(`Not signed in: ${t.error_description || t.error || 'no refresh token'}`); return; }
+      fs.mkdirSync(path.dirname(GOOGLE_FILE), { recursive: true });
+      fs.writeFileSync(GOOGLE_FILE, JSON.stringify({ refreshToken: t.refresh_token, at: new Date().toISOString() }), { mode: 0o600 });
+      res.end('Signed in. You can close this tab.');
+      console.log(`Saved to ${GOOGLE_FILE}.`);
+      srv.close(); done();
+    }).listen(53682, '127.0.0.1');
+  });
+  process.exit(0);
+}
 
 const PG = opt('pg');
 if (!PG) { console.error('Give --pg <postgres admin url> (or --report-only <folder>)'); process.exit(2); }
@@ -66,6 +100,9 @@ const SCALE = Number(opt('scale', 1));
 const OLLAMA = opt('ollama', 'http://127.0.0.1:11434'), MODEL = opt('model', 'phi4-mini');
 const SIZES = String(opt('files', '10,20,30,40,50,60')).split(',').map(Number).filter(n => n > 0);
 const AI = !flag('no-ai'), KILL = !flag('no-kill'), OUTAGE = !flag('no-outage'), BIG = !flag('no-big');
+const SHARE = opt('share');
+const GOOGLE = process.env.SOAK_GOOGLE_CLIENT_ID && process.env.SOAK_GOOGLE_CLIENT_SECRET && process.env.SOAK_DRIVE_FOLDER && fs.existsSync(GOOGLE_FILE)
+  ? { clientId: process.env.SOAK_GOOGLE_CLIENT_ID, clientSecret: process.env.SOAK_GOOGLE_CLIENT_SECRET, folder: process.env.SOAK_DRIVE_FOLDER, refreshToken: JSON.parse(fs.readFileSync(GOOGLE_FILE, 'utf8')).refreshToken } : null;
 const MAIN = path.join(HOME, 'dist', 'server', 'main.js');
 if (!fs.existsSync(MAIN)) { console.error('Build first: npm run build'); process.exit(2); }
 const TOKEN = crypto.randomBytes(16).toString('hex');
@@ -221,7 +258,16 @@ await new Promise(r => brokerListener.on('listening', r));
 const sftpRoot = fs.mkdtempSync(path.join(WORK, 'sftp-'));
 fs.mkdirSync(path.join(sftpRoot, 'inbox'), { recursive: true });
 const sftpPort = await startSftp(sftpRoot, 'soak', 'soak-sftp-pass');
-const inbox = fs.mkdtempSync(path.join(WORK, 'inbox-'));
+const inbox = SHARE ? path.join(SHARE, `soak-${Date.now()}`) : fs.mkdtempSync(path.join(WORK, 'inbox-'));
+fs.mkdirSync(inbox, { recursive: true });
+// FTP server over a folder.
+const ftpRoot = fs.mkdtempSync(path.join(WORK, 'ftp-'));
+fs.mkdirSync(path.join(ftpRoot, 'inbox'), { recursive: true });
+const FtpSrv = require('ftp-srv');
+const ftpPort = await new Promise(r => { const t = net.createServer(); t.listen(0, '127.0.0.1', () => { const p = t.address().port; t.close(() => r(p)); }); });
+const ftpSrv = new FtpSrv({ url: `ftp://127.0.0.1:${ftpPort}`, pasv_url: '127.0.0.1', pasv_min: 30000, pasv_max: 30100, anonymous: false, greeting: 'soak', log: { info() {}, debug() {}, trace() {}, warn() {}, error() {}, child() { return this; } } });
+ftpSrv.on('login', ({ username, password }, resolve, reject) => (username === 'soak' && password === 'soak-ftp-pass' ? resolve({ root: ftpRoot }) : reject(new Error('Bad login'))));
+await ftpSrv.listen();
 const docs = fs.mkdtempSync(path.join(WORK, 'docs-'));
 
 // ---------- the project ----------
@@ -233,6 +279,8 @@ await secret('SOAK_WS_PW', 'soak-ws-password');
 await secret('SOAK_SERVICE_KEY', certs.service.private);
 await secret('SOAK_MCP_KEY', 'soak-mcp-key-123');
 await secret('SOAK_SFTP_PW', 'soak-sftp-pass');
+await secret('SOAK_FTP_PW', 'soak-ftp-pass');
+if (GOOGLE) { await secret('SOAK_GOOGLE_SECRET', GOOGLE.clientSecret); await secret('SOAK_GOOGLE_REFRESH', GOOGLE.refreshToken); }
 const res = (kind, name, config) => api('POST', '/api/resources', { kind, name, project_id: P, config });
 const polHmac = await res('inboundPolicy', 'Soak HMAC', { auth: 'hmac', hmacSecrets: ['SOAK_HMAC'], requireHttps: false, rateLimitPerMinute: 0 });
 const polUt = await res('inboundPolicy', 'Soak UsernameToken', { auth: 'wssUsernameToken', users: [{ k: 'erp', v: 'SOAK_WS_PW' }], wssTimestamp: 'required', requireHttps: false, rateLimitPerMinute: 0 });
@@ -241,9 +289,15 @@ const polMcp = await res('inboundPolicy', 'Soak MCP keys', { auth: 'apiKey', api
 const mcpSrv = await res('mcpServer', 'Soak tools', { path: '/mcp/soak', title: 'Soak tools', instructions: 'Tools for the soak test.', policy: polMcp.id });
 const amqp = await res('amqp1', 'Soak broker', { host: '127.0.0.1', port: brokerListener.address().port, user: '', passwordSecret: '' });
 const sftp = await res('sftp', 'Soak SFTP', { host: '127.0.0.1', port: sftpPort, user: 'soak', auth: 'password', passwordSecret: 'SOAK_SFTP_PW', baseFolder: '/' });
+const ftp = await res('ftp', 'Soak FTP', { host: '127.0.0.1', port: ftpPort, user: 'soak', passwordSecret: 'SOAK_FTP_PW', security: 'none', baseFolder: '/' });
+const google = GOOGLE ? await res('oauthApp', 'Soak Google Drive', { provider: 'google', clientId: GOOGLE.clientId, clientSecretSecret: 'SOAK_GOOGLE_SECRET', refreshTokenSecret: 'SOAK_GOOGLE_REFRESH', scopes: 'https://www.googleapis.com/auth/drive' }) : null;
 const wsConn = await res('websocket', 'Soak feed', { url: `ws://127.0.0.1:${feed.port}/feed`, reconnectMinMs: 500, reconnectMaxMs: 5000, pingSeconds: 15 });
 const ai = AI ? await res('aiProvider', 'Soak Ollama', { engine: 'Ollama', baseUrl: OLLAMA, model: MODEL, maxTokens: 300 }) : null;
-const kb = await res('aiKnowledge', 'Soak documents', { store: 'built-in', embedWith: 'built-in', chunkTokens: 300, overlapTokens: 40 });
+// Big documents: pgvector in the soak database (the built-in store is for small knowledge bases).
+await dbq('CREATE EXTENSION IF NOT EXISTS vector').catch(e => event('setup', `pgvector is not available (${e.message}); RAG uses the built-in store`));
+const hasVector = (await dbq("select 1 from pg_extension where extname = 'vector'")).length > 0;
+const kbDb = hasVector ? await res('database', 'Soak vectors', { driver: 'postgres', host: dbUrl.hostname, port: Number(dbUrl.port || 5432), database: DBNAME, user: decodeURIComponent(dbUrl.username || 'postgres'), passwordSecret: '', poolMax: 4 }) : null;
+const kb = await res('aiKnowledge', 'Soak documents', kbDb ? { store: 'PostgreSQL (pgvector)', database: kbDb.id, table: 'soak_knowledge', embedWith: 'built-in', chunkTokens: 300, overlapTokens: 40 } : { store: 'built-in', embedWith: 'built-in', chunkTokens: 300, overlapTokens: 40 });
 const orderSchema = await api('POST', '/api/schemas', { project_id: P, name: 'SoakOrder', kind: 'json', text: JSON.stringify({ type: 'object', required: ['id', 'qty'], properties: { id: { type: 'string' }, qty: { type: 'integer', minimum: 1 } } }) });
 
 let nid = 0;
@@ -316,19 +370,36 @@ async function sutra(name, nodes, edges, tuning) {
 }
 { // big files: SFTP, folder (streamed), RAG documents, AI agent
   const rt = N('remoteTrigger', 'SFTP inbox', { protocol: 'SFTP', sftpConn: sftp.id, folder: 'inbox', pattern: '*.csv', pollSeconds: 30, after: 'delete', format: 'do not read' });
-  const rr2 = N('remoteRead', 'Read', { protocol: 'SFTP', sftpConn: sftp.id, path: 'inbox/{{input.name}}', format: 'CSV rows', maxMb: 100 }, { timeoutMs: 1800000 });
-  const rc = N('jsonata', 'Count', { source: '{{input}}', expression: '{ "rows": count, "file": name }' });
-  await sutra('Soak SFTP files', [rt, rr2, rc], [E(rt, rr2), E(rr2, rc)], { stepData: 'errors only' });
+  const rr2 = N('remoteRead', 'Read', { protocol: 'SFTP', sftpConn: sftp.id, path: 'inbox/{{input.name}}', format: 'CSV rows', stream: true, batchSize: 20000 }, { timeoutMs: 1800000 });
+  const rb = N('jsonata', 'Batch', { source: '{{input}}', expression: '{ "count": count, "batch": batch }' });
+  const rc = N('jsonata', 'Totals', { source: '{{input}}', expression: '{ "rows": count, "batches": batches }' });
+  await sutra('Soak SFTP files', [rt, rr2, rb, rc], [E(rt, rr2), E(rr2, rb, 'batch'), E(rr2, rc)], { stepData: 'errors only' });
+  const fpt = N('remoteTrigger', 'FTP inbox', { protocol: 'FTP', ftpConn: ftp.id, folder: 'inbox', pattern: '*.csv', pollSeconds: 30, after: 'delete', format: 'do not read' });
+  const fpr = N('remoteRead', 'Read', { protocol: 'FTP', ftpConn: ftp.id, path: 'inbox/{{input.name}}', format: 'CSV rows', stream: true, batchSize: 20000 }, { timeoutMs: 1800000 });
+  const fpb = N('jsonata', 'Batch', { source: '{{input}}', expression: '{ "count": count, "batch": batch }' });
+  const fpc = N('jsonata', 'Totals', { source: '{{input}}', expression: '{ "rows": count, "batches": batches }' });
+  await sutra('Soak FTP files', [fpt, fpr, fpb, fpc], [E(fpt, fpr), E(fpr, fpb, 'batch'), E(fpr, fpc)], { stepData: 'errors only' });
+  if (google) {
+    const gs = N('start', 'Start', { payload: '{}' });
+    const gu = N('googleDrive', 'Upload', { connection: google.id, op: 'upload', from: 'server file', filePath: '{{input.path}}', name: '{{input.name}}', folderId: GOOGLE.folder, mimeType: 'text/csv', overwrite: true, timeoutSec: 900 }, { timeoutMs: 3600000 });
+    const gd = N('googleDrive', 'Fetch', { connection: google.id, op: 'download', fileId: '{{input.id}}', saveTo: 'server file', savePath: '{{trigger.path}}.back', timeoutSec: 900 }, { timeoutMs: 3600000 });
+    const gr = N('fileRead', 'Stream', { folder: path.dirname(inbox), path: '{{trigger.name}}.back', format: 'CSV rows', stream: true, batchSize: 20000 }, { timeoutMs: 3600000 });
+    const gb = N('jsonata', 'Batch', { source: '{{input}}', expression: '{ "count": count }' });
+    const gt = N('jsonata', 'Totals', { source: '{{input}}', expression: '{ "rows": count, "batches": batches }' });
+    await sutra('Soak Google Drive', [gs, gu, gd, gr, gb, gt], [E(gs, gu), E(gu, gd), E(gd, gr), E(gr, gb, 'batch'), E(gr, gt)], { stepData: 'errors only' });
+  }
   const ft = N('fileTrigger', 'Inbox', { folder: inbox, pattern: '*.csv', events: ['added'], pollSeconds: 10, stableSeconds: 3, format: 'do not read' });
   const fr = N('fileRead', 'Stream', { folder: inbox, path: '{{input.name}}', format: 'CSV rows', stream: true, batchSize: 20000, maxMb: 100 }, { timeoutMs: 3600000 });
   const fb = N('jsonata', 'Batch', { source: '{{input}}', expression: '{ "count": count, "batch": batch }' });
   const fd = N('jsonata', 'Totals', { source: '{{input}}', expression: '{ "rows": count, "batches": batches }' });
-  await sutra('Soak folder CSV', [ft, fr, fb, fd], [E(ft, fr), E(fr, fb, 'batch'), E(fr, fd)], { stepData: 'errors only' });
+  await sutra('Soak folder CSV', [ft, fr, fb, fd], [E(ft, fr, 'added'), E(fr, fb, 'batch'), E(fr, fd)], { stepData: 'errors only' });
+  // Documents streamed: 2,000 lines a batch, each batch learned as a part of the document (a pgvector table).
   const ks = N('start', 'Start', { payload: '{}' });
-  const kr = N('fileRead', 'Read', { folder: docs, path: '{{input.name}}', format: 'text', maxMb: 100 }, { timeoutMs: 3600000 });
-  const ka = N('knowledgeAdd', 'Learn', { knowledge: kb.id, source: '{{input.name}}', text: '{{input.content}}' }, { timeoutMs: 7200000 });
-  const kd = N('jsonata', 'Learned', { source: '{{input}}', expression: '{ "chunks": chunks, "source": source }' });
-  await sutra('Soak RAG ingest', [ks, kr, ka, kd], [E(ks, kr), E(kr, ka), E(ka, kd)], { stepData: 'errors only' });
+  const kr = N('fileRead', 'Stream', { folder: docs, path: '{{input.name}}', format: 'lines', stream: true, batchSize: 2000 }, { timeoutMs: 7200000 });
+  const kj = N('jsonata', 'Part', { source: '{{input}}', expression: '{ "name": file.name & "#" & $string(batch), "text": $join(rows.line, "\\n") }' });
+  const ka = N('knowledgeAdd', 'Learn', { knowledge: kb.id, source: '{{input.name}}', text: '{{input.text}}' }, { timeoutMs: 1800000 });
+  const kd = N('jsonata', 'Learned', { source: '{{input}}', expression: '{ "lines": count, "batches": batches }' });
+  await sutra('Soak RAG ingest', [ks, kr, kj, ka, kd], [E(ks, kr), E(kr, kj, 'batch'), E(kj, ka), E(kr, kd)], { stepData: 'errors only' });
   const qs = N('start', 'Start', { payload: '{}' }), qq = N('knowledgeSearch', 'Search', { knowledge: kb.id, question: '{{input.q}}', top: 5 });
   await sutra('Soak RAG search', [qs, qq], [E(qs, qq)]);
   if (ai) {
@@ -397,9 +468,11 @@ every('SOAP UsernameToken', 1000, async () => { const id = `S-${++seq}`; await s
 every('SOAP X.509 signed and encrypted', 4000, async () => { const id = `X-${++seq}`; await soap('/soap/soak-x509', applyWss(envelope(id), { x509: { keyPem: certs.client.private, certPem: certs.client.cert }, timestampTtlSec: 300, encrypt: { certPem: certs.service.cert } }), id); });
 
 // WebSocket clients: five, each sends every 2 seconds and waits for its echo; reconnect when dropped.
-const wsState = { connects: 0, drops: 0, broadcastsSent: 0, broadcastsGot: 0 };
+const wsState = { connects: 0, drops: 0, broadcastsSent: 0, broadcastsExpected: 0, broadcastsGot: 0 };
+const wsClients = [];
 for (let k = 0; k < 5; k++) {
   const client = { ws: null, pending: new Map(), open: false };
+  wsClients.push(client);
   const connect = () => {
     if (stopping || Date.now() > END) return;
     const ws = new WebSocket(`${gw().replace('http', 'ws')}/ws/soak`);
@@ -427,6 +500,7 @@ for (let k = 0; k < 5; k++) {
 }
 every('WebSocket broadcast', 30000, async () => {
   wsState.broadcastsSent++;
+  wsState.broadcastsExpected += wsClients.filter(c => c.open).length;
   const r = await postJson(`${gw()}/soak/broadcast`, { id: `B-${++seq}` });
   expect(r.status === 200, `status ${r.status}`);
 });
@@ -471,7 +545,7 @@ if (ai) {
   }, 1);
 }
 // Big files in turn: CSV to the watched folder, CSV over SFTP, documents for RAG.
-const files = { csv: [], sftp: [], docs: [] };
+const files = { csv: [], sftp: [], ftp: [], docs: [], drive: [] };
 let sizeAt = 0;
 const nextSize = () => SIZES[sizeAt++ % SIZES.length];
 function writeCsv(file, mb) {
@@ -508,11 +582,31 @@ if (BIG) {
     event('file', `${name}: ${rows} rows to the watched folder`);
   }, 1);
   every('SFTP CSV', Number(opt('sftp-every', 30)) * 60000, async () => {
-    const mb = Math.min(30, nextSize()), name = `soak-${++seq}-${mb}mb.csv`, tmp = path.join(WORK, name);
+    const mb = nextSize(), name = `soak-${++seq}-${mb}mb.csv`, tmp = path.join(WORK, name);
     const rows = writeCsv(tmp, mb);
     fs.renameSync(tmp, path.join(sftpRoot, 'inbox', name));
     files.sftp.push({ name, mb, rows, at: Date.now() });
     event('file', `${name}: ${rows} rows to the SFTP inbox`);
+  }, 1);
+  every('FTP CSV (streamed)', Number(opt('sftp-every', 30)) * 60000, async () => {
+    const mb = nextSize(), name = `soak-${++seq}-${mb}mb.csv`, tmp = path.join(WORK, name);
+    const rows = writeCsv(tmp, mb);
+    fs.renameSync(tmp, path.join(ftpRoot, 'inbox', name));
+    files.ftp.push({ name, mb, rows, at: Date.now() });
+    event('file', `${name}: ${rows} rows to the FTP inbox`);
+  }, 1);
+  if (google) every('Google Drive upload and fetch (streamed)', Number(opt('drive-every', 45)) * 60000, async () => {
+    const mb = nextSize(), name = `soak-drive-${mb}mb.csv`, p = path.join(inbox, '..', name);
+    const rows = writeCsv(p, mb);
+    const t = Date.now();
+    const r = await runApi('Soak Google Drive', { path: p, name }, 120000);
+    let d = r;
+    while (!['done', 'failed', 'cancelled'].includes(d.status) && Date.now() - t < 2 * 3600e3) { await sleep(10000); d = await api('GET', `/api/runs/${r.id}`); }
+    const got = d.outputs?.Totals?.rows;
+    files.drive.push({ name, mb, rows, got, status: d.status, seconds: Math.round((Date.now() - t) / 1000), error: d.error || null });
+    event('drive', `${name}: ${d.status} in ${Math.round((Date.now() - t) / 1000)} s, ${got ?? '?'} of ${rows} rows back${d.error ? `: ${d.error}` : ''}`);
+    fs.rmSync(p, { force: true }); fs.rmSync(`${p}.back`, { force: true });
+    expect(d.status === 'done' && Number(got) === rows, `run ${d.status}: ${d.error || `${got} of ${rows} rows`}`);
   }, 1);
   every('RAG document ingest', Number(opt('rag-every', 60)) * 60000, async () => {
     const mb = nextSize(), name = `soak-doc-${++seq}-${mb}mb.txt`;
@@ -521,7 +615,7 @@ if (BIG) {
     const r = await runApi('Soak RAG ingest', { name }, 120000);
     let d = r;
     while (!['done', 'failed', 'cancelled'].includes(d.status) && Date.now() - t < 2 * 3600e3) { await sleep(10000); d = await api('GET', `/api/runs/${r.id}`); }
-    files.docs.push({ name, mb, status: d.status, seconds: Math.round((Date.now() - t) / 1000), error: d.error || null });
+    files.docs.push({ name, mb, status: d.status, seconds: Math.round((Date.now() - t) / 1000), error: d.error || null, parts: d.outputs?.Learned?.batches ?? null });
     event('document', `${name}: ${d.status} in ${Math.round((Date.now() - t) / 1000)} s${d.error ? `: ${d.error}` : ''}`);
     expect(d.status === 'done', `run ${d.status}: ${d.error}`);
   }, 1);
@@ -559,7 +653,7 @@ async function sample() {
     const u = alive(e) ? usage(e.p.pid) : { cpu: 0, mem: 0 };
     let m = '';
     if (alive(e)) { try { m = await (await fetch(`${e.base}/metrics`, { headers: { authorization: `Bearer ${TOKEN}` }, signal: AbortSignal.timeout(10000) })).text(); } catch { /* busy */ } }
-    engines.push({ i: e.i, alive: alive(e), rssMb: Math.round(u.mem / 1048576), cpuSec: Math.round(u.cpu), restarts: e.restarts, poolWaiting: metric(m, 'sutra_db_pool_waiting'), poolOpen: metric(m, 'sutra_db_pool_connections', 'state="open"') });
+    engines.push({ i: e.i, alive: alive(e), rssMb: Math.round(u.mem / 1048576), cpuSec: Math.round(u.cpu), restarts: e.restarts, poolWaiting: metric(m, 'sutra_db_pool_waiting'), poolOpen: metric(m, 'sutra_db_pool_connections', 'state="open"'), loopP99: metric(m, 'sutra_event_loop_delay_ms', 'of="p99"'), loopMax: metric(m, 'sutra_event_loop_delay_ms', 'of="max"') });
   }
   let db = {};
   try {
@@ -621,7 +715,7 @@ check('Every channel message reached its subscriber', subRuns >= pubRuns, `${sub
 check('Bus messages acknowledged', bus.accepted >= bus.sent * 0.99 && bus.rejected === 0, `${bus.accepted} accepted, ${bus.released} released, ${bus.rejected} rejected of ${bus.sent} sent`);
 const feedRuns = (await flowRuns('Soak WebSocket client')).done || 0;
 check('WebSocket client trigger ran for the server\'s messages', feedRuns >= feed.sent * 0.95, `${feedRuns} runs for ${feed.sent} messages pushed`);
-check('WebSocket broadcasts arrived', wsState.broadcastsGot >= wsState.broadcastsSent * 4, `${wsState.broadcastsGot} received by the clients for ${wsState.broadcastsSent} broadcasts (5 clients)`);
+check('WebSocket broadcasts arrived', wsState.broadcastsGot >= wsState.broadcastsExpected * 0.98, `${wsState.broadcastsGot} received of ${wsState.broadcastsExpected} expected (${wsState.broadcastsSent} broadcasts to the clients connected at the time)`);
 if (BIG) {
   const totals = await dbq(`select r.id, r.status, r.input from runs r where r.flow_id = $1`, [flowIds['Soak folder CSV']]);
   const outs = await dbq(`select o.run_id, o.out from run_outputs o join runs r on r.id = o.run_id where r.flow_id = $1 and o.name = 'Totals'`, [flowIds['Soak folder CSV']]);
@@ -629,19 +723,33 @@ if (BIG) {
   const seen = totals.map(r => ({ name: JSON.parse(r.input || '{}').name, status: r.status, rows: byRun.get(r.id)?.rows }));
   const okFiles = files.csv.filter(f => seen.some(s => s.name === f.name && s.status === 'done' && Number(s.rows) === f.rows));
   check('Every CSV in the folder was streamed whole', okFiles.length === files.csv.length, `${okFiles.length} of ${files.csv.length} files with every row counted (${files.csv.map(f => `${f.mb} MB`).join(', ')})`);
-  const sftpDone = (await flowRuns('Soak SFTP files')).done || 0;
-  check('SFTP files were read', sftpDone >= files.sftp.length, `${sftpDone} runs for ${files.sftp.length} files`);
+  const sftpOuts = await dbq(`select o.out from run_outputs o join runs r on r.id = o.run_id where r.flow_id = $1 and o.name = 'Totals' and r.status = 'done'`, [flowIds['Soak SFTP files']]);
+  const sftpRows = sftpOuts.map(o => Number(JSON.parse(o.out).rows));
+  const sftpOk = files.sftp.filter(f => sftpRows.includes(f.rows)).length;
+  check('Every SFTP CSV was streamed whole', sftpOk === files.sftp.length, `${sftpOk} of ${files.sftp.length} files with every row counted (${files.sftp.map(f => `${f.mb} MB`).join(', ')})`);
+  const ftpOuts = await dbq(`select o.out from run_outputs o join runs r on r.id = o.run_id where r.flow_id = $1 and o.name = 'Totals' and r.status = 'done'`, [flowIds['Soak FTP files']]);
+  const ftpRows = ftpOuts.map(o => Number(JSON.parse(o.out).rows));
+  const ftpOk = files.ftp.filter(f => ftpRows.includes(f.rows)).length;
+  check('Every FTP CSV was streamed whole', ftpOk === files.ftp.length, `${ftpOk} of ${files.ftp.length} files with every row counted (${files.ftp.map(f => `${f.mb} MB`).join(', ')})`);
+  if (google) check('Google Drive files went up and came back whole', files.drive.every(f => f.status === 'done' && Number(f.got) === f.rows), files.drive.map(f => `${f.mb} MB ${f.status} in ${f.seconds} s`).join('; ') || 'none');
+  if (hasVector) { const [n] = await dbq('select count(*)::int n from soak_knowledge').catch(() => [{ n: 0 }]); check('RAG passages are in the pgvector table', n.n > 0 || !files.docs.length, `${n.n} passages in soak_knowledge`); }
   check('RAG documents were learned', files.docs.every(d => d.status === 'done'), files.docs.map(d => `${d.mb} MB ${d.status} in ${d.seconds} s`).join('; ') || 'none');
 }
+// Event loop: how long an engine kept work waiting (a step computing without pause holds everything).
+for (const e of procs) {
+  const p99s = minutesS0().map(s => s.engines[e.i]?.loopP99).filter(v => typeof v === 'number');
+  const maxes = minutesS0().map(s => s.engines[e.i]?.loopMax).filter(v => typeof v === 'number');
+  if (p99s.length) check(`Engine ${e.i} stays responsive`, pct(p99s, 95) < 1000, `event loop delay: p99 per minute ${pct(p99s, 50)} ms typical, ${pct(p99s, 95)} ms in the worst 5% of minutes; longest single wait ${Math.max(...maxes)} ms`);
+}
 // Memory: the second half of the run, per engine; a steady climb is a leak.
-const minutes = fs.readFileSync(path.join(OUT, 'samples.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l)).filter(s => s.type === 'minute');
+const minutes = minutesS0();
 for (const e of procs) {
   const pts = minutes.slice(Math.floor(minutes.length / 2)).map(s => [s.min, s.engines[e.i]?.rssMb]).filter(([, y]) => y);
   const slope = trend(pts) * 60;
-  check(`Engine ${e.i} memory steady`, slope < 50, `${slope.toFixed(1)} MB per hour over the second half; highest ${Math.max(0, ...minutes.map(s => s.engines[e.i]?.rssMb || 0))} MB`);
+  if (pts.length >= 60) check(`Engine ${e.i} memory steady`, slope < 50, `${slope.toFixed(1)} MB per hour over the second half; highest ${Math.max(0, ...minutes.map(s => s.engines[e.i]?.rssMb || 0))} MB`);
 }
-for (const s of Object.values(stats).filter(x => x.hours.length >= 2 && x.hours[0].n > 50)) {
-  const first = s.hours[0].p95, last = s.hours[s.hours.length - 1].p95;
+for (const s of Object.values(stats).filter(x => x.hours.filter(h => h.n > 50).length >= 2)) {
+  const hs = s.hours.filter(h => h.n > 50), first = hs[0].p95, last = hs[hs.length - 1].p95;
   if (first > 0) check(`${s.name} stays as fast`, last <= first * 2 + 50, `p95 ${first} ms in the first period, ${last} ms in the last`);
 }
 
@@ -659,7 +767,8 @@ event('end', `report written to ${OUT}`);
 stopping = true;
 for (const e of procs) { try { e.p.kill(); } catch { /* gone */ } }
 await sleep(3000);
-feedSrv.close(); brokerListener.close(); proxy.srv.close();
+feedSrv.close(); brokerListener.close(); proxy.srv.close(); await ftpSrv.close().catch(() => {});
+if (SHARE) fs.rmSync(inbox, { recursive: true, force: true });
 try { await toolDb?.end(); } catch { /* closed */ }
 await adminDb.query(`DROP DATABASE IF EXISTS ${DBNAME} WITH (FORCE)`).catch(() => {});
 await adminDb.end().catch(() => {});
@@ -667,6 +776,7 @@ fs.rmSync(WORK, { recursive: true, force: true });
 process.exit(checks.every(c => c.ok) ? 0 : 1);
 
 // ---------- pieces ----------
+function minutesS0() { return fs.readFileSync(path.join(OUT, 'samples.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l)).filter(s => s.type === 'minute'); }
 /** Least-squares slope of [x, y] points. */
 function trend(pts) {
   if (pts.length < 3) return 0;
@@ -741,7 +851,9 @@ function writeReport(dir) {
     md.push('', '## Big files', '', '| Kind | File | Size | Result |', '|---|---|---|---|');
     for (const f of sum.files.csv) md.push(`| Folder CSV (streamed) | ${f.name} | ${f.mb} MB, ${f.rows} rows | see check |`);
     for (const f of sum.files.sftp) md.push(`| SFTP CSV | ${f.name} | ${f.mb} MB, ${f.rows} rows | see check |`);
-    for (const f of sum.files.docs) md.push(`| RAG document | ${f.name} | ${f.mb} MB | ${f.status} in ${f.seconds} s${f.error ? `: ${f.error}` : ''} |`);
+    for (const f of sum.files.ftp || []) md.push(`| FTP CSV (streamed) | ${f.name} | ${f.mb} MB, ${f.rows} rows | see check |`);
+    for (const f of sum.files.drive || []) md.push(`| Google Drive (streamed up and back) | ${f.name} | ${f.mb} MB, ${f.rows} rows | ${f.status} in ${f.seconds} s, ${f.got ?? '?'} rows back${f.error ? `: ${f.error}` : ''} |`);
+    for (const f of sum.files.docs) md.push(`| RAG document (streamed to pgvector) | ${f.name} | ${f.mb} MB | ${f.status} in ${f.seconds} s${f.parts ? `, ${f.parts} parts` : ''}${f.error ? `: ${f.error}` : ''} |`);
   }
   const last = minutesS[minutesS.length - 1];
   if (last) {
@@ -750,7 +862,7 @@ function writeReport(dir) {
     md.push('', `Database: ${last.db.sizeMb} MB at the end; runs ${JSON.stringify(last.db.runs || {})}.`);
   }
   md.push('', '## Events', '', ...events.filter(e => !['retry'].includes(e.kind) || events.filter(x => x.kind === 'retry').length < 40).map(e => `- ${e.min} min, ${e.kind}: ${String(e.message).split('\n')[0]}`));
-  md.push('', '## Starters covered', '', 'Run here: Manual start (API), Timer, REST service, SOAP service, WebSocket service, WebSocket client, Folder (file) trigger, Remote file trigger (SFTP), Message bus subscriber (AMQP 1.0 stand-in), Channel trigger, Error handler, MCP tool, AI agent channel (chat).', '', 'Not run here (they need outside accounts or servers): Email (IMAP), Kafka and RabbitMQ subscribers, Google Drive, Microsoft files, Twitch, Discord, Telegram, Azure Data Factory.');
+  md.push('', '## Starters covered', '', 'Run here: Manual start (API), Timer, REST service, SOAP service, WebSocket service, WebSocket client, Folder (file) trigger on a shared location, Remote file trigger (SFTP and FTP), Message bus subscriber (AMQP 1.0 stand-in), Channel trigger, Error handler, MCP tool, AI agent channel (chat); Google Drive upload and fetch when its account is set up. Every file is streamed.', '', 'Not run here (they need outside accounts or servers): Email (IMAP), Kafka and RabbitMQ subscribers, the Google Drive trigger, Microsoft files, Twitch, Discord, Telegram, Azure Data Factory.');
   fs.writeFileSync(path.join(dir, 'report.md'), md.join('\n') + '\n');
 
   // HTML with charts
@@ -775,6 +887,7 @@ function writeReport(dir) {
     { name: 'size MB', pts: minutesS.map(s => [s.min, s.db?.sizeMb || 0]) },
     { name: 'steps waiting or running', pts: minutesS.map(s => [s.min, s.db?.queue || 0]) },
   ], 'MB, steps');
+  const loopChart = chart('Event loop delay, p99 per minute', engineIds.map(i => ({ name: i === 0 ? 'studio' : `engine ${i}`, pts: minutesS.map(s => [s.min, s.engines[i]?.loopP99 || 0]) })), 'ms');
   const hourS = samples.filter(s => s.type === 'hour');
   const main = ['REST orders', 'SOAP UsernameToken', 'WebSocket echo', 'MCP tool'];
   const latChart = chart('p95 per period', main.map(n => ({ name: n, pts: hourS.map((h, k) => [k + 1, h.latency?.[n]?.p95 || 0]) })), 'ms');
@@ -794,10 +907,10 @@ figure{margin:14px 0;background:var(--card);border:1px solid var(--line);border-
 </style></head><body><main>
 <h1>${esc(title)}</h1><p class="muted">${sum ? `${esc(sum.started)} to ${esc(sum.ended)} · ${Math.round(sum.minutes / 6) / 10} hours · ${sum.engines} processes on PostgreSQL · ${esc(sum.machine)} · Node ${esc(sum.node)}${sum.model ? ` · AI: ${esc(sum.model)}` : ''}` : 'The run did not finish: made from the samples and events written so far.'}</p>
 ${sum ? `<p class="big">${passed} of ${sum.checks.length} checks passed</p><div class="wrap"><table><thead><tr><th>Check</th><th>Result</th><th>Detail</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}
-<h2>Over time</h2>${okChart}${latChart}${memChart}${dbChart}
+<h2>Over time</h2>${okChart}${latChart}${loopChart}${memChart}${dbChart}
 <h2>Scenarios</h2><div class="wrap"><table><thead><tr><th>Scenario</th><th>Done</th><th>Failed</th><th>p50 / p95 / p99 ms, last period</th><th>Worst p95</th><th>Most frequent error</th></tr></thead><tbody>${scen}</tbody></table></div>
 <h2>Events</h2><div class="wrap"><table><thead><tr><th>Minute</th><th>Kind</th><th>What</th></tr></thead><tbody>${ev}</tbody></table></div>
-<h2>Starters covered</h2><p>Run here: Manual start (API), Timer, REST service, SOAP service, WebSocket service, WebSocket client, Folder (file) trigger, Remote file trigger (SFTP), Message bus subscriber (AMQP 1.0 stand-in), Channel trigger, Error handler, MCP tool, AI agent channel (chat).</p><p class="muted">Not run here (they need outside accounts or servers): Email (IMAP), Kafka and RabbitMQ subscribers, Google Drive, Microsoft files, Twitch, Discord, Telegram, Azure Data Factory.</p>
+<h2>Starters covered</h2><p>Run here: Manual start (API), Timer, REST service, SOAP service, WebSocket service, WebSocket client, Folder (file) trigger on a shared location, Remote file trigger (SFTP and FTP), Message bus subscriber (AMQP 1.0 stand-in), Channel trigger, Error handler, MCP tool, AI agent channel (chat); Google Drive upload and fetch when its account is set up. Every file is streamed.</p><p class="muted">Not run here (they need outside accounts or servers): Email (IMAP), Kafka and RabbitMQ subscribers, the Google Drive trigger, Microsoft files, Twitch, Discord, Telegram, Azure Data Factory.</p>
 </main></body></html>`;
   fs.writeFileSync(path.join(dir, 'report.html'), html);
 }

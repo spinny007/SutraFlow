@@ -41,13 +41,55 @@ async function connect() {
   const pg = require('pg');
   pg.types.setTypeParser(20, (v: string) => Number(v)); // bigint
   pg.types.setTypeParser(1700, (v: string) => Number(v)); // numeric
-  const client = new pg.Client({ connectionString: url, application_name: 'sutraflow' });
-  await client.connect();
-  client.on('error', (e: Error) => { console.error('PostgreSQL connection lost:', e.message); process.exit(1); });
+  // A lost connection (a restarted or unreachable database) is opened again on the next statement,
+  // trying 10 times with growing waits. A statement already sent is never sent again (it may have run),
+  // and a transaction the connection was lost in fails until the engine rolls it back, so the rest of
+  // a half transaction is never committed on its own.
+  let client: any = null, inTx = false, broken = false;
+  const open = async () => {
+    for (let i = 1; ; i++) {
+      const c = new pg.Client({ connectionString: url, application_name: 'sutraflow', connectionTimeoutMillis: 10000 });
+      // An idle connection that is closed under it ends without an error: both mean it is gone.
+      const lost = (why: string) => {
+        if (client !== c) return;
+        console.error('PostgreSQL connection lost:', why);
+        client = null;
+        if (inTx) broken = true;
+      };
+      c.on('error', (e: Error) => lost(e.message));
+      c.on('end', () => lost('closed'));
+      try { await c.connect(); client = c; if (i > 1) console.error(`PostgreSQL connection open again (try ${i})`); return; } catch (e: any) {
+        c.end().catch(() => {});
+        if (i >= 10) throw new Error(`PostgreSQL cannot be reached after 10 tries: ${e.message}`);
+        await new Promise(r => setTimeout(r, Math.min(5000, 250 * 2 ** i)));
+      }
+    }
+  };
+  await open();
   query = async (sql, params, exec) => {
-    const r = await client.query(exec ? sql : { text: sql, values: params });
-    const last = Array.isArray(r) ? r[r.length - 1] : r;
-    return { rows: (last?.rows || []).map(row), changes: last?.rowCount ?? 0 };
+    const s = sql.trimStart().slice(0, 12).toLowerCase();
+    const ends = s.startsWith('commit') || s.startsWith('rollback');
+    if (broken) {
+      if (s.startsWith('rollback')) { broken = false; inTx = false; return { rows: [], changes: 0 }; }
+      throw new Error('The connection to PostgreSQL was lost during this transaction; it was rolled back');
+    }
+    if (!client) await open();
+    try {
+      const r = await client.query(exec ? sql : { text: sql, values: params });
+      if (s.startsWith('begin')) inTx = true;
+      if (ends) inTx = false;
+      const last = Array.isArray(r) ? r[r.length - 1] : r;
+      return { rows: (last?.rows || []).map(row), changes: last?.rowCount ?? 0 };
+    } catch (e: any) {
+      // The connection went while this statement was on its way: its fate is unknown, so it is not repeated.
+      if (!client || /Connection terminated|ECONNRESET|EPIPE|not queryable/i.test(String(e?.message))) {
+        try { await client?.end(); } catch { /* gone */ }
+        client = null;
+        if (inTx && !ends) broken = true;
+        inTx = false;
+      }
+      throw e;
+    }
   };
 }
 

@@ -115,7 +115,7 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     output: ['<code>files</code> (repeating, with their content when read) and <code>count</code>.'],
   },
   remoteRead: {
-    scope: ['One file on an SFTP or FTP server, read as text, CSV rows, lines, JSON, XML or base64.', 'A size limit, so a wrong file cannot fill the memory.'],
+    scope: ['One file on an SFTP or FTP server, read as text, CSV rows, lines, JSON, XML or base64.', 'A size limit, so a wrong file cannot fill the memory.', '<em>Stream in batches</em> for big CSV and line files: the rows come out on the <em>batch</em> output, one batch in memory at a time, and <em>out</em> gives the totals.'],
     outScope: ['Paths outside the connection\'s base folder: they are refused.'],
     use: ['Reading a price list or a statement that has a known name.'],
     steps: ['Pick the connection and enter the file, for example <code>inbox/{{input.name}}</code>.', 'Choose the format; for CSV, the delimiter and header.'],
@@ -517,7 +517,7 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     output: ['<code>rows</code> and <code>count</code>, or the update result.'],
   },
   googleDrive: {
-    scope: ['List, read (with Google Docs exported as text, PDF and other formats), upload, update, append and delete files.'],
+    scope: ['List, read (with Google Docs exported as text, PDF and other formats), upload, update, append and delete files.', 'Big files both ways without holding them in memory: download with <em>Save to: server file</em>, upload with <em>Upload from: server file</em> (a resumable upload).', '<em>Wait for each call</em> (5 minutes by default) for slow links; streamed transfers run until the time limit of the step, 30 minutes by default.'],
     outScope: ['Sharing permissions.'],
     use: ['Reading documents people keep in Drive; saving reports to Drive.'],
     steps: ['Pick the Google connection and the operation.', 'Fill in the folder or file id and the content.'],

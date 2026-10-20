@@ -1898,6 +1898,19 @@ docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=...
 <li>No run failed and none was lost in any scenario, including the one where an engine was killed.</li>
 </ul>
 
+<p class="h">Soak test: hours of mixed load, unattended</p>
+<p><code>tools/soak.mjs</code> runs a studio and engines on a PostgreSQL database of their own for hours and writes its own report (<code>report.md</code> and <code>report.html</code>, with charts), so nobody has to watch it:</p>
+<pre class="code">node tools/soak.mjs --pg postgres://postgres@db:5432/postgres --hours 8
+node tools/soak.mjs --pg ... --hours 24 --share //fileserver/soak     # the folder trigger watches a real share
+node tools/soak.mjs --report-only docs/benchmarks/soak-1.8.0               # the report again, from the samples</pre>
+<ul>
+<li><strong>Every starter that runs on one machine</strong>: REST (plain, in memory, HMAC with schema validation), SOAP (UsernameToken; X.509 signed and encrypted), WebSocket service and client, timer, called Sutras with approvals, the error handler, channels, MCP, a message bus (a stand-in AMQP 1.0 broker), and an AI agent and RAG answers on a local Ollama model.</li>
+<li><strong>Big files, all streamed</strong>: CSV files of 10 to 60 MB to a watched folder, over SFTP and over FTP; documents of 10 to 60 MB learned in batches into a pgvector table; and Google Drive uploads and downloads of the same sizes when an account is set up (below).</li>
+<li><strong>Faults on purpose</strong>: an engine is killed a third of the way in and started again a minute later, and the database is cut for 20 seconds two thirds of the way in.</li>
+<li><strong>Unattended</strong>: the tool's own database connections are tried 10 times; an engine that stops by itself is started again, at most 10 times. Samples and events are written every minute, so a report can be made even from a run that was stopped.</li>
+<li><strong>Checks</strong>: no engine stopped by itself, no run left running, no step run twice, failed requests under 0.5%, timers on time, every channel, bus and WebSocket message handled, every file's rows all counted, memory steady, engines responsive (event loop delay), and each scenario as fast at the end as at the start.</li>
+</ul>
+<p>For Google Drive, set <code>SOAK_GOOGLE_CLIENT_ID</code>, <code>SOAK_GOOGLE_CLIENT_SECRET</code> (a Desktop app OAuth client of your Google Cloud project) and <code>SOAK_DRIVE_FOLDER</code> (the folder id), then run <code>node tools/soak.mjs --google-sign-in</code> once and sign in in the browser: the refresh token is kept in <code>data/soak-google.json</code>, outside Git. The soak then uploads files of each size to that folder (replacing the earlier one of the same size) and fetches them back.</p>
 <p class="h">Run the load test on your own servers</p>
 <pre class="code">node tools/loadtest.mjs --pg postgres://user:pass@db:5432/postgres --engines 1,2,4 --payload 0.1,64 --out results.json
 node tools/loadtest.mjs --sqlite --cpus 1 --mem 512 --workers 4 --execution durable,memory

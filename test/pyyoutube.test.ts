@@ -61,6 +61,11 @@ before(async () => {
       if (u.pathname === '/drive/v3/files/VID1' && u.searchParams.get('alt') === 'media') { res.writeHead(200, { 'content-type': 'video/mp4' }); return res.end(VIDEO); }
       if (u.pathname === '/drive/v3/files/VID1') return send(200, { id: 'VID1', name: 'Tea tasting.mp4', mimeType: 'video/mp4', size: String(VIDEO.length), modifiedTime: '2026-10-19T08:00:00Z' });
       if (u.pathname === '/upload/youtube/v3/videos') return send(200, {}, { location: `${base}/upload-session/42` });
+      if (u.pathname === '/drive/v3/files' && req.method === 'GET') return send(200, { files: [] });
+      if (u.pathname === '/upload/drive/v3/files' && u.searchParams.get('uploadType') === 'resumable') return send(200, {}, { location: `${base}/drive-session/9` });
+      if (u.pathname === '/drive-session/9') return send(200, { id: 'DRV9', name: JSON.parse(got.find(g => g.url.startsWith('/upload/drive'))!.body.toString()).name, mimeType: 'text/csv', size: String(body.length) });
+      if (u.pathname === '/drive/v3/files/DRV9' && u.searchParams.get('alt') === 'media') { res.writeHead(200, { 'content-type': 'text/csv' }); return res.end(got.find(g => g.url === '/drive-session/9')!.body); }
+      if (u.pathname === '/drive/v3/files/DRV9') return send(200, { id: 'DRV9', name: 'orders.csv', mimeType: 'text/csv', size: String(got.find(g => g.url === '/drive-session/9')!.body.length), modifiedTime: '2026-10-20T08:00:00Z' });
       if (u.pathname === '/upload-session/42') return send(200, { id: 'yt123', snippet: { title: JSON.parse(got.find(g => g.url.startsWith('/upload/youtube'))!.body.toString()).snippet.title }, status: { privacyStatus: 'private', uploadStatus: 'uploaded' } });
       if (u.pathname === '/youtube/v3/channels') return send(200, { items: [{ id: 'UC1', snippet: { title: 'Asha Traders' }, statistics: { subscriberCount: '1200', viewCount: '50000', videoCount: '40' } }] });
       if (u.pathname === '/v2/reports') return send(200, { columnHeaders: [{ name: 'day' }, { name: 'views' }], rows: [['2026-10-18', 120], ['2026-10-19', 95]] });
@@ -195,4 +200,23 @@ test('the ADF, Databricks, Python, YouTube and Twitch templates are complete, de
   const r: any = q.get('select id, status, error, state from runs where id = ?', id);
   assert.equal(r.status, 'done', r.error);
   assert.deepEqual(runState(r.id)!.outputs['Sales report'].result, { region: 'West', count: 4, total: 4830, average: 1207.5, median: 1090, mode: 'quick' });
+});
+
+test('Google Drive: a server file is uploaded streamed (resumable) and fetched back to a server file', async () => {
+  const g = saveResource({ kind: 'oauthApp', name: 'Google files', project_id: pid, config: { provider: 'google', clientId: 'g-client', tokenUrl: `${base}/token`, apiBase: base, refreshTokenSecret: 'GOOGLE_REFRESH' } });
+  const src = path.join(tmp, 'orders-big.csv');
+  fs.writeFileSync(src, 'id,amount\n' + Array.from({ length: 50000 }, (_, i) => `${i},${i % 9}`).join('\n'));
+  const back = path.join(tmp, 'back', 'orders.csv');
+  const r = await run([
+    node('googleDrive', 'Upload', { connection: g.id, op: 'upload', from: 'server file', filePath: src, name: '', folderId: 'FOLDER1', mimeType: 'text/csv', timeoutSec: 600 }),
+    node('googleDrive', 'Fetch', { connection: g.id, op: 'download', fileId: '{{input.id}}', saveTo: 'server file', savePath: back }),
+  ]);
+  assert.equal(r.status, 'done', r.error);
+  assert.equal(r.out.Upload.bytes, fs.statSync(src).size);
+  assert.equal(r.out.Upload.action, 'created');
+  const start = got.find(x => x.url.startsWith('/upload/drive/v3/files'))!;
+  assert.match(start.url, /uploadType=resumable/);
+  assert.equal(start.headers['x-upload-content-length'], String(fs.statSync(src).size));
+  assert.deepEqual(JSON.parse(start.body.toString()), { name: 'orders-big.csv', parents: ['FOLDER1'] });
+  assert.ok(fs.readFileSync(back).equals(fs.readFileSync(src)), 'the file came back unchanged');
 });

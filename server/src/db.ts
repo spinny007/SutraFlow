@@ -263,7 +263,21 @@ export function openDb(file?: string) {
     db = postgresBackend(url);
     // Engines starting together on an empty database would create the same tables at once: one at a time.
     db.exec('select pg_advisory_lock(424243)');
-    try { db.exec(pgSchema(SCHEMA)); migrate(); } finally { db.exec('select pg_advisory_unlock(424243)'); }
+    try {
+      // An engine joining a running cluster finds every table and index there: it runs no DDL, which
+      // would lock tables the other engines are writing (and could deadlock with them).
+      const want = [...SCHEMA.matchAll(/create (?:table|index) if not exists (\w+)/g)].map(m => m[1]);
+      const have = new Set((db.all(`select relname from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = current_schema()`, []) as any[]).map(r => r.relname));
+      if (want.some(n => !have.has(n))) {
+        for (let i = 1; ; i++) {
+          try { db.exec(pgSchema(SCHEMA)); break; } catch (e: any) {
+            if (e?.code !== '40P01' || i >= 5) throw e;
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200 * i);
+          }
+        }
+      }
+      migrate();
+    } finally { db.exec('select pg_advisory_unlock(424243)'); }
     return db;
   } else {
     const f = file || path.join(config.dataDir, 'sutra.db');
