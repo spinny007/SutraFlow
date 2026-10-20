@@ -120,7 +120,7 @@ export const CHAPTERS: Chapter[] = [
 <p>The top bar holds the four screens, the version in the middle, <strong>Admin Console</strong> (deployed projects, engines, gateway, users and audit, in its own page), <strong>Guide</strong> (this guide in a new tab), the light/dark switch and Sign out.</p>
 <table class="t"><thead><tr><th>Screen</th><th>What it is for</th></tr></thead><tbody>
 <tr><td><strong>Designer</strong></td><td>Building, testing, debugging and deploying Sutras. Left: the <em>Project</em> explorer and the <em>Palettes</em>. Middle: the canvas and its toolbar. Right: the selected activity's General, Input, Output and Settings tabs.</td></tr>
-<tr><td><strong>Runs</strong></td><td>Every run with its status, steps, inputs and outputs, logs; approvals waiting for a person.</td></tr>
+<tr><td><strong>Runs</strong></td><td>Every run with its status, steps, inputs and outputs, logs; approvals waiting for a person (approvers decide in the Approval Center, <code>/approvals</code>).</td></tr>
 <tr><td><strong>Resources</strong></td><td>Shared connections and security of the current project, and the secrets vault.</td></tr>
 <tr><td><strong>Server &amp; APIs</strong></td><td>Exposed services, Sengine variables, gateway ports, TLS certificate, active listeners.</td></tr>
 </tbody></table>
@@ -387,7 +387,7 @@ export const CHAPTERS: Chapter[] = [
 </ol>
 [[img:debugger|Debugging: paused before Build order. The toolbar shows Step, Continue, Pause and Stop; the Output tab shows the input it will receive.]]
 <p class="h">Runs</p>
-<p>The Runs screen lists every run: Sutra, version, trigger, status, time. Open one to see each step with its input, output, time and error, and the run log. <em>Approvals</em> lists runs waiting for a person.</p>
+<p>The Runs screen lists every run: Sutra, version, trigger, status, time. Open one to see each step with its input, output, time and error, and the run log. <em>Approvals</em> lists runs waiting for a person; designers can decide their own test runs there, and approvers decide deployed ones in the <a href="#ch-approvals">Approval Center</a>.</p>
 [[img:runs|A run: its steps, each with input and output, and the log.]]`,
   },
   {
@@ -565,7 +565,7 @@ export const CHAPTERS: Chapter[] = [
 </ul>
 <p class="h">Approval processes</p>
 <ol>
-<li>Prepare everything the approver needs first (amount, customer, history, a link), and put it in the question: the approver decides from the Approvals page or the Admin Console without opening other systems.</li>
+<li>Prepare everything the approver needs first (amount, customer, history, a link), and put it in the question and the step's <em>Details for the approvers</em>: the approver decides in the <a href="#ch-approvals">Approval Center</a>, on a computer or a phone, without opening other systems.</li>
 <li>[[approval]] for yes or no (outputs <em>approved</em>, <em>rejected</em>); [[askPerson]] when the answer is text (outputs <em>answered</em>, <em>declined</em>). Name an <em>assignee</em> (a person or a role) so it lands with the right people.</li>
 <li>Decide by rules first: an If before the approval sends small amounts straight through, so people see only what needs them.</li>
 <li>Several levels: approvals in a row (manager, then finance above a limit), each with its own assignee.</li>
@@ -1635,7 +1635,7 @@ sutra deploy shop-1.4.0.sutra --server https://prod:4800 --token $SUTRA_TOKEN</p
 <ul>
 <li><strong>Overview</strong>: tiles for engines, deployed Sutras, runs of the last 24 hours, waiting approvals, the work queue and the gateway certificate, and the latest failed runs with <em>Resubmit</em>. Test runs from the designer are not counted.</li>
 <li><strong>Applications</strong>: every deployed project with its package version and its Sutras: version, started or stopped, what starts it (REST path, SOAP path, timer, skill), runs of the last day and the last run. <em>Stop</em> makes the Sutra's triggers start nothing (its address answers 404, timers and listeners pause) while it stays deployed; <em>Start</em> brings it back on every engine; <em>Restart</em> does both at once, so its address, timers and listeners start fresh with the current connections. <em>Runs</em> opens its runs with every step's result, <em>Resubmit</em> and <em>Cancel run</em>; <em>Versions</em> deploys an earlier version; <em>Tuning</em> sets how the Sutra runs (below); <em>Package history</em> rolls the project back to an earlier package.</li>
-<li><strong>Approvals</strong>: running Sutras waiting for a person, with a comment and <em>Approve</em> or <em>Reject</em>.</li>
+<li><strong>Approvals</strong>: what waits for a person and for whom (roles, accounts, progress, due time), with a button to open the <a href="#ch-approvals">Approval Center</a>, where the approvers decide.</li>
 <li><strong>Releases</strong>: deploy a release zip (or <code>.sutra</code> package): choose the file, see its Sutras, the secrets present or missing on this server, where it was built from and its deployment config, change the project or give another config, then <em>Deploy</em>. Below, every project's current package with its history: <em>Roll back</em>, or <em>Deploy again</em> for any earlier one. This is how a production server receives Sutras.</li>
 <li><strong>Engines</strong>: every engine sharing the database: alive or silent, leader, steps running, heartbeat. <em>Drain and stop</em> asks one engine to finish its steps, hand the rest to the others and stop; your service manager starts it again. <em>Delete old runs now</em> runs housekeeping at once. <em>Tuning</em> on the same page sets engine values (below).</li>
 </ul>

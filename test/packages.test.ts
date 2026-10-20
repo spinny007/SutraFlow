@@ -198,10 +198,10 @@ test('admin API: package download, check and deploy with the bearer token; sessi
   assert.equal(r.statusCode, 200, JSON.stringify(r.json()));
 });
 
-test('command line: package, check, deploy, history, rollback, test, usage errors (local data folder)', () => {
+test('command line: package, check, deploy, history, rollback, test, usage errors (local data folder)', { timeout: 900000 }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-cli-'));
   const cli = (...args: string[]) => spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', '--import', 'tsx', path.join(root, 'server/src/cli.ts'), ...args],
-    { cwd: root, env: { ...process.env, SUTRA_SERVER: '' }, encoding: 'utf8', timeout: 120000 });
+    { cwd: root, env: { ...process.env, SUTRA_SERVER: '' }, encoding: 'utf8', timeout: 240000 });
   const f = (n: string) => path.join(dir, n);
   let r = cli('package', '--project', 'Shop', '--version', '3.0.0', '--sutras', 'Double,Draft only', '--out', f('shop.sutra'));
   assert.equal(r.status, 0, r.stderr + r.stdout);

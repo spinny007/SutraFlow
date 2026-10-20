@@ -60,6 +60,8 @@ async function connect() {
       c.on('end', () => lost('closed'));
       try { await c.connect(); client = c; if (i > 1) console.error(`PostgreSQL connection open again (try ${i})`); return; } catch (e: any) {
         c.end().catch(() => {});
+        // A database that does not exist or refuses the account: trying again cannot help.
+        if (['3D000', '28P01', '28000', '42501'].includes(e?.code)) throw e;
         if (i >= 10) throw new Error(`PostgreSQL cannot be reached after 10 tries: ${e.message}`);
         await new Promise(r => setTimeout(r, Math.min(5000, 250 * 2 ** i)));
       }
@@ -94,6 +96,8 @@ async function connect() {
 }
 
 const ready = connect();
+// A failed start is answered to each statement (they await it); it is not an error of its own.
+ready.catch(() => {});
 port.on('message', async (q: Q) => {
   let reply: any;
   try {

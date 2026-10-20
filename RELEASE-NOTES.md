@@ -58,16 +58,30 @@ Each comes with a `.sha256` file to check the download.
 - User guide: *OAuth connections step by step* for Google (Drive, Sheets, Docs, YouTube), Microsoft (SharePoint, OneDrive), Dropbox, Facebook, Twitch and custom services, from creating the client to signing in on production servers; how to find folder and file IDs; troubleshooting.
 - Google Drive reads big CSV and text files **as they download**, in batches of rows, without saving them (*Save to: rows in batches*).
 - Google Drive uploads a **server file streamed** (a resumable upload), and has *Wait for each call* (5 minutes by default) for slow links; Drive steps get a 30-minute time limit.
-- Fixed: after PostgreSQL was unreachable for a moment (a restart, a network cut), an engine's synchronous connection never came back and the engine hung. It now opens the connection again (10 tries), never repeats a statement that may have run, and fails a transaction the connection was lost in until it is rolled back. Found by the soak test.
 - Built-in knowledge bases write and read through the connection pool in batches, and make vectors in slices, so learning a big document no longer holds the engine.
 - A new user guide chapter, *Setting up a cluster, step by step*: one machine, two machines, engines only, Docker; what every engine and what the leader does. And *WebSockets: live connections*.
 
 ### Soak test
 - `tools/soak.mjs` runs unattended for hours on a cluster: every starter that runs on one machine (REST, SOAP with WS-Security, WebSocket service and client, timer, called Sutras and approvals, error handler, channels, MCP, a message bus, SFTP and folder files of 10 to 60 MB, RAG documents of 10 to 60 MB, an AI agent on a local Ollama model), with an engine killed and the database cut on the way. Database connections are tried 10 times, engines that stop are started again, and it writes `report.md` and `report.html` itself. The 1.8.0 run: 8 hours, 500,338 requests, 0.089% failed with the engine kill and the database cut included; 50 CSV files of 10 to 60 MB streamed whole through a folder, SFTP and FTP; 328,490 passages learned into pgvector. Its report and notes are in `docs/benchmarks/soak-1.8.0`.
-- Fixed: a trigger that started a run while the database was unreachable could stop the engine (an unhandled failure); triggers now show it on the listener and the server logs such failures instead of stopping. Found by the soak test.
 
 ### New settings
 `SUTRA_CAN_LEAD`, `SUTRA_PUBLIC_URL` (the studio's address behind a proxy, for single sign-on).
+
+## Fixes in 1.8.0
+
+What went wrong before, and what happens now. Most were found by the soak test (`docs/benchmarks/soak-1.8.0`).
+
+| # | What you would have seen | Cause | Now |
+|---|---|---|---|
+| 1 | After PostgreSQL restarted or the network to it dropped for a moment, an engine stopped answering: pages and API calls waited, and every request took two minutes to fail. Only restarting the engine helped. | The engine's background connection to the database ended itself when the connection was lost, and nothing opened a new one. | The engine opens the connection again by itself (up to 10 tries, with growing waits). A statement that may already have run is never sent twice, and a transaction that lost its connection is rolled back instead of half committed. |
+| 2 | An engine started (or restarted) while the others were busy sometimes stopped at once with "deadlock detected", and was started again by the service manager. | At start, every engine re-ran the database set-up statements, which lock tables the running engines are writing. | An engine joining a running cluster finds the tables there and runs no set-up statements; a deadlock during a real set-up is tried again. |
+| 3 | An engine stopped by itself when the database came back after an outage. | A trigger (folder, mailbox, queue, timer) started a run while the database was unreachable, and the failure was not caught; Node stops a process for that. | The trigger shows "A run could not start" on its listener (the file or message is tried again later), and the server logs any such failure and keeps running. |
+| 4 | Learning a big document into a built-in knowledge base (tens of MB) made the whole engine unresponsive for seconds to minutes; API calls and other runs waited. | Passages were written one by one through the engine's blocking connection, and vectors were made without a pause. | Passages are written in batches through the connection pool and vectors are made in slices, so the engine keeps serving. For big or many documents the guide now points to a vector database such as pgvector. |
+| 5 | Reading a big CSV from SFTP or FTP (tens of MB) slowed every other run and request on that engine, and could run it out of memory. | The whole file was read into one step output. | *Read remote file* can stream CSV and line files in batches, one batch in memory at a time, like *Read file*. |
+| 6 | Uploading a big file to Google Drive needed the whole file in a step's output, and calls on a slow link failed after 60 seconds. | Uploads took their content from the step input, and Drive calls had a fixed one-minute limit. | *Upload from: server file* streams the file in a resumable upload; *Save to: rows in batches* reads CSV and text files as they download, never saved; *Wait for each call* (5 minutes by default) and a 30-minute step limit suit slow links. |
+| 7 | A Microsoft (SharePoint, OneDrive) connection registered for one organisation could not sign in: "AADSTS50194". | Sign-in always used Microsoft's shared "common" address, which such apps refuse. | Microsoft connections have a *Tenant* setting. |
+| 8 | The *Assignee* of a Human approval step was only a label: anyone with the Approve permission on the project could decide any approval. | Approvers were not part of the step. | Steps name their approver roles and accounts, and only those people decide (administrators on their behalf, recorded so). Steps that name nobody keep the old behaviour. |
+| 9 | Sutras whose steps pass big data along got slower with every step, and 1 MB outputs managed about 2.6 steps a second. | Every step rewrote the run's state with the outputs of all earlier steps. | Each step writes only its own output (7.7 steps a second with 1 MB outputs; 145 with 64 KB, was 60). |
 
 ## In 1.7.6
 
