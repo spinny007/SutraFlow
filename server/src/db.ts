@@ -325,6 +325,8 @@ function migrate(d = getDb()) {
   add('users', 'sessions_after', 'sessions_after integer not null default 0');
   add('users', 'last_login', 'last_login text');
   add('users', 'updated_at', 'updated_at text');
+  // Single sign-on: the identity provider's issuer and subject of the person (sso.ts).
+  add('users', 'idp_subject', 'idp_subject text');
   d.exec('create index if not exists flows_project on flows(project_id)');
   d.exec('create index if not exists resources_project on resources(project_id)');
   d.exec('create index if not exists tasks_owner on tasks(owner, status)');

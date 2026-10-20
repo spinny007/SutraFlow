@@ -25,7 +25,7 @@ import { Logo, SignIn, ChangePassword } from './Auth';
 type Page = 'designer' | 'runs' | 'resources' | 'server';
 
 export function App() {
-  const [auth, setAuth] = useState<{ setup: boolean; user: { username: string; mustChange?: boolean } | null } | null>(null);
+  const [auth, setAuth] = useState<{ setup: boolean; user: { username: string; mustChange?: boolean } | null; sso?: { name: string } | null } | null>(null);
   const [page, setPage] = useState<Page>(() => (location.hash.slice(1) as Page) || 'designer');
   const check = () => get('/api/auth/status').then(setAuth).catch(() => setAuth({ setup: false, user: null }));
   useEffect(() => {
@@ -43,7 +43,7 @@ export function App() {
   }, []);
 
   if (!auth) return null;
-  if (!auth.user) return <ToastHost><SignIn setup={auth.setup} onDone={check} /></ToastHost>;
+  if (!auth.user) return <ToastHost><SignIn setup={auth.setup} sso={auth.sso} onDone={check} /></ToastHost>;
   if (auth.user.mustChange) return <ToastHost><ChangePassword onDone={check} /></ToastHost>;
 
   const toggleTheme = () => {

@@ -13,11 +13,12 @@ import { act as run, type Action } from './log';
 import { useToast } from '../src/ui';
 import { PageHead, State, Err, Empty, Confirm, useLoad, ago, when, newPassword, useMe } from './shared';
 import { Drawer } from './Apps';
+import { SsoDrawer } from './Sso';
 
 interface Grant { role: string; project: string }
 interface Account {
   username: string; kind: 'user' | 'system'; displayName: string; email: string; disabled: boolean; locked: boolean;
-  mustChange: boolean; hasPassword: boolean; lastLogin: string | null; createdAt: string; grants: Grant[]; tokens: number;
+  mustChange: boolean; hasPassword: boolean; sso?: boolean; lastLogin: string | null; createdAt: string; grants: Grant[]; tokens: number;
 }
 interface Role { id: string; name: string }
 interface Project { id: string; name: string }
@@ -31,6 +32,7 @@ export function People({ kind }: { kind: 'user' | 'system' }) {
   const projects = useLoad<Project[]>('/api/projects');
   const [edit, setEdit] = useState<Account | 'new' | null>(null);
   const [filter, setFilter] = useState('');
+  const [sso, setSso] = useState(false);
   const people = kind === 'user';
   const f = filter.trim().toLowerCase();
   const rows = (list.data || []).filter(a => !f || [a.username, a.displayName, a.email].some(x => x.toLowerCase().includes(f)));
@@ -43,6 +45,7 @@ export function People({ kind }: { kind: 'user' | 'system' }) {
         ? 'People who sign in to the designer and this console. A role applies to all projects or to one project.'
         : 'Accounts for engines, CI pipelines and API callers. They use API tokens for the admin API, and a password for gateway services whose policy accepts system accounts.'}>
         <input className="inp c-search" type="search" placeholder="Find" aria-label="Find an account" value={filter} onChange={e => setFilter(e.target.value)} />
+        {people && <button className="btn small" onClick={() => setSso(true)}>Single sign-on</button>}
         <button className="btn primary small" onClick={() => setEdit('new')}>{people ? 'Add user' : 'Add system account'}</button>
       </PageHead>
       <Err text={list.error} />
@@ -52,7 +55,7 @@ export function People({ kind }: { kind: 'user' | 'system' }) {
           <thead><tr><th>{people ? 'User' : 'Account'}</th><th>State</th><th>Roles</th><th>{people ? 'Last sign-in' : 'Tokens'}</th><th /></tr></thead>
           <tbody>{rows.map(a => (
             <tr key={a.username} className="click" tabIndex={0} onClick={() => setEdit(a)} onKeyDown={e => { if (e.key === 'Enter') setEdit(a); }}>
-              <td><strong>{a.displayName || a.username}</strong>{a.username === me.username && <span className="c-badge soft">you</span>}<div className="muted xs">{a.username}{a.email ? ` · ${a.email}` : ''}</div></td>
+              <td><strong>{a.displayName || a.username}</strong>{a.username === me.username && <span className="c-badge soft">you</span>}<div className="muted xs">{a.username}{a.email ? ` · ${a.email}` : ''}{a.sso ? ' · single sign-on' : ''}</div></td>
               <td>{a.disabled ? <State kind="idle">disabled</State> : a.locked ? <State kind="err">locked</State> : a.mustChange ? <State kind="warn">new password due</State> : <State kind="ok">active</State>}</td>
               <td>{a.grants.length ? a.grants.map(g => <span key={g.role + g.project} className="c-grant">{roleName(g.role)} <span className="muted">on {projName(g.project)}</span></span>) : <span className="muted">no roles</span>}</td>
               <td className="nowrap muted">{people ? (a.lastLogin ? ago(a.lastLogin) : 'never') : `${a.tokens} token${a.tokens === 1 ? '' : 's'}${a.hasPassword ? ' · gateway password' : ''}`}</td>
@@ -61,6 +64,7 @@ export function People({ kind }: { kind: 'user' | 'system' }) {
           ))}</tbody>
         </table></div>
       )}
+      {sso && <SsoDrawer onClose={() => { setSso(false); list.reload(); }} />}
       {edit && <AccountDrawer kind={kind} account={edit === 'new' ? null : edit} roles={roles.data || []} projects={projects.data || []}
         onClose={() => setEdit(null)} onSaved={(a, msg) => { toast(msg); list.reload(); if (a) setEdit(a); else setEdit(null); }} />}
     </>

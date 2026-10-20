@@ -157,6 +157,8 @@ export const RULES: Record<string, Rule> = {
   'POST /api/access/roles': R('users'),
   'PUT /api/access/roles/:id': R('users'),
   'DELETE /api/access/roles/:id': R('users'),
+  'GET /api/access/sso': R('users'),
+  'PUT /api/access/sso': R('users'),
   'GET /api/access/users': R('users'),
   'POST /api/access/users': R('users'),
   'GET /api/access/users/:name': R('users'),
@@ -247,7 +249,7 @@ export const RULES: Record<string, Rule> = {
 };
 
 /** Routes reachable before sign-in. */
-export const OPEN_ROUTES = new Set(['GET /api/auth/status', 'POST /api/auth/setup', 'POST /api/auth/login', 'POST /api/auth/logout', 'GET /api/oauth/callback']);
+export const OPEN_ROUTES = new Set(['GET /api/auth/status', 'POST /api/auth/setup', 'POST /api/auth/login', 'POST /api/auth/logout', 'GET /api/oauth/callback', 'GET /api/auth/sso/start', 'GET /api/auth/sso/callback']);
 
 const SERVER_PERMS = new Set(PERMISSIONS.filter(p => p.scope === 'server').map(p => p.id));
 const projectOf = (table: string, id: unknown) => q.get<any>(`select project_id from ${table} where id = ?`, String(id ?? ''))?.project_id as string | undefined;

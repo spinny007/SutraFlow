@@ -21,7 +21,7 @@ export function Logo() {
   );
 }
 
-export function SignIn({ setup, onDone, title = 'SutraFlow', subtitle = 'Studio for designing, deploying and monitoring integration Sutras.' }: { setup: boolean; onDone(): void; title?: string; subtitle?: string }) {
+export function SignIn({ setup, onDone, title = 'SutraFlow', subtitle = 'Studio for designing, deploying and monitoring integration Sutras.', sso }: { setup: boolean; onDone(): void; title?: string; subtitle?: string; sso?: { name: string } | null }) {
   const [username, setUser] = useState('admin');
   const [password, setPw] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -46,6 +46,7 @@ export function SignIn({ setup, onDone, title = 'SutraFlow', subtitle = 'Studio 
         <div className="fld"><label htmlFor="p">Password</label><input id="p" type="password" value={password} onChange={e => setPw(e.target.value)} autoComplete={setup ? 'new-password' : 'current-password'} />{setup && <div className="hint">At least 10 characters.</div>}</div>
         {setup && <div className="fld"><label htmlFor="c">Confirm password</label><input id="c" type="password" value={confirm} onChange={e => setConfirm(e.target.value)} autoComplete="new-password" /></div>}
         <button className="btn primary" type="submit">{setup ? 'Create account' : 'Sign in'}</button>
+        {!setup && sso && <a className="btn" style={{ marginTop: 8, textAlign: 'center' }} href={`/api/auth/sso/start?return=${encodeURIComponent(location.pathname + location.hash)}`}>Sign in with {sso.name}</a>}
       </form>
     </div>
   );

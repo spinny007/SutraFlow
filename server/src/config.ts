@@ -46,6 +46,8 @@ export const config = {
   maxStepsPerRun: Number(process.env.SUTRA_MAX_STEPS || 10000),
   /** Default time a REST/SOAP caller waits for the flow to reply. */
   replyTimeoutMs: Number(process.env.SUTRA_REPLY_TIMEOUT_MS || 60000),
+  /** The studio's address as people reach it (behind a proxy), for single sign-on: https://sutra.example.com. Empty = from each request. */
+  publicUrl: String(process.env.SUTRA_PUBLIC_URL || '').replace(/\/+$/, ''),
   webDir: process.env.SUTRA_WEB_DIR || '',
   /** studio: studio, engine and gateway in one process. engine: headless, no studio and no editing API. */
   mode: (process.env.SUTRA_MODE === 'engine' ? 'engine' : 'studio') as 'studio' | 'engine',

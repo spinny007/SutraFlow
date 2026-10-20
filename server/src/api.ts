@@ -33,6 +33,7 @@ import * as auth from './auth.js';
 import * as access from './access.js';
 import type { Caller } from './access.js';
 import { RULES, OPEN_ROUTES, check, auditRequest, auditSubject } from './guard.js';
+import { ssoSettings, saveSsoSettings, startSignIn, finishSignIn, SsoError } from './sso.js';
 import { audit, listAudit, auditCsv, auditStats, clearAudit } from './audit.js';
 import { overview, applications, setSutraEnabled, requestDrain, restartSutra } from './console.js';
 import * as gwa from './gateway/apps.js';
@@ -218,8 +219,40 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.get('/api/auth/status', async req => {
     const s = auth.verifySession(cookie(req, COOKIE));
     const ok = !!s && access.sessionValid(s.u, s.iat);
-    return { setup: !auth.hasUsers(), user: ok ? access.me({ u: s!.u, kind: 'user' }) : null, version, mode: config.mode, environment: config.environment };
+    const sso = ssoSettings();
+    return { setup: !auth.hasUsers(), user: ok ? access.me({ u: s!.u, kind: 'user' }) : null, version, mode: config.mode, environment: config.environment, sso: sso.enabled ? { name: sso.name } : null };
   });
+
+  // ---------- single sign-on (OpenID Connect, sso.ts) ----------
+  const SSO_COOKIE = 'sutra_sso';
+  const ssoRedirect = (req: FastifyRequest) => `${config.publicUrl || `${req.protocol}://${req.headers.host}`}/api/auth/sso/callback`;
+  const ssoPage = (reply: FastifyReply, title: string, msg: string, to?: string) => reply.type('text/html').send(
+    `<!doctype html><meta charset="utf-8"><title>${title}</title><body style="font-family:system-ui;padding:40px"><h2>${title}</h2><p>${msg.replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]!)}</p>`
+    + (to ? `<script>location.replace(${JSON.stringify(to)})</script><p><a href="${to.replace(/"/g, '&quot;')}">Continue</a></p>` : '<p><a href="/">Back to sign in</a></p>') + '</body>');
+  app.get('/api/auth/sso/start', async (req: any, reply) => {
+    try {
+      const r = await startSignIn(ssoRedirect(req), req.query?.return);
+      // Lax: the provider sends the browser back from its own site, and the cookie must come along.
+      reply.header('set-cookie', `${SSO_COOKIE}=${r.cookie}; HttpOnly; SameSite=Lax; Path=/api/auth/sso; Max-Age=600${req.protocol === 'https' ? '; Secure' : ''}`);
+      return reply.redirect(r.url, 302);
+    } catch (e: any) { reply.code(503); return ssoPage(reply, 'Single sign-on is not available', e.message); }
+  });
+  app.get('/api/auth/sso/callback', async (req: any, reply) => {
+    reply.header('set-cookie', `${SSO_COOKIE}=; HttpOnly; SameSite=Lax; Path=/api/auth/sso; Max-Age=0`);
+    try {
+      const r = await finishSignIn(req.query || {}, cookie(req, SSO_COOKIE));
+      signInAudit(req, r.username, r.created ? 'Sign in with single sign-on (account created)' : 'Sign in with single sign-on', 'ok', 200);
+      reply.header('set-cookie', `${COOKIE}=${auth.issue(r.username)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${12 * 3600}${req.protocol === 'https' ? '; Secure' : ''}`);
+      // A page of this site moves on, so the Strict session cookie is sent from here on.
+      return ssoPage(reply, 'Signed in', `Welcome, ${r.username}.`, r.ret);
+    } catch (e: any) {
+      signInAudit(req, 'unknown', 'Sign in with single sign-on', 'failed', 401, e.message);
+      reply.code(e instanceof SsoError ? 401 : 502);
+      return ssoPage(reply, 'Not signed in', e.message);
+    }
+  });
+  app.get('/api/access/sso', async (req: any) => ({ ...ssoSettings(), redirectUri: ssoRedirect(req) }));
+  app.put('/api/access/sso', async (req: any) => { try { return saveSsoSettings(req.body || {}); } catch (e: any) { throw bad(e.message); } });
   app.post('/api/auth/setup', async (req: any, reply) => {
     if (auth.hasUsers()) throw new HttpError(409, 'Already set up');
     // Anyone reaching a fresh headless engine could otherwise claim it.

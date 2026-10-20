@@ -1,0 +1,192 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.8.0
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+/**
+ * Single sign-on for people (designer and Admin Console) with OpenID Connect: the authorization code
+ * flow with PKCE, state and nonce. The identity provider's ID token is checked against its published
+ * keys (JWKS), issuer, audience (the client id), expiry and the nonce of this sign-in.
+ *
+ * Accounts: a person is found by the provider's subject (sub). A new person gets an account when
+ * "Create accounts" is on; an existing account with the same username is linked only when
+ * "Link existing accounts" is on (otherwise anyone who could choose that name at the provider could
+ * take it over). Roles come from the provider's groups claim through the group mapping, replaced at
+ * every sign-in; without a mapping, the account keeps the roles given in the Admin Console.
+ * Password sign-in stays available, so an administrator can always get in.
+ */
+import crypto from 'node:crypto';
+import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose';
+import { q, now, getSetting, setSetting, tx } from './db.js';
+import { getSecret } from './secrets.js';
+import { createAccount, getUser, setAccountGrants, type Grant } from './access.js';
+
+export interface SsoSettings {
+  enabled: boolean;
+  /** Shown on the button: "Sign in with <name>". */
+  name: string;
+  /** The provider's issuer URL; its /.well-known/openid-configuration is read. */
+  issuer: string;
+  clientId: string;
+  /** Name of the vault secret holding the client secret (empty: a public client, PKCE only). */
+  clientSecret: string;
+  scopes: string;
+  /** Claim that becomes the username: preferred_username, email, upn or sub. */
+  usernameClaim: string;
+  /** Claim with the person's groups (a list or a space separated text). */
+  groupsClaim: string;
+  /** Group -> role (and project, '' = all projects). */
+  groupRoles: { group: string; role: string; project?: string }[];
+  createAccounts: boolean;
+  linkExisting: boolean;
+}
+
+export const SSO_DEFAULTS: SsoSettings = {
+  enabled: false, name: 'single sign-on', issuer: '', clientId: '', clientSecret: '', scopes: 'openid profile email',
+  usernameClaim: 'preferred_username', groupsClaim: 'groups', groupRoles: [], createAccounts: false, linkExisting: false,
+};
+
+export const ssoSettings = (): SsoSettings => ({ ...SSO_DEFAULTS, ...getSetting<Partial<SsoSettings>>('sso', {}) });
+
+export function saveSsoSettings(input: Partial<SsoSettings>) {
+  const s = { ...ssoSettings(), ...input };
+  s.issuer = String(s.issuer || '').trim().replace(/\/+$/, '');
+  s.groupRoles = (Array.isArray(s.groupRoles) ? s.groupRoles : []).filter(g => g && String(g.group || '').trim() && String(g.role || '').trim())
+    .map(g => ({ group: String(g.group).trim(), role: String(g.role).trim(), project: String(g.project || '') }));
+  if (s.enabled) {
+    if (!/^https:\/\/|^http:\/\/(127\.0\.0\.1|localhost)(:|\/|$)/.test(s.issuer)) throw new Error('Issuer: an https:// address (http only for 127.0.0.1 or localhost)');
+    if (!s.clientId) throw new Error('Client id is required');
+    if (s.clientSecret && getSecret(s.clientSecret) === undefined) throw new Error(`Secret "${s.clientSecret}" does not exist`);
+    const roles = new Set(q.all<any>('select id from roles').map(r => r.id));
+    for (const g of s.groupRoles) if (!roles.has(g.role)) throw new Error(`Unknown role: ${g.role}`);
+  }
+  setSetting('sso', s);
+  discovered.clear();
+  return s;
+}
+
+// ---------- provider metadata ----------
+
+interface Discovery { authorization_endpoint: string; token_endpoint: string; jwks_uri: string; issuer: string; end_session_endpoint?: string }
+const discovered = new Map<string, { at: number; d: Discovery; keys: JWTVerifyGetKey }>();
+
+async function provider(issuer: string) {
+  const hit = discovered.get(issuer);
+  if (hit && Date.now() - hit.at < 3600e3) return hit;
+  const r = await fetch(`${issuer}/.well-known/openid-configuration`, { signal: AbortSignal.timeout(10000) });
+  if (!r.ok) throw new Error(`The identity provider did not answer its configuration (${r.status})`);
+  const d = await r.json() as Discovery;
+  if (!d.authorization_endpoint || !d.token_endpoint || !d.jwks_uri) throw new Error('The identity provider configuration lacks its endpoints');
+  if (d.issuer && d.issuer.replace(/\/+$/, '') !== issuer) throw new Error(`The identity provider calls itself ${d.issuer}, not ${issuer}`);
+  const v = { at: Date.now(), d, keys: createRemoteJWKSet(new URL(d.jwks_uri)) };
+  discovered.set(issuer, v);
+  return v;
+}
+
+// ---------- the sign-in round trip ----------
+
+const STATE_MINUTES = 10;
+const key = () => {
+  let k = getSetting<string>('sessionKey', '');
+  if (!k) { k = crypto.randomBytes(32).toString('base64'); setSetting('sessionKey', k); }
+  return Buffer.from(k, 'base64');
+};
+const sign = (v: object) => {
+  const p = Buffer.from(JSON.stringify(v)).toString('base64url');
+  return `${p}.${crypto.createHmac('sha256', key()).update(`sso.${p}`).digest('base64url')}`;
+};
+function unsign(t: string | undefined): any {
+  const [p, s] = String(t || '').split('.');
+  if (!p || !s) return null;
+  const e = crypto.createHmac('sha256', key()).update(`sso.${p}`).digest('base64url');
+  if (s.length !== e.length || !crypto.timingSafeEqual(Buffer.from(s), Buffer.from(e))) return null;
+  try { const v = JSON.parse(Buffer.from(p, 'base64url').toString()); return v.exp > Date.now() ? v : null; } catch { return null; }
+}
+/** Only paths on this server: no other site, no //host. */
+export const safeReturn = (r: unknown) => (typeof r === 'string' && /^\/(?![/\\])/.test(r) ? r : '/');
+
+/** Where to send the browser, and the short-lived signed cookie that remembers this sign-in. */
+export async function startSignIn(redirectUri: string, returnTo: unknown) {
+  const s = ssoSettings();
+  if (!s.enabled) throw new Error('Single sign-on is not set up');
+  const p = await provider(s.issuer);
+  const state = crypto.randomBytes(16).toString('base64url');
+  const nonce = crypto.randomBytes(16).toString('base64url');
+  const verifier = crypto.randomBytes(32).toString('base64url');
+  const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+  const u = new URL(p.d.authorization_endpoint);
+  for (const [k, v] of Object.entries({ response_type: 'code', client_id: s.clientId, redirect_uri: redirectUri, scope: s.scopes || 'openid', state, nonce, code_challenge: challenge, code_challenge_method: 'S256' })) u.searchParams.set(k, v);
+  return { url: u.toString(), cookie: sign({ state, nonce, verifier, redirectUri, ret: safeReturn(returnTo), exp: Date.now() + STATE_MINUTES * 60e3 }) };
+}
+
+export class SsoError extends Error {}
+
+/** The provider sent the browser back: the code for tokens, the ID token checked, the account found or made. */
+export async function finishSignIn(query: Record<string, any>, cookie: string | undefined): Promise<{ username: string; ret: string; created: boolean }> {
+  const s = ssoSettings();
+  if (!s.enabled) throw new SsoError('Single sign-on is not set up');
+  if (query.error) throw new SsoError(`The identity provider refused the sign-in: ${String(query.error_description || query.error)}`);
+  const st = unsign(cookie);
+  if (!st) throw new SsoError('The sign-in took too long or was started in another browser. Try again.');
+  if (!query.state || query.state !== st.state) throw new SsoError('The sign-in does not match the one this browser started. Try again.');
+  if (!query.code) throw new SsoError('The identity provider sent no code');
+  const p = await provider(s.issuer);
+  const secret = s.clientSecret ? getSecret(s.clientSecret) : undefined;
+  const body = new URLSearchParams({ grant_type: 'authorization_code', code: String(query.code), redirect_uri: st.redirectUri, client_id: s.clientId, code_verifier: st.verifier });
+  const headers: Record<string, string> = { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' };
+  if (secret) headers.authorization = `Basic ${Buffer.from(`${encodeURIComponent(s.clientId)}:${encodeURIComponent(secret)}`).toString('base64')}`;
+  const r = await fetch(p.d.token_endpoint, { method: 'POST', headers, body, signal: AbortSignal.timeout(15000) });
+  const tok = await r.json().catch(() => ({})) as any;
+  if (!r.ok || !tok.id_token) throw new SsoError(`The identity provider did not give an ID token: ${tok.error_description || tok.error || r.status}`);
+  let claims: Record<string, any>;
+  try {
+    ({ payload: claims } = await jwtVerify(tok.id_token, p.keys, { issuer: p.d.issuer || s.issuer, audience: s.clientId, clockTolerance: 60 }));
+  } catch (e: any) { throw new SsoError(`The ID token is not valid: ${e.message}`); }
+  if (claims.nonce !== st.nonce) throw new SsoError('The ID token belongs to another sign-in (nonce)');
+  return { ...signInPerson(s, claims), ret: st.ret };
+}
+
+/** The account of a person the provider vouched for: found by subject, linked, or created. */
+export function signInPerson(s: SsoSettings, claims: Record<string, any>): { username: string; created: boolean } {
+  const subject = `${s.issuer}|${String(claims.sub || '')}`;
+  if (!claims.sub) throw new SsoError('The ID token has no subject');
+  const raw = String(claims[s.usernameClaim] ?? claims.preferred_username ?? claims.email ?? claims.sub);
+  const wanted = raw.replace(/[^A-Za-z0-9._@-]/g, '-').slice(0, 64);
+  const groupsRaw = claims[s.groupsClaim];
+  const groups = new Set((Array.isArray(groupsRaw) ? groupsRaw : typeof groupsRaw === 'string' ? groupsRaw.split(/[\s,]+/) : []).map(String));
+  const grants: Grant[] = s.groupRoles.filter(g => groups.has(g.group)).map(g => ({ role: g.role, project: g.project || '' }));
+
+  let created = false;
+  let username = q.get<any>('select username from users where idp_subject = ?', subject)?.username as string | undefined;
+  if (!username) {
+    const same = getUser(wanted);
+    if (same) {
+      if (same.kind !== 'user') throw new SsoError(`${wanted} is a system account`);
+      if (!s.linkExisting) throw new SsoError(`An account named ${wanted} exists. An administrator can turn on Link existing accounts, or remove it.`);
+      if (q.get<any>('select idp_subject from users where username = ?', wanted)?.idp_subject) throw new SsoError(`${wanted} is linked to another person at the identity provider`);
+      q.run('update users set idp_subject = ? where username = ?', subject, wanted);
+      username = wanted;
+    } else {
+      if (!s.createAccounts) throw new SsoError(`No account for ${wanted}. An administrator can create it, or turn on Create accounts.`);
+      tx(() => {
+        createAccount({ username: wanted, displayName: String(claims.name || ''), email: String(claims.email || ''), sso: true, grants: [] });
+        q.run('update users set idp_subject = ? where username = ?', subject, wanted);
+      });
+      username = wanted;
+      created = true;
+    }
+  }
+  const u = getUser(username)!;
+  if (u.disabled) throw new SsoError('This account is disabled');
+  if (s.groupRoles.length) {
+    // Roles follow the provider's groups; the last administrator is never taken away (setAccountGrants refuses).
+    try { setAccountGrants(username, grants); } catch (e: any) { if (created) throw new SsoError(e.message); }
+  }
+  q.run('update users set last_login = ?, display_name = coalesce(nullif(?, \'\'), display_name), email = coalesce(nullif(?, \'\'), email), updated_at = ? where username = ?',
+    now(), String(claims.name || ''), String(claims.email || ''), now(), username);
+  return { username, created };
+}

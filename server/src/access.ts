@@ -171,7 +171,7 @@ export function checkPassword(pw: string, username = '') {
 function userRow(r: any) {
   return {
     username: r.username, kind: (r.kind || 'user') as AccountKind, displayName: r.display_name || '', email: r.email || '',
-    disabled: !!r.disabled, locked: Number(r.locked_until || 0) > Date.now(), mustChange: !!r.must_change, hasPassword: !!r.hash,
+    disabled: !!r.disabled, locked: Number(r.locked_until || 0) > Date.now(), mustChange: !!r.must_change, hasPassword: !!r.hash, sso: !!r.idp_subject,
     lastLogin: r.last_login || null, createdAt: r.created_at, grants: grantsOf(r.username),
     tokens: Number(q.get<any>('select count(*) n from api_tokens where username = ?', r.username)?.n || 0),
   };
@@ -209,21 +209,27 @@ function keepsAnAdministrator(change: () => void) {
   });
 }
 
-export function createAccount(input: { username: string; kind?: AccountKind; displayName?: string; email?: string; password?: string; mustChange?: boolean; grants?: Grant[] }) {
+export function createAccount(input: { username: string; kind?: AccountKind; displayName?: string; email?: string; password?: string; mustChange?: boolean; grants?: Grant[]; sso?: boolean }) {
   const username = String(input.username || '').trim();
   const kind: AccountKind = input.kind === 'system' ? 'system' : 'user';
   if (!USERNAME.test(username)) throw new Error('Username: 2 to 64 letters, digits, . _ @ -');
   if (q.get('select 1 from users where lower(username) = lower(?)', username)) throw new Error(`"${username}" exists`);
   const pw = input.password ? String(input.password) : '';
-  if (kind === 'user' && !pw) throw new Error('A password is required for a user');
+  // A person who signs in with single sign-on has no password here.
+  if (kind === 'user' && !pw && !input.sso) throw new Error('A password is required for a user');
   if (pw) checkPassword(pw, username);
   tx(() => {
     q.run(`insert into users(username, hash, role, created_at, kind, display_name, email, disabled, must_change, failed, locked_until, sessions_after, updated_at)
       values(?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 0, ?)`,
-    username, pw ? hashPassword(pw) : '', 'member', now(), kind, String(input.displayName || ''), String(input.email || ''), kind === 'user' && input.mustChange !== false ? 1 : 0, now());
+    username, pw ? hashPassword(pw) : '', 'member', now(), kind, String(input.displayName || ''), String(input.email || ''), kind === 'user' && !input.sso && input.mustChange !== false ? 1 : 0, now());
     setGrants(username, input.grants || []);
   });
   return getUser(username)!;
+}
+
+/** Replaces an account's roles (single sign-on group mapping); at least one administrator remains. */
+export function setAccountGrants(username: string, grants: Grant[]) {
+  keepsAnAdministrator(() => setGrants(username, grants));
 }
 
 export function updateAccount(username: string, input: { displayName?: string; email?: string; disabled?: boolean; grants?: Grant[] }, by?: string) {

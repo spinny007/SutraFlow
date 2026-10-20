@@ -42,7 +42,7 @@ const NAV: { group: string; items: { id: Page; label: string; perm?: string }[] 
 ];
 
 export function Console() {
-  const [auth, setAuth] = useState<{ setup: boolean; user: (Me & { mustChange?: boolean }) | null; version: string; mode: Status['mode'] } | null>(null);
+  const [auth, setAuth] = useState<{ setup: boolean; user: (Me & { mustChange?: boolean }) | null; version: string; mode: Status['mode']; sso?: { name: string } | null } | null>(null);
   const [page, setPage] = useState<Page>(() => (location.hash.slice(1) as Page) || 'overview');
   const [menu, setMenu] = useState(false);
   const [panel, setPanel] = useState(() => { try { return localStorage.getItem('sutra.console') === 'open'; } catch { return false; } });
@@ -82,7 +82,7 @@ export function Console() {
         <p className="muted">Then reload this page and sign in.</p>
       </div></div>
     );
-    return <ToastHost><SignIn setup={auth.setup} onDone={check} title="SutraFlow Admin Console" subtitle="Deployed projects and Sutras, engines, users and audit." /></ToastHost>;
+    return <ToastHost><SignIn setup={auth.setup} sso={auth.sso} onDone={check} title="SutraFlow Admin Console" subtitle="Deployed projects and Sutras, engines, users and audit." /></ToastHost>;
   }
   if (auth.user.mustChange) return <ToastHost><ChangePassword onDone={check} /></ToastHost>;
 
