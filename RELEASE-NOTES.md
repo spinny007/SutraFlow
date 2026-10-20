@@ -36,6 +36,12 @@ Each comes with a `.sha256` file to check the download.
 - **Timestamps** checked with an allowed clock difference, and can be required.
 - **XML encryption** both ways: encrypted requests decrypted with the service's key (and can be required); outgoing calls encrypt the Body for the receiver after signing. AES-GCM or AES-CBC, keys by RSA-OAEP; RSA 1.5 refused.
 
+### The Approval Center
+- A page of its own for business people, `/approvals` on every server: approvals and questions waiting for the signed-in person, everything they may see, and what was decided; it works on a phone and signs in with a password or single sign-on.
+- Human approval and Ask a person steps name their approvers: roles and/or accounts (from the data too), any one of them, all of them or a number of them; details shown as labelled fields; a comment required on rejection. Only those people decide; administrators can decide on their behalf, recorded so.
+- A due time that escalates to other roles or goes on through an *expired* output; reminders and email notices through an SMTP connection; every vote kept in the run and the history.
+- The Admin Console's Approvals page lists what waits and for whom, and opens the Approval Center.
+
 ### Single sign-on
 - People sign in to the designer and the Admin Console with an OpenID Connect provider (authorization code with PKCE, state and nonce; the ID token checked against the provider's keys). Accounts are created or linked only when allowed; roles follow the provider's groups. Password sign-in stays available. Admin Console → Users → Single sign-on.
 

@@ -11,6 +11,7 @@ import type { Activity, ExecCtx } from '../engine/types.js';
 import { requireResource } from '../resources.js';
 import { getFlow, versionDoc } from '../flows.js';
 import { F, when } from './common.js';
+import { approvalWait } from './core.js';
 import { runAgent } from '../ai/agent.js';
 import { appendTurns, cleanSession, clearOld, clearSession, compact, fitTurns, loadSession, settingsOf, tokensOf } from '../ai/memory.js';
 import { addKnowledge, embed, embedWith, keepOnlySources, rebuildKnowledge, removeKnowledge, searchKnowledge } from '../ai/knowledge.js';
@@ -64,13 +65,19 @@ export const agentActivities: Activity[] = [
   },
   {
     type: 'askPerson', palette: 'ai', name: 'Ask a person', glyph: '☏', ports: ['answered', 'declined'],
-    desc: 'Waits for a person to answer a question, in Runs > Approvals or the Admin Console, for minutes or days, without holding a worker. The answer goes on, for example back to the agent with the same session.',
+    desc: 'Waits for a person to answer a question, in the Approval Center (/approvals), for minutes or days, without holding a worker. The answer goes on, for example back to the agent with the same session.',
     fields: [
       F('question', 'Question', 'textarea', '{{input.question}}', { tpl: true }),
-      F('assignee', 'Who should answer (optional)', 'text', ''),
+      F('approverRoles', 'Who can answer: roles', 'list', [], { help: 'Role names or ids. Empty with no accounts = anyone with the Approve permission on the project.' }),
+      F('approvers', 'Who can answer: accounts', 'list', [], { tpl: true }),
+      F('details', 'Details for the person', 'kv', [], { tpl: true }),
+      F('dueHours', 'Due in (hours)', 'number', 0, { group: 'Time' }),
+      F('remindHours', 'Remind every (hours)', 'number', 0, { group: 'Time' }),
+      F('notify', 'Email through', 'resource', '', { group: 'Time', resourceKind: 'smtp' }),
+      F('assignee', 'Who should answer (shown only)', 'text', ''),
     ],
     outputHint: { answer: '', approval: { approved: true, by: '', comment: '', at: '' } },
-    execute: c => ({ wait: { kind: 'approval', question: true, message: text(c.v('question')), assignee: c.raw('assignee') || undefined } }),
+    execute: c => ({ wait: approvalWait(c, { kind: 'approval', question: true, message: text(c.v('question')) }) }),
   },
   {
     type: 'agentHandoff', palette: 'ai', name: 'Hand off to agent', glyph: '⇢', ports: ['out'],

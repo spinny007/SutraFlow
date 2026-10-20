@@ -1590,6 +1590,43 @@ sutra deploy shop-1.4.0.sutra --server https://prod:4800 --token $SUTRA_TOKEN</p
 [[tip:Guidelines|Run sutraflow stop before db copy, so nothing changes while the data is copied.<br>Give scripts a system account and its API token (sutra user add --system, sutra token create) rather than the local admin token.]]`,
   },
   {
+    id: 'approvals', title: 'The Approval Center: decisions by business people',
+    html: `
+<p>When a Sutra needs a person (a refund over a limit, a new supplier, a purchase order, a question an AI agent may not answer alone), a [[approval]] or [[askPerson]] step waits, and the people it names decide in the <strong>Approval Center</strong>: a page of its own at <code>/approvals</code> on every SutraFlow server, made for business people. It shows only their approvals: nothing of the designer or the Admin Console, and it works on a phone.</p>
+[[img:approvals|The Approval Center: what waits for the signed-in approver, with the details the step chose to show.]]
+<p class="h">Set up the approvers (an administrator, once)</p>
+<ol>
+<li>Admin Console &rarr; <strong>Roles</strong>: make a role per group of approvers, for example <em>Finance approver</em> (it needs no permissions of its own; <em>View</em> lets its members also see the other waiting items of the project).</li>
+<li>Admin Console &rarr; <strong>Users</strong>: add the people, with their email address, and give them the role (on all projects or one). With single sign-on, map an identity provider group to the role instead.</li>
+<li>Send them the address: <code>https://your-server/approvals</code>. They sign in with their password or with single sign-on.</li>
+</ol>
+<p class="h">In the Sutra</p>
+<ol>
+<li>Add a [[approval]] step. Write the question with references: <code>Approve purchase order {{input.ref}}?</code>.</li>
+<li><strong>Details for the approvers</strong>: label = value, such as <code>Amount = {{input.total}}</code>, <code>Supplier = {{input.supplier}}</code>. They see these first; the full data is one click away.</li>
+<li><strong>Approver roles</strong> (<em>Finance approver</em>) and/or <strong>approver accounts</strong> (usernames, or from the data: <code>{{input.managerAccount}}</code>).</li>
+<li><strong>Who must approve</strong>: any one of them, all of them, or a number of them (any 2 of 5). One rejection rejects.</li>
+<li><strong>Comment required</strong>: on rejection (default), always, or never.</li>
+<li><strong>Time</strong> (optional): <em>Due in</em> hours, then keep waiting, <em>escalate</em> (the escalation roles can decide too, with the same time again) or the <em>expired</em> output; <em>Remind every</em> hours; <em>Email the approvers through</em> an SMTP connection, so they get an email with a link when the approval arrives, at each reminder and on escalation.</li>
+<li>Connect <em>approved</em>, <em>rejected</em> (and <em>expired</em>). The output's <code>approval</code> holds who decided, the comment, and every approver's vote.</li>
+</ol>
+<p class="h">What the approvers see</p>
+<ul>
+<li><strong>Waiting for me</strong>: what they may decide and have not yet, newest last, with the details, who else must approve, how many approvals are in, and the due time.</li>
+<li><strong>All waiting</strong>: everything of the projects they may view, including items waiting for others.</li>
+<li><strong>Decided</strong>: their decisions and, for those who may view the project, everyone's, for 30 days.</li>
+</ul>
+<p class="h">Who may decide</p>
+<table class="t"><thead><tr><th>The step names</th><th>Who decides</th></tr></thead><tbody>
+<tr><td>Roles and/or accounts</td><td>Only those people (members of the roles on that project or on all projects, and the named accounts).</td></tr>
+<tr><td>Nobody (older steps)</td><td>Anyone with the <em>Approve</em> permission on the project, as before.</td></tr>
+<tr><td>Test and debug runs in the designer</td><td>Also the designers of the project, so a Sutra can be tried without the approvers.</td></tr>
+</tbody></table>
+<p>Administrators who are not approvers see the item and can decide <em>on behalf of the approvers</em>, which is recorded so; Operators can reassign an approval to other roles or accounts or give it a new due time (<code>POST /api/approvals/:id/reassign</code>). Every decision is in the run, in the history and in the audit log.</p>
+[[tip:Who decides, not who can see|Approver roles need no permissions to decide what names them. Give the role View on the project only if its members should also see the other waiting items and the history of the project.]]
+<p>The Admin Console's <em>Approvals</em> page lists what waits and for whom, and opens the Approval Center.</p>`,
+  },
+  {
     id: 'console', title: 'The Admin Console',
     html: `
 <p>The Admin Console manages what is deployed: running projects and Sutras, approvals, engines, people, system accounts, roles and the audit log. Designing stays in the designer. Open it with <strong>Admin Console</strong> in the designer's top bar, or at <code>/admin</code> on the admin port (<code>http://127.0.0.1:4800/admin</code>). Headless engines serve the console too, without the designer.</p>

@@ -35,6 +35,7 @@ import * as access from './access.js';
 import type { Caller } from './access.js';
 import { RULES, OPEN_ROUTES, check, auditRequest, auditSubject } from './guard.js';
 import { ssoSettings, saveSsoSettings, startSignIn, finishSignIn, SsoError } from './sso.js';
+import { listApprovals, approvalHistory, decideApproval, reassign } from './approvals.js';
 import { audit, listAudit, auditCsv, auditStats, clearAudit } from './audit.js';
 import { overview, applications, setSutraEnabled, requestDrain, restartSutra } from './console.js';
 import * as gwa from './gateway/apps.js';
@@ -766,17 +767,15 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     if (!['step', 'continue', 'pause', 'breakpoints'].includes(a)) throw bad('action must be step, continue, pause or breakpoints');
     try { return await engine.debug(req.params.id, a as any, Array.isArray(req.body?.breakpoints) ? req.body.breakpoints : undefined); } catch (e: any) { throw bad(e.message); }
   });
-  app.get('/api/approvals', async req => {
-    const ok = seen(req);
-    return q.all<any>(`select t.id, t.run_id "runId", t.node_id "nodeId", t.wait, t.input, r.flow_name "flowName", r.started_at "startedAt", r.doc, r.project_id
-      from tasks t join runs r on r.id = t.run_id where t.status = 'waiting' order by t.id`).filter(t => ok(t.project_id)).map(t => {
-      const doc = JSON.parse(t.doc);
-      return { id: t.id, runId: t.runId, flowName: t.flowName, startedAt: t.startedAt, step: doc.nodes.find((n: any) => n.id === t.nodeId)?.name, wait: JSON.parse(t.wait || '{}'), input: t.input ? JSON.parse(t.input) : null };
-    });
-  });
+  // ---------- the Approval Center (approvals.ts) ----------
+  app.get('/api/approvals', async (req: any) => listApprovals(caller(req), { mine: req.query?.mine === '1' || req.query?.mine === 'true' }));
+  app.get('/api/approvals/history', async (req: any) => approvalHistory(caller(req), Math.min(365, Number(req.query?.days) || 30)));
   app.post('/api/approvals/:id', async (req: any) => {
-    try { await engine.decide(Number(req.params.id), !!req.body?.approved, req.user.u, String(req.body?.comment || '')); } catch (e: any) { throw bad(e.message); }
-    return { ok: true };
+    try { return { ok: true, ...(await decideApproval(caller(req), Number(req.params.id), !!req.body?.approved, String(req.body?.comment || ''), !!req.body?.onBehalf)) }; }
+    catch (e: any) { throw e.status ? new HttpError(e.status, e.message) : bad(e.message); }
+  });
+  app.post('/api/approvals/:id/reassign', async (req: any) => {
+    try { return reassign(Number(req.params.id), { approvers: req.body?.approvers, roles: req.body?.roles, dueHours: req.body?.dueHours }, caller(req).u); } catch (e: any) { throw bad(e.message); }
   });
 
   /** Server-sent events: run status changes, for live canvas updates. */
@@ -905,6 +904,8 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     const studio = config.mode !== 'engine';
     await app.register(fastifyStatic, { root: webDir, prefix: '/', index: studio ? ['index.html'] : false, allowedPath: p => studio || (p !== '/' && !/(^|\/)index\.html$/.test(p)) });
     app.get('/admin', (_req, reply) => reply.header('cache-control', 'no-cache').type('text/html').sendFile('admin.html'));
+    // The Approval Center for business people, on every server (studio or engine).
+    app.get('/approvals', (_req, reply) => reply.header('cache-control', 'no-cache').type('text/html').sendFile('approvals.html'));
     app.setNotFoundHandler((req, reply) => {
       if (req.url.startsWith('/api/') || !studio) return reply.code(404).send({ error: 'Not found' });
       return reply.type('text/html').sendFile('index.html');

@@ -8,7 +8,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 import { XMLBuilder } from 'fast-xml-parser';
-import type { Activity } from '../engine/types.js';
+import type { Activity, ExecCtx } from '../engine/types.js';
 import { getPath, setPath, toNumber } from '../template.js';
 import { xmlParser } from '../security/outbound.js';
 import { inferTree, type SNode } from '../schemas.js';
@@ -183,12 +183,26 @@ const flow: Activity[] = [
     },
   },
   {
-    type: 'approval', palette: 'flow', name: 'Human approval', glyph: '✓', ports: ['approved', 'rejected'],
-    desc: 'Pauses until a person approves or rejects in Runs > Approvals. The run waits as saved state, for days if needed.',
-    fields: [F('message', 'Question', 'textarea', 'Approve order {{input.orderId}}?', { tpl: true }), F('assignee', 'Assignee (optional)', 'text', '')],
-    outputHint: { approval: { approved: true, by: '', comment: '', at: '' } },
-    outputSchema: (_cfg, h) => ({ name: 'out', type: 'object', children: [...(h.input?.children || []), h.infer({ approved: true, by: '', comment: '', at: '' }, 'approval')] }),
-    execute: c => ({ wait: { kind: 'approval', message: String(c.v('message') ?? ''), assignee: c.raw('assignee') || undefined } }),
+    type: 'approval', palette: 'flow', name: 'Human approval', glyph: '✓', ports: cfg => (cfg.afterDue === 'expired output' ? ['approved', 'rejected', 'expired'] : ['approved', 'rejected']),
+    desc: 'Pauses until the people it names approve or reject, in the Approval Center (/approvals). The run waits as saved state, for days if needed.',
+    fields: [
+      F('message', 'Question', 'textarea', 'Approve order {{input.orderId}}?', { tpl: true }),
+      F('details', 'Details for the approvers', 'kv', [], { tpl: true, help: 'Label = value, such as Amount = {{input.total}}. Shown as a short list in the Approval Center and in the email; the full data is one click away.' }),
+      F('approverRoles', 'Approver roles', 'list', [], { help: 'Role names or ids, such as Finance approver. Everyone holding one of these roles (on this project or all projects) can decide.' }),
+      F('approvers', 'Approver accounts', 'list', [], { tpl: true, help: 'Usernames; may come from the data, such as {{input.managerAccount}}.' }),
+      F('rule', 'Who must approve', 'select', 'any one', { options: ['any one', 'all', 'a number of them'], help: 'One rejection rejects in every case.' }),
+      F('need', 'How many', 'number', 2, when('rule', 'a number of them')),
+      F('requireComment', 'Comment required', 'select', 'on rejection', { options: ['on rejection', 'always', 'never'] }),
+      F('dueHours', 'Due in (hours)', 'number', 0, { group: 'Time', help: '0 = no due time.' }),
+      F('afterDue', 'When it is due', 'select', 'keep waiting', { group: 'Time', options: ['keep waiting', 'escalate', 'expired output'], help: 'escalate: the escalation roles can decide too, with the same time again. expired output: the step goes on through its expired output.' }),
+      F('escalateRoles', 'Escalate to roles', 'list', [], { group: 'Time', showIf: { k: 'afterDue', in: ['escalate'] } }),
+      F('remindHours', 'Remind every (hours)', 'number', 0, { group: 'Time', help: '0 = no reminders. Needs an email connection.' }),
+      F('notify', 'Email the approvers through', 'resource', '', { group: 'Time', resourceKind: 'smtp', help: 'Optional. The approvers get an email when the approval arrives, at each reminder and on escalation, with a link to the Approval Center (their email address from Users).' }),
+      F('assignee', 'Assignee (shown only)', 'text', '', { help: 'Older field: a name shown to people. Use Approver accounts to decide who may approve.' }),
+    ],
+    outputHint: { approval: { approved: true, by: '', comment: '', at: '', votes: [{ username: '', approved: true, comment: '', at: '' }] } },
+    outputSchema: (_cfg, h) => ({ name: 'out', type: 'object', children: [...(h.input?.children || []), h.infer({ approved: true, by: '', comment: '', at: '', expired: false, votes: [{ username: '', approved: true, comment: '', at: '' }] }, 'approval')] }),
+    execute: c => ({ wait: approvalWait(c, { kind: 'approval', message: String(c.v('message') ?? '') }) }),
   },
   {
     type: 'setVar', palette: 'flow', name: 'Set variables', glyph: '𝑥', ports: ['out'],
@@ -417,3 +431,22 @@ const general: Activity[] = [
 ];
 
 export const coreActivities: Activity[] = [...triggers, ...flow, ...data, ...general];
+
+/** What a Human approval or Ask a person step waits with: its people, rule, details and times. */
+export function approvalWait(c: ExecCtx, base: { kind: 'approval'; message: string; question?: boolean }) {
+  const list = (k: string) => ((c.raw(k) as unknown[]) || []).map(x => String(c.resolve(x) ?? '').trim()).flatMap(x => x.split(/\s*,\s*/)).filter(Boolean);
+  const hours = (k: string) => Math.max(0, Number(c.raw(k)) || 0) * 3600000;
+  const details = Object.fromEntries(((c.raw('details') as any[]) || []).filter(r => r?.k).map(r => [String(r.k), c.resolve(r.v)]));
+  const due = hours('dueHours'), remind = hours('remindHours');
+  return {
+    ...base,
+    assignee: c.raw('assignee') || undefined,
+    approvers: list('approvers'), roles: list('approverRoles'),
+    rule: c.raw('rule') || 'any one', need: Number(c.raw('need')) || undefined,
+    requireComment: c.raw('requireComment') || (base.question ? 'never' : 'on rejection'),
+    ...(Object.keys(details).length ? { details } : {}),
+    ...(due ? { dueAt: Date.now() + due, dueMs: due, afterDue: c.raw('afterDue') || 'keep waiting', escalateRoles: list('escalateRoles') } : {}),
+    ...(remind ? { remindAt: Date.now() + remind, remindEveryMs: remind } : {}),
+    ...(c.raw('notify') ? { notify: String(c.raw('notify')) } : {}),
+  };
+}

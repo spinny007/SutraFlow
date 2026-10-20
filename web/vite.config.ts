@@ -19,8 +19,8 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: path.resolve(here, '../dist/web'), emptyOutDir: true,
-    // Two pages: the designer (index.html) and the Admin Console (admin.html).
-    rollupOptions: { input: { index: path.resolve(here, 'index.html'), admin: path.resolve(here, 'admin.html') } },
+    // Three pages: the designer (index.html), the Admin Console (admin.html) and the Approval Center (approvals.html).
+    rollupOptions: { input: { index: path.resolve(here, 'index.html'), admin: path.resolve(here, 'admin.html'), approvals: path.resolve(here, 'approvals.html') } },
   },
   server: {
     port: 5173,

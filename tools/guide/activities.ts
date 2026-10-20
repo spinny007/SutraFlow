@@ -183,11 +183,11 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     output: ['The input, unchanged.'],
   },
   approval: {
-    scope: ['Pausing a run until a person approves or rejects in Runs &rarr; Approvals, with a comment.'],
-    outScope: ['Sending the request by email: add [[emailSend]] before it.'],
-    use: ['Refunds over a limit, new suppliers, manual corrections.'],
-    steps: ['Write the question with references, for example <code>Refund {{input.amount}}?</code>.', 'Optionally name the assignee.', 'Connect <em>approved</em> and <em>rejected</em>.'],
-    output: ['The input plus <code>approval</code>: <code>approved</code>, <code>by</code>, <code>comment</code>, <code>at</code>.'],
+    scope: ['Pausing a run until the people it names approve or reject, in the Approval Center (<code>/approvals</code>), on a computer or a phone.', 'Approvers by role and by account (accounts may come from the data); any one of them, all of them, or a number of them; one rejection rejects.', 'Details shown to the approvers as labelled fields; a comment required on rejection (or always).', 'A due time that escalates to other roles or goes on through an <em>expired</em> output; reminders and email notices through an SMTP connection.'],
+    outScope: ['Approving by replying to an email: approvers decide in the Approval Center (the email links to it).'],
+    use: ['Refunds over a limit, new suppliers, purchase orders, manual corrections.'],
+    steps: ['Write the question with references, for example <code>Refund {{input.amount}}?</code>.', 'Add details: <code>Amount = {{input.total}}</code>, <code>Customer = {{input.customer}}</code>.', 'Name the approver roles (<em>Finance approver</em>) and/or accounts (<code>{{input.managerAccount}}</code>), and whether any one or all must approve.', 'Optionally a due time, reminders and an email connection.', 'Connect <em>approved</em> and <em>rejected</em> (and <em>expired</em> when it is chosen).'],
+    output: ['The input plus <code>approval</code>: <code>approved</code>, <code>by</code>, <code>comment</code>, <code>at</code>, <code>votes</code> (each approver\'s decision), and <code>expired</code> when the due time ended it.'],
     guide: ['A waiting run costs nothing; it can wait for days.'],
   },
   setVar: {
@@ -827,7 +827,7 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     guide: ['A tool Sutra runs as a called Sutra: the agent waits without holding a worker, and after a restart it continues without running a finished tool again.', 'Messages of one session are handled one at a time, in arrival order; other sessions run alongside.', 'Small local models (phi4-mini) handle look-ups well; give them few tools and clear instructions.'],
   },
   askPerson: {
-    scope: ['A question to a person, answered in writing in Runs or the Admin Console; outputs <em>answered</em> and <em>declined</em>.', 'Waits as saved state, minutes or days, costing nothing.'],
+    scope: ['A question to a person, answered in writing in the Approval Center; outputs <em>answered</em> and <em>declined</em>.', 'Who can answer by role and account, details, a due time, reminders and email notices, as on [[approval]].', 'Waits as saved state, minutes or days, costing nothing.'],
     outScope: ['Yes or no decisions without an answer: use [[approval]].'],
     use: ['Refunds, exceptions and anything the agent may not decide.'],
     steps: ['Write the question, usually <code>{{input.question}}</code> from the agent.', 'Optionally name who should answer.', 'Connect <em>answered</em> to the reply or back to the agent with the same session.'],

@@ -7,51 +7,38 @@
  * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
  * SPDX-License-Identifier: AGPL-3.0-only
  */
-import { useCallback, useState } from 'react';
-import { act } from './log';
-import { useToast } from '../src/ui';
+import { useCallback } from 'react';
 import { PageHead, Err, Empty, useLoad, useEvery, ago, when } from './shared';
 
-interface Approval { id: number; runId: string; flowName: string; startedAt: string; step: string; wait: { kind?: string; message?: string; assignee?: string; question?: boolean }; input: unknown }
+interface Approval { id: number; flowName: string; startedAt: string; step: string; kind: string; message: string; people: string[]; roles: string[]; approvers: string[]; dueAt: string | null; approvedSoFar: number; need: number }
 
-/** Runs waiting for a person's decision. */
+/**
+ * Approvals are decided in the Approval Center (/approvals), the page for business people. Here the
+ * operators see what waits and for whom, and open the Approval Center to act.
+ */
 export function Approvals() {
-  const toast = useToast();
   const { data, error, reload } = useLoad<Approval[]>('/api/approvals');
-  useEvery(useCallback(() => { reload(); }, [reload]), 10000);
-  const [comments, setComments] = useState<Record<number, string>>({});
-  const list = (data || []).filter(a => a.wait?.kind === 'approval');
-  const decide = async (a: Approval, approved: boolean) => {
-    const comment = comments[a.id] || '';
-    try { await act({ label: `${approved ? 'Approve' : 'Reject'} ${a.flowName}: ${a.step}`, method: 'POST', url: `/api/approvals/${a.id}`, body: { approved, comment }, cli: ['approvals', approved ? 'approve' : 'reject', String(a.id), ...(comment ? ['--comment', comment] : [])] }); toast(approved ? 'Approved' : 'Rejected'); reload(); } catch (e: any) { toast(e.message, true); }
-  };
+  useEvery(useCallback(() => { reload(); }, [reload]), 15000);
   return (
     <>
-      <PageHead title="Approvals" sub="Running Sutras waiting for a decision. You see those of projects you may view; deciding needs the Approve permission.">
-        <button className="btn small" onClick={reload}>Refresh</button>
+      <PageHead title="Approvals" sub="Running Sutras waiting for a person. Approvers decide in the Approval Center, a page of its own for business people (it also works on a phone).">
+        <a className="btn primary small" href="/approvals" target="_blank" rel="noopener">Open the Approval Center</a>
       </PageHead>
       <Err text={error} />
-      {data && !list.length && <Empty title="Nothing is waiting">Approval steps of running Sutras appear here.</Empty>}
-      <div className="c-cards">
-        {list.map(a => (
-          <article key={a.id} className="c-card">
-            <div className="c-cardhead"><strong>{a.flowName}</strong><span className="muted xs" title={when(a.startedAt)}>started {ago(a.startedAt)}</span></div>
-            <div className="muted xs">Step {a.step}{a.wait.assignee ? ` · for ${a.wait.assignee}` : ''}</div>
-            <p className="c-message">{a.wait.message || 'No message.'}</p>
-            {a.input != null && <details><summary className="muted xs">What the step received</summary><pre className="c-code">{JSON.stringify(a.input, null, 2).slice(0, 4000)}</pre></details>}
-            <div className="fld" style={{ marginTop: 10 }}>
-              <label htmlFor={`c-ap-${a.id}`}>{a.wait.question ? 'Answer' : 'Comment'}</label>
-              {a.wait.question
-                ? <textarea id={`c-ap-${a.id}`} rows={3} value={comments[a.id] || ''} onChange={e => setComments(c => ({ ...c, [a.id]: e.target.value }))} />
-                : <input id={`c-ap-${a.id}`} type="text" value={comments[a.id] || ''} onChange={e => setComments(c => ({ ...c, [a.id]: e.target.value }))} />}
-            </div>
-            <div className="c-actions">
-              <button className="btn go" disabled={!!a.wait.question && !(comments[a.id] || '').trim()} onClick={() => decide(a, true)}>{a.wait.question ? 'Send answer' : 'Approve'}</button>
-              <button className="btn c-danger-soft" onClick={() => decide(a, false)}>{a.wait.question ? 'Decline' : 'Reject'}</button>
-            </div>
-          </article>
-        ))}
-      </div>
+      {data && !data.length && <Empty title="Nothing is waiting">Approval steps and questions of running Sutras appear here and in the Approval Center.</Empty>}
+      {!!data?.length && (
+        <div className="c-tablewrap"><table className="t c-table">
+          <thead><tr><th>Waiting</th><th>For</th><th>Progress</th><th>Due</th></tr></thead>
+          <tbody>{data.map(a => (
+            <tr key={a.id}>
+              <td><strong>{a.message || a.step}</strong><div className="muted xs">{a.flowName} · {a.kind} · <span title={when(a.startedAt)}>{ago(a.startedAt)}</span></div></td>
+              <td className="xs">{[...a.roles.map(r => `role ${r}`), ...a.approvers].join(', ') || 'anyone with Approve on the project'}</td>
+              <td className="nowrap xs">{a.approvedSoFar} of {a.need}</td>
+              <td className="nowrap xs">{a.dueAt ? when(a.dueAt) : ''}</td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+      )}
     </>
   );
 }

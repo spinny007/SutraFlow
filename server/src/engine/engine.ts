@@ -1164,7 +1164,7 @@ export class Engine {
 
   // ---------- operator actions ----------
 
-  async decide(taskId: number, approved: boolean, by: string, comment = '') {
+  async decide(taskId: number, approved: boolean, by: string, comment = '', votes?: unknown[], port?: string) {
     const t = await this.a.get<TaskRow>('select * from tasks where id = ?', taskId);
     if (!t || t.status !== 'waiting') throw new Error('This approval is no longer waiting');
     t.id = Number(t.id); t.claim = Number(t.claim); t.attempt = Number(t.attempt);
@@ -1174,8 +1174,8 @@ export class Engine {
     const input = t.input == null ? null : JSON.parse(t.input);
     const question = !!JSON.parse(t.wait || '{}').question;
     if (question && approved && !comment.trim()) throw new Error('Write the answer first');
-    const out = { ...(input && typeof input === 'object' && !Array.isArray(input) ? input : { value: input }), ...(question ? { answer: approved ? comment : '' } : {}), approval: { approved, by, comment, at: now() } };
-    await this.complete(t, run.doc, node, { port: question ? (approved ? 'answered' : 'declined') : approved ? 'approved' : 'rejected', out }, { ms: 0, revealed: new Set(), logs: [{ t: now(), level: 'info', msg: `${node.name}: ${approved ? 'approved' : 'rejected'} by ${by}${comment ? ` (${comment})` : ''}`, step: node.name }], varsSet: {} });
+    const out = { ...(input && typeof input === 'object' && !Array.isArray(input) ? input : { value: input }), ...(question ? { answer: approved ? comment : '' } : {}), approval: { approved, by, comment, at: now(), ...(votes ? { votes } : {}), ...(port === 'expired' ? { expired: true } : {}) } };
+    await this.complete(t, run.doc, node, { port: port || (question ? (approved ? 'answered' : 'declined') : approved ? 'approved' : 'rejected'), out }, { ms: 0, revealed: new Set(), logs: [{ t: now(), level: 'info', msg: `${node.name}: ${approved ? 'approved' : 'rejected'} by ${by}${comment ? ` (${comment})` : ''}`, step: node.name }], varsSet: {} });
     this.pump();
   }
 

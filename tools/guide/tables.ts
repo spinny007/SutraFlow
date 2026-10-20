@@ -55,6 +55,7 @@ export const TABLE_TEXT: Record<string, string> = {
   grants: 'Which role each account holds, for all projects (empty project) or one project.',
   api_tokens: 'API tokens of system accounts: hash, name, expiry and last use. Token values are never stored.',
   audit: 'Audit log: time, actor, address, action, target, project, status, outcome and safe details.',
+  approval_votes: 'Each approver\'s decision on an approval: the step\'s task, the username, approved or not, the comment, when, and whether an administrator decided on behalf of the approvers.',
   run_outputs: 'The output of each step of a run, one row per step name (a later pass of a loop replaces it), read by the steps after it. Kept apart from the run state so a step writes only its own output.',
   replay_guard: 'Signatures of HMAC-signed requests seen recently, so a replay to any engine is refused; each row expires after twice the allowed age.',
   ws_connections: 'Open WebSocket connections of every engine: id, engine, service path, Sutra, caller. Lets a step on one engine reach a connection held by another.',
@@ -64,7 +65,7 @@ export const TABLE_TEXT: Record<string, string> = {
 /** The tables by what they are for, in the order the guide shows them. */
 export const TABLE_GROUPS: [string, string[]][] = [
   ['Projects and Sutras', ['projects', 'flows', 'flow_versions', 'deployments', 'resources', 'schemas', 'folders', 'counters', 'mem_rows', 'mem_meta']],
-  ['Runs and the work queue', ['runs', 'tasks', 'run_outputs']],
+  ['Runs and the work queue', ['runs', 'tasks', 'run_outputs', 'approval_votes']],
   ['Releases and the cluster', ['package_deployments', 'engines', 'leases']],
   ['People, access and audit', ['users', 'roles', 'grants', 'api_tokens', 'audit']],
   ['Vault and server settings', ['secrets', 'settings']],

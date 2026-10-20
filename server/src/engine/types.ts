@@ -99,7 +99,7 @@ export interface StepResult {
   /** Value stored as this step's output when it differs from what is emitted. */
   store?: any;
   /** Pause until a person decides (port approved/rejected). */
-  wait?: { kind: 'approval'; message: string; assignee?: string; /** Ask a person: the comment is the answer (ports answered / declined). */ question?: boolean };
+  wait?: { kind: 'approval'; message: string; assignee?: string; /** Ask a person: the comment is the answer (ports answered / declined). */ question?: boolean; [k: string]: unknown };
   /** Durable timer: run this step again (phase "resume") after this epoch ms. */
   deferUntil?: number;
   /** Stops the whole run: other branches are cancelled and the run ends with this status. */

@@ -1,0 +1,219 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.8.0
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+/**
+ * The Approval Center: Human approval and Ask a person steps, decided by business people.
+ *
+ *  Who      a step names approver roles and/or accounts (accounts may come from the data). Only they
+ *           decide; a step that names nobody falls back to the Approve permission on the project.
+ *           Administrators may decide on someone's behalf, recorded as such. Test and debug runs in
+ *           the designer can be decided by their designers.
+ *  Rule     any one of them, all of them, or a number of them. One rejection rejects.
+ *  Votes    every decision is kept (approval_votes), so the history shows who decided what and when.
+ *  Time     a reminder after some hours; at the due time the approval keeps waiting, escalates to other
+ *           roles (with a new due time), or takes the step's expired output. The leader checks every
+ *           30 seconds; notices go by email through the step's SMTP connection.
+ */
+import { q, now, getSetting, setSetting } from './db.js';
+import { config } from './config.js';
+import { engine } from './engine/engine.js';
+import { can, type Caller } from './access.js';
+import { sendMail } from './connectors/email.js';
+
+export interface ApprovalWait {
+  kind: 'approval';
+  message: string;
+  question?: boolean;
+  /** Older steps: one name, shown only. */
+  assignee?: string;
+  approvers?: string[];
+  roles?: string[];
+  rule?: 'any one' | 'all' | 'a number of them';
+  need?: number;
+  requireComment?: 'on rejection' | 'always' | 'never';
+  details?: Record<string, unknown>;
+  dueAt?: number;
+  remindAt?: number;
+  remindEveryMs?: number;
+  afterDue?: 'keep waiting' | 'escalate' | 'expired output';
+  escalateRoles?: string[];
+  dueMs?: number;
+  escalated?: boolean;
+  notify?: string;
+}
+
+const lower = (s: unknown) => String(s ?? '').trim().toLowerCase();
+const waitOf = (t: { wait?: string | null }): ApprovalWait => JSON.parse(t.wait || '{}');
+
+/** Every role a person holds on a project (role ids and names, lower case). */
+function rolesOf(username: string, project: string | null): Set<string> {
+  const rows = q.all<any>(`select r.id, r.name from grants g join roles r on r.id = g.role_id where lower(g.username) = lower(?) and (g.project_id = '' or g.project_id = ?)`, username, project || '');
+  return new Set(rows.flatMap(r => [lower(r.id), lower(r.name)]));
+}
+
+/** The people a step's approvers resolve to: named accounts and the members of its roles. */
+export function approverAccounts(w: ApprovalWait, project: string | null): string[] {
+  const roles = new Set((w.roles || []).map(lower));
+  const fromRoles = roles.size ? q.all<any>(`select distinct g.username, r.id, r.name from grants g join roles r on r.id = g.role_id join users u on u.username = g.username
+    where coalesce(u.disabled, 0) = 0 and coalesce(u.kind, 'user') = 'user' and (g.project_id = '' or g.project_id = ?)`, project || '')
+    .filter(r => roles.has(lower(r.id)) || roles.has(lower(r.name))).map(r => r.username) : [];
+  return [...new Set([...(w.approvers || []), ...(w.assignee && !w.approvers?.length ? [w.assignee] : []), ...fromRoles].map(s => String(s).trim()).filter(Boolean))];
+}
+
+/** Whether this person may decide the approval, and on what ground. */
+export function canDecide(c: Caller, t: { wait?: string | null; project_id: string | null; source?: string }): { ok: boolean; why: string; onBehalf?: boolean } {
+  const w = waitOf(t);
+  const named = (w.approvers || []).map(lower).concat(w.assignee && !w.approvers?.length ? [lower(w.assignee)] : []);
+  const hasPeople = named.length > 0 || (w.roles || []).length > 0;
+  if (c.kind === 'user') {
+    if (named.includes(lower(c.u))) return { ok: true, why: 'named' };
+    if ((w.roles || []).length) { const mine = rolesOf(c.u, t.project_id); if ((w.roles || []).some(r => mine.has(lower(r)))) return { ok: true, why: 'role' }; }
+  }
+  if ((t.source === 'test' || t.source === 'debug') && can(c, 'design', t.project_id || undefined)) return { ok: true, why: 'designer' };
+  if (!hasPeople && can(c, 'approve', t.project_id || undefined)) return { ok: true, why: 'permission' };
+  if (c.all || can(c, 'users')) return { ok: true, why: 'administrator', onBehalf: true };
+  return { ok: false, why: 'not an approver of this item' };
+}
+
+const votesOf = (taskId: number) => q.all<any>('select username, approved, comment, at, on_behalf from approval_votes where task_id = ? order by at', taskId)
+  .map(v => ({ username: v.username, approved: !!Number(v.approved), comment: v.comment || '', at: v.at, onBehalf: !!Number(v.on_behalf) }));
+
+/** How many approvals the rule needs, given who can approve. */
+function needed(w: ApprovalWait, people: number) {
+  if (w.rule === 'all') return Math.max(1, people);
+  if (w.rule === 'a number of them') return Math.max(1, Math.min(Number(w.need) || 1, Math.max(1, people)));
+  return 1;
+}
+
+/** One approval as the Approval Center shows it. */
+export function describe(t: any, c?: Caller) {
+  const w = waitOf(t);
+  const doc = typeof t.doc === 'string' ? JSON.parse(t.doc) : t.doc;
+  const people = approverAccounts(w, t.project_id);
+  const votes = votesOf(Number(t.id));
+  const decide = c ? canDecide(c, t) : { ok: false, why: '' };
+  return {
+    id: Number(t.id), runId: t.runId ?? t.run_id, flowName: t.flowName ?? t.flow_name, projectId: t.project_id, startedAt: t.startedAt ?? t.started_at,
+    step: doc?.nodes?.find((n: any) => n.id === (t.nodeId ?? t.node_id))?.name, kind: w.question ? 'question' : 'approval',
+    message: w.message, details: w.details || null, wait: w, input: t.input ? JSON.parse(t.input) : null,
+    approvers: w.approvers || (w.assignee ? [w.assignee] : []), roles: w.roles || [], people, rule: w.rule || 'any one', need: needed(w, people.length),
+    votes, approvedSoFar: votes.filter(v => v.approved).length, dueAt: w.dueAt ? new Date(w.dueAt).toISOString() : null, escalated: !!w.escalated,
+    canDecide: decide.ok && !votes.some(v => c && lower(v.username) === lower(c.u)), onBehalf: !!decide.onBehalf, test: t.source === 'test' || t.source === 'debug',
+  };
+}
+
+const WAITING = `select t.id, t.run_id, t.node_id, t.wait, t.input, r.flow_name, r.started_at, r.doc, r.project_id, r.source
+  from tasks t join runs r on r.id = t.run_id where t.status = 'waiting' and t.wait like '%"kind":"approval"%'`;
+
+/** Waiting approvals this person can see (and those they can decide first). */
+export function listApprovals(c: Caller, o: { mine?: boolean } = {}) {
+  const rows = q.all<any>(`${WAITING} order by t.id`);
+  return rows.map(t => ({ t, d: canDecide(c, t) }))
+    .filter(({ t, d }) => (o.mine ? d.ok && !d.onBehalf : d.ok || can(c, 'view', t.project_id || undefined)))
+    .map(({ t }) => describe(t, c))
+    .filter(a => !o.mine || a.canDecide);
+}
+
+/** Decisions made: this person's, or all of them for those who may see the project. */
+export function approvalHistory(c: Caller, days = 30) {
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+  return q.all<any>(`select v.task_id, v.username, v.approved, v.comment, v.at, v.on_behalf, t.status, t.port, t.node_id, r.id run_id, r.flow_name, r.project_id, r.doc, t.wait
+    from approval_votes v join tasks t on t.id = v.task_id join runs r on r.id = t.run_id where v.at >= ? order by v.at desc limit 500`, since)
+    .filter(v => lower(v.username) === lower(c.u) || can(c, 'view', v.project_id || undefined))
+    .map(v => ({ id: Number(v.task_id), runId: v.run_id, flowName: v.flow_name, step: JSON.parse(v.doc).nodes.find((n: any) => n.id === v.node_id)?.name, message: waitOf(v).message,
+      username: v.username, approved: !!Number(v.approved), comment: v.comment || '', at: v.at, onBehalf: !!Number(v.on_behalf), outcome: v.status === 'waiting' ? 'waiting for others' : v.port || v.status }));
+}
+
+/**
+ * A person's decision. Rejection ends the approval at once; approvals count until the rule is met.
+ * Returns what happened.
+ */
+export async function decideApproval(c: Caller, taskId: number, approved: boolean, comment = '', onBehalf = false) {
+  const t = q.get<any>(`${WAITING} and t.id = ?`, taskId);
+  if (!t) throw new Error('This approval is no longer waiting');
+  const w = waitOf(t);
+  const d = canDecide(c, t);
+  if (!d.ok) throw Object.assign(new Error('You are not an approver of this item'), { status: 403 });
+  // The admin token (automation, the sutra command) decides on behalf without being asked to say so.
+  if (d.onBehalf && !onBehalf && c.kind !== 'token') throw Object.assign(new Error('You are not an approver of this item; as an administrator you can decide on behalf of the approvers'), { status: 403 });
+  const req = w.requireComment || 'on rejection';
+  if (!w.question && !String(comment).trim() && (req === 'always' || (req === 'on rejection' && !approved))) throw new Error(approved ? 'Write a comment with the approval' : 'Write why you reject it');
+  const by = c.kind === 'user' ? c.u : c.kind === 'token' ? 'admin token' : c.u;
+  if (votesOf(taskId).some(v => lower(v.username) === lower(by))) throw new Error('You already decided this item');
+  q.run('insert into approval_votes(task_id, username, approved, comment, at, on_behalf) values(?, ?, ?, ?, ?, ?)', taskId, by, approved ? 1 : 0, String(comment || ''), now(), d.onBehalf ? 1 : 0);
+  const votes = votesOf(taskId);
+  const people = approverAccounts(w, t.project_id);
+  const yes = votes.filter(v => v.approved);
+  const label = (v: { username: string; onBehalf: boolean }) => v.onBehalf ? `${v.username} (on behalf of the approvers)` : v.username;
+  if (!approved || w.question || d.onBehalf || yes.length >= needed(w, people.length)) {
+    await engine.decide(taskId, approved, (approved ? yes : votes.filter(v => !v.approved)).map(label).join(', '), String(comment || ''), votes);
+    return { decided: true, outcome: approved ? (w.question ? 'answered' : 'approved') : (w.question ? 'declined' : 'rejected') };
+  }
+  return { decided: false, approvedSoFar: yes.length, need: needed(w, people.length) };
+}
+
+/** An administrator changes who approves (and may give a new due time). */
+export function reassign(taskId: number, o: { approvers?: string[]; roles?: string[]; dueHours?: number }, by: string) {
+  const t = q.get<any>(`${WAITING} and t.id = ?`, taskId);
+  if (!t) throw new Error('This approval is no longer waiting');
+  const w = waitOf(t);
+  if (o.approvers) w.approvers = o.approvers.map(String).filter(Boolean);
+  if (o.roles) w.roles = o.roles.map(String).filter(Boolean);
+  if (Number(o.dueHours) > 0) w.dueAt = Date.now() + Number(o.dueHours) * 3600000;
+  (w as any).reassignedBy = by;
+  q.run(`update tasks set wait = ? where id = ? and status = 'waiting'`, JSON.stringify(w), taskId);
+  return describe({ ...t, wait: JSON.stringify(w) });
+}
+
+// ---------- time: reminders, due times, escalation (the leader, every 30 seconds) ----------
+
+function approvalCenterUrl() {
+  return `${config.publicUrl || `http://${config.adminHost === '0.0.0.0' ? '127.0.0.1' : config.adminHost}:${config.adminPort}`}/approvals`;
+}
+
+async function notify(w: ApprovalWait, t: any, what: 'new' | 'reminder' | 'escalated') {
+  if (!w.notify) return;
+  const people = approverAccounts(w, t.project_id);
+  const emails = people.length ? q.all<any>(`select email from users where lower(username) in (${people.map(() => '?').join(', ')}) and coalesce(email, '') <> ''`, ...people.map(lower)).map(r => r.email) : [];
+  if (!emails.length) return;
+  const head = what === 'new' ? 'Approval needed' : what === 'reminder' ? 'Reminder: approval waiting' : 'Escalated: approval waiting';
+  const lines = [w.message, '', ...Object.entries(w.details || {}).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`), '', `Sutra: ${t.flow_name}`, w.dueAt ? `Due: ${new Date(w.dueAt).toLocaleString()}` : '', '', `Decide in the Approval Center: ${approvalCenterUrl()}`];
+  await sendMail(w.notify, { to: emails.join(', '), subject: `${head}: ${String(w.message).slice(0, 80)}`, text: lines.filter(l => l !== undefined).join('\n') })
+    .catch(e => console.error(`Approval notice for ${t.flow_name} not sent: ${e?.message || e}`));
+}
+
+/** New approvals get their notice; reminders and due times are acted on. */
+export async function approvalTick(at = Date.now()) {
+  const seen = new Set(getSetting<number[]>('approvalsNotified', []));
+  const rows = q.all<any>(`${WAITING} order by t.id`);
+  const still = new Set<number>();
+  for (const t of rows) {
+    const id = Number(t.id);
+    still.add(id);
+    const w = waitOf(t);
+    if (!seen.has(id)) { seen.add(id); await notify(w, t, 'new'); }
+    let changed = false;
+    if (w.remindAt && w.remindAt <= at) { await notify(w, t, 'reminder'); w.remindAt = w.remindEveryMs ? at + w.remindEveryMs : undefined; changed = true; }
+    if (w.dueAt && w.dueAt <= at) {
+      if (w.afterDue === 'expired output') {
+        await engine.decide(id, false, 'nobody (the due time passed)', '', votesOf(id), 'expired').catch(e => console.error('Expiring an approval:', e?.message || e));
+        continue;
+      }
+      if (w.afterDue === 'escalate' && !w.escalated) {
+        w.roles = [...new Set([...(w.roles || []), ...(w.escalateRoles || [])])];
+        w.escalated = true;
+        w.dueAt = w.dueMs ? at + w.dueMs : undefined;
+        changed = true;
+        await notify(w, t, 'escalated');
+      } else { w.dueAt = undefined; changed = true; }
+    }
+    if (changed) q.run(`update tasks set wait = ? where id = ? and status = 'waiting'`, JSON.stringify(w), id);
+  }
+  setSetting('approvalsNotified', [...seen].filter(id => still.has(id)));
+}

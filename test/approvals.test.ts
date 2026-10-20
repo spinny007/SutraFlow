@@ -1,0 +1,128 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.8.0
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { testEnv, node, edge } from './helpers.js';
+
+/**
+ * The Approval Center (approvals.ts, /approvals): who may decide (roles, named accounts, from the
+ * data), the rule (all of them), comments, deciding on behalf, escalation and expiry, history.
+ */
+testEnv(20900);
+const { boot } = await import('../server/src/index.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
+const { q } = await import('../server/src/db.js');
+const flows = await import('../server/src/flows.js');
+const projects = await import('../server/src/projects.js');
+const { approvalTick } = await import('../server/src/approvals.js');
+
+let srv: Awaited<ReturnType<typeof boot>>;
+const cookies: Record<string, string> = {};
+const call = (who: string, method: string, url: string, payload?: any) =>
+  srv.admin.inject({ method: method as any, url, payload, headers: { 'x-sutra': '1', ...(cookies[who] ? { cookie: cookies[who] } : {}) } });
+let pid = '';
+
+before(async () => {
+  srv = await boot({ listenAdmin: false });
+  cookies.root = String((await call('', 'POST', '/api/auth/setup', { username: 'root', password: 'Approvals-admin-1' })).headers['set-cookie']).split(';')[0];
+  pid = projects.saveProject({ name: 'Purchasing', config: { variables: [] } }).id;
+  const fin = (await call('root', 'POST', '/api/access/roles', { name: 'Finance approver', perms: ['view'] })).json();
+  const esc = (await call('root', 'POST', '/api/access/roles', { name: 'Escalation', perms: ['view'] })).json();
+  for (const [u, grants] of [['fin1', [{ role: fin.id, project: '' }]], ['mgr', []], ['outsider', [{ role: 'viewer', project: pid }]], ['boss', [{ role: esc.id, project: pid }]]] as const) {
+    const r = await call('root', 'POST', '/api/access/users', { username: u, password: 'Approver-pass-42', mustChange: false, grants, email: `${u}@example.com` });
+    assert.equal(r.statusCode, 200, r.body);
+    cookies[u] = String((await call('', 'POST', '/api/auth/login', { username: u, password: 'Approver-pass-42' })).headers['set-cookie']).split(';')[0];
+  }
+});
+after(async () => { await srv.stop(); });
+
+function purchase(name: string, o: Record<string, any> = {}) {
+  const s = node('start', 'Start', { payload: '{}' });
+  const a = node('approval', 'Approve purchase', { message: 'Approve purchase {{input.ref}}?', details: [{ k: 'Amount', v: '{{input.amount}}' }, { k: 'Supplier', v: '{{input.supplier}}' }],
+    approverRoles: ['Finance approver'], approvers: ['{{input.manager}}'], rule: 'all', ...o });
+  const yes = node('log', 'Approved', { message: 'ok' }), no = node('log', 'Rejected', { message: 'no' }), late = node('log', 'Expired', { message: 'late' });
+  const f = flows.saveFlow(undefined, { name, nodes: [s, a, yes, no, late], edges: [edge(s, a), edge(a, yes, 'approved'), edge(a, no, 'rejected'), edge(a, late, 'expired')] }, pid);
+  flows.deploy(f.id);
+  return f.id;
+}
+async function waiting(flowId: string, input: any) {
+  const d = flows.deployedFlows().find(x => x.flowId === flowId)!;
+  const id = await engine.startRun({ doc: d.doc, flowId, projectId: pid, version: d.version, input });
+  for (let i = 0; i < 100; i++) { const t = q.get<any>(`select id from tasks where run_id = ? and status = 'waiting'`, id); if (t) return { runId: id, taskId: Number(t.id) }; await new Promise(r => setTimeout(r, 30)); }
+  throw new Error('no approval');
+}
+
+test('the approvers decide: a role and an account from the data, all of them, a comment to reject', async () => {
+  const f = purchase('Purchase approval');
+  const { runId, taskId } = await waiting(f, { ref: 'PO-7', amount: 1200, supplier: 'Acme', manager: 'mgr' });
+  assert.deepEqual((await call('outsider', 'GET', '/api/approvals?mine=1')).json(), []);
+  const no = await call('outsider', 'POST', `/api/approvals/${taskId}`, { approved: true });
+  assert.equal(no.statusCode, 403);
+  assert.equal(no.json().error, 'You are not an approver of this item');
+  const [item] = (await call('fin1', 'GET', '/api/approvals?mine=1')).json();
+  assert.equal(item.message, 'Approve purchase PO-7?');
+  assert.deepEqual(item.details, { Amount: 1200, Supplier: 'Acme' });
+  assert.deepEqual(item.people.sort(), ['fin1', 'mgr']);
+  assert.equal(item.need, 2);
+  assert.equal((await call('fin1', 'POST', `/api/approvals/${taskId}`, { approved: false })).json().error, 'Write why you reject it');
+  const first = (await call('fin1', 'POST', `/api/approvals/${taskId}`, { approved: true, comment: 'Budget fine' })).json();
+  assert.deepEqual(first, { ok: true, decided: false, approvedSoFar: 1, need: 2 });
+  assert.equal((await call('fin1', 'POST', `/api/approvals/${taskId}`, { approved: true })).json().error, 'You already decided this item');
+  assert.deepEqual((await call('fin1', 'GET', '/api/approvals?mine=1')).json(), [], 'nothing more for fin1');
+  assert.equal((await call('mgr', 'GET', '/api/approvals?mine=1')).json().length, 1);
+  assert.equal((await call('mgr', 'POST', `/api/approvals/${taskId}`, { approved: true })).json().decided, true);
+  assert.equal(await engine.waitFor(runId, 10000), 'done');
+  const out = runState(runId)!.outputs['Approve purchase'].approval;
+  assert.equal(out.approved, true);
+  assert.equal(out.by, 'fin1, mgr');
+  assert.deepEqual(out.votes.map((v: any) => [v.username, v.approved, v.comment]), [['fin1', true, 'Budget fine'], ['mgr', true, '']]);
+  assert.ok(runState(runId)!.outputs.Approved);
+  const hist = (await call('fin1', 'GET', '/api/approvals/history')).json();
+  const mine = hist.find((h: any) => h.username === 'fin1' && h.id === taskId);
+  assert.equal(mine.outcome, 'approved');
+  assert.equal(mine.comment, 'Budget fine');
+});
+
+test('one rejection rejects; an administrator decides only on behalf, recorded so', async () => {
+  const f = purchase('Purchase approval 2');
+  const { runId, taskId } = await waiting(f, { ref: 'PO-8', amount: 90000, manager: 'mgr' });
+  const r = await call('root', 'POST', `/api/approvals/${taskId}`, { approved: true });
+  assert.equal(r.statusCode, 403);
+  assert.match(r.json().error, /on behalf of the approvers/);
+  const [item] = (await call('root', 'GET', '/api/approvals')).json().filter((a: any) => a.id === taskId);
+  assert.equal(item.onBehalf, true);
+  assert.equal((await call('root', 'POST', `/api/approvals/${taskId}`, { approved: false, comment: 'Over budget', onBehalf: true })).json().decided, true);
+  assert.equal(await engine.waitFor(runId, 10000), 'done');
+  const out = runState(runId)!.outputs['Approve purchase'].approval;
+  assert.deepEqual([out.approved, out.by, out.comment], [false, 'root (on behalf of the approvers)', 'Over budget']);
+  assert.ok(runState(runId)!.outputs.Rejected);
+});
+
+test('at the due time an approval escalates to other roles, or goes on through its expired output', async () => {
+  const esc = purchase('Purchase escalation', { approverRoles: ['Finance approver'], approvers: [], rule: 'any one', dueHours: 1, afterDue: 'escalate', escalateRoles: ['Escalation'] });
+  const { taskId } = await waiting(esc, { ref: 'PO-9', amount: 10 });
+  assert.equal((await call('boss', 'GET', '/api/approvals?mine=1')).json().length, 0, 'not yet');
+  await approvalTick(Date.now() + 2 * 3600000);
+  const [item] = (await call('boss', 'GET', '/api/approvals?mine=1')).json();
+  assert.equal(item?.id, taskId, 'escalated to the boss');
+  assert.equal(item.escalated, true);
+  const exp = purchase('Purchase expiry', { approverRoles: ['Finance approver'], approvers: [], rule: 'any one', dueHours: 1, afterDue: 'expired output' });
+  const { runId } = await waiting(exp, { ref: 'PO-10', amount: 10 });
+  await approvalTick(Date.now() + 2 * 3600000);
+  assert.equal(await engine.waitFor(runId, 10000), 'done');
+  assert.ok(runState(runId)!.outputs.Expired, 'the expired output ran');
+  assert.equal(runState(runId)!.outputs['Approve purchase'].approval.expired, true);
+});
+
+test('the Approval Center page is served on its own address', async () => {
+  const r = await srv.admin.inject({ method: 'GET', url: '/approvals' });
+  assert.equal(r.statusCode, 200);
+  assert.match(r.body, /Approval Center/);
+});

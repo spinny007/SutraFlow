@@ -169,6 +169,7 @@ create table if not exists tasks(
 create index if not exists tasks_pick on tasks(status, not_before);
 create index if not exists tasks_run on tasks(run_id);
 create table if not exists replay_guard(k text primary key, expires_at integer not null);
+create table if not exists approval_votes(task_id integer not null, username text not null, approved integer not null, comment text, at text not null, on_behalf integer not null default 0, primary key(task_id, username));
 create table if not exists ws_connections(id text primary key, engine_id text not null, path text not null, flow_id text, subject text, opened_at integer not null);
 create index if not exists ws_connections_path on ws_connections(path, engine_id);
 create table if not exists ws_outbox(id integer primary key autoincrement, engine_id text not null, connection_id text not null, path text not null, item text not null, created_at integer not null);

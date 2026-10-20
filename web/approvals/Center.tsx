@@ -1,0 +1,135 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.8.0
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { useCallback, useEffect, useState } from 'react';
+import { get, post } from '../src/api';
+import { ToastHost, useToast } from '../src/ui';
+import { Logo, SignIn, ChangePassword } from '../src/Auth';
+
+/**
+ * The Approval Center: business people decide the approvals and answer the questions of running
+ * Sutras. It shows only that: what waits for this person, everything they may see, and what was
+ * decided. Works on a phone; signs in like the studio (password or single sign-on).
+ */
+
+interface Vote { username: string; approved: boolean; comment: string; at: string; onBehalf: boolean }
+interface Item {
+  id: number; runId: string; flowName: string; step: string; kind: 'approval' | 'question'; message: string; startedAt: string;
+  details: Record<string, unknown> | null; input: unknown; approvers: string[]; roles: string[]; people: string[]; rule: string; need: number;
+  votes: Vote[]; approvedSoFar: number; dueAt: string | null; escalated: boolean; canDecide: boolean; onBehalf: boolean; test: boolean;
+}
+interface Past { id: number; runId: string; flowName: string; step: string; message: string; username: string; approved: boolean; comment: string; at: string; onBehalf: boolean; outcome: string }
+type Tab = 'mine' | 'all' | 'history';
+
+const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '');
+const ago = (iso: string) => {
+  const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+  return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`;
+};
+const show = (v: unknown) => (v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+
+export function Center() {
+  const [auth, setAuth] = useState<{ setup: boolean; user: { username: string; displayName?: string; mustChange?: boolean } | null; sso?: { name: string } | null } | null>(null);
+  const check = () => get('/api/auth/status').then(setAuth).catch(() => setAuth({ setup: false, user: null }));
+  useEffect(() => { check(); const out = () => setAuth(a => (a ? { ...a, user: null } : a)); window.addEventListener('sutra:signed-out', out); return () => window.removeEventListener('sutra:signed-out', out); }, []);
+  if (!auth) return null;
+  if (!auth.user) return <ToastHost><SignIn setup={false} sso={auth.sso} onDone={check} title="SutraFlow Approval Center" subtitle="Approvals and questions of running Sutras that wait for you." /></ToastHost>;
+  if (auth.user.mustChange) return <ToastHost><ChangePassword onDone={check} /></ToastHost>;
+  return <ToastHost><Inbox me={auth.user} onSignOut={() => post('/api/auth/logout').finally(check)} /></ToastHost>;
+}
+
+function Inbox({ me, onSignOut }: { me: { username: string; displayName?: string }; onSignOut(): void }) {
+  const toast = useToast();
+  const [tab, setTab] = useState<Tab>(() => (location.hash.slice(1) as Tab) || 'mine');
+  const [mine, setMine] = useState<Item[] | null>(null);
+  const [all, setAll] = useState<Item[] | null>(null);
+  const [past, setPast] = useState<Past[] | null>(null);
+  const [error, setError] = useState('');
+  const load = useCallback(() => {
+    Promise.all([get<Item[]>('/api/approvals?mine=1'), get<Item[]>('/api/approvals'), get<Past[]>('/api/approvals/history?days=30')])
+      .then(([m, a, h]) => { setMine(m); setAll(a); setPast(h); setError(''); })
+      .catch(e => setError(e.message));
+  }, []);
+  useEffect(() => { load(); const t = setInterval(() => { if (document.visibilityState === 'visible') load(); }, 15000); return () => clearInterval(t); }, [load]);
+  useEffect(() => { history.replaceState(null, '', `#${tab}`); }, [tab]);
+  useEffect(() => { const on = () => setTab((location.hash.slice(1) as Tab) || 'mine'); window.addEventListener('hashchange', on); return () => window.removeEventListener('hashchange', on); }, []);
+  const items = tab === 'mine' ? mine : all;
+  return (
+    <div className="ac">
+      <header className="ac-head">
+        <div className="ac-brand"><Logo /> <span>Approval Center</span></div>
+        <div className="ac-me"><span className="muted">{me.displayName || me.username}</span><button className="btn small" onClick={onSignOut}>Sign out</button></div>
+      </header>
+      <nav className="ac-tabs" aria-label="Approvals">
+        <button className={tab === 'mine' ? 'on' : ''} onClick={() => setTab('mine')}>Waiting for me{mine?.length ? <b>{mine.length}</b> : null}</button>
+        <button className={tab === 'all' ? 'on' : ''} onClick={() => setTab('all')}>All waiting{all?.length ? <i>{all.length}</i> : null}</button>
+        <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>Decided</button>
+      </nav>
+      <main className="ac-main">
+        {error && <div className="errbox">{error}</div>}
+        {tab !== 'history' && items && !items.length && <div className="ac-empty"><h2>{tab === 'mine' ? 'Nothing waits for you' : 'Nothing is waiting'}</h2><p className="muted">Approvals and questions appear here as soon as a Sutra asks.</p></div>}
+        {tab !== 'history' && items?.map(a => <Card key={a.id} a={a} me={me.username} onDone={msg => { toast(msg); load(); }} />)}
+        {tab === 'history' && past && (past.length
+          ? <div className="ac-list">{past.map((p, i) => (
+            <div key={`${p.id}-${i}`} className="ac-row">
+              <span className={`ac-pill ${p.approved ? 'ok' : 'no'}`}>{p.approved ? 'Approved' : 'Rejected'}</span>
+              <div><strong>{p.message || p.step}</strong><div className="muted xs">{p.flowName} · {p.username}{p.onBehalf ? ' on behalf of the approvers' : ''} · {when(p.at)} · {p.outcome}</div>{p.comment && <div className="xs">“{p.comment}”</div>}</div>
+            </div>))}</div>
+          : <div className="ac-empty"><h2>No decisions in the last 30 days</h2></div>)}
+      </main>
+    </div>
+  );
+}
+
+function Card({ a, me, onDone }: { a: Item; me: string; onDone(msg: string): void }) {
+  const [comment, setComment] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const question = a.kind === 'question';
+  const mineVoted = a.votes.some(v => v.username.toLowerCase() === me.toLowerCase());
+  const decide = async (approved: boolean) => {
+    setBusy(true); setErr('');
+    try {
+      const r = await post<{ decided: boolean; approvedSoFar?: number; need?: number }>(`/api/approvals/${a.id}`, { approved, comment, onBehalf: a.onBehalf });
+      onDone(r.decided ? (question ? (approved ? 'Answer sent' : 'Declined') : approved ? 'Approved' : 'Rejected') : `Approved; ${r.approvedSoFar} of ${r.need} approvals so far`);
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
+  const due = a.dueAt ? Date.parse(a.dueAt) - Date.now() : null;
+  return (
+    <article className="ac-card">
+      <div className="ac-cardhead">
+        <span className="ac-kind">{question ? 'Question' : 'Approval'}{a.test ? ' · test run' : ''}</span>
+        <span className="muted xs" title={when(a.startedAt)}>{a.flowName} · {ago(a.startedAt)}</span>
+      </div>
+      <h2 className="ac-msg">{a.message || a.step}</h2>
+      {a.details && Object.keys(a.details).length > 0 && (
+        <dl className="ac-details">{Object.entries(a.details).map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{show(v)}</dd></div>)}</dl>
+      )}
+      <div className="ac-who muted xs">
+        {a.people.length ? <>For {a.roles.length ? <>{a.roles.join(', ')}{a.approvers.length ? ' and ' : ''}</> : null}{a.approvers.join(', ')}</> : 'For anyone who may approve in this project'}
+        {!question && a.need > 1 ? ` · ${a.approvedSoFar} of ${a.need} approvals` : ''}
+        {due !== null ? ` · ${due > 0 ? `due ${when(a.dueAt)}` : 'past its due time'}` : ''}{a.escalated ? ' · escalated' : ''}
+      </div>
+      {a.votes.length > 0 && <ul className="ac-votes">{a.votes.map(v => <li key={v.username}><span className={`ac-pill ${v.approved ? 'ok' : 'no'}`}>{v.approved ? 'Approved' : 'Rejected'}</span> {v.username} <span className="muted xs">{when(v.at)}</span>{v.comment && <> “{v.comment}”</>}</li>)}</ul>}
+      {a.input != null && <details className="ac-data"><summary className="muted xs">All the data</summary><pre>{JSON.stringify(a.input, null, 2).slice(0, 6000)}</pre></details>}
+      {a.canDecide ? (
+        <div className="ac-decide">
+          {a.onBehalf && <div className="warnbox xs">You are not one of its approvers; as an administrator you decide on their behalf, and it is recorded so.</div>}
+          {err && <div className="errbox">{err}</div>}
+          <label htmlFor={`ac-c-${a.id}`} className="muted xs">{question ? 'Your answer' : 'Comment (needed to reject)'}</label>
+          <textarea id={`ac-c-${a.id}`} rows={question ? 3 : 2} value={comment} onChange={e => setComment(e.target.value)} />
+          <div className="ac-buttons">
+            <button className="btn go" disabled={busy || (question && !comment.trim())} onClick={() => decide(true)}>{question ? 'Send answer' : 'Approve'}</button>
+            <button className="btn ac-reject" disabled={busy} onClick={() => decide(false)}>{question ? 'Decline' : 'Reject'}</button>
+          </div>
+        </div>
+      ) : <div className="muted xs ac-wait">{mineVoted ? 'You decided; waiting for the others.' : 'Waiting for its approvers.'}</div>}
+    </article>
+  );
+}

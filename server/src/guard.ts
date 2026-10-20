@@ -129,7 +129,10 @@ export const RULES: Record<string, Rule> = {
   'POST /api/runs/:id/cancel': R('operate', 'run'),
   'POST /api/runs/:id/debug': R('design', 'run'),
   'GET /api/approvals': R(null),
-  'POST /api/approvals/:id': R('approve', 'task'),
+  // Who may decide is checked per item (approvals.ts): roles and accounts the step names.
+  'POST /api/approvals/:id': R(null),
+  'GET /api/approvals/history': R(null),
+  'POST /api/approvals/:id/reassign': R('operate', 'task'),
   'GET /api/events': R(null),
 
   'GET /api/resources': R('view', 'queryProject'),

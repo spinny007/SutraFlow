@@ -29,6 +29,7 @@ import { startCluster, stopCluster, bumpDeployGen, leaveLeadership, cluster } fr
 import { housekeeping } from './housekeeping.js';
 import { ensureBuiltins } from './access.js';
 import { evaluate as evaluateAlerts } from './alerts.js';
+import { approvalTick } from './approvals.js';
 import { applyTuning, onTuningChange, onWorkersChange, onPollChange } from './tuning.js';
 import { onMemoryRunProject } from './guard.js';
 import { flushTracing } from './tracing.js';
@@ -121,7 +122,7 @@ export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gatew
     lostLeader: () => { stopSchedules(); stopListeners().catch(() => {}); },
     deploymentsChanged: () => { forgetCachedSettings(); applyTuning(); rebuildRoutes(); reschedule(); relisten(); },
     housekeeping: () => { try { housekeeping(); } catch (e) { console.error('Housekeeping:', e); } },
-    alerts: () => { evaluateAlerts().catch(e => console.error('Alerts:', e)); },
+    alerts: () => { evaluateAlerts().catch(e => console.error('Alerts:', e)); approvalTick().catch(e => console.error('Approvals:', e)); },
     drainRequested: () => { console.log('Drain requested from the Admin Console'); lifecycle.shutdown?.().finally(() => { if (opts.exitOnDrain) process.exit(0); }); },
   });
   rebuildRoutes();
