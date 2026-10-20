@@ -1,0 +1,65 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.8.1
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { useEffect, useState, type ReactNode } from 'react';
+import { get } from './api';
+import { Modal } from './ui';
+
+/**
+ * Asks before anything is deleted: says what goes and what uses it, and enables Delete only once the
+ * person has typed "delete", so nothing is deleted by a stray click.
+ */
+export function ConfirmDelete({ title, what, usageOf, extra, blocked, onConfirm, onClose }: {
+  title: string;
+  /** What will be deleted, in words or as a list. */
+  what: ReactNode;
+  /** Look up what uses this item (project id and item id). */
+  usageOf?: { projectId: string; id: string };
+  extra?: ReactNode;
+  /** A reason the delete cannot go ahead (a deployed Sutra): shown, and Delete stays off. */
+  blocked?: string;
+  onConfirm(): Promise<void>;
+  onClose(): void;
+}) {
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [usage, setUsage] = useState<{ sutras: string[]; resources: string[] } | null>(null);
+  useEffect(() => {
+    if (usageOf) get<{ sutras: string[]; resources: string[] }>(`/api/projects/${encodeURIComponent(usageOf.projectId)}/usage?item=${encodeURIComponent(usageOf.id)}`).then(setUsage).catch(() => setUsage(null));
+  }, [usageOf?.projectId, usageOf?.id]);
+  const ok = typed.trim().toLowerCase() === 'delete' && !blocked && !busy;
+  const go = async () => {
+    setBusy(true); setErr('');
+    try { await onConfirm(); } catch (e: any) { setErr(e.message); setBusy(false); }
+  };
+  const used = usage && (usage.sutras.length || usage.resources.length);
+  return (
+    <Modal title={title} onClose={onClose} actions={<>
+      <button className="btn" onClick={onClose}>Cancel</button>
+      <button className="btn danger" disabled={!ok} onClick={go}>{busy ? 'Deleting' : 'Delete'}</button>
+    </>}>
+      <div className="fld">{what}</div>
+      {used ? (
+        <div className="warnbox" role="alert">
+          Still used by {[usage!.sutras.length ? `Sutras: ${usage!.sutras.join(', ')}` : '', usage!.resources.length ? `connections: ${usage!.resources.join(', ')}` : ''].filter(Boolean).join('; ')}.
+          {'\n'}They stop working until you pick another one.
+        </div>
+      ) : null}
+      {extra}
+      {blocked && <div className="errbox">{blocked}</div>}
+      {err && <div className="errbox">{err}</div>}
+      <div className="fld">
+        <label htmlFor="cd-type">Type <b>delete</b> to confirm</label>
+        <input id="cd-type" type="text" autoFocus autoComplete="off" value={typed} onChange={e => setTyped(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && ok) go(); }} disabled={!!blocked} />
+        <div className="hint">This cannot be undone here. In a Git project, the deleted files show in the Git tab until you commit; run history is kept.</div>
+      </div>
+    </Modal>
+  );
+}

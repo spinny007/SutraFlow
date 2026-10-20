@@ -1,15 +1,35 @@
-# SutraFlow 1.8.0 release notes
+# SutraFlow 1.8.1 release notes
 
 Released 2026-10-20. Copyright (c) 2026-27 Surya Partap Singh, [MixAgile.com](https://mixagile.com). Licensed under the GNU Affero General Public License v3.0 only (AGPL-3.0-only); a commercial licence is available, see `COMMERCIAL-LICENSE.md`.
 
 | Download | For |
 |---|---|
-| `sutraflow-1.8.0-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
-| `sutraflow-1.8.0-linux.tar.gz` | Linux (x64 or arm64); also macOS |
+| `sutraflow-1.8.1-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
+| `sutraflow-1.8.1-linux.tar.gz` | Linux (x64 or arm64); also macOS |
 
 Each comes with a `.sha256` file to check the download.
 
-## What is new since 1.7.6
+## What is new in 1.8.1
+
+- **Delete with a typed confirmation**: Sutras, connections, schemas and service descriptors, one by one or a folder with everything in it. The dialog lists what still uses the item, and Delete stays off until `delete` is typed. A deployed Sutra (or a folder holding one) is refused until it is undeployed. The project's configuration cannot be deleted.
+- **Rename and the item menu**: the ⋯ button or a right-click on an item renames, moves or deletes it; on a folder it also deletes the folder with its contents (removing a folder still keeps them).
+- **Git follows at once**: in a project connected to Git, deleted and renamed items show in the Git tab straight away, to commit or discard.
+- **A name for a new Sutra**: the New Sutra dialog asks for it.
+- **Approval Center links** in the designer's top bar and in the Admin Console.
+- API: `POST /api/flows|resources|schemas/:id/rename`, `GET /api/projects/:id/usage?item=`, `GET /api/projects/:id/folders/contents`, and `DELETE /api/projects/:id/folders?withItems=1&confirm=delete`. The usual permissions apply (Design; Connections for connections).
+- No database change: 1.8.1 shares a database with 1.8.0 engines.
+
+## Fixes in 1.8.1
+
+| # | What you would have seen | Cause | Now |
+|---|---|---|---|
+| 1 | A deployed Sutra could be deleted with one click on OK, and its REST or SOAP service, timer or listener stopped at once. | Deleting removed the deployment along with the Sutra, after the browser's plain OK / Cancel question. | A deployed Sutra must be undeployed first, and every delete needs `delete` typed. |
+| 2 | Deleting a connection or a schema gave no warning that Sutras still used it; they failed at their next run. | The question did not look up what used the item. | The delete dialog lists the Sutras and connections that use it. |
+| 3 | *+ New Sutra → Blank* gave no chance to name the Sutra: it took the starter's name (then the same with 2, 3), and renaming was only on the Sutra's General tab. | The dialog had no name field, and the explorer menu only moved items. | The dialog asks for the name; the item menu (⋯ or right-click) renames Sutras, connections and schemas. |
+| 4 | In a Git project, a deleted Sutra still showed as unchanged in the Git tab until something else was saved. | The working copy was written again only on the next save. | Deleting or renaming writes the working copy at once. |
+| 5 | Emptying a folder of many items meant deleting them one by one. | Only "remove folder" existed, which keeps the contents. | *Delete folder and everything in it*, after typing `delete`. |
+
+## In 1.8.0: what is new since 1.7.6
 
 ### Leaner run state
 - Each step writes only its own output (a table of step outputs) instead of the run state with every earlier output. One engine on PostgreSQL:
@@ -162,13 +182,13 @@ What went wrong before, and what happens now. Most were found by the soak test (
 
 1. Back up: the data folder with `master.key`, and for PostgreSQL a `pg_dump` of the database.
 2. Stop gracefully: `sutraflow stop all` (running steps finish first).
-3. Unpack 1.8.0 into a new folder beside the old one. Copy `sutraflow.env` from the old folder; keep `SUTRA_DATA_DIR` pointing at the same data folder (or copy the folder).
-4. Run `sutraflow setup`, then `sutraflow start`. The database is upgraded at start (from 1.7.6: the tables `run_outputs`, `replay_guard`, `ws_connections` and `ws_outbox`, and the columns `users.idp_subject` and `engines.can_lead`; from 1.7.5 also `tasks.claim`; from 1.6 also the new indexes and the memory table tables); nothing is removed. Runs that were open go on.
+3. Unpack 1.8.1 into a new folder beside the old one. Copy `sutraflow.env` from the old folder; keep `SUTRA_DATA_DIR` pointing at the same data folder (or copy the folder).
+4. Run `sutraflow setup`, then `sutraflow start`. The database is upgraded at start (from 1.8.0: nothing changes; from 1.7.6: the tables `run_outputs`, `replay_guard`, `ws_connections` and `ws_outbox`, and the columns `users.idp_subject` and `engines.can_lead`; from 1.7.5 also `tasks.claim`; from 1.6 also the new indexes and the memory table tables); nothing is removed. Runs that were open go on.
 5. In a cluster, **upgrade every engine before starting any of them again**: 1.8.0 engines keep step outputs apart from the run state, which older engines do not read, so the two must not share a database.
 6. On PostgreSQL, check `max_connections`: each engine opens its pool (`SUTRA_PG_POOL`, at most 20 by default) plus one connection. Engines × (pool + 1) must fit, with room for other clients.
 7. Optional: *Admin Console → Engines → This machine → Apply recommended tuning*.
 
-To go back, stop 1.8.0 and restore the backup taken before the upgrade: runs that 1.8.0 ran keep their outputs in a table older versions do not read.
+To go back to 1.8.0, stop 1.8.1 and start 1.8.0 again (same database). To go back to 1.7.x, stop SutraFlow and restore the backup taken before the upgrade: runs that 1.8.0 ran keep their outputs in a table older versions do not read.
 
 ## Docker
 

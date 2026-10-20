@@ -63,6 +63,7 @@ export function App() {
             <div className="spacer" />
             <Version />
             <a className="btn small" href="/admin" title="Deployed projects, engines, users and audit">Admin Console</a>
+            <a className="btn small" href="/approvals" target="_blank" rel="noopener" title="Approvals waiting for people: opens the Approval Center in a new tab">Approval Center</a>
             <a className="btn small" href="/guide" target="_blank" rel="noopener" title="Open the user guide in a new tab">Guide</a>
             <button className="btn small" onClick={toggleTheme} aria-label="Switch light or dark theme">◐</button>
             <span className="muted" style={{ fontSize: 12 }}>{auth.user.username}</span>

@@ -1,0 +1,132 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.8.1
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+/**
+ * Deleting what a project holds: Sutras, connections (resources), schemas and service descriptors,
+ * one at a time or a folder with everything in it. The project's configuration (project variables,
+ * deployment config, log settings) belongs to the project and is never deleted here.
+ *
+ *  Safety   the designer asks the person to type "delete"; a folder with its contents is refused
+ *           here too without confirm=delete. A deployed Sutra is refused until it is undeployed, so
+ *           a delete never stops production by accident. What uses an item is listed first.
+ *  Git      a project in Git has its working copy written again at once, so the deleted files show
+ *           in the Git tab as deletions to commit.
+ *  History  run history stays (runs keep their own copy of the Sutra).
+ */
+import { q, tx } from './db.js';
+import { deleteFlow, getFlow, saveFlow } from './flows.js';
+import { deleteResource, getResource, saveResource } from './resources.js';
+import { deleteSchema, getSchema, saveSchema } from './schemas.js';
+import { areaOf, listFolders, normFolder, type FolderArea } from './folders.js';
+import { workspaceOf } from './git/workspaces.js';
+import { writeWorkingTree } from './git/files.js';
+
+export type ItemKind = 'sutra' | 'resource' | 'schema';
+const KIND_OF_AREA: Record<FolderArea, ItemKind> = { sutras: 'sutra', resources: 'resource', schemas: 'schema', wsdl: 'schema' };
+
+/** Sutras and connections of the project that refer to an item (by its id in their settings). */
+export function usageOf(projectId: string, id: string) {
+  const sutras = q.all<{ id: string; name: string; doc: string }>('select id, name, doc from flows where project_id = ? and id != ?', projectId, id)
+    .filter(f => f.doc.includes(id)).map(f => f.name);
+  const resources = q.all<{ id: string; name: string; config: string }>('select id, name, config from resources where project_id = ? and id != ?', projectId, id)
+    .filter(r => r.config.includes(id)).map(r => r.name);
+  return { sutras, resources };
+}
+
+const deployed = (flowId: string) => !!q.get('select 1 from deployments where flow_id = ?', flowId);
+
+/** The Git working copy follows the project at once (deleted items become deleted files). */
+export function syncGit(projectId: string) {
+  try { const w = workspaceOf(projectId); if (w) writeWorkingTree(w.dir, projectId, w.id); } catch (e: any) { console.error(`Git working copy of ${projectId}: ${e?.message || e}`); }
+}
+
+/** One item. Returns what was deleted. */
+export function deleteItem(kind: ItemKind, id: string) {
+  if (kind === 'sutra') {
+    const f = getFlow(id);
+    if (!f) throw new Error('Sutra not found');
+    if (deployed(id)) throw new Error(`${f.name} is deployed: undeploy it first, so deleting never stops a running service by accident`);
+    deleteFlow(id);
+    syncGit(f.project_id || '');
+    return { kind, id, name: f.name };
+  }
+  if (kind === 'resource') {
+    const r = getResource(id);
+    if (!r) throw new Error('Connection not found');
+    deleteResource(id);
+    syncGit(r.project_id || '');
+    return { kind, id, name: r.name };
+  }
+  const s = getSchema(id);
+  if (!s) throw new Error('Schema not found');
+  deleteSchema(id);
+  syncGit(s.project_id);
+  return { kind, id, name: s.name };
+}
+
+const TABLE: Record<FolderArea, { table: string; where: string }> = {
+  sutras: { table: 'flows', where: '' }, resources: { table: 'resources', where: '' },
+  schemas: { table: 'schemas', where: " and kind != 'wsdl'" }, wsdl: { table: 'schemas', where: " and kind = 'wsdl'" },
+};
+const inside = (p: string, folder: string) => p === folder || p.startsWith(folder + '/');
+
+/** What deleting a folder would delete: its items (in it and in its folders) and its folders. */
+export function folderContents(projectId: string, area: FolderArea, path: unknown) {
+  const a = normFolder(path);
+  if (!a) throw new Error('Choose a folder');
+  const t = TABLE[area];
+  const items = q.all<{ id: string; name: string; folder: string | null }>(`select id, name, folder from ${t.table} where project_id = ?${t.where}`, projectId)
+    .filter(r => inside(r.folder || '', a));
+  const folders = listFolders(projectId, area).filter(p => inside(p, a));
+  const blocked = area === 'sutras' ? items.filter(i => deployed(i.id)).map(i => i.name) : [];
+  return { path: a, items: items.map(i => ({ id: i.id, name: i.name, folder: i.folder || '' })), folders, blocked };
+}
+
+/** A folder and everything in it. confirm must be "delete". */
+export function deleteFolderTree(projectId: string, areaRaw: unknown, path: unknown, confirm: unknown) {
+  if (String(confirm || '').trim().toLowerCase() !== 'delete') throw new Error('Type delete to confirm deleting the folder and everything in it');
+  const area = areaOf(areaRaw);
+  const c = folderContents(projectId, area, path);
+  if (c.blocked.length) throw new Error(`Undeploy first: ${c.blocked.join(', ')} ${c.blocked.length === 1 ? 'is' : 'are'} deployed`);
+  const kind = KIND_OF_AREA[area];
+  tx(() => {
+    for (const i of c.items) {
+      if (kind === 'sutra') deleteFlow(i.id); else if (kind === 'resource') deleteResource(i.id); else deleteSchema(i.id);
+    }
+    for (const p of c.folders) q.run('delete from folders where project_id = ? and area = ? and path = ?', projectId, area, p);
+  });
+  syncGit(projectId);
+  return { deleted: c.items.length, folders: c.folders.length, path: c.path };
+}
+
+/** Renames an item; the usual checks apply (a name used twice in a project is refused). */
+export function renameItem(kind: ItemKind, id: string, name: unknown) {
+  const n = String(name ?? '').trim();
+  if (!n) throw new Error('Give a name');
+  if (n.length > 120) throw new Error('A name has at most 120 characters');
+  let projectId = '';
+  if (kind === 'sutra') {
+    const f = getFlow(id);
+    if (!f) throw new Error('Sutra not found');
+    saveFlow(id, { ...f.doc, name: n });
+    projectId = f.project_id || '';
+  } else if (kind === 'resource') {
+    const r = getResource(id);
+    if (!r) throw new Error('Connection not found');
+    saveResource({ ...r, name: n });
+    projectId = r.project_id || '';
+  } else {
+    const s = getSchema(id);
+    if (!s) throw new Error('Schema not found');
+    saveSchema({ id, project_id: s.project_id, name: n, kind: s.kind, root: s.root || undefined, text: s.text });
+    projectId = s.project_id;
+  }
+  syncGit(projectId);
+  return { kind, id, name: n };
+}

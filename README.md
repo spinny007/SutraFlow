@@ -2,14 +2,14 @@
 
 **A visual integration designer and engine.** Drag activities onto a canvas, map data between steps, test and debug, and deploy *Sutras* (integration processes) that run as REST, SOAP and MCP services, on schedules, or on events: files, queues, mail, cloud drives, chat messages and more.
 
-![Version](https://img.shields.io/badge/version-1.8.0-2f6fd8)
+![Version](https://img.shields.io/badge/version-1.8.1-2f6fd8)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Commercial licence available](https://img.shields.io/badge/commercial%20licence-available-orange)](COMMERCIAL-LICENSE.md)
 ![Node.js](https://img.shields.io/badge/node-%E2%89%A5%2022.13-339933?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-7-3178c6?logo=typescript&logoColor=white)
 ![Database](https://img.shields.io/badge/database-SQLite%20%7C%20PostgreSQL-4169e1?logo=postgresql&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Docker-555)
-![Tests](https://img.shields.io/badge/tests-335-success)
+![Tests](https://img.shields.io/badge/tests-340-success)
 
 ![The SutraFlow designer: palettes, canvas and the step inspector](docs/guide-images/designer.jpg)
 
@@ -215,6 +215,8 @@ Tested against stand-in services that answer like the real ones, but not yet aga
 - **Waking engines on new work**: PostgreSQL can notify engines when work arrives (LISTEN/NOTIFY), instead of them polling the queue.
 - **A 24-hour soak with PostgreSQL on its own machine**: the soak tool (`tools/soak.mjs`) runs unattended for any length and writes its own report; the next run moves the database to a separate machine.
 - **Encrypted SOAP replies** for callers who send their certificate, and SAML sign-on for people.
+
+Done in 1.8.1: deleting with a typed confirmation (one item or a folder with its contents; deployed Sutras refused; Git follows at once), renaming from the item menu or a right-click, a name in the New Sutra dialog, and Approval Center links in the designer and the Admin Console.
 
 Done in 1.8.0: leaner run state (each step writes only its own output: 1 MB outputs three times faster), message validation (JSON Schema, XSD) and threat protection, single sign-on with OpenID Connect, WS-Security completed (X.509 and SAML on incoming requests, timestamps, XML encryption both ways), HMAC request signing, OAuth token introspection and scopes per operation, WebSocket services and clients, `SUTRA_CAN_LEAD`, and an unattended soak test with a Markdown and HTML report.
 

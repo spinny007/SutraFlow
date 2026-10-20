@@ -12,6 +12,7 @@ import { del, get, post, put } from './api';
 import { FieldList } from './Fields';
 import { Modal, useCatalog, useToast } from './ui';
 import { NewProjectDialog } from './NewProject';
+import { ConfirmDelete } from './ConfirmDelete';
 import { missingInResource, missingText } from './vars';
 import type { FlowSummary, LoggingConfig, ProjectVariable, Resource, SchemaInfo, SNode } from './types';
 
@@ -110,11 +111,16 @@ const MOVE_URL: Record<FolderArea, (id: string) => string> = {
   sutras: id => `/api/flows/${id}/folder`, resources: id => `/api/resources/${id}/folder`, schemas: id => `/api/schemas/${id}/folder`, wsdl: id => `/api/schemas/${id}/folder`,
 };
 const WHAT: Record<FolderArea, string> = { sutras: 'Sutra', resources: 'connection', schemas: 'schema', wsdl: 'service descriptor' };
+const ITEM_URL: Record<FolderArea, (id: string) => string> = {
+  sutras: id => `/api/flows/${id}`, resources: id => `/api/resources/${id}`, schemas: id => `/api/schemas/${id}`, wsdl: id => `/api/schemas/${id}`,
+};
+type FolderContents = { items: { id: string; name: string; folder: string }[]; folders: string[]; blocked: string[] };
 
 /**
  * One section of the explorer as folders. Drag an item or a folder onto a folder (or onto the line
- * at the bottom for the top level) to move it; the ⋯ button does the same from the keyboard and
- * renames or removes folders. Removing a folder never deletes anything: its contents move up one level.
+ * at the bottom for the top level) to move it. The ⋯ button (or a right-click) renames, moves and
+ * deletes items, and renames, moves, removes or deletes folders. Removing a folder keeps what is in it
+ * (it moves up one level); deleting a folder deletes everything in it, after typing "delete".
  */
 function FolderTree({ area, items, activeId, open, onChanged }: { area: FolderArea; items: TreeItem[]; activeId: string | null; open(id: string): void; onChanged(): void | Promise<void> }) {
   const { projectId } = useCatalog();
@@ -129,7 +135,13 @@ function FolderTree({ area, items, activeId, open, onChanged }: { area: FolderAr
   const current = items.find(f => f.id === activeId)?.folder || '';
   const isOpen = (p: string) => (p in shut ? !shut[p] : current === p || current.startsWith(p + '/'));
   const toggle = (p: string) => setShut(s => { const n = { ...s, [p]: isOpen(p) }; store.set(key, n); return n; });
-  const done = async (p: Promise<unknown>, msg?: string) => { try { await p; if (msg) toast(msg); await load(); await onChanged(); } catch (e: any) { toast(e.message, true); } };
+  /** Runs a change and refreshes; true when it worked. With rethrow, a failure goes back to the dialog that shows it. */
+  const done = async (p: Promise<unknown>, msg?: string, rethrow = false) => {
+    try { await p; } catch (e: any) { if (rethrow) throw e; toast(e.message, true); return false; }
+    if (msg) toast(msg);
+    await load(); await onChanged();
+    return true;
+  };
   const moveItem = (id: string, folder: string) => done(put(MOVE_URL[area](id), { folder }), `Moved to ${folder || 'the top level'}`);
   const moveFolder = (from: string, to: string) => done(post(`/api/projects/${projectId}/folders/move`, { area, from, to }), `Folder now ${to}`);
   const dropOn = (target: string) => ({
@@ -151,20 +163,20 @@ function FolderTree({ area, items, activeId, open, onChanged }: { area: FolderAr
   const count = (p: string) => items.filter(f => (f.folder || '') === p || (f.folder || '').startsWith(p + '/')).length;
   const pad = (depth: number) => ({ paddingLeft: 6 + depth * 12 });
   const itemRow = (f: TreeItem, depth: number) => (
-    <div key={f.id} className="xrow" title={f.warn || f.title} draggable onDragStart={e => { e.dataTransfer.setData(ITEM_MIME + area, f.id); e.dataTransfer.effectAllowed = 'move'; }}>
+    <div key={f.id} className="xrow" title={f.warn || f.title} onContextMenu={e => { e.preventDefault(); setDlg({ kind: 'item', id: f.id }); }} draggable onDragStart={e => { e.dataTransfer.setData(ITEM_MIME + area, f.id); e.dataTransfer.effectAllowed = 'move'; }}>
       <button className={`xitem${f.id === activeId ? ' act' : ''}`} style={pad(depth)} onClick={() => open(f.id)}>
         <span className="xi">{f.icon}</span><span className="xl">{f.name}</span>{f.warn && <span className="xwarn" aria-label={f.warn}>⚠</span>}{f.sub && <span className="muted xs">{f.sub}</span>}
       </button>
-      <button className="xmore" title="Move to a folder" aria-label={`Move ${f.name} to a folder`} onClick={() => setDlg({ kind: 'item', id: f.id })}>⋯</button>
+      <button className="xmore" title="Rename, move or delete" aria-label={`${f.name}: rename, move or delete`} onClick={() => setDlg({ kind: 'item', id: f.id })}>⋯</button>
     </div>
   );
   const folderRow = (p: string, depth: number): React.ReactNode => (
     <div key={'d' + p}>
-      <div className={`xrow${over === p ? ' drop' : ''}`} draggable onDragStart={e => { e.dataTransfer.setData(FOLDER_MIME + area, p); e.dataTransfer.effectAllowed = 'move'; }} {...dropOn(p)}>
+      <div className={`xrow${over === p ? ' drop' : ''}`} onContextMenu={e => { e.preventDefault(); setDlg({ kind: 'folder', path: p }); }} draggable onDragStart={e => { e.dataTransfer.setData(FOLDER_MIME + area, p); e.dataTransfer.effectAllowed = 'move'; }} {...dropOn(p)}>
         <button className="xitem xfolder" style={pad(depth)} aria-expanded={isOpen(p)} onClick={() => toggle(p)}>
           <span className="xi">{isOpen(p) ? '▾' : '▸'}</span><span className="xl">{name(p)}</span><span className="muted xs">{count(p)}</span>
         </button>
-        <button className="xmore" title="Folder: new folder inside, rename, move, remove" aria-label={`Folder ${p}`} onClick={() => setDlg({ kind: 'folder', path: p })}>⋯</button>
+        <button className="xmore" title="Folder: new folder inside, rename, move, remove, delete" aria-label={`Folder ${p}`} onClick={() => setDlg({ kind: 'folder', path: p })}>⋯</button>
       </div>
       {isOpen(p) && <>
         {childrenOf(p).map(c => folderRow(c, depth + 1))}
@@ -181,14 +193,14 @@ function FolderTree({ area, items, activeId, open, onChanged }: { area: FolderAr
         {folders.length > 0 && <span className="muted xs">Drag here for the top level</span>}
       </div>
       {dlg && <FolderDialog area={area} dlg={dlg} folders={folders} items={items} onClose={() => setDlg(null)}
-        act={async p => { await done(p); setDlg(null); }} moveItem={async (id, f) => { await moveItem(id, f); setDlg(null); }} moveFolder={async (a, b) => { await moveFolder(a, b); setDlg(null); }} />}
+        act={async (p, msg, rethrow) => { if (await done(p, msg, rethrow)) setDlg(null); }} moveItem={async (id, f) => { await moveItem(id, f); setDlg(null); }} moveFolder={async (a, b) => { await moveFolder(a, b); setDlg(null); }} />}
     </>
   );
 }
 
 function FolderDialog({ area, dlg, folders, items, onClose, act, moveItem, moveFolder }: {
   area: FolderArea; dlg: { kind: 'item'; id: string } | { kind: 'folder'; path: string } | { kind: 'new'; parent: string };
-  folders: string[]; items: TreeItem[]; onClose(): void; act(p: Promise<unknown>): Promise<void>;
+  folders: string[]; items: TreeItem[]; onClose(): void; act(p: Promise<unknown>, msg?: string, rethrow?: boolean): Promise<void>;
   moveItem(id: string, folder: string): Promise<void>; moveFolder(from: string, to: string): Promise<void>;
 }) {
   const { projectId } = useCatalog();
@@ -196,16 +208,42 @@ function FolderDialog({ area, dlg, folders, items, onClose, act, moveItem, moveF
   const [target, setTarget] = useState(item?.folder || '');
   const [path, setPath] = useState(dlg.kind === 'folder' ? dlg.path : dlg.kind === 'new' ? (dlg.parent ? dlg.parent + '/' : '') : '');
   const [sub, setSub] = useState('');
+  const [newName, setNewName] = useState(item?.name || '');
+  const [deleting, setDeleting] = useState<null | 'item' | FolderContents>(null);
+  const [err, setErr] = useState('');
+  const what = WHAT[area], What = what[0].toUpperCase() + what.slice(1);
+  if (deleting === 'item' && item) {
+    return <ConfirmDelete title={`Delete ${item.name}`} usageOf={{ projectId, id: item.id }} onClose={() => setDeleting(null)}
+      onConfirm={() => act(del(ITEM_URL[area](item.id)), `${What} ${item.name} deleted`, true)}
+      what={<p>The {what} <b>{item.name}</b>{area === 'sutras' ? ' and its saved versions are' : ' is'} deleted.{area === 'sutras' ? ' Run history is kept.' : ''}</p>} />;
+  }
+  if (deleting && deleting !== 'item' && dlg.kind === 'folder') {
+    const d = deleting, inner = d.folders.length - 1;
+    return <ConfirmDelete title={`Delete folder ${dlg.path}`} onClose={() => setDeleting(null)}
+      blocked={d.blocked.length ? `Undeploy first: ${d.blocked.join(', ')} ${d.blocked.length === 1 ? 'is' : 'are'} deployed.` : undefined}
+      onConfirm={() => act(del(`/api/projects/${projectId}/folders?area=${area}&path=${encodeURIComponent(dlg.path)}&withItems=1&confirm=delete`), `Folder ${dlg.path} deleted with ${d.items.length} items`, true)}
+      what={<>
+        <p>The folder <b>{dlg.path}</b>{inner > 0 ? `, its ${inner} folders` : ''} and everything in it {d.items.length ? `(${d.items.length} ${d.items.length === 1 ? what : what + 's'})` : '(nothing yet)'} are deleted.</p>
+        {d.items.length > 0 && <ul className="muted xs" style={{ maxHeight: 160, overflow: 'auto', margin: '4px 0' }}>{d.items.map(i => <li key={i.id}>{i.folder}/{i.name}</li>)}</ul>}
+      </>} />;
+  }
   if (dlg.kind === 'item') {
+    const renamed = !!newName.trim() && newName.trim() !== item?.name;
+    const rename = () => act(post(`${ITEM_URL[area](dlg.id)}/rename`, { name: newName.trim() }), 'Renamed');
     return (
-      <Modal title={`Move ${item?.name || WHAT[area]}`} onClose={onClose} actions={<>
-        <button className="btn" onClick={onClose}>Cancel</button>
-        <button className="btn go" onClick={() => moveItem(dlg.id, target)}>Move</button>
-      </>}>
+      <Modal title={item?.name || What} onClose={onClose} actions={<button className="btn" onClick={onClose}>Close</button>}>
+        <div className="fld"><label htmlFor="rnto">Name</label>
+          <div className="row" style={{ gap: 6 }}><input id="rnto" style={{ flex: 1 }} autoFocus value={newName} maxLength={120} onChange={e => setNewName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && renamed) rename(); }} />
+            <button className="btn go" disabled={!renamed} onClick={rename}>Rename</button></div>
+          <div className="hint">What uses it keeps working: steps and connections refer to it by its id, not its name.</div></div>
         <div className="fld"><label htmlFor="mvto">Folder</label>
-          <input id="mvto" list="mvlist" value={target} onChange={e => setTarget(e.target.value)} placeholder="Empty = top level" />
+          <div className="row" style={{ gap: 6 }}><input id="mvto" style={{ flex: 1 }} list="mvlist" value={target} onChange={e => setTarget(e.target.value)} placeholder="Empty = top level" />
+            <button className="btn" disabled={target === (item?.folder || '')} onClick={() => moveItem(dlg.id, target)}>Move</button></div>
           <datalist id="mvlist">{folders.map(f => <option key={f} value={f} />)}</datalist>
           <div className="hint">Pick a folder or type a new path such as Orders/Inbound; missing folders are made.</div></div>
+        <div className="fld"><button className="btn danger" onClick={() => setDeleting('item')}>Delete {what}</button>
+          <div className="hint">You type delete to confirm. {area === 'sutras' ? 'A deployed Sutra must be undeployed first.' : 'What uses it is listed first.'}</div></div>
       </Modal>
     );
   }
@@ -230,8 +268,11 @@ function FolderDialog({ area, dlg, folders, items, onClose, act, moveItem, moveF
       <div className="fld"><label htmlFor="fsub">New folder inside</label>
         <div className="row" style={{ gap: 6 }}><input id="fsub" style={{ flex: 1 }} value={sub} onChange={e => setSub(e.target.value)} />
           <button className="btn" disabled={!sub.trim()} onClick={() => act(post(`/api/projects/${projectId}/folders`, { area, path: `${dlg.path}/${sub}` }))}>Create</button></div></div>
-      <div className="fld"><button className="btn danger" onClick={() => act(del(`/api/projects/${projectId}/folders?area=${area}&path=${encodeURIComponent(dlg.path)}`))}>Remove folder</button>
+      <div className="fld"><button className="btn" onClick={() => act(del(`/api/projects/${projectId}/folders?area=${area}&path=${encodeURIComponent(dlg.path)}`))}>Remove folder, keep contents</button>
         <div className="hint">{n ? `Its ${n} items and folders move up one level; nothing is deleted.` : 'The folder is empty.'}</div></div>
+      <div className="fld"><button className="btn danger" onClick={() => { setErr(''); get<FolderContents>(`/api/projects/${projectId}/folders/contents?area=${area}&path=${encodeURIComponent(dlg.path)}`).then(setDeleting).catch((e: any) => setErr(e.message)); }}>Delete folder and everything in it</button>
+        <div className="hint">Lists what goes, then asks you to type delete. Deployed Sutras must be undeployed first.</div></div>
+      {err && <div className="errbox">{err}</div>}
     </Modal>
   );
 }
@@ -281,6 +322,7 @@ function ResourceEditor({ sel, setSel }: { sel: Extract<ExplorerSel, { kind: 're
     id: '', kind, name: uniqueName(k?.name || 'Resource', resources.map(x => x.name)), project_id: projectId, config: defaults(),
   });
   const [test, setTest] = useState<{ ok: boolean; message: string; ms: number } | 'running' | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const runTest = async () => {
     setTest('running');
     try { setTest(await post('/api/resources/test', { ...r, project_id: projectId })); } catch (e: any) { setTest({ ok: false, message: e.message, ms: 0 }); }
@@ -295,10 +337,11 @@ function ResourceEditor({ sel, setSel }: { sel: Extract<ExplorerSel, { kind: 're
     } catch (e: any) { toast(e.message, true); }
   };
   const remove = async () => {
-    if (!confirm(`Delete "${r.name}"? Activities and services using it stop working until you pick another.`)) return;
     await del(`/api/resources/${r.id}`);
+    setDeleting(false);
     await reload();
     setSel(null);
+    toast(`${r.name} deleted`);
   };
   return (
     <>
@@ -310,7 +353,9 @@ function ResourceEditor({ sel, setSel }: { sel: Extract<ExplorerSel, { kind: 're
       <div className="row">
         <button className="btn primary" onClick={save}>Save</button>
         {k.kind !== 'inboundPolicy' && <button className="btn" onClick={runTest} disabled={test === 'running'}>{test === 'running' ? 'Testing' : 'Test connection'}</button>}
-        {r.id && <button className="btn danger" onClick={remove}>Delete</button>}
+        {r.id && <button className="btn danger" onClick={() => setDeleting(true)}>Delete</button>}
+        {deleting && <ConfirmDelete title={`Delete ${r.name}`} usageOf={{ projectId, id: r.id }} onClose={() => setDeleting(false)} onConfirm={remove}
+          what={<p>The connection <b>{r.name}</b> is deleted. Its secrets stay in the vault.</p>} />}
       </div>
       {r.kind === 'aiProvider' && <AiModels r={r} projectId={projectId} setModel={m => { setR({ ...r, config: { ...r.config, model: m } }); setTest(null); }} />}
       {r.kind === 'oauthApp' && r.id && <OAuthPanel id={r.id} />}
@@ -358,6 +403,7 @@ function SchemaEditor({ sel, setSel }: { sel: Extract<ExplorerSel, { kind: 'sche
   const [form, setForm] = useState<{ name: string; kind: 'json' | 'xsd' | 'wsdl'; root: string; text: string } | null>(
     sel.kind === 'newSchema' ? { name: '', kind: sel.schemaKind, root: '', text: SCHEMA_STARTERS[sel.schemaKind] } : null);
   const [tree, setTree] = useState<SNode | null>(null);
+  const [deleting, setDeleting] = useState(false);
   useEffect(() => {
     if (sel.kind !== 'schema') return;
     get(`/api/schemas/${sel.id}`).then(s => setForm({ name: s.name, kind: s.kind, root: s.root || '', text: s.text })).catch(e => toast(e.message, true));
@@ -396,7 +442,10 @@ function SchemaEditor({ sel, setSel }: { sel: Extract<ExplorerSel, { kind: 'sche
       <div className="fld"><label htmlFor="st">Content</label><textarea id="st" className="code" rows={14} spellCheck={false} value={form.text} onChange={e => setForm({ ...form, text: e.target.value })} />
         <div className="hint">Or load a file: <input type="file" accept=".json,.xsd,.wsdl,.xml" aria-label="Load schema file" onChange={e => e.target.files?.[0] && loadFile(e.target.files[0])} /></div></div>
       <div className="row"><button className="btn primary" disabled={!form.name.trim() || !form.text.trim()} onClick={save}>Save</button>
-        {info && <button className="btn danger" onClick={async () => { if (!confirm(`Delete ${info.name}?`)) return; await del(`/api/schemas/${info.id}`); await reload(); setSel(null); }}>Delete</button>}</div>
+        {info && <button className="btn danger" onClick={() => setDeleting(true)}>Delete</button>}</div>
+      {deleting && info && <ConfirmDelete title={`Delete ${info.name}`} usageOf={{ projectId, id: info.id }} onClose={() => setDeleting(false)}
+        onConfirm={async () => { await del(`/api/schemas/${info.id}`); setDeleting(false); await reload(); setSel(null); toast(`${info.name} deleted`); }}
+        what={<p>The {form.kind === 'wsdl' ? 'service descriptor' : 'schema'} <b>{info.name}</b> is deleted.</p>} />}
       {tree && <><div className="group">Fields</div><SchemaTreeView n={tree} depth={0} /></>}
     </>
   );

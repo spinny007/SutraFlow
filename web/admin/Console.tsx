@@ -119,6 +119,7 @@ export function Console() {
             </nav>
             <div className="c-sidefoot">
               {status.mode === 'studio' && <a className="btn small" href="/">Designer</a>}
+              <a className="btn small" href="/approvals" target="_blank" rel="noopener" title="Opens the Approval Center in a new tab">Approval Center</a>
               <a className="btn small" href="/guide" target="_blank" rel="noopener">Guide</a>
               <span className="muted xs">v{status.version}{status.mode === 'engine' ? ' · headless' : ''}</span>
             </div>

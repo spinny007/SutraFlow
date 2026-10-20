@@ -36,6 +36,7 @@ import type { Caller } from './access.js';
 import { RULES, OPEN_ROUTES, check, auditRequest, auditSubject } from './guard.js';
 import { ssoSettings, saveSsoSettings, startSignIn, finishSignIn, SsoError } from './sso.js';
 import { listApprovals, approvalHistory, decideApproval, reassign } from './approvals.js';
+import { deleteItem, renameItem, usageOf, folderContents, deleteFolderTree } from './deletes.js';
 import { audit, listAudit, auditCsv, auditStats, clearAudit } from './audit.js';
 import { overview, applications, setSutraEnabled, requestDrain, restartSutra } from './console.js';
 import * as gwa from './gateway/apps.js';
@@ -662,7 +663,8 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.get('/api/schemas/:id', async (req: any) => schemas.getSchema(req.params.id) ?? (() => { throw new HttpError(404, 'Schema not found'); })());
   app.post('/api/schemas', async (req: any) => schemas.saveSchema(req.body));
   app.put('/api/schemas/:id', async (req: any) => schemas.saveSchema({ ...req.body, id: req.params.id }));
-  app.delete('/api/schemas/:id', async (req: any) => { schemas.deleteSchema(req.params.id); return { ok: true }; });
+  app.delete('/api/schemas/:id', async (req: any) => { try { return { ok: true, ...deleteItem('schema', req.params.id) }; } catch (e: any) { throw bad(e.message); } });
+  app.post('/api/schemas/:id/rename', async (req: any) => { try { return renameItem('schema', req.params.id, req.body?.name); } catch (e: any) { throw bad(e.message); } });
   app.get('/api/schemas/:id/tree', async (req: any) => schemas.schemaTree(req.params.id + (req.query?.root ? '::' + req.query.root : '')));
 
   /** Design-time shapes of every step (Process Data, Activity Input trees, Output fields). */
@@ -693,7 +695,14 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.get('/api/projects/:id/folders', async (req: any) => folders.listFolders(projects.requireProject(req.params.id).id, folders.areaOf(req.query?.area)));
   app.post('/api/projects/:id/folders', async (req: any) => folders.createFolder(projects.requireProject(req.params.id).id, req.body?.path, folders.areaOf(req.body?.area)));
   app.post('/api/projects/:id/folders/move', async (req: any) => folders.moveFolder(projects.requireProject(req.params.id).id, req.body?.from, req.body?.to, folders.areaOf(req.body?.area)));
-  app.delete('/api/projects/:id/folders', async (req: any) => folders.removeFolder(projects.requireProject(req.params.id).id, req.query?.path, folders.areaOf(req.query?.area)));
+  // ?withItems=1&confirm=delete deletes the folder and everything in it; otherwise its contents move up.
+  app.delete('/api/projects/:id/folders', async (req: any) => {
+    const pid = projects.requireProject(req.params.id).id;
+    if (req.query?.withItems === '1' || req.query?.withItems === 'true') {
+      if (folders.areaOf(req.query?.area) === 'resources' && !access.can(caller(req), 'connections', pid)) throw new HttpError(403, 'Deleting connections needs the Connections permission');
+      try { return deleteFolderTree(pid, req.query?.area, req.query?.path, req.query?.confirm); } catch (e: any) { throw bad(e.message); } }
+    return folders.removeFolder(pid, req.query?.path, folders.areaOf(req.query?.area));
+  });
   app.put('/api/resources/:id/folder', async (req: any) => { folders.setItemFolder('resources', req.params.id, req.body?.folder); return { ok: true }; });
   app.put('/api/schemas/:id/folder', async (req: any) => {
     const s = schemas.getSchema(req.params.id);
@@ -703,7 +712,8 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   });
   app.get('/api/flows/:id', async (req: any) => flows.getFlow(req.params.id) ?? (() => { throw new HttpError(404, 'Sutra not found'); })());
   app.put('/api/flows/:id', async (req: any) => flows.saveFlow(req.params.id, req.body));
-  app.delete('/api/flows/:id', async (req: any) => { flows.deleteFlow(req.params.id); return { ok: true }; });
+  app.delete('/api/flows/:id', async (req: any) => { try { return { ok: true, ...deleteItem('sutra', req.params.id) }; } catch (e: any) { throw bad(e.message); } });
+  app.post('/api/flows/:id/rename', async (req: any) => { try { return renameItem('sutra', req.params.id, req.body?.name); } catch (e: any) { throw bad(e.message); } });
   app.post('/api/flows/validate', async (req: any) => flows.validateDoc(flows.normalizeDoc(req.body), req.query?.projectId ? String(req.query.projectId) : undefined));
   app.get('/api/flows/:id/versions', async (req: any) => flows.versions(req.params.id));
   app.post('/api/flows/:id/deploy', async (req: any) => {
@@ -821,7 +831,11 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     if (!getResource(req.params.id)) throw new HttpError(404, 'Resource not found');
     return saveResource({ ...req.body, id: req.params.id });
   });
-  app.delete('/api/resources/:id', async (req: any) => { deleteResource(req.params.id); return { ok: true }; });
+  app.delete('/api/resources/:id', async (req: any) => { try { return { ok: true, ...deleteItem('resource', req.params.id) }; } catch (e: any) { throw bad(e.message); } });
+  app.post('/api/resources/:id/rename', async (req: any) => { try { return renameItem('resource', req.params.id, req.body?.name); } catch (e: any) { throw bad(e.message); } });
+  // What deleting an item or a folder would affect: shown before the person types delete.
+  app.get('/api/projects/:id/usage', async (req: any) => usageOf(projects.requireProject(req.params.id).id, String(req.query?.item || '')));
+  app.get('/api/projects/:id/folders/contents', async (req: any) => { try { return folderContents(projects.requireProject(req.params.id).id, folders.areaOf(req.query?.area), req.query?.path); } catch (e: any) { throw bad(e.message); } });
   app.get('/api/secrets', async () => listSecrets());
   app.put('/api/secrets/:name', async (req: any) => {
     if (typeof req.body?.value !== 'string') throw bad('value is required');

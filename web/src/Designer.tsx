@@ -21,6 +21,7 @@ import { TEMPLATES } from './templates';
 import { Inspector, type InspectorTab } from './Inspector';
 import { ExplorerEditor, ProjectExplorer, type ExplorerSel } from './Project';
 import { ChoiceList, sampleChoices } from './NewProject';
+import { ConfirmDelete } from './ConfirmDelete';
 
 const ACT_MIME = 'application/x-sutra-activity';
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -113,7 +114,8 @@ function DesignerInner() {
   const [sel, setSel] = useState<{ kind: 'node' | 'edge'; id: string } | null>(null);
   const [run, setRun] = useState<RunDetail | null>(null);
   const [sample, setSample] = useState<{ outputs: Record<string, any>; vars?: Record<string, any> }>({ outputs: {} });
-  const [dialog, setDialog] = useState<null | 'new' | 'deploy'>(null);
+  const [dialog, setDialog] = useState<null | 'new' | 'deploy' | 'delete'>(null);
+  const [newName, setNewName] = useState('');
   const [leftTab, setLeftTab] = useState<'project' | 'palette' | 'git'>(() => { try { return (localStorage.getItem('sutra.left') as any) || 'palette'; } catch { return 'palette'; } });
   const [explorerSel, setExplorerSel] = useState<ExplorerSel | null>(null);
   const [tab, setTab] = useState<InspectorTab>('general');
@@ -366,13 +368,17 @@ function DesignerInner() {
   const createFlow = async (tplId: string) => {
     const t = TEMPLATES.find(x => x.id === tplId)!;
     const d = structuredClone(t.doc);
-    let name = d.name, i = 2;
-    while (flows.some(f => f.name.toLowerCase() === name.toLowerCase())) name = `${d.name} ${i++}`;
+    // The name typed in the dialog, or the template's name made unique.
+    const typed = newName.trim();
+    if (typed && flows.some(f => f.name.toLowerCase() === typed.toLowerCase())) throw new Error(`A Sutra named ${typed} exists in this project`);
+    let name = typed || d.name, i = 2;
+    if (!typed) while (flows.some(f => f.name.toLowerCase() === name.toLowerCase())) name = `${d.name} ${i++}`;
     // A new Sutra goes in the folder of the one open now.
     const f = await post('/api/flows', { doc: { ...d, name }, projectId, folder: flows.find(x => x.id === flowId)?.folder || '' });
     await refreshFlows();
     setFlowId(f.id);
     setDialog(null);
+    setNewName('');
   };
   const addSamples = async (ids: string[]) => {
     const added = await post<{ id: string; name: string }[]>(`/api/projects/${encodeURIComponent(projectId)}/samples`, { ids });
@@ -381,11 +387,14 @@ function DesignerInner() {
     setDialog(null);
     toast(`Added ${added.length} sample Sutras: ${added.map(a => a.name).join(', ')}`);
   };
-  const removeFlow = async () => {
-    if (!flowId || !doc || !confirm(`Delete "${doc.name}" and its versions? Run history is kept.`)) return;
+  const removeFlow = () => { if (flowId && doc) setDialog('delete'); };
+  const deleteFlowNow = async () => {
+    if (!flowId) return;
     await del(`/api/flows/${flowId}`);
     setFlowId(null);
+    setDialog(null);
     await refreshFlows();
+    toast('Sutra deleted');
   };
 
   useEffect(() => {
@@ -473,6 +482,9 @@ function DesignerInner() {
       </main>
       {dialog === 'new' && (
         <Modal title="New Sutra" onClose={() => setDialog(null)}>
+          <div className="fld"><label htmlFor="nfname">Name</label>
+            <input id="nfname" type="text" autoFocus value={newName} onChange={e => setNewName(e.target.value)} placeholder="Empty = the template's name" maxLength={120} />
+            <div className="hint">Rename later from the ⋯ menu (or right-click) of the Sutra in the explorer.</div></div>
           <p className="muted">Start blank or from a template. Everything stays editable.</p>
           <ul className="list">
             {TEMPLATES.map(t => (
@@ -481,6 +493,11 @@ function DesignerInner() {
           </ul>
           <SamplePicker onAdd={ids => addSamples(ids).catch(e => toast(e.message, true))} />
         </Modal>
+      )}
+      {dialog === 'delete' && doc && flowId && (
+        <ConfirmDelete title={`Delete ${doc.name}`} usageOf={{ projectId, id: flowId }} onClose={() => setDialog(null)} onConfirm={deleteFlowNow}
+          blocked={current?.deployed ? `${doc.name} is deployed (version ${current.deployed.version}): undeploy it first, so deleting never stops a running service.` : undefined}
+          what={<p>The Sutra <b>{doc.name}</b> and its saved versions are deleted. Run history is kept.</p>} />
       )}
       {dialog === 'deploy' && doc && flowId && (
         <DeployDialog flowId={flowId} doc={doc} deployed={current?.deployed?.version} onClose={() => setDialog(null)}

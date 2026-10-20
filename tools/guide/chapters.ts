@@ -36,8 +36,8 @@ export const CHAPTERS: Chapter[] = [
 <p class="h">From a release (servers)</p>
 <p>Each release comes as <code>sutraflow-&lt;version&gt;-windows.zip</code> and <code>sutraflow-&lt;version&gt;-linux.tar.gz</code>, already built, each with a <code>.sha256</code> file; offline archives with the packages inside are there for servers without access to the npm registry. <code>RELEASE-NOTES.md</code> in the archive has the steps for each system and for upgrades.</p>
 <ol>
-<li>Check the download: <code>sha256sum -c sutraflow-1.8.0-linux.tar.gz.sha256</code>, or on Windows <code>Get-FileHash sutraflow-1.8.0-windows.zip -Algorithm SHA256</code> against the <code>.sha256</code> file.</li>
-<li>Unpack it: <code>tar -xzf sutraflow-1.8.0-linux.tar.gz -C /opt/sutraflow</code>, or <code>Expand-Archive sutraflow-1.8.0-windows.zip C:\\SutraFlow</code>.</li>
+<li>Check the download: <code>sha256sum -c sutraflow-1.8.1-linux.tar.gz.sha256</code>, or on Windows <code>Get-FileHash sutraflow-1.8.1-windows.zip -Algorithm SHA256</code> against the <code>.sha256</code> file.</li>
+<li>Unpack it: <code>tar -xzf sutraflow-1.8.1-linux.tar.gz -C /opt/sutraflow</code>, or <code>Expand-Archive sutraflow-1.8.1-windows.zip C:\\SutraFlow</code>.</li>
 <li>In the unpacked folder: <code>bin/sutraflow setup</code> (Windows: <code>bin\\sutraflow.cmd setup</code>) installs the runtime packages and makes <code>sutraflow.env</code>.</li>
 <li><code>bin/sutraflow start</code>, then open <code>http://127.0.0.1:4800</code> and create the administrator account.</li>
 </ol>
@@ -117,7 +117,7 @@ export const CHAPTERS: Chapter[] = [
   {
     id: 'tour', title: 'The studio, screen by screen',
     html: `
-<p>The top bar holds the four screens, the version in the middle, <strong>Admin Console</strong> (deployed projects, engines, gateway, users and audit, in its own page), <strong>Guide</strong> (this guide in a new tab), the light/dark switch and Sign out.</p>
+<p>The top bar holds the four screens, the version in the middle, <strong>Admin Console</strong> (deployed projects, engines, gateway, users and audit, in its own page), <strong>Approval Center</strong> (approvals waiting for people, in a new tab), <strong>Guide</strong> (this guide in a new tab), the light/dark switch and Sign out.</p>
 <table class="t"><thead><tr><th>Screen</th><th>What it is for</th></tr></thead><tbody>
 <tr><td><strong>Designer</strong></td><td>Building, testing, debugging and deploying Sutras. Left: the <em>Project</em> explorer and the <em>Palettes</em>. Middle: the canvas and its toolbar. Right: the selected activity's General, Input, Output and Settings tabs.</td></tr>
 <tr><td><strong>Runs</strong></td><td>Every run with its status, steps, inputs and outputs, logs; approvals waiting for a person (approvers decide in the Approval Center, <code>/approvals</code>).</td></tr>
@@ -127,7 +127,7 @@ export const CHAPTERS: Chapter[] = [
 <p class="h">The Designer toolbar</p>
 <ul>
 <li><strong>Sutra list</strong>: opens another Sutra of the project.</li>
-<li><strong>+ New Sutra</strong>: a blank Sutra or a starter (REST API, SOAP service, approval with timer).</li>
+<li><strong>+ New Sutra</strong>: type a <em>Name</em> (left empty, the starter's name is used), then pick a blank Sutra or a starter (REST API, SOAP service, approval with timer).</li>
 <li><strong>&#9654; Test</strong>: runs the current draft once with the trigger's test data, without deploying.</li>
 <li><strong>Debug</strong>: runs the draft one activity at a time (see <a href="#ch-debug">Testing and debugging</a>).</li>
 <li><strong>&#8630; Undo</strong> and <strong>&#8631; Redo</strong> (Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z): step back and forward through your changes to the Sutra, up to 100 of them, such as a deleted activity or connection, a move or a changed mapping. While you type in a field, Ctrl+Z undoes the typing in that field instead.</li>
@@ -161,11 +161,26 @@ export const CHAPTERS: Chapter[] = [
 <ul>
 <li><strong>+ Folder</strong> under the list makes a folder; type <code>Orders/Inbound</code> for one inside another.</li>
 <li><strong>Drag</strong> a Sutra or a folder onto a folder to move it there, or onto the line <em>Drag here for the top level</em>.</li>
-<li>The <strong>⋯</strong> button beside a Sutra moves it by typing or picking a folder. Beside a folder it renames or moves the folder with everything in it, makes a folder inside, or removes the folder. Removing a folder never deletes Sutras: they move up one level.</li>
+<li>The <strong>⋯</strong> button beside an item, or a <strong>right-click</strong> on it, opens its menu: <strong>Rename</strong>, <strong>Move</strong> (type or pick a folder) and <strong>Delete</strong>. Renaming breaks nothing: steps and connections refer to an item by its id.</li>
+<li>Beside a folder (or with a right-click) the menu renames or moves the folder with everything in it, makes a folder inside, <strong>removes the folder</strong> (its contents move up one level; nothing is deleted) or <strong>deletes the folder and everything in it</strong>.</li>
 <li>A new Sutra goes in the folder of the Sutra open at the time.</li>
 <li>Samples go to <code>Samples/&lt;topic&gt;</code>, for example <em>Samples/SQL</em> and <em>Samples/REST and microservices</em>, and the connections made for them to <em>Resources &gt; Samples</em>. Samples added before folders existed were filed there once, when the server was updated. Move them anywhere afterwards.</li>
 <li>Packages and project copies keep each item's folder.</li>
 <li>Importing chosen Sutras (a new project from a package or a copy) brings the connections, schemas and service descriptors those Sutras use, directly or through each other (an MCP server and its policy), in their folders, and nothing else.</li>
+</ul>
+<p class="h">Deleting</p>
+<p>Sutras, connections, schemas and service descriptors can be deleted one by one (the item's menu, or the <strong>Delete</strong> button of its editor or of the Sutra), or a whole folder with everything in it. Every delete asks first:</p>
+<ol>
+<li>The dialog says what goes, and lists the Sutras and connections that still use the item: they stop working until you pick another one.</li>
+<li>Type <code>delete</code> in the box. Until you do, the Delete button stays off, so a stray click or Enter deletes nothing.</li>
+<li>A <strong>deployed</strong> Sutra cannot be deleted: undeploy it first, so a delete never stops a running service by accident. A folder with a deployed Sutra in it is refused the same way, and nothing in it is deleted.</li>
+</ol>
+<ul>
+<li>Deleting a Sutra deletes its saved versions too; its run history is kept.</li>
+<li>Deleting a connection leaves its secrets in the vault (they may serve other connections).</li>
+<li>The <em>Configuration</em> section (project variables, deployment config, logging) belongs to the project and cannot be deleted; change its values instead.</li>
+<li>Deleting needs the same permission as changing the item: <em>Design</em> for Sutras, schemas and service descriptors, <em>Connections</em> for connections. Viewers and approvers cannot delete.</li>
+<li>In a project connected to Git, a deleted item shows at once in the Git tab as a deleted file: commit it like any other change (or discard it to bring the item back before the commit).</li>
 </ul>
 <p class="h">Project log</p>
 <p><em>Configuration &gt; Project log</em> shows what this project's runs wrote to its log file (set it up under <em>Logging</em>), newest at the bottom. Filter by level, by <em>Runs from</em> (deployed Sutras or designer tests) and by words; refresh it every 5 seconds; download what is shown. Every line carries two tags: the server it ran on (<em>production</em>, <em>test</em>, <em>development</em>) and the run, <em>deployed v3</em> for a deployed Sutra and its version, or <em>editor test</em> / <em>editor debug</em> for the designer's own runs. In the file a line reads <code>2026-10-19T09:12:03Z INFO  {development, editor test} [Orders / 3f2a91c0 / Check stock] ...</code>.</p>
@@ -231,7 +246,7 @@ export const CHAPTERS: Chapter[] = [
     id: 'build', title: 'Building a Sutra',
     html: `
 <ol>
-<li>Click <strong>+ New Sutra</strong> and choose a starter, or start blank.</li>
+<li>Click <strong>+ New Sutra</strong>, type its name, and choose a starter or start blank.</li>
 <li>Drag a <strong>trigger</strong> from the Triggers palette (or keep Manual start). A Sutra has one trigger.</li>
 <li>Drag activities onto the canvas. Search the palettes with the box at the top.</li>
 <li>Connect an activity's output (a circle on its right) to the next activity's input (on its left). Activities with several outputs, such as [[if]] or [[router]], have one circle per output.</li>
@@ -1581,7 +1596,7 @@ stages:
   post { success { archiveArtifacts 'release.zip' } }
 }</pre>
 <p class="h">Container images</p>
-<p>For immutable production, bake the release into an engine image: <code>FROM sutraflow:1.8.0</code>, <code>COPY release.zip /deploy/</code>, and start it with <code>SUTRA_MODE=engine SUTRA_DEPLOY_DIR=/deploy</code>; the engine deploys every package in the folder at start. A new release is a new image.</p>
+<p>For immutable production, bake the release into an engine image: <code>FROM sutraflow:1.8.1</code>, <code>COPY release.zip /deploy/</code>, and start it with <code>SUTRA_MODE=engine SUTRA_DEPLOY_DIR=/deploy</code>; the engine deploys every package in the folder at start. A new release is a new image.</p>
 [[tip:Good practice|One zip, many environments: build once, deploy the same artifact to UAT and production.<br>Give each environment its own system account and token, with Deploy on the project only.<br>Let the pipeline fail on <code>sutra check</code> before anything changes; keep rollback one command away.<br>Store the zip with the pipeline run: it is the record of exactly what went live.]]`,
   },
   {
@@ -1619,7 +1634,7 @@ sutra deploy shop-1.4.0.sutra --server https://prod:4800 --token $SUTRA_TOKEN</p
 <ol>
 <li>Admin Console &rarr; <strong>Roles</strong>: make a role per group of approvers, for example <em>Finance approver</em> (it needs no permissions of its own; <em>View</em> lets its members also see the other waiting items of the project).</li>
 <li>Admin Console &rarr; <strong>Users</strong>: add the people, with their email address, and give them the role (on all projects or one). With single sign-on, map an identity provider group to the role instead.</li>
-<li>Send them the address: <code>https://your-server/approvals</code>. They sign in with their password or with single sign-on.</li>
+<li>Send them the address: <code>https://your-server/approvals</code>. They sign in with their password or with single sign-on. Designers and administrators reach it with <strong>Approval Center</strong> in the designer's top bar and in the Admin Console beside <em>Guide</em>.</li>
 </ol>
 <p class="h">In the Sutra</p>
 <ol>
@@ -1837,9 +1852,9 @@ tools/migrate-to-postgres.sh --url "postgres://sutra:password@db.example.com:543
 <p class="h">Headless engines</p>
 <p>The same program started with <code>SUTRA_MODE=engine</code> runs Sutras without the studio: no designer pages and no editing. It keeps <code>/health</code>, <code>/ready</code> and <code>/metrics</code>, the Admin Console at <code>/admin</code> for its users, and an automation API for API tokens (the admin token or system account tokens). Packages in <code>SUTRA_DEPLOY_DIR</code> are deployed when it starts; a package that cannot be deployed stops the start.</p>
 <p class="h">Docker</p>
-<pre>docker build -t sutraflow:1.8.0 .
+<pre>docker build -t sutraflow:1.8.1 .
 docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=... \\
-           -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:1.8.0</pre>
+           -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:1.8.1</pre>
 <p>The image runs as a non-root user, checks its own health, and writes JSON logs. <code>docker-compose.yml</code> has a studio and an engine; <code>docker-compose.cluster.yml</code> has PostgreSQL, a studio and two engines.</p>
 <p class="h">Clusters</p>
 <p>Several engines share one database (<code>SUTRA_DB=postgres://...</code>), each with its own <code>SUTRA_ENGINE_ID</code> and all with the same <code>SUTRA_MASTER_KEY</code>.</p>
