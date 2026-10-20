@@ -19,6 +19,8 @@ import { effectiveResource, getResource } from '../resources.js';
 import { authorize, corsHeaders, PolicyError, type Caller } from '../security/inbound.js';
 import { xmlParser } from '../security/outbound.js';
 import { checkParsed, checkRaw, limitsOf, MessageRejected, validateMessage } from '../security/validate.js';
+import { decryptMessage, WssError } from '../security/wssin.js';
+import { getSecret } from '../secrets.js';
 import { NS } from '../security/wss.js';
 import { listOf } from '../palettes/common.js';
 import { acmeChallenge, getCert, getTls } from './tls.js';
@@ -258,15 +260,25 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
     const soapMaxKb = Number(policy?.config.maxBodyKb) || 0;
     if (soapMaxKb && Buffer.byteLength(raw) > soapMaxKb * 1024) { gw.error = 'Body too large'; return fault(413, 'soap:Client', `Body is larger than ${soapMaxKb} KB`); }
     try { checkRaw(raw, 'xml', limits); } catch (e: any) { gw.error = e.message; return fault(e.status || 400, 'soap:Client', e.message); }
+    // XML encryption: decrypted with the policy's key before anything reads the message.
+    let xml = raw;
+    if (policy?.config.decryptKeySecret || policy?.config.requireEncryption || /EncryptedData/.test(raw)) {
+      try {
+        const c = policy?.config || {};
+        const d = decryptMessage(raw, c.decryptKeySecret ? getSecret(c.decryptKeySecret) || '' : '', c.decryptKeyPassSecret ? getSecret(c.decryptKeyPassSecret) : undefined);
+        if (c.requireEncryption && !d.bodyEncrypted) throw new WssError('The SOAP Body must be encrypted');
+        xml = d.xml;
+      } catch (e: any) { gw.error = e.message; return fault(e instanceof WssError ? 400 : 500, 'soap:Client', e.message); }
+    }
     let env: any;
-    try { env = xmlParser.parse(raw)?.Envelope; } catch { /* handled below */ }
+    try { env = xmlParser.parse(xml)?.Envelope; } catch { /* handled below */ }
     if (!env?.Body) return fault(400, 'soap:Client', 'Request is not a SOAP envelope');
     const v12 = ct.includes('application/soap+xml') || raw.includes(NS.soap12);
     const opName = Object.keys(env.Body).find(k => !k.startsWith('@_'));
     if (!opName) return fault(400, 'soap:Client', 'SOAP Body is empty', v12);
     let caller;
     try {
-      caller = await authorize(policy, { headers: req.headers, ip: req.ip, secure, socket: req.raw.socket, wsSecurity: env.Header?.Security });
+      caller = await authorize(policy, { headers: req.headers, ip: req.ip, secure, socket: req.raw.socket, wsSecurity: env.Header?.Security, soapXml: xml });
       noteCaller(gw, reply, caller);
     } catch (e: any) {
       const pe = e as PolicyError;

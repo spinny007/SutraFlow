@@ -28,6 +28,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
     "@fastify/static": "^10.1.6",
+    "@xmldom/xmldom": "^0.8.15",
     "acme-client": "^5.4.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
@@ -50,6 +51,7 @@
     "rhea": "^3.0.5",
     "selfsigned": "^5.5.0",
     "soap": "^1.14.0",
+    "xml-crypto": "^6.3.3",
     "ssh2-sftp-client": "^11.0.0",
     "undici": "^8.11.2",
     "unpdf": "^1.9.0"

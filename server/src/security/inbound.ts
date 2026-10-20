@@ -14,6 +14,7 @@ import { jwtVerify, createRemoteJWKSet, type JWTVerifyGetKey } from 'jose';
 import { getSecret } from '../secrets.js';
 import { kvToObject, type Resource } from '../resources.js';
 import { verifyUsernameToken, safeEqual } from './wss.js';
+import { checkTimestamp, verifySaml, verifyX509 } from './wssin.js';
 import { systemAccountMayCall } from '../access.js';
 import { appOfKey, appOfToken, consume, type App } from '../gateway/apps.js';
 
@@ -31,6 +32,8 @@ export interface InboundRequest {
   socket: any;
   /** Parsed wsse:Security header for SOAP requests. */
   wsSecurity?: any;
+  /** The SOAP message as received (after decryption), for signature checks. */
+  soapXml?: string;
 }
 
 export interface Caller {
@@ -169,11 +172,27 @@ export async function authorize(policy: Resource | undefined, req: InboundReques
       caller = { method: 'app', subject: app.name, appId: app.id, claims: { appId: app.id, plan: app.planId, scopes }, responseHeaders: used.headers };
       break;
     }
+    case 'wssX509':
+    case 'wssSaml': {
+      if (!req.soapXml) throw new PolicyError(400, `${c.auth === 'wssX509' ? 'X.509 signed' : 'SAML'} WS-Security applies to SOAP services only`);
+      const skewSec = Number(c.wssSkewSec) > 0 ? Number(c.wssSkewSec) : 300;
+      try {
+        checkTimestamp(req.wsSecurity, c.wssTimestamp === 'required', skewSec);
+        const r = c.auth === 'wssX509'
+          ? verifyX509(req.soapXml, { trustedPem: String(c.trustedCertsPem || ''), allowedSubjects: Array.isArray(c.x509AllowedSubjects) ? c.x509AllowedSubjects : [], requireTimestamp: c.wssTimestamp === 'required', skewSec })
+          : verifySaml(req.soapXml, { idpCertPem: String(c.samlIdpCertPem || ''), issuer: String(c.samlIssuer || ''), audience: String(c.samlAudience || ''), skewSec });
+        caller = { method: c.auth, subject: r.subject, claims: r.claims };
+      } catch (e: any) {
+        throw new PolicyError(401, e.message);
+      }
+      break;
+    }
     case 'wssUsernameToken': {
       if (!req.wsSecurity) throw new PolicyError(401, 'WS-Security header is required');
       const users = kvToObject(c.users);
       try {
-        const r = verifyUsernameToken(req.wsSecurity, u => (users[u] ? getSecret(users[u]) : undefined));
+        checkTimestamp(req.wsSecurity, c.wssTimestamp === 'required', Number(c.wssSkewSec) > 0 ? Number(c.wssSkewSec) : 300);
+        const r = verifyUsernameToken(req.wsSecurity, u => (users[u] ? getSecret(users[u]) : undefined), { maxSkewSec: Number(c.wssSkewSec) > 0 ? Number(c.wssSkewSec) : 300 });
         caller = { method: 'wssUsernameToken', subject: r.user };
       } catch (e: any) {
         throw new PolicyError(401, e.message);

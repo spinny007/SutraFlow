@@ -9,6 +9,7 @@
  */
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
+import { encryptBody } from './wssin.js';
 
 const require = createRequire(import.meta.url);
 // node-soap ships CommonJS; WSSecurityCert does XML signing (xml-crypto) for X.509 profiles.
@@ -36,6 +37,8 @@ export interface WssOptions {
   /** Sign Body (and Timestamp) with an X.509 key. */
   x509?: { keyPem: string; certPem: string; passphrase?: string; signatureAlgorithm?: string; digestAlgorithm?: string };
   mustUnderstand?: boolean;
+  /** Encrypt the Body content for this certificate (after signing). */
+  encrypt?: { certPem: string; algorithm?: string };
 }
 
 export function passwordDigest(nonceB64: string, created: string, password: string) {
@@ -76,7 +79,7 @@ const stripXmlDecl = (s: string) => s.replace(/^<\?xml[^>]*\?>\s*/, '');
 /** Inserts the WS-Security header into a SOAP envelope and signs it when an X.509 key is given. */
 export function applyWss(xml: string, o: WssOptions, envKey?: string): string {
   const key = envKey || detectEnvelopePrefix(xml);
-  const hasAny = o.username || o.samlAssertion || o.timestampTtlSec || o.x509;
+  const hasAny = o.username || o.samlAssertion || o.timestampTtlSec || o.x509 || o.encrypt;
   if (!hasAny) return xml;
   xml = ensureHeader(xml, key);
   const header = securityHeaderXml(o, key);
@@ -91,6 +94,7 @@ export function applyWss(xml: string, o: WssOptions, envKey?: string): string {
     placeSignatureInSecurity(signer);
     xml = signer.postProcess(xml, key);
   }
+  if (o.encrypt) xml = encryptBody(xml, o.encrypt.certPem, o.encrypt.algorithm);
   return xml;
 }
 

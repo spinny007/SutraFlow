@@ -129,6 +129,7 @@ export async function applyAuth(
           digestAlgorithm: c.signatureAlgorithm === 'rsa-sha1' ? 'http://www.w3.org/2000/09/xmldsig#sha1' : undefined,
         };
       }
+      if (c.encryptCertPem?.trim()) wss.encrypt = { certPem: c.encryptCertPem, algorithm: c.encryptAlgorithm || 'aes256-gcm' };
       out.wss = wss;
       break;
     }
