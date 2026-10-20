@@ -1215,6 +1215,119 @@ print(json.dumps({"total": 42}))                              # the last line, a
 <p><em>YouTube: publish from Google Drive, weekly analytics</em>, <em>Twitch: going live</em>, <em>Discord: order status bot</em> and <em>Telegram: order status bot and alerts</em> in New Sutra &rarr; Samples (folder Samples/Social media).</p>`,
   },
   {
+    id: 'oauth-setup', title: 'OAuth connections step by step: Google, Microsoft, Dropbox, Facebook, Twitch',
+    html: `
+<p>Google Drive, Sheets, Docs and YouTube, SharePoint and OneDrive, Dropbox, Facebook Pages and Twitch all sign in with <strong>OAuth</strong>: SutraFlow never sees the account's password. Every one is set up the same way, in three places:</p>
+<ol>
+<li><strong>At the provider</strong> (once): register an app. It gives a <em>client ID</em> and a <em>client secret</em>, and you tell it SutraFlow's <em>redirect address</em>.</li>
+<li><strong>In the designer</strong>: an <em>OAuth connection</em> holds the client ID, the secret's name and the scopes; <em>Connect account</em> signs in once, and the tokens are kept encrypted.</li>
+<li><strong>On each server you deploy to</strong> (Admin Console, command line): the secret is put in that server's vault and the account signed in there, because tokens never travel with a release.</li>
+</ol>
+[[note:The redirect address|It is where the provider sends the browser back after sign-in: your studio's address followed by <code>/api/oauth/callback</code>, for example <code>http://127.0.0.1:4800/api/oauth/callback</code> on your own computer or <code>https://sutra.example.com/api/oauth/callback</code> behind a proxy. The OAuth connection shows the exact address under <em>Account</em>; copy it from there. Providers want <code>https://</code> for anything but 127.0.0.1 and localhost.]]
+
+<p class="h">In the designer: the part that is the same for every provider</p>
+<ol>
+<li><strong>Keep the client secret in the vault.</strong> Project explorer &rarr; Resources &rarr; <strong>+</strong> &rarr; Secret, for example <code>GOOGLE_CLIENT_SECRET</code>. Paste the value; it is encrypted, and nobody can read it back.</li>
+<li><strong>Create the connection.</strong> Resources &rarr; <strong>+</strong> &rarr; <em>OAuth connection</em>. Choose the <em>Service</em> (google, microsoft, dropbox, facebook, twitch, or custom), paste the <em>Client ID</em>, pick the secret under <em>Client secret</em>, and set the <em>Scopes</em> (the provider sections below say which). Save.</li>
+<li><strong>Register the redirect address.</strong> The connection now shows <em>Register this redirect URI</em> with the address to copy into the provider's app (each provider section says where).</li>
+<li><strong>Sign in.</strong> Click <em>Connect account</em>. A window opens at the provider: sign in with the account the Sutras should use and allow the access asked for. The window closes and the connection says <em>Connected</em>, and <em>Tokens refresh automatically</em> when the provider gave a refresh token.</li>
+<li><strong>Check.</strong> <em>Test connection</em> reads the account (the Drive user, the YouTube channel, the Microsoft user, the Dropbox account).</li>
+<li><strong>Use it.</strong> Pick the connection in [[googleDrive]], [[googleSheets]], [[youtube]], [[msFiles]], [[dropbox]], [[facebookPage]], [[twitch]] or [[oauthRequest]] (Connected API call), and in their triggers.</li>
+</ol>
+[[tip:One app per environment|Make one app (one client ID) for development and another for production, ideally in separate projects or registrations, each with its own redirect address. A test account in development and a service account or shared mailbox in production keep people's own files out of your Sutras.]]
+
+<p class="h">Google: Drive, Sheets, Docs, YouTube</p>
+<ol>
+<li>Open <a href="https://console.cloud.google.com" target="_blank" rel="noopener">console.cloud.google.com</a> and sign in. Top left, next to the Google Cloud logo, choose a project or <em>New project</em> (for example <em>SutraFlow production</em>).</li>
+<li><strong>Turn on the APIs</strong>: menu &rarr; <em>APIs &amp; Services</em> &rarr; <em>Library</em>. Search and <em>Enable</em> each one the Sutras use: <em>Google Drive API</em>, <em>Google Sheets API</em>, <em>Google Docs API</em>, <em>YouTube Data API v3</em>, <em>YouTube Analytics API</em>.</li>
+<li><strong>The consent screen</strong>: <em>APIs &amp; Services</em> &rarr; <em>OAuth consent screen</em> (newer consoles: <em>Google Auth Platform</em>). Choose the user type: <strong>Internal</strong> if you have Google Workspace and only your organisation's accounts sign in (no review, tokens do not expire); otherwise <strong>External</strong>. Fill in the app name and support email.</li>
+<li>With <em>External</em>, add the accounts that will sign in under <em>Audience</em> &rarr; <em>Test users</em> while the app is in <em>Testing</em>.</li>
+<li><strong>Create the client</strong>: <em>APIs &amp; Services</em> &rarr; <em>Credentials</em> &rarr; <em>Create credentials</em> &rarr; <em>OAuth client ID</em>. Application type: <strong>Web application</strong>. Name it. Under <strong>Authorized redirect URIs</strong> (not <em>Authorized JavaScript origins</em>, which takes no path) click <em>Add URI</em> and paste the connection's redirect address. <em>Create</em>.</li>
+<li>Copy the <strong>Client ID</strong> and the <strong>Client secret</strong> (or <em>Download JSON</em>). The secret goes into the vault; the ID into the connection.</li>
+<li>Scopes in the connection, space separated, only what the Sutras need:
+<table class="t"><thead><tr><th>Scope</th><th>Gives</th></tr></thead><tbody>
+<tr><td><code>https://www.googleapis.com/auth/drive</code></td><td>Every file and folder the account can open (Drive steps and trigger)</td></tr>
+<tr><td><code>https://www.googleapis.com/auth/drive.readonly</code></td><td>Reading only</td></tr>
+<tr><td><code>https://www.googleapis.com/auth/drive.file</code></td><td>Only files SutraFlow made or uploaded; not folders and files made in Drive by people</td></tr>
+<tr><td><code>https://www.googleapis.com/auth/spreadsheets</code></td><td>Google Sheets</td></tr>
+<tr><td><code>https://www.googleapis.com/auth/documents</code></td><td>Google Docs</td></tr>
+<tr><td><code>https://www.googleapis.com/auth/youtube.upload</code>, <code>.../youtube.readonly</code>, <code>.../yt-analytics.readonly</code></td><td>YouTube upload, reading, analytics</td></tr>
+</tbody></table></li>
+<li>Back in the designer: <em>Connect account</em>, sign in, <em>Test connection</em>.</li>
+</ol>
+[[note:Testing apps lose their sign-in after 7 days|While an External app's publishing status is Testing, Google ends its refresh tokens after seven days, and the connection must sign in again. For anything that runs unattended, use an Internal app, or press Publish app on the consent screen. Apps that ask for the full drive scope and are used by more than 100 people outside your organisation need Google's verification; for your own accounts the warning page at sign-in (Advanced, Go to the app) is enough.]]
+<p><strong>Folder and file IDs.</strong> Open the folder in <a href="https://drive.google.com" target="_blank" rel="noopener">drive.google.com</a>: the address ends with its ID, <code>https://drive.google.com/drive/folders/<strong>1bWYnLxM6Ea_YecThA1FUQyQXN1cWMWTq</strong></code>. A file: <code>https://drive.google.com/file/d/<strong>FILE_ID</strong>/view</code>; a Doc or Sheet: <code>https://docs.google.com/document/d/<strong>ID</strong>/edit</code> or <code>/spreadsheets/d/<strong>ID</strong>/edit</code>. Folders on a shared drive work the same way; <code>root</code> is the top of My Drive. [[googleDrive]] with <em>List</em> shows the ID of every file in a folder. Keep folder IDs in project variables (<code>{{gv.DRIVE_INBOX}}</code>) so each environment can have its own.</p>
+<p><strong>Big files and slow links.</strong> Download with <em>Save to: server file</em> and upload with <em>Upload from: server file</em>: both stream, whatever the size. <em>Wait for each call</em> (5 minutes by default) and the step's time limit (30 minutes) can be raised for slow connections.</p>
+
+<p class="h">Microsoft: SharePoint and OneDrive</p>
+<ol>
+<li>Open <a href="https://portal.azure.com" target="_blank" rel="noopener">portal.azure.com</a> &rarr; <em>Microsoft Entra ID</em> &rarr; <em>App registrations</em> &rarr; <em>New registration</em>.</li>
+<li>Name it. <em>Supported account types</em>: <strong>this organizational directory only</strong> for your company's SharePoint and OneDrive (most cases); <em>any organizational directory and personal Microsoft accounts</em> for personal OneDrive too.</li>
+<li><em>Redirect URI</em>: platform <strong>Web</strong>, the connection's redirect address. <em>Register</em>.</li>
+<li>On the app's <em>Overview</em>, copy the <strong>Application (client) ID</strong> and the <strong>Directory (tenant) ID</strong>.</li>
+<li><em>Certificates &amp; secrets</em> &rarr; <em>New client secret</em>: a description and an expiry (at most 24 months; note the date, the connection stops working when it passes). Copy the <strong>Value</strong> (not the Secret ID); it is shown only once. Put it in the vault.</li>
+<li><em>API permissions</em> &rarr; <em>Add a permission</em> &rarr; <em>Microsoft Graph</em> &rarr; <em>Delegated permissions</em>: <code>Files.Read.All</code>, <code>Sites.Read.All</code>, <code>offline_access</code>, <code>User.Read</code> (and <code>Files.ReadWrite.All</code> to write). Then <em>Grant admin consent</em> if your organisation requires it.</li>
+<li>In the designer: Service <strong>microsoft</strong>, <strong>Tenant</strong> = the Directory (tenant) ID or your domain (<code>contoso.onmicrosoft.com</code>) for a single-organisation app, <code>common</code> otherwise; Client ID; the secret; Scopes <code>Files.Read.All Sites.Read.All offline_access User.Read</code>. <em>Connect account</em>.</li>
+</ol>
+<p><strong>Sites and folders.</strong> [[msFiles]] takes a SharePoint site address (<code>https://contoso.sharepoint.com/sites/Finance</code>), a document library (empty = the default one, <em>Documents</em>) and a folder path inside it (<code>Invoices/2026</code>); or, with <em>Where: OneDrive</em>, paths in the signed-in account's OneDrive. Paths, not IDs.</p>
+
+<p class="h">Dropbox</p>
+<ol>
+<li>Open <a href="https://www.dropbox.com/developers/apps" target="_blank" rel="noopener">dropbox.com/developers/apps</a> &rarr; <em>Create app</em> &rarr; <em>Scoped access</em>; <em>App folder</em> (only a folder of its own, safest) or <em>Full Dropbox</em>; a name.</li>
+<li><em>Permissions</em> tab: tick <code>files.metadata.read</code>, <code>files.content.read</code> and, to write, <code>files.content.write</code>; <em>Submit</em>.</li>
+<li><em>Settings</em> tab: under <em>OAuth 2</em> &rarr; <em>Redirect URIs</em> add the connection's redirect address. Copy the <strong>App key</strong> (the client ID) and the <strong>App secret</strong>.</li>
+<li>In the designer: Service <strong>dropbox</strong>, the App key as Client ID, the secret, Scopes <code>files.metadata.read files.content.read files.content.write</code>. <em>Connect account</em>.</li>
+</ol>
+<p>Dropbox works with paths (<code>/Invoices/2026</code>); with an App folder app, <code>/</code> is that app's folder.</p>
+
+<p class="h">Facebook Pages</p>
+<ol>
+<li>Open <a href="https://developers.facebook.com/apps" target="_blank" rel="noopener">developers.facebook.com/apps</a> &rarr; <em>Create app</em>; choose the business use case and connect your business portfolio.</li>
+<li>Add <em>Facebook Login for Business</em>; under its <em>Settings</em>, <em>Valid OAuth Redirect URIs</em>: the connection's redirect address.</li>
+<li><em>App settings</em> &rarr; <em>Basic</em>: copy the <strong>App ID</strong> and <strong>App secret</strong>.</li>
+<li>Scopes: <code>pages_show_list pages_read_engagement pages_manage_posts</code>. In <em>Development</em> mode they work for people with a role on the app; others need App Review.</li>
+<li>In the designer: Service <strong>facebook</strong>; <em>Connect account</em> with a Page administrator. Facebook gives no refresh token: the sign-in lasts about 60 days, then <em>Reconnect account</em>.</li>
+</ol>
+<p>The Page ID is on the Page under <em>About</em> &rarr; <em>Page transparency</em>, or in Meta Business Suite &rarr; <em>Settings</em> &rarr; <em>Business assets</em>. Use it in [[facebookPage]].</p>
+
+<p class="h">Twitch</p>
+<ol>
+<li>Open <a href="https://dev.twitch.tv/console" target="_blank" rel="noopener">dev.twitch.tv/console</a> &rarr; <em>Register Your Application</em>: a name, <em>OAuth Redirect URLs</em> = the connection's redirect address, a category, client type <strong>Confidential</strong>.</li>
+<li><em>Manage</em>: copy the <strong>Client ID</strong>; <em>New Secret</em> and put it in the vault.</li>
+<li>In the designer: Service <strong>twitch</strong>, scopes such as <code>user:read:email channel:manage:broadcast clips:edit</code>. <em>Connect account</em> with the channel's account.</li>
+</ol>
+
+<p class="h">Other services (custom)</p>
+<p>Service <strong>custom</strong> works with any provider that offers the OAuth 2.0 authorization code flow: give its <em>Authorization URL</em>, <em>Token URL</em> and <em>API base URL</em> from its documentation, register the redirect address there, and use [[oauthRequest]] for its API. A provider that issues refresh tokens keeps the connection signed in; one that does not needs <em>Reconnect account</em> when the token ends.</p>
+
+<p class="h">On production servers (Admin Console and deployment)</p>
+<p>A release carries the connection (service, client ID, scopes) and the <em>name</em> of its secret, never the secret's value or the account's tokens. On each server:</p>
+<ol>
+<li><strong>Register the server's redirect address</strong> in the provider's app (<code>https://prod.example.com/api/oauth/callback</code>), or use a separate production app.</li>
+<li><strong>Put the client secret in the server's vault</strong>, from your pipeline's secret store: <code>sutra secret set GOOGLE_CLIENT_SECRET --from-env GOOGLE_CLIENT_SECRET --server https://prod:4800 --token $TOKEN</code>. The release check (Admin Console &rarr; Releases) shows every secret a release needs and whether the server has it.</li>
+<li><strong>A different client ID per environment</strong>: write <code>{{gv.GOOGLE_CLIENT_ID}}</code> in the connection's Client ID and set the variable in each environment's deployment config, or override the connection's setting there (<code>\${env:GOOGLE_CLIENT_ID}</code> reads it from the server's environment).</li>
+<li><strong>Sign in on that server</strong>, one of three ways:
+<ul>
+<li><code>sutra connect "Google Drive" --project Media --server https://prod:4800 --token $TOKEN</code> prints the sign-in address; open it, sign in, and the command reports when the server is connected (headless engines too).</li>
+<li>Or open the server's studio, if it has one, and use <em>Connect account</em> on the connection.</li>
+<li>Or, when nobody may sign in on production, give the connection a <em>Refresh token (secret)</em>: a refresh token of the account, kept in the server's vault and set by the pipeline. For Google, get one with the OAuth Playground (<a href="https://developers.google.com/oauthplayground" target="_blank" rel="noopener">developers.google.com/oauthplayground</a>): gear &rarr; <em>Use your own OAuth credentials</em> (add <code>https://developers.google.com/oauthplayground</code> to the client's redirect URIs), choose the scopes, <em>Authorize APIs</em>, <em>Exchange authorization code for tokens</em>, copy the refresh token.</li>
+</ul></li>
+<li><strong>Check</strong>: <em>Test connection</em> on the server, then deploy or start the Sutras. Tokens are encrypted with that server's master key and refresh by themselves.</li>
+</ol>
+
+<p class="h">When it does not work</p>
+<table class="t"><thead><tr><th>Message</th><th>Cause and remedy</th></tr></thead><tbody>
+<tr><td><code>redirect_uri_mismatch</code></td><td>The provider's app does not list the exact address the connection shows (http or https, port, path). Add it under the redirect URIs (Google: not under JavaScript origins), wait a few minutes, connect again.</td></tr>
+<tr><td><code>access_denied</code>, <em>app not verified</em>, <em>not a test user</em></td><td>The account is not a test user of a Google app in Testing, or a Facebook app in Development mode has no role for it. Add it, or publish the app.</td></tr>
+<tr><td><code>invalid_grant</code>, <em>No refresh token</em></td><td>The sign-in ended: a Google app in Testing (7 days), a revoked access, a changed password, Facebook's 60 days. <em>Reconnect account</em>; publish the Google app or make it Internal.</td></tr>
+<tr><td><code>AADSTS50194</code> (Microsoft)</td><td>A single-organisation app signs in at <em>common</em>: set the connection's Tenant to the Directory (tenant) ID.</td></tr>
+<tr><td><code>AADSTS7000215</code> (Microsoft)</td><td>The secret is the Secret ID or expired: copy the secret's Value, or make a new one.</td></tr>
+<tr><td>403 <em>insufficient permissions</em> or <em>scope</em></td><td>The scopes in the connection or the app's permissions do not cover the operation. Add them, then <em>Reconnect account</em> (new scopes need a new sign-in).</td></tr>
+<tr><td>404 on a folder or file that exists</td><td>The account cannot see it (not shared with it), or the scope is Google's <code>drive.file</code>, which sees only files SutraFlow made.</td></tr>
+<tr><td>Time-outs on big files</td><td>Stream to and from server files, raise <em>Wait for each call</em> and the step's time limit.</td></tr>
+</tbody></table>`,
+  },
+  {
     id: 'prod-connections', title: 'Connections on production servers',
     html: `
 <p>A project deployed to another server brings its connections, but never their passwords, keys or tokens. Each server signs in on its own, so test and production can use different accounts, and a package can go to production without anyone copying a secret.</p>
@@ -1224,6 +1337,7 @@ print(json.dumps({"total": 42}))                              # the last line, a
 <tr><td>Azure identities</td><td>Best: a managed identity on the production server (no secret). Else a service principal per environment, its secret in that server's vault.</td></tr>
 <tr><td>OAuth accounts (Google, YouTube, Twitch, Dropbox, Facebook, Microsoft)</td><td>One of: <strong>sutra connect</strong> (below); a <strong>refresh token secret</strong> on the connection; or Connect account in that server's studio. Tokens are encrypted with that server's master key and never leave it.</td></tr>
 </tbody></table>
+<p>Setting up each provider's app (client ID, secret, redirect address, scopes) and signing in, step by step: <a href="#ch-oauth-setup">OAuth connections step by step</a>.</p>
 <p class="h">sutra connect</p>
 <pre>sutra connect "Sample Google (Drive and YouTube)" --project Media --server https://prod-engine:4800 --token $TOKEN</pre>
 <p>It prints the sign-in address for that server; open it in a browser, sign in to the account, and the command reports when the server has its tokens. The OAuth app must list that server's redirect address (shown by the command). Headless engines accept it too.</p>

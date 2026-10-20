@@ -30,7 +30,10 @@ interface Stored { access: { iv: string; tag: string; data: string }; refresh?: 
 
 const endpoints = (r: Resource) => {
   const p = PROVIDERS[r.config.provider];
-  return { auth: r.config.authUrl || p?.auth, token: r.config.tokenUrl || p?.token, extra: p?.extraAuth || {}, api: r.config.apiBase || p?.api || '' };
+  // Microsoft: an app registered for one organisation signs in at that organisation's tenant, not at common.
+  const tenant = r.config.provider === 'microsoft' ? String(r.config.tenant || '').trim() : '';
+  const t = (u?: string) => (u && tenant && /^[\w.-]+$/.test(tenant) ? u.replace('/common/', `/${tenant}/`) : u);
+  return { auth: r.config.authUrl || t(p?.auth), token: r.config.tokenUrl || t(p?.token), extra: p?.extraAuth || {}, api: r.config.apiBase || p?.api || '' };
 };
 
 function stateKey(): Buffer {

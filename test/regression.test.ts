@@ -340,3 +340,13 @@ test('the README test badge said 275 while the suite had grown past 300: it must
   const badge = /badge\/tests-(\d+)-/.exec(fs.readFileSync(path.join(root, 'README.md'), 'utf8'))?.[1];
   assert.equal(Number(badge), n, `README badge shows ${badge}, the files have ${n} tests`);
 });
+
+test('a Microsoft connection for one organisation signed in at "common", which such apps refuse (AADSTS50194): the tenant is used', async () => {
+  const { saveResource } = await import('../server/src/resources.js');
+  const oauth = await import('../server/src/connectors/oauth.js');
+  const pid = projects.saveProject({ name: 'Tenant check', config: { variables: [] } }).id;
+  const one = saveResource({ kind: 'oauthApp', name: 'Contoso files', project_id: pid, config: { provider: 'microsoft', tenant: 'contoso.onmicrosoft.com', clientId: 'cid', scopes: 'Files.Read.All offline_access' } });
+  const any = saveResource({ kind: 'oauthApp', name: 'Any files', project_id: pid, config: { provider: 'microsoft', clientId: 'cid', scopes: 'Files.Read.All offline_access' } });
+  assert.match(oauth.startUrl(one.id, 'http://127.0.0.1:4800/api/oauth/callback'), /^https:\/\/login\.microsoftonline\.com\/contoso\.onmicrosoft\.com\/oauth2\/v2\.0\/authorize\?/);
+  assert.match(oauth.startUrl(any.id, 'http://127.0.0.1:4800/api/oauth/callback'), /^https:\/\/login\.microsoftonline\.com\/common\/oauth2\/v2\.0\/authorize\?/);
+});
