@@ -188,9 +188,10 @@ export const STREAM_FORMATS = ['CSV rows', 'lines'];
 
 /**
  * Reads a CSV or line file as a stream and hands its rows over in batches, so a file of any size needs
- * only one batch in memory. onBatch may be async: reading waits for it (back pressure).
+ * only one batch in memory. onBatch may be async: reading waits for it (back pressure). The source is a
+ * file path, or a stream (a download read as it arrives, never saved).
  */
-export async function streamRows(file: string, cfg: Record<string, any>, schema: SNode | null, batchSize: number, onBatch: (rows: any[], batch: number) => void | Promise<void>, signal?: AbortSignal) {
+export async function streamRows(file: string | AsyncIterable<Uint8Array>, cfg: Record<string, any>, schema: SNode | null, batchSize: number, onBatch: (rows: any[], batch: number) => void | Promise<void>, signal?: AbortSignal) {
   const fmt = cfg.format || 'text';
   if (!STREAM_FORMATS.includes(fmt)) throw new Error(`Streaming reads CSV rows or lines, not ${fmt}`);
   const enc = String(cfg.encoding || 'utf-8').toLowerCase();
@@ -220,8 +221,8 @@ export async function streamRows(file: string, cfg: Record<string, any>, schema:
       await add({ number: ++line, line: l.endsWith('\r') && !last ? l.slice(0, -1) : l });
     }
   };
-  const stream = fs.createReadStream(file, { highWaterMark: 256 * 1024, signal });
-  for await (const chunk of stream) await takeText(decoder.decode(chunk as Buffer, { stream: true }), false);
+  const stream = typeof file === 'string' ? fs.createReadStream(file, { highWaterMark: 256 * 1024, signal }) : file;
+  for await (const chunk of stream) { if (signal?.aborted) throw new Error('Step was cancelled'); await takeText(decoder.decode(chunk as Uint8Array, { stream: true }), false); }
   await takeText(decoder.decode(), true);
   await flush();
   return { count, batches };

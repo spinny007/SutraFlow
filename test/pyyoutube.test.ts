@@ -220,3 +220,14 @@ test('Google Drive: a server file is uploaded streamed (resumable) and fetched b
   assert.deepEqual(JSON.parse(start.body.toString()), { name: 'orders-big.csv', parents: ['FOLDER1'] });
   assert.ok(fs.readFileSync(back).equals(fs.readFileSync(src)), 'the file came back unchanged');
 });
+
+test('Google Drive: a CSV is read as it downloads, in batches of rows, never saved to disk', async () => {
+  const g = saveResource({ kind: 'oauthApp', name: 'Google files read', project_id: pid, config: { provider: 'google', clientId: 'g-client', tokenUrl: `${base}/token`, apiBase: base, refreshTokenSecret: 'GOOGLE_REFRESH' } });
+  const s = node('start', 'Start', { payload: '{}' });
+  const d = node('googleDrive', 'Read', { connection: g.id, op: 'download', fileId: 'DRV9', saveTo: 'rows in batches', rowsFormat: 'CSV rows', batchSize: 20000 });
+  const b = node('jsonata', 'Batch', { source: '{{input}}', expression: '{ "n": count, "first": rows[0].id }' });
+  const t = node('jsonata', 'Totals', { source: '{{input}}', expression: '{ "count": count, "batches": batches, "streamed": streamed, "name": name }' });
+  const id = await engine.startRun({ doc: { name: 'Drive rows', nodes: [s, d, b, t], edges: [edge(s, d), { ...edge(d, b), port: 'batch' }, edge(d, t)] }, projectId: pid });
+  assert.equal(await engine.waitFor(id, 30000), 'done', JSON.stringify(runState(id)!.logs));
+  assert.deepEqual(runState(id)!.outputs.Totals, { count: 50000, batches: 3, streamed: true, name: 'orders.csv' });
+});

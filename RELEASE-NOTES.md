@@ -50,6 +50,7 @@ Each comes with a `.sha256` file to check the download.
 - Read remote file (SFTP, FTP) can **stream** big CSV and line files in batches, like Read file.
 - Microsoft OAuth connections have a **Tenant** setting: apps registered for one organisation sign in at its tenant (they refuse the common endpoint).
 - User guide: *OAuth connections step by step* for Google (Drive, Sheets, Docs, YouTube), Microsoft (SharePoint, OneDrive), Dropbox, Facebook, Twitch and custom services, from creating the client to signing in on production servers; how to find folder and file IDs; troubleshooting.
+- Google Drive reads big CSV and text files **as they download**, in batches of rows, without saving them (*Save to: rows in batches*).
 - Google Drive uploads a **server file streamed** (a resumable upload), and has *Wait for each call* (5 minutes by default) for slow links; Drive steps get a 30-minute time limit.
 - Fixed: after PostgreSQL was unreachable for a moment (a restart, a network cut), an engine's synchronous connection never came back and the engine hung. It now opens the connection again (10 tries), never repeats a statement that may have run, and fails a transaction the connection was lost in until it is rolled back. Found by the soak test.
 - Built-in knowledge bases write and read through the connection pool in batches, and make vectors in slices, so learning a big document no longer holds the engine.

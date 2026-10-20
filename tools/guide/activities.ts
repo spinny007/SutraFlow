@@ -517,7 +517,7 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     output: ['<code>rows</code> and <code>count</code>, or the update result.'],
   },
   googleDrive: {
-    scope: ['List, read (with Google Docs exported as text, PDF and other formats), upload, update, append and delete files.', 'Big files both ways without holding them in memory: download with <em>Save to: server file</em>, upload with <em>Upload from: server file</em> (a resumable upload).', '<em>Wait for each call</em> (5 minutes by default) for slow links; streamed transfers run until the time limit of the step, 30 minutes by default.'],
+    scope: ['List, read (with Google Docs exported as text, PDF and other formats), upload, update, append and delete files.', 'Big files both ways without holding them in memory: download with <em>Save to: server file</em>, upload with <em>Upload from: server file</em> (a resumable upload).', 'Big CSV and text files (and Sheets exported as CSV) read without saving them: <em>Save to: rows in batches</em> reads the file as it downloads and sends its rows on the <em>batch</em> output, one batch in memory at a time.', '<em>Wait for each call</em> (5 minutes by default) for slow links; streamed transfers run until the time limit of the step, 30 minutes by default.'],
     outScope: ['Sharing permissions.'],
     use: ['Reading documents people keep in Drive; saving reports to Drive.'],
     steps: ['Pick the Google connection and the operation.', 'Fill in the folder or file id and the content.'],

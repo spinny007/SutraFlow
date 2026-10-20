@@ -36,6 +36,7 @@
  *   --files-every 20 --rag-every 60 --sftp-every 30     minutes between big files, documents, SFTP files
  *   --scale 1                   multiplies the request rates
  *   --no-ai --no-kill --no-outage --no-big                leave parts out
+ *   --drive-sizes 30,40,50,60   Google Drive file sizes in MB, in turn; --drive-every 45 (minutes)
  *   --share \\server\share\soak   the folder the folder trigger watches: a real shared location (a
  *                               network share or a mounted drive); default a folder of its own here
  *
@@ -101,8 +102,17 @@ const OLLAMA = opt('ollama', 'http://127.0.0.1:11434'), MODEL = opt('model', 'ph
 const SIZES = String(opt('files', '10,20,30,40,50,60')).split(',').map(Number).filter(n => n > 0);
 const AI = !flag('no-ai'), KILL = !flag('no-kill'), OUTAGE = !flag('no-outage'), BIG = !flag('no-big');
 const SHARE = opt('share');
-const GOOGLE = process.env.SOAK_GOOGLE_CLIENT_ID && process.env.SOAK_GOOGLE_CLIENT_SECRET && process.env.SOAK_DRIVE_FOLDER && fs.existsSync(GOOGLE_FILE)
-  ? { clientId: process.env.SOAK_GOOGLE_CLIENT_ID, clientSecret: process.env.SOAK_GOOGLE_CLIENT_SECRET, folder: process.env.SOAK_DRIVE_FOLDER, refreshToken: JSON.parse(fs.readFileSync(GOOGLE_FILE, 'utf8')).refreshToken } : null;
+// Google Drive: the client, folder and refresh token from the environment or from data/soak-google.json
+// (clientId, clientSecret, folder, refreshToken); the file is outside Git.
+const GOOGLE = (() => {
+  const f = fs.existsSync(GOOGLE_FILE) ? JSON.parse(fs.readFileSync(GOOGLE_FILE, 'utf8')) : {};
+  const g = { clientId: process.env.SOAK_GOOGLE_CLIENT_ID || f.clientId, clientSecret: process.env.SOAK_GOOGLE_CLIENT_SECRET || f.clientSecret, folder: process.env.SOAK_DRIVE_FOLDER || f.folder, refreshToken: f.refreshToken };
+  return g.clientId && g.clientSecret && g.folder && g.refreshToken ? g : null;
+})();
+// --drive-sizes 30,40,50,60: the sizes of the Drive files, in turn (default: --files).
+const DRIVE_SIZES = String(opt('drive-sizes', '')).split(',').map(Number).filter(n => n > 0);
+let driveAt = 0;
+const nextDriveSize = () => (DRIVE_SIZES.length ? DRIVE_SIZES[driveAt++ % DRIVE_SIZES.length] : nextSize());
 const MAIN = path.join(HOME, 'dist', 'server', 'main.js');
 if (!fs.existsSync(MAIN)) { console.error('Build first: npm run build'); process.exit(2); }
 const TOKEN = crypto.randomBytes(16).toString('hex');
@@ -382,11 +392,10 @@ async function sutra(name, nodes, edges, tuning) {
   if (google) {
     const gs = N('start', 'Start', { payload: '{}' });
     const gu = N('googleDrive', 'Upload', { connection: google.id, op: 'upload', from: 'server file', filePath: '{{input.path}}', name: '{{input.name}}', folderId: GOOGLE.folder, mimeType: 'text/csv', overwrite: true, timeoutSec: 900 }, { timeoutMs: 3600000 });
-    const gd = N('googleDrive', 'Fetch', { connection: google.id, op: 'download', fileId: '{{input.id}}', saveTo: 'server file', savePath: '{{trigger.path}}.back', timeoutSec: 900 }, { timeoutMs: 3600000 });
-    const gr = N('fileRead', 'Stream', { folder: path.dirname(inbox), path: '{{trigger.name}}.back', format: 'CSV rows', stream: true, batchSize: 20000 }, { timeoutMs: 3600000 });
+    const gd = N('googleDrive', 'Read back', { connection: google.id, op: 'download', fileId: '{{input.id}}', saveTo: 'rows in batches', rowsFormat: 'CSV rows', batchSize: 20000, timeoutSec: 900 }, { timeoutMs: 3600000 });
     const gb = N('jsonata', 'Batch', { source: '{{input}}', expression: '{ "count": count }' });
     const gt = N('jsonata', 'Totals', { source: '{{input}}', expression: '{ "rows": count, "batches": batches }' });
-    await sutra('Soak Google Drive', [gs, gu, gd, gr, gb, gt], [E(gs, gu), E(gu, gd), E(gd, gr), E(gr, gb, 'batch'), E(gr, gt)], { stepData: 'errors only' });
+    await sutra('Soak Google Drive', [gs, gu, gd, gb, gt], [E(gs, gu), E(gu, gd), E(gd, gb, 'batch'), E(gd, gt)], { stepData: 'errors only' });
   }
   const ft = N('fileTrigger', 'Inbox', { folder: inbox, pattern: '*.csv', events: ['added'], pollSeconds: 10, stableSeconds: 3, format: 'do not read' });
   const fr = N('fileRead', 'Stream', { folder: inbox, path: '{{input.name}}', format: 'CSV rows', stream: true, batchSize: 20000, maxMb: 100 }, { timeoutMs: 3600000 });
@@ -597,7 +606,7 @@ if (BIG) {
     event('file', `${name}: ${rows} rows to the FTP inbox`);
   }, 1);
   if (google) every('Google Drive upload and fetch (streamed)', Number(opt('drive-every', 45)) * 60000, async () => {
-    const mb = nextSize(), name = `soak-drive-${mb}mb.csv`, p = path.join(inbox, '..', name);
+    const mb = nextDriveSize(), name = `soak-drive-${mb}mb.csv`, p = path.join(inbox, '..', name);
     const rows = writeCsv(p, mb);
     const t = Date.now();
     const r = await runApi('Soak Google Drive', { path: p, name }, 120000);
@@ -606,7 +615,7 @@ if (BIG) {
     const got = d.outputs?.Totals?.rows;
     files.drive.push({ name, mb, rows, got, status: d.status, seconds: Math.round((Date.now() - t) / 1000), error: d.error || null });
     event('drive', `${name}: ${d.status} in ${Math.round((Date.now() - t) / 1000)} s, ${got ?? '?'} of ${rows} rows back${d.error ? `: ${d.error}` : ''}`);
-    fs.rmSync(p, { force: true }); fs.rmSync(`${p}.back`, { force: true });
+    fs.rmSync(p, { force: true });
     expect(d.status === 'done' && Number(got) === rows, `run ${d.status}: ${d.error || `${got} of ${rows} rows`}`);
   }, 1);
   every('RAG document ingest', Number(opt('rag-every', 60)) * 60000, async () => {

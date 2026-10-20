@@ -16,6 +16,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { apiCall, streamCall } from './oauth.js';
 import { F, when, isObj, writeFields, writeMode, appended } from '../palettes/common.js';
+import { streamRows } from '../palettes/fileformat.js';
 
 /** Activities for Google Sheets, Google Drive / Docs, Dropbox, YouTube, Facebook Pages, and any REST API of a connected account. */
 const conn = (help?: string) => F('connection', 'Account (OAuth connection)', 'resource', '', { resourceKind: 'oauthApp', help });
@@ -96,7 +97,7 @@ export const saasActivities: Activity[] = [
     },
   },
   {
-    type: 'googleDrive', palette: 'apps', name: 'Google Drive / Docs', glyph: '△', ports: ['out'], timeoutMs: 1800000,
+    type: 'googleDrive', palette: 'apps', name: 'Google Drive / Docs', glyph: '△', ports: cfg => (cfg.saveTo === 'rows in batches' && ['download', 'export'].includes(cfg.op) ? ['batch', 'out'] : ['out']), timeoutMs: 1800000,
     desc: 'Lists, uploads, downloads files, and exports Google Docs/Sheets as text, PDF, CSV or Word.',
     fields: [
       conn('Scope https://www.googleapis.com/auth/drive'),
@@ -104,7 +105,11 @@ export const saasActivities: Activity[] = [
       F('folderId', 'Folder id', 'text', '', { tpl: true, ...when('op', 'list', 'upload') }),
       F('q', 'Search (Drive query)', 'text', "trashed = false", { tpl: true, ...when('op', 'list'), help: "e.g. mimeType = 'application/vnd.google-apps.document'" }),
       F('fileId', 'File id', 'text', '{{input.id}}', { tpl: true, ...when('op', 'download', 'export') }),
-      F('saveTo', 'Save to', 'select', 'step output', { options: ['step output', 'server file'], ...when('op', 'download', 'export'), help: 'server file: streamed to disk, for videos and other large files (then YouTube, SFTP or Read document text can take the file).' }),
+      F('saveTo', 'Save to', 'select', 'step output', { options: ['step output', 'server file', 'rows in batches'], ...when('op', 'download', 'export'), help: 'server file: streamed to disk, for videos and other large files. rows in batches: a CSV or text file (or a Sheet exported as CSV) read as it downloads, never saved; its rows come out on the batch output, one batch in memory at a time. step output: the content in the output, for small files.' }),
+      F('rowsFormat', 'Read as', 'select', 'CSV rows', { options: ['CSV rows', 'lines'], ...when('saveTo', 'rows in batches') }),
+      F('delimiter', 'Delimiter', 'select', ',', { options: [',', ';', 'tab', '|'], showIf: { k: 'rowsFormat', in: ['CSV rows'] } }),
+      F('header', 'First row has column names', 'bool', true, { showIf: { k: 'rowsFormat', in: ['CSV rows'] } }),
+      F('batchSize', 'Rows per batch', 'number', 1000, when('saveTo', 'rows in batches')),
       F('savePath', 'Server file', 'text', "=concat({gv.DOWNLOADS}, '/', {input.name})", { tpl: true, ...when('saveTo', 'server file'), help: 'Full path of the file to write; its folder is made when missing.' }),
       F('exportAs', 'Export as', 'select', 'text/plain', { options: ['text/plain', 'text/html', 'application/pdf', 'text/csv', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'], ...when('op', 'export') }),
       F('name', 'File name', 'text', 'report.csv', { tpl: true, ...when('op', 'upload'), help: 'With Upload from server file: empty = the name of the file.' }),
@@ -129,6 +134,16 @@ export const saasActivities: Activity[] = [
         const id = encodeURIComponent(String(c.v('fileId')));
         const url = op === 'export' ? `${DRIVE}/files/${id}/export` : `${DRIVE}/files/${id}`;
         const textual = op === 'export' && /^text\//.test(c.raw('exportAs'));
+        if (c.raw('saveTo') === 'rows in batches') {
+          // Read as it downloads: the rows go out in batches and the file is never held or saved.
+          const meta = (await call(c, { method: 'GET', url: `${DRIVE}/files/${id}`, query: { fields: 'id,name,mimeType,size,modifiedTime' } })).body;
+          const q = new URLSearchParams(op === 'export' ? { mimeType: c.raw('exportAs') } : { alt: 'media' });
+          const res = await streamCall(c.raw('connection'), `${url}?${q}`, { method: 'GET', signal: c.signal });
+          const file = { fileId: c.v('fileId'), name: meta.name, mimeType: meta.mimeType, size: Number(meta.size) || null, modifiedTime: meta.modifiedTime };
+          const r = await streamRows(Readable.fromWeb(res.body as any), { format: c.raw('rowsFormat') || 'CSV rows', delimiter: c.raw('delimiter'), header: c.raw('header'), encoding: 'utf-8' }, null,
+            Number(c.raw('batchSize')) || 1000, (rows, batch) => c.emit('batch', { rows, batch, count: rows.length, file }), c.signal);
+          return { port: 'out', out: { ...file, ...r, streamed: true } };
+        }
         if (c.raw('saveTo') === 'server file') {
           const target = String(c.v('savePath') || '').trim();
           if (!target) throw new Error('Server file is not set');
