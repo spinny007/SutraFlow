@@ -19,7 +19,10 @@ import { registerListener } from '../listeners.js';
 import { getSetting, setSetting } from '../db.js';
 import { F, when, writeFields, writeMode, appended } from '../palettes/common.js';
 import { readFields, writeFormatFields, parseContent, contentShape, buildContent } from '../palettes/fileformat.js';
-import { wildcard } from '../palettes/file.js';
+import { wildcard, streamFields, streaming, batchShape } from '../palettes/file.js';
+import { streamRows } from '../palettes/fileformat.js';
+import fs from 'node:fs';
+import os from 'node:os';
 
 const require = createRequire(import.meta.url);
 
@@ -257,13 +260,23 @@ export const remoteActivities: Activity[] = [
     }),
   },
   {
-    type: 'remoteRead', palette: 'remote', name: 'Read remote file', glyph: '⇩', ports: ['out'], timeoutMs: 600000,
-    desc: 'Reads a file from an SFTP or FTP server as text, CSV rows, lines, JSON, XML or base64 bytes.',
-    fields: [...connFields(), F('path', 'File (relative to the base folder)', 'text', 'inbox/{{input.name}}', { tpl: true }), ...readFields(), F('maxMb', 'Maximum size (MB)', 'number', 50)],
-    outputSchema: (cfg, h) => shape(h, cfg),
+    type: 'remoteRead', palette: 'remote', name: 'Read remote file', glyph: '⇩', ports: cfg => (streaming(cfg) ? ['batch', 'out'] : ['out']), timeoutMs: 600000,
+    desc: 'Reads a file from an SFTP or FTP server as text, CSV rows, lines, JSON, XML or base64 bytes. Big CSV and line files can be streamed in batches.',
+    fields: [...connFields(), F('path', 'File (relative to the base folder)', 'text', 'inbox/{{input.name}}', { tpl: true }), ...readFields(), ...streamFields(), F('maxMb', 'Maximum size (MB)', 'number', 50, { help: 'Files read whole are held in memory. For bigger CSV or line files, stream them in batches.' })],
+    outputSchema: (cfg, h) => (streaming(cfg) ? { name: 'out', type: 'object', children: [...batchShape(h, cfg).children!, { name: 'batches', type: 'integer' }, { name: 'streamed', type: 'boolean' }] } : shape(h, cfg)),
     execute: async c => withRemote(resourceOf(c), secretOf(c), async x => {
       const p = remotePath(x.base, String(c.v('path') ?? ''));
       const st = await x.stat(p);
+      if (streaming({ format: c.raw('format'), stream: c.raw('stream') })) {
+        // Downloaded to a temporary file, then read piece by piece: one batch of rows in memory at a time.
+        const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-remote-')), 'file');
+        try {
+          fs.writeFileSync(tmp, await x.get(p));
+          const file = info(st, x.base, x.host);
+          const r = await streamRows(tmp, readCfg(c), schemaOf(c), Number(c.raw('batchSize')) || 1000, (rows, batch) => c.emit('batch', { rows, batch, count: rows.length, file }), c.signal);
+          return { port: 'out', out: { ...file, ...r, streamed: true } };
+        } finally { fs.rmSync(path.dirname(tmp), { recursive: true, force: true }); }
+      }
       const max = (Number(c.raw('maxMb')) || 50) * 1048576;
       if (st.size > max) throw new Error(`${st.name} is larger than ${Math.round(max / 1048576)} MB`);
       return { out: { ...info(st, x.base, x.host), ...parseContent(await x.get(p), readCfg(c), schemaOf(c)) } };

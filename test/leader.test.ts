@@ -1,0 +1,40 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.8.0
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { testEnv } from './helpers.js';
+
+/** SUTRA_CAN_LEAD=0: an engine that must not lead (it cannot reach the watched folders, say) never takes the lease. */
+testEnv(20880);
+const { boot } = await import('../server/src/index.js');
+const { config } = await import('../server/src/config.js');
+const { beat, cluster, clusterStatus } = await import('../server/src/cluster.js');
+const { q } = await import('../server/src/db.js');
+
+let srv: Awaited<ReturnType<typeof boot>>;
+before(async () => { srv = await boot({ listenAdmin: false, gateway: false }); });
+after(async () => { (config as any).canLead = true; await srv.stop(); });
+
+test('an engine with SUTRA_CAN_LEAD=0 lets go of the lease and never takes it; others can', async () => {
+  beat();
+  assert.equal(cluster.leader, true, 'alone, it leads');
+  (config as any).canLead = false;
+  q.run('update engines set can_lead = 0 where id = ?', config.engineId);
+  beat();
+  assert.equal(cluster.leader, false, 'it let go');
+  assert.equal(q.get('select 1 from leases where name = ? and holder = ?', 'leader', config.engineId), undefined);
+  beat();
+  assert.equal(cluster.leader, false, 'and does not take it again');
+  assert.equal(clusterStatus().leader, null);
+  assert.equal(clusterStatus().engines.find((e: any) => e.id === config.engineId)?.canLead, false, 'the Admin Console shows it');
+  (config as any).canLead = true;
+  beat();
+  assert.equal(cluster.leader, true);
+});

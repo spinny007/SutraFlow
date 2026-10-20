@@ -8,6 +8,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 import crypto from 'node:crypto';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { asyncDatabase, poolFigures } from './asyncdb.js';
 import { setEngineName } from './cluster.js';
 import { allMemTables, memTable, reload, memClear, memStats, memRows, memPut, memDelete } from './memtables.js';
@@ -118,6 +119,9 @@ function runDetail(id: string) {
   };
 }
 
+const loopDelay = monitorEventLoopDelay({ resolution: 20 });
+loopDelay.enable();
+
 export async function buildAdmin(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, bodyLimit: 20 * 1024 * 1024, forceCloseConnections: 'idle', keepAliveTimeout: config.keepAliveMs });
 
@@ -145,6 +149,9 @@ export async function buildAdmin(): Promise<FastifyInstance> {
       { name: 'sutra_engine_workers', help: 'Steps this engine may run at once.', values: [{ v: engine.concurrency }] },
       { name: 'sutra_engine_leader', help: '1 when this engine leads the cluster (timers, listeners).', values: [{ v: me?.leader ? 1 : 0 }] },
       { name: 'sutra_engines_alive', help: 'Engines with a recent heartbeat.', values: [{ v: st.engines.filter((e: any) => e.alive).length }] },
+      // How long work waited for the event loop since the last scrape: a step that computes for seconds
+      // without pausing holds every request and step of this engine for that long.
+      { name: 'sutra_event_loop_delay_ms', help: 'Event loop delay since the last scrape: p99 and max, in ms.', values: (() => { const v = [{ labels: { of: 'p99' }, v: Math.round(loopDelay.percentile(99) / 1e6) }, { labels: { of: 'max' }, v: Math.round(loopDelay.max / 1e6) }]; loopDelay.reset(); return v; })() },
       { name: 'sutra_listeners', help: 'Polling listeners on this engine by state.', values: Object.entries(listeners).map(([state, v]) => ({ labels: { state }, v })) },
       { name: 'sutra_traces_exported_total', help: 'Spans sent to the OpenTelemetry collector.', values: [{ v: tracingStats.exported }] },
       { name: 'sutra_traces_failed_total', help: 'Spans the collector did not accept.', values: [{ v: tracingStats.failed }] },

@@ -49,13 +49,13 @@ const infoShape: SNode[] = ['name', 'path', 'relativePath', 'folder', 'extension
 const shapeWith = (h: SchemaHelpers, cfg: Record<string, any>, extra: SNode[] = []): SNode => ({ name: 'out', type: 'object', children: [...extra, ...infoShape, ...contentShape(legacyRead(cfg), h.schema(cfg.schema))] });
 
 /** Streaming: big CSV and line files are read in batches of rows, each sent on the batch port. */
-const streamFields = () => [
+export const streamFields = () => [
   F('stream', 'Stream in batches', 'bool', false, { help: 'For big files: reads the file piece by piece and sends its rows in batches on the batch port while reading goes on, so only one batch is in memory. out gives the totals when the whole file is read. CSV rows and lines only; the size limit does not apply.', showIf: { k: 'format', in: STREAM_FORMATS } }),
   F('batchSize', 'Rows per batch', 'number', 1000, { help: 'Larger batches mean fewer steps per file; smaller ones less memory per step.', showIf: { k: 'stream', in: [true] } }),
 ];
-const streaming = (cfg: Record<string, any>) => !!cfg.stream && STREAM_FORMATS.includes(cfg.format);
+export const streaming = (cfg: Record<string, any>) => !!cfg.stream && STREAM_FORMATS.includes(cfg.format);
 /** What the batch port gives: the rows of one batch, its number, and the file. */
-const batchShape = (h: SchemaHelpers, cfg: Record<string, any>): SNode => {
+export const batchShape = (h: SchemaHelpers, cfg: Record<string, any>): SNode => {
   const cols = columnsOf(h.schema(cfg.schema));
   const rowKids: SNode[] = cfg.format === 'lines' ? [{ name: 'number', type: 'integer' }, { name: 'line', type: 'string' }] : cols ? cols.map(c => ({ name: c.name, type: c.type })) : [{ name: '(columns)', type: 'any' }];
   return { name: 'out', type: 'object', children: [{ name: 'rows', type: 'object', repeats: true, children: rowKids }, { name: 'batch', type: 'integer' }, { name: 'count', type: 'integer' }, { name: 'file', type: 'object', children: infoShape }] };

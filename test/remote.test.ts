@@ -180,3 +180,19 @@ test('time limits: connection attempts with waits, a response limit per operatio
   assert.equal(engine.activity('remoteRead')!.timeoutMs, 600000, 'remote steps may take up to 10 minutes by default');
   assert.equal(engine.activity('log')!.timeoutMs, undefined);
 });
+
+test('a big CSV on SFTP is streamed in batches, so only one batch is in memory and the engine keeps serving', async () => {
+  const rows = ['id,amount', ...Array.from({ length: 2500 }, (_, i) => `${i + 1},${i % 7}`)].join('\n');
+  fs.mkdirSync(path.join(sftpRoot, 'partner', 'big'), { recursive: true });
+  fs.writeFileSync(path.join(sftpRoot, 'partner', 'big', 'orders.csv'), rows);
+  const s = node('start', 'Start', { payload: '{}' });
+  const r = node('remoteRead', 'Read', { protocol: 'SFTP', sftpConn, path: 'big/orders.csv', format: 'CSV rows', stream: true, batchSize: 1000 });
+  const b = node('jsonata', 'Batch', { source: '{{input}}', expression: '{ "n": count, "batch": batch, "first": rows[0].id }' });
+  const t = node('jsonata', 'Totals', { source: '{{input}}', expression: '{ "count": count, "batches": batches, "streamed": streamed }' });
+  const res = await run([s, r, b, t], [edge(s, r), { ...edge(r, b), port: 'batch' }, edge(r, t)]);
+  assert.equal(res.status, 'done', res.error);
+  assert.deepEqual(res.out.Totals, { count: 2500, batches: 3, streamed: true });
+  const batches = q.all<any>(`select output from tasks where node_id = ? and status = 'done' order by id`, b.id).map(x => JSON.parse(x.output));
+  assert.deepEqual(batches.map(x => [x.n, x.batch]), [[1000, 1], [1000, 2], [500, 3]]);
+  assert.equal(batches[2].first, 2001);
+});

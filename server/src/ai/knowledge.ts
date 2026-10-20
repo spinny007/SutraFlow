@@ -11,6 +11,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { q, now } from '../db.js';
+import { asyncDatabase } from '../asyncdb.js';
 import { config } from '../config.js';
 import { requireResource, type Resource } from '../resources.js';
 import { httpCall } from '../security/outbound.js';
@@ -66,7 +67,16 @@ export function builtInVector(text: string, dims = 512) {
 
 /** Vectors for texts from the knowledge base's AI provider, or the built-in word vectors. */
 export async function embed(kb: Resource, secret: Secret, texts: string[], signal?: AbortSignal): Promise<{ vectors: number[][]; model: string }> {
-  if ((kb.config.embedWith || 'built-in') === 'built-in') return { vectors: texts.map(t => builtInVector(t)), model: 'built-in word vectors' };
+  if ((kb.config.embedWith || 'built-in') === 'built-in') {
+    // A long document has thousands of passages: made in slices, so the engine keeps serving meanwhile.
+    const vectors: number[][] = [];
+    for (let i = 0; i < texts.length; i += 200) {
+      if (signal?.aborted) throw new Error('Step was cancelled');
+      for (const t of texts.slice(i, i + 200)) vectors.push(builtInVector(t));
+      await new Promise(r => setImmediate(r));
+    }
+    return { vectors, model: 'built-in word vectors' };
+  }
   const p = requireResource(String(kb.config.provider || ''), 'aiProvider', 'AI provider for vectors');
   return embedWith(p, secret, String(kb.config.embedModel || ''), texts, signal);
 }
@@ -132,10 +142,34 @@ function localStore(kb: Resource): Store {
     write = cs => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, cs.map(c => JSON.stringify(c)).join('\n') + (cs.length ? '\n' : '')); };
     append = cs => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.appendFileSync(file, cs.map(c => JSON.stringify(c) + '\n').join('')); };
   } else {
-    read = () => q.all<any>('select id, source, chunk, text, meta, vector, at from ai_knowledge where kb_id = ?', kb.id)
-      .map(r => ({ id: r.id, source: r.source, chunk: Number(r.chunk), text: r.text, meta: r.meta ? JSON.parse(r.meta) : {}, vector: r.vector ? JSON.parse(r.vector) : [], at: r.at }));
-    append = cs => { for (const c of cs) q.run('insert into ai_knowledge(kb_id, id, source, chunk, text, meta, vector, at) values(?, ?, ?, ?, ?, ?, ?, ?)', kb.id, c.id, c.source, c.chunk, c.text, JSON.stringify(c.meta), JSON.stringify(c.vector), c.at); };
-    write = cs => { q.run('delete from ai_knowledge where kb_id = ?', kb.id); append(cs); };
+    // In the database, through the connection pool and in batches: a document of many passages does
+    // not hold the engine while it is written.
+    const db = asyncDatabase();
+    // A source and the sources in its folder ("Policies" and "Policies/..."), with LIKE wildcards escaped.
+    const inFolder = ` and (source = ? or source like ? escape '\\')`;
+    const folderOf = (src: string) => [src, `${src.replace(/[\\%_]/g, '\\$&')}/%`];
+    const rows = async (f: Filter) => {
+      const src = f.source && !f.all ? f.source : '';
+      const list = await db.all<any>(`select id, source, chunk, text, meta, vector, at from ai_knowledge where kb_id = ?${src ? inFolder : ''}`, kb.id, ...(src ? folderOf(src) : []));
+      return list.map((r: any) =>({ id: r.id, source: r.source, chunk: Number(r.chunk), text: r.text, meta: r.meta ? JSON.parse(r.meta) : {}, vector: r.vector ? JSON.parse(r.vector) : [], at: r.at }) as Chunk).filter(c => matches(c, f));
+    };
+    const insert = async (cs: Chunk[]) => {
+      for (let i = 0; i < cs.length; i += 200) {
+        const part = cs.slice(i, i + 200);
+        await db.run(`insert into ai_knowledge(kb_id, id, source, chunk, text, meta, vector, at) values ${part.map(() => '(?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}`,
+          ...part.flatMap(c => [kb.id, c.id, c.source, c.chunk, c.text, JSON.stringify(c.meta), JSON.stringify(c.vector), c.at]));
+      }
+    };
+    return {
+      add: insert,
+      remove: async f => {
+        if (f.all) return (await db.run('delete from ai_knowledge where kb_id = ?', kb.id)).changes;
+        if (!f.source) return 0;
+        return (await db.run(`delete from ai_knowledge where kb_id = ?${inFolder}`, kb.id, ...folderOf(f.source))).changes;
+      },
+      candidates: async (_v, _k, f) => rows(f),
+      list: async f => rows(f),
+    };
   }
   return {
     add: async cs => append(cs),

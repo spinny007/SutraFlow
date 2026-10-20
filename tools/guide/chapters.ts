@@ -435,7 +435,7 @@ export const CHAPTERS: Chapter[] = [
 <li><strong>Claim.</strong> Every engine has a number of workers (<em>Steps at once</em>, 16 by default). A free worker takes the next due task in one database statement: highest Sutra priority first, then the oldest; due means its not-before time has passed. With several engines on one database, exactly one of them wins each task and records itself as its owner. Engines look for work every quarter of a second, and at once when a step ends.</li>
 <li><strong>Prepare.</strong> The step sees: <code>{input}</code> (what the previous step sent on the connection), <code>{nodes.Step name}</code> (any earlier step's output), <code>{trigger}</code>, <code>{vars}</code> (Sutra variables), <code>{gv}</code> (project variables with the deployment config applied), <code>{ev}</code> (Sengine variables), <code>{run}</code> and secrets by name. Settings and mappings are resolved now, not earlier.</li>
 <li><strong>Execute.</strong> The activity runs within its time limit (the step's Settings, else the activity's own: 2 minutes for most, 10 for AI steps, longer for data platform steps). A step set to loop runs here many times: <em>for each item</em> one after the other, <em>repeat while</em> until the condition is false.</li>
-<li><strong>Checkpoint.</strong> In one transaction the engine stores the step's output in the run state, marks the task done, and inserts tasks for the next steps. This is the checkpoint: if the engine stops after it, nothing is lost and nothing is repeated.</li>
+<li><strong>Checkpoint.</strong> In one transaction the engine stores the step's output (one row per step, apart from the run state), marks the task done, and inserts tasks for the next steps. This is the checkpoint: if the engine stops after it, nothing is lost and nothing is repeated.</li>
 <li><strong>Route.</strong> The output goes out on one port (<em>out</em>, <em>true</em>, <em>error</em>, <em>approved</em> ...). Each connection from that port carries a <em>live</em> token, or a <em>skip</em> token when its condition is false or the port was not used. A step runs once for each live token that reaches it. A <strong>Merge</strong> step waits until every incoming connection has delivered a token (live or skip) and then runs once with the live ones; so a branch not taken never blocks it.</li>
 <li><strong>Wait.</strong> A step that waits (Approval, Ask a person, Call Sutra with wait, an AI agent waiting for a tool) stores what it waits for and its task becomes <em>waiting</em>: no worker, thread or memory is held, for a minute or a month. Wait (a delay) puts its task back as pending with a not-before time. When the answer comes, the step continues on whichever engine claims it.</li>
 <li><strong>Reply.</strong> For REST, SOAP and AI tool callers, the first reply step (Send HTTP response, SOAP reply, Reply to AI) answers the caller at once; the run may continue after it. A caller gets 504 if no reply comes within <em>Reply wait</em> (60 seconds by default).</li>
@@ -471,7 +471,7 @@ export const CHAPTERS: Chapter[] = [
 <ul>
 <li><strong>At least once.</strong> A step whose engine dies mid-step runs again on another. Steps that change things (insert an order, send money, post a message) should be safe to repeat: use the run id or a business key as an idempotency key, or check before writing.</li>
 <li><strong>Waiting is free.</strong> Approvals, people and long timers cost nothing while they wait; no need to avoid them.</li>
-<li><strong>State is rewritten each step.</strong> Every step's output stays in the run state for the rest of the run: large outputs make every later step slower and the database bigger (see <em>Designing Sutras</em>, large data).</li>
+<li><strong>Outputs are kept for the run.</strong> Every step's output stays available to later steps for the rest of the run. Since 1.8.0 a step writes only its own output, so later steps no longer pay for earlier large ones; outputs still take database space and time to read (see <em>Designing Sutras</em>, large data).</li>
 <li><strong>Names are the keys.</strong> <code>{nodes.Step name}</code> holds the latest output of that step; in parallel branches (For each) read the item from <code>{input}</code>, or call a Sutra per item.</li>
 </ul>`,
   },
@@ -582,7 +582,7 @@ export const CHAPTERS: Chapter[] = [
 <li>Keep <em>Save steps</em> on so every answer can be explained; review a sample of conversations regularly.</li>
 </ul>
 <p class="h">Large data</p>
-<p>The run state is written after every step, and every step's output stays in it. So:</p>
+<p>Every step's output is kept for the rest of the run and read by the steps after it. Steps of 1 MB measured 7.7 a second on one engine (2.6 before 1.8.0): it works, but data that does not need to be in a step's output should not be. So:</p>
 <ul>
 <li><strong>Carry references, not content</strong>: a file path, a row id, a blob address. Files: [[fileList]] without reading, then a sub-Sutra per file; save downloads to server files (Google Drive <em>Save to: server file</em>), not into outputs.</li>
 <li><strong>Stream large files</strong> with the steps that do (file copy and move, SFTP, Drive save, YouTube upload) rather than reading them into a step's output.</li>
@@ -685,9 +685,39 @@ curl http://127.0.0.1:8080/orders/A-1001 -H "Authorization: Bearer ACCESS_TOKEN"
 <tr><td>Basic</td><td>User name and password; passwords are vault secrets.</td></tr>
 <tr><td>API key</td><td>A key in a header; keys are vault secrets.</td></tr>
 <tr><td>JWT bearer</td><td>A signed token, checked with a JWKS URL, a public key or a shared secret; issuer, audience and scopes.</td></tr>
+<tr><td>Gateway apps</td><td>Keys and OAuth client-credentials tokens of apps in the Admin Console, with scopes and plans.</td></tr>
+<tr><td>OAuth token introspection</td><td>An opaque access token, checked at the identity provider's introspection endpoint (answers kept until the token expires or the cache time); audience and scopes.</td></tr>
+<tr><td>HMAC signature</td><td>The request signed with a shared secret, as webhook senders do: the timestamp and body, or the method, path, timestamp and body, or the body only. Old timestamps and replays are refused.</td></tr>
 <tr><td>WS-Security UsernameToken</td><td>SOAP only; password digest with a time window and replay protection.</td></tr>
+<tr><td>WS-Security X.509</td><td>SOAP only; the request signed with a certificate the policy trusts (the certificate itself, or a CA that issued it). The Body and the Timestamp must be signed.</td></tr>
+<tr><td>WS-Security SAML</td><td>SOAP only; a SAML 1.1 or 2.0 assertion signed by the identity provider, from the expected issuer, for this audience, in its validity period.</td></tr>
 <tr><td>Mutual TLS</td><td>A client certificate signed by the client CA set in Server &amp; APIs; optionally only listed subjects.</td></tr>
 </tbody></table>
+<p class="h">Scopes per service and per operation</p>
+<p>A token or gateway app carries scopes. The policy can require some for everything it protects; a [[restService]] can require more (<em>Required scopes</em>), and a [[soapService]] per operation (<em>Scopes per operation</em>: <code>CancelOrder = orders:cancel</code>). A caller without them gets 403 <code>insufficient_scope</code>.</p>
+<p class="h">Message validation</p>
+<p>Give the trigger a schema and set <em>Validate requests</em> to <em>reject invalid</em>: the body is checked before a run starts, and a bad request gets 400 (REST, with the list of errors) or a Client fault (SOAP).</p>
+<ul>
+<li><strong>JSON Schema</strong> (drafts 07, 2019-09 and 2020-12): required fields, types, patterns, formats such as email and date-time, ranges, allowed values, no extra fields when the schema says so.</li>
+<li><strong>A JSON sample</strong>: the types of the fields it shows; other fields are allowed.</li>
+<li><strong>An XSD element</strong>: required elements and attributes, types, single or repeated, allowed values, and nothing the XSD does not declare. A SOAP service checks each operation against the element of the same name.</li>
+</ul>
+<p class="h">Threat protection</p>
+<p>Every policy limits what a message may hold, before the Sutra sees it: nesting depth (checked on the raw text, before parsing), fields per message, items per list, the length of one text value, and the body size. XML with a DOCTYPE is always refused, so entity tricks (billion laughs, external entities) never reach the parser. Services without a policy get generous limits (depth 64, 50,000 fields).</p>
+<p class="h">HMAC-signed webhooks, step by step</p>
+<ol>
+<li>Put the shared secret in the vault (Resources &rarr; Secrets), for example <code>PARTNER_HOOK_SECRET</code>.</li>
+<li>Create an API security policy with <em>hmac</em>, the secret under <em>Accepted secrets</em>, and the sender's header names, algorithm, encoding and prefix (many senders: <code>X-Hub-Signature-256</code>, <code>sha256=</code>, body only).</li>
+<li>To change the secret without missing calls, list the new one beside the old one until the sender has switched.</li>
+<li>Pick the policy on the [[restService]]. The caller's <code>auth.subject</code> is the name of the secret that matched.</li>
+</ol>
+<p class="h">WS-Security on incoming SOAP</p>
+<ul>
+<li><strong>Timestamps</strong>: a Timestamp that is present is always checked (created not in the future, not expired, within the allowed clock difference); set <em>Timestamp: required</em> to refuse messages without one.</li>
+<li><strong>X.509</strong>: paste the callers' certificates, or the CA that issues them, into <em>Trusted certificates</em>. A changed body, an untrusted or expired certificate, an unsigned Timestamp or a second Body is refused.</li>
+<li><strong>SAML</strong>: paste the identity provider's signing certificate, and set the issuer and audience.</li>
+<li><strong>Encrypted requests</strong>: put this service's private key in the vault and pick it under <em>XML encryption</em>; give callers the matching certificate. Requests encrypted for it are decrypted first (AES-GCM or AES-CBC, keys by RSA-OAEP; RSA 1.5 is refused), then checked. <em>Require an encrypted body</em> refuses plain ones.</li>
+</ul>
 [[img:resources|Resources: an API security policy using API keys held in the vault.]]
 <p class="h">TLS certificate of the gateway</p>
 <ul>
@@ -717,7 +747,9 @@ curl http://127.0.0.1:8080/orders/A-1001 -H "Authorization: Bearer ACCESS_TOKEN"
 <tr><td>WS-Security UsernameToken</td><td>SOAP</td><td>Password digest (nonce and created) or text, optional timestamp.</td></tr>
 <tr><td>WS-Security SAML token</td><td>SOAP</td><td>A SAML 1.1 or 2.0 assertion from the vault or from an earlier step (for example a token service call).</td></tr>
 <tr><td>WS-Security X.509</td><td>SOAP</td><td>A binary security token and an XML signature over Body and Timestamp.</td></tr>
+<tr><td>HMAC</td><td>HTTP</td><td>The body (with a timestamp, or the method, path and timestamp) signed with a shared secret, in the receiver's header names and format.</td></tr>
 </tbody></table>
+<p>Every WS-Security profile can also <strong>encrypt the Body</strong> for the receiving service: paste its certificate under <em>Encrypt the body for</em>. A signed message is signed first, then encrypted, as receivers expect. AES-256-GCM is the default; choose CBC only for services that do not support GCM.</p>
 <p>See [[httpRequest]] and [[soapInvoke]].</p>`,
   },
   {
@@ -729,6 +761,38 @@ curl http://127.0.0.1:8080/orders/A-1001 -H "Authorization: Bearer ACCESS_TOKEN"
 <li>JMS headers: delivery mode (persistent or not), priority, time to live, message id, correlation id, reply-to and type; plus your own properties.</li>
 <li>Acknowledgement: <em>auto</em> on receipt, <em>client</em> after the run succeeds, <em>explicit</em> with Confirm message. On failure: requeue, or send to the dead-letter queue after a number of redeliveries.</li>
 </ul>`,
+  },
+  {
+    id: 'websocket', title: 'WebSockets: live connections',
+    html: `
+<p>A WebSocket is a connection that stays open, so either side can send at any time: a page that shows an order's status as it changes, a dashboard, a device. SutraFlow serves WebSockets on the gateway, and connects to other WebSocket servers.</p>
+<p class="h">A WebSocket service, step by step</p>
+<ol>
+<li>Add a [[wsService]] trigger. Set its path (<code>/ws/orders</code>) and an API security policy.</li>
+<li>Connect its <em>message</em> output to the steps that handle a message, and end with [[wsSend]] (<em>this connection</em>) to answer.</li>
+<li>Optionally connect <em>open</em> (a client connected: send a welcome, or keep its <code>connectionId</code> in a memory table) and <em>close</em>.</li>
+<li>Deploy. Clients connect to <code>ws://host:8080/ws/orders</code> or <code>wss://host:8443/ws/orders</code>.</li>
+</ol>
+<pre>const ws = new WebSocket('wss://api.example.com:8443/ws/orders?access_token=' + token);
+ws.onmessage = e =&gt; console.log(JSON.parse(e.data));
+ws.onopen = () =&gt; ws.send(JSON.stringify({ type: 'watch', orderId: 'A-1001' }));</pre>
+<p class="h">Security</p>
+<ul>
+<li>The policy is checked once, when the client connects: API keys, JWT, token introspection, gateway apps, Basic, mutual TLS, IP lists and rate limits work as for REST.</li>
+<li>Browsers cannot set headers on a WebSocket: they pass a token as <code>?access_token=</code>, or the API key under the policy's key header name, such as <code>?X-API-Key=</code>.</li>
+<li>With CORS origins on the policy, only pages from those origins may connect.</li>
+<li>Each message is checked for size (<em>Max message size</em>), nesting and the policy's threat limits, and against the message schema when <em>Validate messages</em> is on. A bad message gets an error message back and starts no run.</li>
+</ul>
+<p class="h">Pushing and broadcasting</p>
+<p>[[wsSend]] can write to any connection by its id (from an earlier message, a memory table, or a database), or to every connection of a service. In a cluster a connection stays on the engine that accepted it; a step on another engine leaves the message in the database and that engine delivers it within a fraction of a second. Server &amp; APIs lists the WebSocket services with their ws:// and wss:// addresses.</p>
+<p class="h">Order and load</p>
+<p>By default a connection's messages are handled one at a time, so answers come back in order. Turn <em>One message at a time per connection</em> off for independent messages that may run side by side. A client that sends faster than its runs finish is closed after 1,000 waiting messages rather than filling memory; a client that stops answering pings is dropped after 30 seconds.</p>
+<p class="h">Connecting to other WebSocket servers</p>
+<ol>
+<li>Create a <em>WebSocket connection</em> in Resources: the address (<code>wss://...</code>), headers such as <code>Authorization = Bearer {{secret.STREAM_TOKEN}}</code>, and how it reconnects.</li>
+<li>For a stream, add a [[wsClientTrigger]] with the subscribe message the server expects. Each message it receives starts a run; when the connection drops it reconnects and subscribes again. In a cluster the leader holds the connection.</li>
+<li>To ask once and wait for the answer, use [[wsClientSend]], with <em>Answer has field</em> when the server sends other messages on the same connection.</li>
+</ol>`,
   },
   {
     id: 'files', title: 'Files',
@@ -1170,6 +1234,18 @@ print(json.dumps({"total": 42}))                              # the last line, a
   {
     id: 'secrets', title: 'Secrets and studio security',
     html: `
+<p class="h">Single sign-on (OpenID Connect)</p>
+<p>People can sign in to the designer and the Admin Console with your identity provider (Microsoft Entra ID, Okta, Keycloak, Google, Auth0 or any OpenID Connect provider). Password sign-in stays available, so an administrator can always get in.</p>
+<ol>
+<li>At the provider, register an application (a web app, authorization code flow) and note its client id and secret. Register the redirect address shown in SutraFlow (Admin Console &rarr; Users &rarr; Single sign-on), such as <code>https://sutra.example.com/api/auth/sso/callback</code>. Behind a proxy, set <code>SUTRA_PUBLIC_URL</code> so the address is the one people use.</li>
+<li>Ask the provider to put the person's groups in the ID token (a <code>groups</code> claim).</li>
+<li>Put the client secret in the vault, then fill in <em>Single sign-on</em>: issuer, client id, secret, the claim for the username, the groups claim.</li>
+<li>Map groups to roles: <code>sutra-admins</code> to Administrator on all projects, <code>shop-team</code> to Operator on the Shop project. At every sign-in a person's roles become those of their groups.</li>
+<li>Choose <em>Create accounts</em> (people get an account at their first sign-in) and, only when the provider controls usernames, <em>Link existing accounts</em>.</li>
+<li>Turn on <em>Offer single sign-on</em>. The sign-in pages show <em>Sign in with</em> your provider.</li>
+</ol>
+<p>The sign-in uses the authorization code flow with PKCE, a state and a nonce; the ID token's signature, issuer, audience and expiry are checked against the provider's published keys. A person is recognised by the provider's subject, so a renamed account stays the same person. Sign-ins with single sign-on are in the audit log.</p>
+<p class="h">The vault and sessions</p>
 <ul>
 <li>Passwords, keys and tokens live in the <strong>vault</strong> (Resources &rarr; Secrets), encrypted with AES-256-GCM. Settings hold the secret's <em>name</em>.</li>
 <li>Secret values are never returned by the API. A secret used in a step is masked in stored outputs and logs.</li>
@@ -1616,6 +1692,7 @@ docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=...
 <li>Callers get their replies from whichever engine they reached.</li>
 <li>A deploy reaches every engine.</li>
 </ul>
+<p>Step-by-step set-ups for one machine, two machines, engines only and Docker are in <a href="#ch-cluster">Setting up a cluster, step by step</a>. <code>SUTRA_CAN_LEAD=0</code> keeps an engine from ever leading.</p>
 <p>Engines with <code>SUTRA_WORKERS=0</code> only serve APIs. <code>sutra status</code> or <code>GET /api/engine/status</code> lists the engines, the leader and the queue.</p>
 <p class="h">Stopping without losing work</p>
 <p>On <code>docker stop</code>, Ctrl+C or <code>POST /api/engine/drain</code>, an engine:</p>
@@ -1645,6 +1722,85 @@ docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=...
 <li>Back up the database (or the <code>data</code> folder).</li>
 </ol>
 <p>The full operations guide is <code>docs/deployment.md</code> in the SutraFlow folder.</p>`,
+  },
+  {
+    id: 'cluster', title: 'Setting up a cluster, step by step',
+    html: `
+<p>A cluster is several SutraFlow processes (a studio and engines) sharing one PostgreSQL database. They share the work, and keep running when one of them stops. This chapter sets one up from scratch, for each common layout.</p>
+<p class="h">What every engine does, and what the leader does</p>
+<p>Every process of a cluster is an <strong>engine</strong>: it runs steps, and it serves the <strong>gateway</strong> (REST, SOAP, WebSocket, MCP and agent services) on its own ports, applying the services' API security policies itself. There is no central gateway: a caller reaches whichever engine the load balancer picks, and that engine checks the caller, starts the run and answers.</p>
+<p>One engine at a time is also the <strong>leader</strong>. The leader runs what must happen <em>once</em> in the cluster, not once per engine:</p>
+<table class="t"><thead><tr><th>Every engine</th><th>The leader as well</th></tr></thead><tbody>
+<tr><td>Runs steps from the shared work queue (each step exactly once)</td><td>Timers (each timer fires once, not once per engine)</td></tr>
+<tr><td>Serves the gateway: REST, SOAP, WebSocket, MCP, chat, OpenAI-compatible and A2A</td><td>Listeners: folders, SFTP and FTP, mailboxes, queues and topics, Drive, Microsoft files, Discord, Telegram, Twitch, Data Factory, WebSocket client streams</td></tr>
+<tr><td>Applies API security policies, validation and threat protection to its callers</td><td>Recovery: steps of an engine that stopped are put back in the queue for the others</td></tr>
+<tr><td>Writes a heartbeat every 5 seconds</td><td>Run time limits, queued runs, alerts (every 30 seconds) and housekeeping (old runs, logs, audit)</td></tr>
+<tr><td>Reloads deploys and settings on its next heartbeat</td><td>Forgetting engines that have been silent for ten minutes</td></tr>
+</tbody></table>
+<p>The leader holds a <em>lease</em> in the database and renews it every heartbeat. If it stops renewing (stopped, crashed, cut off), the lease runs out after three heartbeats (15 seconds) and another engine takes it, starting the timers and listeners there. Nothing needs to be told: there is no leader to configure, only engines that may or may not lead (below).</p>
+[[note:Leader and gateway are separate|Security does not depend on the leader: each engine checks its own callers with the same policies, read from the shared database. A cluster whose leader stops keeps serving APIs on every other engine without a pause; only timers and listeners wait up to 15 seconds for the new leader.]]
+<p class="h">The settings that make a cluster</p>
+<table class="t"><thead><tr><th>Setting</th><th>On every process</th></tr></thead><tbody>
+<tr><td><code>SUTRA_DB</code></td><td>The same PostgreSQL address (<code>postgres://user@host:5432/sutraflow</code>), with <code>SUTRA_DB_PASSWORD</code> when it needs a password.</td></tr>
+<tr><td><code>SUTRA_MASTER_KEY</code></td><td>The same key on every machine (it decrypts the vault). Copy it from the first machine's <code>data/master.key</code>, or put it in each <code>sutraflow.env</code>.</td></tr>
+<tr><td><code>SUTRA_ENGINE_ID</code></td><td>Different on every process: its name in the cluster. The launcher names them <code>&lt;computer&gt;-studio</code> and <code>&lt;computer&gt;-engine</code> (<code>STUDIO_ENGINE_ID</code>, <code>ENGINE_ENGINE_ID</code> in <code>sutraflow.env</code> to choose).</td></tr>
+<tr><td><code>SUTRA_ADMIN_TOKEN</code></td><td>Optional; the same long token lets one release pipeline talk to every engine.</td></tr>
+<tr><td><code>SUTRA_CAN_LEAD</code></td><td><code>0</code> on engines that must never lead, for example machines that cannot reach the folders the folder triggers watch. At least one process must be able to lead.</td></tr>
+<tr><td><code>SUTRA_PG_POOL</code></td><td>Optional: connections per engine. Keep <em>processes &times; (pool + 1)</em> under PostgreSQL's <code>max_connections</code>.</td></tr>
+</tbody></table>
+<p class="h">Before you start: PostgreSQL</p>
+<ol>
+<li>Install PostgreSQL 14 or later on its own machine (or use a managed service). On one test machine, the local one will do.</li>
+<li>Create a database and a user: <code>CREATE USER sutra_owner PASSWORD '...'; CREATE DATABASE sutraflow OWNER sutra_owner;</code></li>
+<li>Allow the engine machines in <code>pg_hba.conf</code> (with <code>scram-sha-256</code>), and turn SSL on for anything that crosses a network.</li>
+<li>If you already have data in SQLite, move it once: Admin Console &rarr; Server &rarr; Database, or <code>sutraflow db copy --to postgres://...</code> (see <a href="#ch-move-postgres">Moving to PostgreSQL</a>).</li>
+</ol>
+<p class="h">Layout 1: one machine, a studio and an engine</p>
+<p>The simplest cluster, and a good way to try one: two processes on one server share the work, and one keeps serving while the other restarts.</p>
+<ol>
+<li>Install SutraFlow (<a href="#ch-start">Install and start the server</a>) and set <code>SUTRA_DB</code> in <code>sutraflow.env</code> to the PostgreSQL address.</li>
+<li>Start the studio: <code>sutraflow start</code>. It listens on 4800, its gateway on 8080 and 8443.</li>
+<li>Start an engine beside it: <code>sutraflow start engine</code>. It uses the same folder and settings, and listens on 4801, its gateway on 9080 and 9443 (<code>ENGINE_PORT</code>, <code>ENGINE_GATEWAY_HTTP</code>, <code>ENGINE_GATEWAY_HTTPS</code>).</li>
+<li>Check: <code>sutraflow status</code>, or Admin Console &rarr; Engines: two engines alive, one marked <em>leader</em>.</li>
+<li>Point your load balancer (or Apache or nginx on the same machine) at both gateways: 8080 and 9080, health check <code>/ready</code> on 4800 and 4801.</li>
+<li>Start both with the machine: <code>sutraflow service</code> prints the systemd units or the Windows scheduled tasks, one for the studio and one for the engine.</li>
+</ol>
+<p class="h">Layout 2: two machines, the studio and an engine on one, an engine on the other</p>
+<ol>
+<li>On machine A, set up layout 1, or just the studio.</li>
+<li>Copy <code>data/master.key</code> from machine A (or set <code>SUTRA_MASTER_KEY</code> on both).</li>
+<li>On machine B, install SutraFlow, and in its <code>sutraflow.env</code> set the same <code>SUTRA_DB</code> and <code>SUTRA_MASTER_KEY</code>, and <code>SUTRA_ADMIN_HOST=0.0.0.0</code> only if a load balancer checks its <code>/ready</code> from another machine.</li>
+<li>Start only an engine on B: <code>sutraflow start engine</code>. Machine B has no studio: design on A, deploy from A, and B picks the deploy up on its next heartbeat.</li>
+<li>Check Admin Console &rarr; Engines on A: the engines of both machines are listed.</li>
+<li>Add B's gateway (9080, 9443) to the load balancer.</li>
+<li>Folder triggers: the leader may be either machine. Make the watched folders reachable from both (a shared drive), or set <code>SUTRA_CAN_LEAD=0</code> on B so A always leads (and A's engines take over from each other).</li>
+</ol>
+<p class="h">Layout 3: engines only, behind a load balancer, with a separate studio</p>
+<p>For production: no designer on the servers that serve traffic.</p>
+<ol>
+<li>Keep the studio on a design or test server; build releases there (<a href="#ch-releases">Releases</a>) or from Git in a pipeline (<a href="#ch-cicd">CI/CD</a>).</li>
+<li>On each production machine install SutraFlow with the same <code>SUTRA_DB</code> (the production database) and <code>SUTRA_MASTER_KEY</code>, <code>SUTRA_ENVIRONMENT=production</code>, and start engines only: <code>sutraflow start engine</code>. On a machine with many cores, a second process (another folder with other ports) uses them better than one big one.</li>
+<li>Create the first administrator for the engines' Admin Console: <code>sutraflow cli user add admin --role administrator</code>.</li>
+<li>Deploy a release: <code>sutra deploy release.zip</code> against any engine (with its admin token), or drop the package in <code>SUTRA_DEPLOY_DIR</code>; every engine loads it.</li>
+<li>Put the load balancer in front of every engine's gateway port, health check <code>/ready</code>. Leave the admin ports (4801) on the private network.</li>
+</ol>
+<p class="h">Layout 4: Docker</p>
+<p><code>sutraflow docker cluster up</code> starts <code>docker-compose.cluster.yml</code>: PostgreSQL, a studio and two engines with the shared settings filled in. To add engines, copy the <code>engine-2</code> service as <code>engine-3</code> and so on, each with its own <code>SUTRA_ENGINE_ID</code>.</p>
+<p class="h">Which layout</p>
+<table class="t"><thead><tr><th>Need</th><th>Layout</th></tr></thead><tbody>
+<tr><td>One server, more throughput, restarts without downtime</td><td>1: studio and engine on one machine</td></tr>
+<tr><td>Survive the loss of a machine</td><td>2 or 3, with PostgreSQL replicated or managed</td></tr>
+<tr><td>Separate design from production</td><td>3: engines only in production</td></tr>
+<tr><td>Containers or Kubernetes</td><td>4: Docker, one engine per container</td></tr>
+</tbody></table>
+<p class="h">Checking a cluster</p>
+<ul>
+<li>Admin Console &rarr; Engines: every engine, alive or not, the leader, steps running, <em>never leads</em> where set; drain one from there.</li>
+<li><code>sutraflow status</code> or <code>GET /api/engine/status</code>: the same as JSON.</li>
+<li><code>/metrics</code>: <code>sutra_engine_leader</code> is 1 on exactly one engine; <code>sutra_engines_alive</code> counts the others.</li>
+<li>To restart an engine without losing work: <code>sutraflow stop engine</code> drains it (running steps finish or go back to the queue), then start it again.</li>
+</ul>
+[[tip:Try a failover|With two engines running, stop the leader (sutraflow stop). Within 15 seconds the other one shows as leader in Engines, and its timers fire. Calls to the remaining gateway never stopped.]]`,
   },
   {
     id: 'sizing', title: 'Sizing and performance',
@@ -1738,7 +1894,7 @@ docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=...
 <ul>
 <li><strong>What changed in this release.</strong> Engines used to take one lock for every write in the cluster, so a second engine added nothing (82 steps a second with one engine or two); each run now has its own lock, and engines claim steps with <em>skip locked</em>. Project and Sengine variables are cached for the settings refresh time instead of read for every step; the run state, step count and status are saved in one statement. Database transactions per step went from 14 to 7, and one engine went from 82 to about 120 steps a second. In memory, a step costs less than one transaction.</li>
 <li><strong>More engines</strong> scale when callers reach all of them, as behind a load balancer: with REST calls spread over the gateways, four engines did about three times the durable steps of one (352 against 116 a second), and in memory 1,660 against 540. When every run starts on one engine (a single timer, say), the others only help with the following steps, and in-memory runs not at all.</li>
-<li><strong>Bigger outputs cost more</strong>, because each step writes the run state with the outputs of earlier steps. For steps that pass large data along, keep the data in a file or a table and pass its name, or stream it.</li>
+<li><strong>Bigger outputs cost more</strong>: each step writes its own output and reads the earlier ones. Since 1.8.0 (outputs kept apart from the run state) one engine on PostgreSQL ran 145 steps a second with 64 KB outputs (60 before), 40.7 with 256 KB (14.3) and 7.7 with 1 MB (2.6). For steps that pass large data along, keep the data in a file or a table and pass its name, or stream it.</li>
 <li>No run failed and none was lost in any scenario, including the one where an engine was killed.</li>
 </ul>
 

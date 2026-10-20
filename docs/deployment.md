@@ -248,6 +248,8 @@ Give the orchestrator more grace time than `SUTRA_DRAIN_MS` (compose: `stop_grac
 | `SUTRA_POLL_MS` | by machine | How often an idle engine looks for due steps (200 to 500 ms) |
 | `SUTRA_SETTINGS_REFRESH_MS` | by machine | How long an engine keeps project and Sengine variables; 0 = every step |
 | `SUTRA_PG_POOL` | half of `SUTRA_WORKERS` (4 to 20) | Connections of the engine's PostgreSQL pool; keep engines x (pool + 1) under `max_connections` |
+| `SUTRA_CAN_LEAD` | 1 | `0` = this engine never becomes the leader (timers, listeners, recovery), for machines that cannot reach watched folders |
+| `SUTRA_PUBLIC_URL` | (none) | The studio address as people reach it behind a proxy; used for the single sign-on redirect address |
 | `SUTRA_PG_ASYNC` | 1 | `0` = the engine uses one synchronous connection as before 1.7.6 (fallback, slower) |
 | `SUTRA_KEEPALIVE_MS` | 65000 | Idle connections kept by the admin and gateway servers; keep it above the idle time of a load balancer in front |
 | `SUTRA_HEARTBEAT_MS` | 5000 | Heartbeat; dead after three missed |

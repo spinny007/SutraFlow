@@ -1,0 +1,803 @@
+#!/usr/bin/env node
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.8.0
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+/**
+ * SutraFlow soak test: hours of steady, mixed load on a cluster, unattended, ending in a report.
+ *
+ * It starts a studio and engines on a PostgreSQL database of their own (made and dropped here),
+ * reached through a proxy that can cut the database for a while. Every starter that can run on one
+ * machine is driven: REST (plain, in memory, HMAC with schema validation), SOAP (UsernameToken; X.509
+ * signed and encrypted), WebSocket service and client, timer, manual runs with called Sutras and
+ * approvals, the error handler, channels, MCP tools, the message bus (a stand-in AMQP 1.0 broker),
+ * SFTP and folder triggers with CSV files of 10 to 60 MB, RAG with documents of 10 to 60 MB, and an AI
+ * agent on a local Ollama model. On the way one engine is killed and started again, and the database
+ * is cut once. Engines that stop by themselves are started again (at most 10 times each); database
+ * connections of this tool are tried 10 times.
+ *
+ * Every minute a sample goes to samples.jsonl and every event to events.jsonl (so a report can be made
+ * from them even if the tool is stopped), and at the end report.md and report.html are written.
+ *
+ *   node tools/soak.mjs --pg postgres://postgres@127.0.0.1:5432/postgres --hours 8
+ *   node tools/soak.mjs --report-only docs/benchmarks/soak-1.8.0
+ *
+ * Options
+ *   --hours 8 | --minutes 15    how long the load runs (then up to 10 minutes for open runs to end)
+ *   --engines 3                 processes: a studio and engines (all serve the gateway)
+ *   --out folder                where samples, events and the report go (default docs/benchmarks/soak-<version>)
+ *   --ollama http://127.0.0.1:11434 --model phi4-mini    the AI model (local Ollama)
+ *   --files 10,20,30,40,50,60   CSV and document sizes in MB, used in turn
+ *   --files-every 20 --rag-every 60 --sftp-every 30     minutes between big files, documents, SFTP files
+ *   --scale 1                   multiplies the request rates
+ *   --no-ai --no-kill --no-outage --no-big                leave parts out
+ */
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import net from 'node:net';
+import { spawn, spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
+
+const HOME = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const require = createRequire(import.meta.url);
+const argv = process.argv.slice(2);
+const opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : d; };
+const flag = k => argv.includes(`--${k}`);
+const VERSION = JSON.parse(fs.readFileSync(path.join(HOME, 'package.json'), 'utf8')).version;
+const OUT = path.resolve(opt('report-only') || opt('out', path.join(HOME, 'docs', 'benchmarks', `soak-${VERSION}`)));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const pct = (a, p) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return Math.round(s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))]); };
+
+if (opt('report-only')) { writeReport(OUT); process.exit(0); }
+
+const PG = opt('pg');
+if (!PG) { console.error('Give --pg <postgres admin url> (or --report-only <folder>)'); process.exit(2); }
+const MINUTES = opt('minutes') ? Number(opt('minutes')) : Number(opt('hours', 8)) * 60;
+const ENGINES = Math.max(2, Number(opt('engines', 3)));
+const SCALE = Number(opt('scale', 1));
+const OLLAMA = opt('ollama', 'http://127.0.0.1:11434'), MODEL = opt('model', 'phi4-mini');
+const SIZES = String(opt('files', '10,20,30,40,50,60')).split(',').map(Number).filter(n => n > 0);
+const AI = !flag('no-ai'), KILL = !flag('no-kill'), OUTAGE = !flag('no-outage'), BIG = !flag('no-big');
+const MAIN = path.join(HOME, 'dist', 'server', 'main.js');
+if (!fs.existsSync(MAIN)) { console.error('Build first: npm run build'); process.exit(2); }
+const TOKEN = crypto.randomBytes(16).toString('hex');
+const KEY = crypto.randomBytes(32).toString('base64');
+const T0 = Date.now(), END = T0 + MINUTES * 60000;
+const WORK = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-soak-'));
+
+fs.mkdirSync(OUT, { recursive: true });
+for (const f of ['samples.jsonl', 'events.jsonl', 'summary.json']) fs.rmSync(path.join(OUT, f), { force: true });
+const append = (f, o) => fs.appendFileSync(path.join(OUT, f), JSON.stringify(o) + '\n');
+function event(kind, message, extra = {}) {
+  const e = { at: new Date().toISOString(), min: Math.round((Date.now() - T0) / 6000) / 10, kind, message, ...extra };
+  append('events.jsonl', e);
+  console.log(`[${e.min} min] ${kind}: ${message}`);
+}
+process.on('uncaughtException', e => event('tool error', e?.stack || String(e)));
+process.on('unhandledRejection', e => event('tool error', e?.stack || String(e)));
+
+// ---------- retries: the database of this tool, and requests ----------
+async function retry(what, fn, tries = 10, waitMs = 3000) {
+  for (let i = 1; ; i++) {
+    try { return await fn(); } catch (e) {
+      if (e.final || i >= tries) throw new Error(`${what}: gave up after ${tries} tries: ${e.message}`);
+      event('retry', `${what} (${i}/${tries}): ${e.message}`);
+      await sleep(waitMs);
+    }
+  }
+}
+const { default: pg } = await import('pg');
+const adminDb = await retry('connect to PostgreSQL', async () => { const c = new pg.Client({ connectionString: PG }); c.on('error', () => {}); await c.connect(); return c; });
+const DBNAME = `sutra_soak_${Date.now()}`;
+await adminDb.query(`CREATE DATABASE ${DBNAME}`);
+const dbUrl = (() => { const u = new URL(PG); u.pathname = `/${DBNAME}`; return u; })();
+
+/** The engines reach the database through this proxy; cut() drops every connection and refuses new ones for a while. */
+const proxy = (() => {
+  const socks = new Set();
+  let down = false;
+  const srv = net.createServer(c => {
+    if (down) return c.destroy();
+    const s = net.connect(Number(dbUrl.port || 5432), dbUrl.hostname);
+    socks.add(c); socks.add(s);
+    c.pipe(s); s.pipe(c);
+    const end = () => { c.destroy(); s.destroy(); socks.delete(c); socks.delete(s); };
+    c.on('error', end); s.on('error', end); c.on('close', end); s.on('close', end);
+  });
+  return { srv, cut: async ms => { down = true; for (const x of socks) x.destroy(); await sleep(ms); down = false; } };
+})();
+await new Promise(r => proxy.srv.listen(0, '127.0.0.1', r));
+const engineDbUrl = (() => { const u = new URL(dbUrl); u.hostname = '127.0.0.1'; u.port = String(proxy.srv.address().port); return u.toString(); })();
+
+/** This tool's own queries: reconnect and try again (10 times) when the connection is lost. */
+let toolDb = null;
+async function dbq(sql, args = []) {
+  return retry('soak database query', async () => {
+    if (!toolDb) { toolDb = new pg.Client({ connectionString: dbUrl.toString() }); toolDb.on('error', () => { toolDb = null; }); await toolDb.connect(); }
+    try { return (await toolDb.query(sql, args)).rows; } catch (e) { if (/terminat|connection|ECONN/i.test(e.message)) { try { await toolDb.end(); } catch { /* gone */ } toolDb = null; } throw e; }
+  });
+}
+
+// ---------- engines ----------
+const procs = [];
+const alive = e => e.p && e.p.exitCode === null && e.p.signalCode === null;
+for (const sig of ['exit', 'SIGINT', 'SIGTERM']) process.on(sig, () => { for (const e of procs) { try { e.p?.kill('SIGKILL'); } catch { /* gone */ } } if (sig !== 'exit') process.exit(1); });
+function startEngine(i) {
+  const e = procs[i] || { i, restarts: 0, planned: false, port: 21500 + i, http: 21600 + i * 2, dir: fs.mkdtempSync(path.join(WORK, `engine-${i}-`)) };
+  procs[i] = e;
+  e.base = `http://127.0.0.1:${e.port}`; e.gateway = `http://127.0.0.1:${e.http}`;
+  const env = {
+    ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('SUTRA_'))),
+    SUTRA_DATA_DIR: e.dir, SUTRA_MASTER_KEY: KEY, SUTRA_ADMIN_TOKEN: TOKEN, SUTRA_MODE: i === 0 ? 'studio' : 'engine', SUTRA_DB: engineDbUrl,
+    SUTRA_ADMIN_PORT: String(e.port), SUTRA_GATEWAY_HTTP_PORT: String(e.http), SUTRA_GATEWAY_HTTPS_PORT: String(e.http + 1),
+    SUTRA_ENGINE_ID: `soak-${i}`, SUTRA_ENVIRONMENT: 'test', SUTRA_RUN_RETENTION_DAYS: '0', SUTRA_REPLY_TIMEOUT_MS: '180000',
+  };
+  const log = fs.openSync(path.join(e.dir, 'engine.log'), 'a');
+  e.p = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', MAIN], { cwd: HOME, env, stdio: ['ignore', log, log], windowsHide: true });
+  e.startedAt = Date.now();
+  e.p.on('exit', (code, signal) => {
+    if (stopping) return;
+    if (e.planned) { e.planned = false; return; }
+    const tail = fs.readFileSync(path.join(e.dir, 'engine.log'), 'utf8').slice(-1200);
+    event('engine stopped', `engine ${i} stopped by itself (code ${code}, signal ${signal})`, { engine: i, log: tail });
+    if (e.restarts >= 10) { event('engine given up', `engine ${i} stopped 10 times; not started again`, { engine: i }); return; }
+    e.restarts++;
+    setTimeout(() => { if (!stopping) { startEngine(i); event('engine restarted', `engine ${i} started again (${e.restarts}/10)`, { engine: i }); } }, 3000);
+  });
+  return e;
+}
+async function ready(e, ms = 120000) {
+  const t = Date.now();
+  while (Date.now() - t < ms) { try { if ((await fetch(`${e.base}/ready`)).ok) return; } catch { /* starting */ } await sleep(500); }
+  throw new Error(`engine ${e.i} is not ready`);
+}
+function usage(pid) {
+  try {
+    if (process.platform === 'win32') {
+      const r = spawnSync('powershell', ['-NoProfile', '-Command', `$p=Get-Process -Id ${pid}; "$($p.TotalProcessorTime.TotalSeconds) $($p.WorkingSet64)"`], { encoding: 'utf8', windowsHide: true });
+      const [cpu, mem] = r.stdout.trim().split(/\s+/).map(Number); return { cpu, mem };
+    }
+    const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8').split(' ');
+    return { cpu: (Number(st[13]) + Number(st[14])) / 100, mem: Number(fs.readFileSync(`/proc/${pid}/statm`, 'utf8').split(' ')[1]) * 4096 };
+  } catch { return { cpu: 0, mem: 0 }; }
+}
+const studio = () => procs[0];
+const gateways = () => procs.filter(alive);
+let rr = 0;
+const gw = () => { const g = gateways(); return g[rr++ % g.length].gateway; };
+async function api(method, p, body, tries = 5) {
+  return retry(`${method} ${p}`, async () => {
+    const r = await fetch(studio().base + p, { method, headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(180000) });
+    const t = await r.text(); let j; try { j = JSON.parse(t); } catch { j = t; }
+    if (!r.ok) { const err = new Error(`${r.status} ${typeof j === 'string' ? j : j.error}`); if (r.status < 500) err.final = true; throw err; }
+    return j;
+  }, tries, 2000);
+}
+
+let stopping = false;
+event('start', `SutraFlow ${VERSION}, ${ENGINES} processes, ${MINUTES} minutes, database ${DBNAME}, ${os.cpus().length} threads, ${Math.round(os.totalmem() / 1073741824)} GB`);
+for (let i = 0; i < ENGINES; i++) { startEngine(i); if (i === 0) await ready(procs[0]); }
+for (const e of procs) await ready(e);
+
+// ---------- helpers the Sutras talk to ----------
+const dist = p => pathToFileURL(path.join(HOME, 'dist', 'server', p)).href;
+const { applyWss } = await import(dist('security/wss.js'));
+const { signRequest } = await import(dist('security/hmac.js'));
+const { generate } = require('selfsigned');
+const { default: WebSocket, WebSocketServer } = await import('ws');
+const rhea = require('rhea');
+const { Server: SshServer, utils: sshUtils } = require('ssh2');
+
+const certs = {};
+for (const n of ['client', 'service']) certs[n] = await generate([{ name: 'commonName', value: `soak-${n}` }], { keySize: 2048, algorithm: 'sha256' });
+
+// WebSocket server the client trigger connects to: it pushes a numbered event every 5 seconds.
+const feed = { sent: 0, port: 0 };
+const feedSrv = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+await new Promise(r => feedSrv.on('listening', r));
+feed.port = feedSrv.address().port;
+setInterval(() => { for (const c of feedSrv.clients) { if (c.subscribed) { c.send(JSON.stringify({ seq: ++feed.sent, at: Date.now() })); } } }, 5000 / SCALE).unref();
+feedSrv.on('connection', c => c.on('message', d => { if (String(d).includes('subscribe')) c.subscribed = true; }));
+
+// Stand-in AMQP 1.0 broker: hands messages to the bus subscriber and counts its acknowledgements.
+const bus = { sent: 0, accepted: 0, released: 0, rejected: 0, sender: null };
+const broker = rhea.create_container({ id: 'soak-broker' });
+broker.on('sender_open', ctx => { bus.sender = ctx.sender; });
+broker.on('accepted', () => bus.accepted++);
+broker.on('released', () => bus.released++);
+broker.on('rejected', () => bus.rejected++);
+const brokerListener = broker.listen({ port: 0, host: '127.0.0.1' });
+await new Promise(r => brokerListener.on('listening', r));
+
+// SFTP server over a folder.
+const sftpRoot = fs.mkdtempSync(path.join(WORK, 'sftp-'));
+fs.mkdirSync(path.join(sftpRoot, 'inbox'), { recursive: true });
+const sftpPort = await startSftp(sftpRoot, 'soak', 'soak-sftp-pass');
+const inbox = fs.mkdtempSync(path.join(WORK, 'inbox-'));
+const docs = fs.mkdtempSync(path.join(WORK, 'docs-'));
+
+// ---------- the project ----------
+const project = await api('POST', '/api/projects', { name: 'Soak' });
+const P = project.id;
+const secret = (name, value) => api('PUT', `/api/secrets/${name}`, { value });
+await secret('SOAK_HMAC', 'soak-hmac-secret');
+await secret('SOAK_WS_PW', 'soak-ws-password');
+await secret('SOAK_SERVICE_KEY', certs.service.private);
+await secret('SOAK_MCP_KEY', 'soak-mcp-key-123');
+await secret('SOAK_SFTP_PW', 'soak-sftp-pass');
+const res = (kind, name, config) => api('POST', '/api/resources', { kind, name, project_id: P, config });
+const polHmac = await res('inboundPolicy', 'Soak HMAC', { auth: 'hmac', hmacSecrets: ['SOAK_HMAC'], requireHttps: false, rateLimitPerMinute: 0 });
+const polUt = await res('inboundPolicy', 'Soak UsernameToken', { auth: 'wssUsernameToken', users: [{ k: 'erp', v: 'SOAK_WS_PW' }], wssTimestamp: 'required', requireHttps: false, rateLimitPerMinute: 0 });
+const polX509 = await res('inboundPolicy', 'Soak X.509', { auth: 'wssX509', trustedCertsPem: certs.client.cert, wssTimestamp: 'required', decryptKeySecret: 'SOAK_SERVICE_KEY', requireEncryption: true, requireHttps: false, rateLimitPerMinute: 0 });
+const polMcp = await res('inboundPolicy', 'Soak MCP keys', { auth: 'apiKey', apiKeyHeader: 'X-API-Key', apiKeySecrets: ['SOAK_MCP_KEY'], requireHttps: false, rateLimitPerMinute: 0 });
+const mcpSrv = await res('mcpServer', 'Soak tools', { path: '/mcp/soak', title: 'Soak tools', instructions: 'Tools for the soak test.', policy: polMcp.id });
+const amqp = await res('amqp1', 'Soak broker', { host: '127.0.0.1', port: brokerListener.address().port, user: '', passwordSecret: '' });
+const sftp = await res('sftp', 'Soak SFTP', { host: '127.0.0.1', port: sftpPort, user: 'soak', auth: 'password', passwordSecret: 'SOAK_SFTP_PW', baseFolder: '/' });
+const wsConn = await res('websocket', 'Soak feed', { url: `ws://127.0.0.1:${feed.port}/feed`, reconnectMinMs: 500, reconnectMaxMs: 5000, pingSeconds: 15 });
+const ai = AI ? await res('aiProvider', 'Soak Ollama', { engine: 'Ollama', baseUrl: OLLAMA, model: MODEL, maxTokens: 300 }) : null;
+const kb = await res('aiKnowledge', 'Soak documents', { store: 'built-in', embedWith: 'built-in', chunkTokens: 300, overlapTokens: 40 });
+const orderSchema = await api('POST', '/api/schemas', { project_id: P, name: 'SoakOrder', kind: 'json', text: JSON.stringify({ type: 'object', required: ['id', 'qty'], properties: { id: { type: 'string' }, qty: { type: 'integer', minimum: 1 } } }) });
+
+let nid = 0;
+const N = (type, name, config = {}, settings) => ({ id: `n${++nid}`, type, name, x: nid * 160, y: 0, config, ...(settings ? { settings } : {}) });
+const E = (a, b, port = 'out') => ({ id: `e${++nid}`, from: a.id, port, to: b.id });
+const flowIds = {};
+let approvalNode = '';
+async function sutra(name, nodes, edges, tuning) {
+  const f = await api('POST', '/api/flows', { doc: { name, nodes, edges }, projectId: P });
+  await api('POST', `/api/flows/${f.id}/deploy`, {});
+  if (tuning) await api('PUT', `/api/console/sutras/${f.id}/tuning`, { values: tuning });
+  flowIds[name] = f.id;
+  return f.id;
+}
+{ // REST: orders, the same in memory, signed hooks with a schema, a broadcast trigger
+  for (const [name, p, tuning] of [['Soak REST orders', '/soak/orders'], ['Soak REST in memory', '/soak/fast', { execution: 'in memory' }]]) {
+    const t = N('restService', 'Orders API', { method: 'POST', path: p });
+    const m = N('jsonata', 'Price', { source: '{{input.body}}', expression: '{ "id": id, "total": qty * 12.5, "lines": [1..5].{ "n": $, "sku": "S-" & $string($) } }' });
+    const r = N('httpResponse', 'Reply', { status: '200', body: '{{input}}' });
+    await sutra(name, [t, m, r], [E(t, m), E(m, r)], tuning);
+  }
+  const h = N('restService', 'Hooks', { method: 'POST', path: '/soak/hooks', policy: polHmac.id, bodySchema: orderSchema.id, validateBody: 'reject invalid' });
+  const hr = N('httpResponse', 'Ok', { status: '200', body: '{"id": "{{input.body.id}}", "by": "{{input.auth.subject}}"}' });
+  await sutra('Soak REST signed hooks', [h, hr], [E(h, hr)]);
+  const b = N('restService', 'Broadcast', { method: 'POST', path: '/soak/broadcast' });
+  const bs = N('wsSend', 'Tell everyone', { to: 'every connection of a service', path: '/ws/soak', message: '{"broadcast": "{{input.body.id}}"}' });
+  const br = N('httpResponse', 'Ok', { status: '200', body: '{{input}}' });
+  await sutra('Soak WebSocket broadcast', [b, bs, br], [E(b, bs), E(bs, br)]);
+}
+{ // SOAP
+  for (const [name, p, pol] of [['Soak SOAP UsernameToken', '/soap/soak-ut', polUt.id], ['Soak SOAP X.509 encrypted', '/soap/soak-x509', polX509.id]]) {
+    const t = N('soapService', 'Orders WS', { serviceName: 'SoakService', namespace: 'urn:soak', path: p, operations: 'GetOrder', soapVersion: '1.1', policy: pol });
+    const r = N('soapReply', 'Reply', { kind: 'response', body: '{"OrderId": "{{input.body.OrderId}}", "Caller": "{{input.auth.subject}}"}' });
+    await sutra(name, [t, r], [E(t, r, 'GetOrder')]);
+  }
+}
+{ // WebSocket service and client trigger
+  const t = N('wsService', 'Soak socket', { path: '/ws/soak' });
+  const s = N('wsSend', 'Echo', { to: 'this connection', message: '{"n": {{input.message.n}}, "t": {{input.message.t}}}' });
+  await sutra('Soak WebSocket service', [t, s], [E(t, s, 'message')]);
+  const c = N('wsClientTrigger', 'Feed', { connection: wsConn.id, subscribe: '{"op":"subscribe"}' });
+  const l = N('jsonata', 'Seq', { source: '{{input.message}}', expression: '{ "seq": seq }' });
+  await sutra('Soak WebSocket client', [c, l], [E(c, l)]);
+}
+{ // timer, channels, error handler, called Sutra with approval, MCP tool, bus
+  const t = N('timer', 'Every 10 s', { mode: 'interval', every: 10, payload: '{}' }), tl = N('log', 'Tick', { message: 'tick' });
+  await sutra('Soak timer', [t, tl], [E(t, tl)]);
+  const pubS = N('start', 'Start', { payload: '{}' }), pub = N('channelPublish', 'Publish', { channel: 'soak-events', message: '{{input}}' });
+  await sutra('Soak channel publisher', [pubS, pub], [E(pubS, pub)]);
+  const sub = N('channelTrigger', 'Events', { channel: 'soak-events' }), subL = N('jsonata', 'Got', { source: '{{input}}', expression: '{ "n": n }' });
+  await sutra('Soak channel subscriber', [sub, subL], [E(sub, subL)]);
+  const es = N('start', 'Start', { payload: '{}' });
+  const ex = N('jsonata', 'Maybe fail', { source: '{{input}}', expression: 'n % 2 = 0 ? $error("even numbers fail") : { "n": n }' }, { retries: 2, retryDelayMs: 200 });
+  const ec = N('catch', 'Handle'), el = N('log', 'Handled', { message: 'handled {{input.error.message}}' });
+  await sutra('Soak error handler', [es, ex, ec, el], [E(es, ex), E(ec, el)]);
+  const cs = N('start', 'Start', { payload: '{}' }), cw = N('wait', 'Work', { ms: 2000 }), cr = N('return', 'Done', { source: 'value', value: '{"child": {{input.n}}}' });
+  await sutra('Soak child', [cs, cw, cr], [E(cs, cw), E(cw, cr)]);
+  const ps = N('start', 'Start', { payload: '{}' });
+  const call = N('callProcess', 'Call child', { process: flowIds['Soak child'], wait: true, source: 'value', input: '{{input}}' });
+  const ap = N('approval', 'Approve', { message: 'Soak approval {{input.child}}' });
+  approvalNode = ap.id;
+  const ok = N('log', 'Approved', { message: 'approved' });
+  await sutra('Soak call and approval', [ps, call, ap, ok], [E(ps, call), E(call, ap), E(ap, ok, 'approved')]);
+  const mt = N('mcpTool', 'Soak tool', { server: mcpSrv.id, toolName: 'soak_total', title: 'Soak total', description: 'Adds a number to itself.', inputs: [{ k: 'n', v: 'number: a number' }], testArguments: '{"n":1}' });
+  const mr = N('mcpReply', 'Reply', { source: 'value', result: '{"total": {{input.arguments.n}}}' });
+  await sutra('Soak MCP tool', [mt, mr], [E(mt, mr)]);
+  const bt = N('busSubscribe', 'Orders in', { broker: 'amqp1', amqpConn: amqp.id, destination: 'soak-orders', ackMode: 'after success', onFailure: 'requeue', concurrency: 2, messageType: 'JSON' });
+  const bl = N('jsonata', 'Seen', { source: '{{input}}', expression: '{ "ok": true }' });
+  await sutra('Soak bus subscriber', [bt, bl], [E(bt, bl)]);
+}
+{ // big files: SFTP, folder (streamed), RAG documents, AI agent
+  const rt = N('remoteTrigger', 'SFTP inbox', { protocol: 'SFTP', sftpConn: sftp.id, folder: 'inbox', pattern: '*.csv', pollSeconds: 30, after: 'delete', format: 'do not read' });
+  const rr2 = N('remoteRead', 'Read', { protocol: 'SFTP', sftpConn: sftp.id, path: 'inbox/{{input.name}}', format: 'CSV rows', maxMb: 100 }, { timeoutMs: 1800000 });
+  const rc = N('jsonata', 'Count', { source: '{{input}}', expression: '{ "rows": count, "file": name }' });
+  await sutra('Soak SFTP files', [rt, rr2, rc], [E(rt, rr2), E(rr2, rc)], { stepData: 'errors only' });
+  const ft = N('fileTrigger', 'Inbox', { folder: inbox, pattern: '*.csv', events: ['added'], pollSeconds: 10, stableSeconds: 3, format: 'do not read' });
+  const fr = N('fileRead', 'Stream', { folder: inbox, path: '{{input.name}}', format: 'CSV rows', stream: true, batchSize: 20000, maxMb: 100 }, { timeoutMs: 3600000 });
+  const fb = N('jsonata', 'Batch', { source: '{{input}}', expression: '{ "count": count, "batch": batch }' });
+  const fd = N('jsonata', 'Totals', { source: '{{input}}', expression: '{ "rows": count, "batches": batches }' });
+  await sutra('Soak folder CSV', [ft, fr, fb, fd], [E(ft, fr), E(fr, fb, 'batch'), E(fr, fd)], { stepData: 'errors only' });
+  const ks = N('start', 'Start', { payload: '{}' });
+  const kr = N('fileRead', 'Read', { folder: docs, path: '{{input.name}}', format: 'text', maxMb: 100 }, { timeoutMs: 3600000 });
+  const ka = N('knowledgeAdd', 'Learn', { knowledge: kb.id, source: '{{input.name}}', text: '{{input.content}}' }, { timeoutMs: 7200000 });
+  const kd = N('jsonata', 'Learned', { source: '{{input}}', expression: '{ "chunks": chunks, "source": source }' });
+  await sutra('Soak RAG ingest', [ks, kr, ka, kd], [E(ks, kr), E(kr, ka), E(ka, kd)], { stepData: 'errors only' });
+  const qs = N('start', 'Start', { payload: '{}' }), qq = N('knowledgeSearch', 'Search', { knowledge: kb.id, question: '{{input.q}}', top: 5 });
+  await sutra('Soak RAG search', [qs, qq], [E(qs, qq)]);
+  if (ai) {
+    const as = N('start', 'Start', { payload: '{}' }), aa = N('knowledgeAsk', 'Ask', { provider: ai.id, knowledge: kb.id, question: '{{input.q}}', top: 3, effort: 'low' }, { timeoutMs: 600000 });
+    await sutra('Soak RAG ask', [as, aa], [E(as, aa)]);
+    const ac = N('agentChannel', 'Desk', { agentName: 'soak-desk', title: 'Soak desk', description: 'Answers questions in one sentence.', chat: true, waitSeconds: 170 });
+    const ag = N('aiAgent', 'Agent', { provider: ai.id, instructions: 'Answer in one short sentence.', task: '{{input.message}}', session: '{{input.sessionId}}', tools: 'none', maxSteps: 2, maxSeconds: 170 }, { timeoutMs: 600000 });
+    const ar = N('agentReply', 'Reply', { answer: '{{input.answer}}', status: 'answer', sessionId: '{{trigger.sessionId}}' });
+    await sutra('Soak AI agent', [ac, ag, ar], [E(ac, ag), E(ag, ar, 'done')]);
+  }
+}
+event('setup', `${Object.keys(flowIds).length} Sutras deployed`);
+await sleep(8000);
+
+// ---------- scenarios ----------
+const stats = {};
+function stat(name) { return (stats[name] ||= { name, ok: 0, fail: 0, errors: {}, ms: [], hours: [] }); }
+function note(name, ok, ms, err) {
+  const s = stat(name);
+  if (ok) { s.ok++; s.ms.push(ms); } else { s.fail++; const k = String(err || 'failed').slice(0, 160); s.errors[k] = (s.errors[k] || 0) + 1; }
+}
+/** Runs fn every ms (scaled), at most `parallel` at a time; records time and outcome. */
+function every(name, ms, fn, parallel = 4) {
+  let running = 0;
+  const tick = async () => {
+    if (stopping || Date.now() > END || running >= parallel) return;
+    running++;
+    const t = performance.now();
+    try { await fn(); note(name, true, performance.now() - t); } catch (e) { note(name, false, 0, e?.message || e); } finally { running--; }
+  };
+  const h = setInterval(tick, Math.max(50, ms / SCALE));
+  timers.push(h);
+  stat(name);
+}
+const timers = [];
+const expect = (cond, msg) => { if (!cond) throw new Error(msg); };
+const postJson = async (url, body, headers = {}) => {
+  const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body), signal: AbortSignal.timeout(180000) });
+  const t = await r.text(); let j; try { j = JSON.parse(t); } catch { j = t; }
+  return { status: r.status, body: j };
+};
+let seq = 0;
+every('REST orders', 100, async () => {
+  const id = `O-${++seq}`;
+  const r = await postJson(`${gw()}/soak/orders`, { id, qty: 3 });
+  expect(r.status === 200 && r.body.id === id && r.body.total === 37.5, `status ${r.status}: ${JSON.stringify(r.body).slice(0, 120)}`);
+}, 16);
+every('REST in memory', 200, async () => {
+  const id = `M-${++seq}`;
+  const r = await postJson(`${gw()}/soak/fast`, { id, qty: 2 });
+  expect(r.status === 200 && r.body.id === id, `status ${r.status}`);
+}, 8);
+every('REST signed and validated', 1000, async () => {
+  const valid = seq % 10 !== 0;
+  const body = JSON.stringify(valid ? { id: `H-${++seq}`, qty: 1 } : { id: `H-${++seq}`, qty: 0 });
+  const r = await postJson(`${gw()}/soak/hooks`, body, signRequest('soak-hmac-secret', { algorithm: 'sha256', encoding: 'hex', prefix: '', signed: 'timestamp and body', header: 'X-Signature', timestampHeader: 'X-Timestamp' }, { method: 'POST', url: '/soak/hooks', body }));
+  expect(r.status === (valid ? 200 : 400), `expected ${valid ? 200 : 400}, got ${r.status}: ${JSON.stringify(r.body).slice(0, 120)}`);
+});
+const envelope = id => `<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Header/><soapenv:Body><o:GetOrder xmlns:o="urn:soak"><o:OrderId>${id}</o:OrderId></o:GetOrder></soapenv:Body></soapenv:Envelope>`;
+const soap = async (p, xml, id) => {
+  const r = await fetch(`${gw()}${p}`, { method: 'POST', headers: { 'content-type': 'text/xml; charset=utf-8' }, body: xml, signal: AbortSignal.timeout(60000) });
+  const t = await r.text();
+  expect(r.status === 200 && t.includes(`<OrderId>${id}</OrderId>`), `status ${r.status}: ${(/<faultstring>([^<]*)/.exec(t)?.[1] || t).slice(0, 120)}`);
+};
+every('SOAP UsernameToken', 1000, async () => { const id = `S-${++seq}`; await soap('/soap/soak-ut', applyWss(envelope(id), { username: { user: 'erp', password: 'soak-ws-password', type: 'PasswordDigest' }, timestampTtlSec: 300 }), id); });
+every('SOAP X.509 signed and encrypted', 4000, async () => { const id = `X-${++seq}`; await soap('/soap/soak-x509', applyWss(envelope(id), { x509: { keyPem: certs.client.private, certPem: certs.client.cert }, timestampTtlSec: 300, encrypt: { certPem: certs.service.cert } }), id); });
+
+// WebSocket clients: five, each sends every 2 seconds and waits for its echo; reconnect when dropped.
+const wsState = { connects: 0, drops: 0, broadcastsSent: 0, broadcastsGot: 0 };
+for (let k = 0; k < 5; k++) {
+  const client = { ws: null, pending: new Map(), open: false };
+  const connect = () => {
+    if (stopping || Date.now() > END) return;
+    const ws = new WebSocket(`${gw().replace('http', 'ws')}/ws/soak`);
+    client.ws = ws;
+    ws.on('open', () => { client.open = true; wsState.connects++; });
+    ws.on('message', d => {
+      const m = JSON.parse(String(d));
+      if (m.broadcast) { wsState.broadcastsGot++; return; }
+      const p = client.pending.get(m.n);
+      if (p) { client.pending.delete(m.n); p(); }
+    });
+    ws.on('close', () => { client.open = false; wsState.drops++; for (const [, p] of client.pending) p(new Error('connection closed')); client.pending.clear(); setTimeout(connect, 1000); });
+    ws.on('error', () => {});
+  };
+  connect();
+  every('WebSocket echo', 2000, async () => {
+    if (!client.open) throw new Error('not connected');
+    const n = ++seq;
+    await new Promise((resolve, reject) => {
+      const to = setTimeout(() => { client.pending.delete(n); reject(new Error('no echo within 30 s')); }, 30000);
+      client.pending.set(n, e => { clearTimeout(to); e ? reject(e) : resolve(); });
+      client.ws.send(JSON.stringify({ n, t: Date.now() }));
+    });
+  }, 1);
+}
+every('WebSocket broadcast', 30000, async () => {
+  wsState.broadcastsSent++;
+  const r = await postJson(`${gw()}/soak/broadcast`, { id: `B-${++seq}` });
+  expect(r.status === 200, `status ${r.status}`);
+});
+// Starting a run is not repeated when the answer is lost: that could start it twice.
+const runApi = (name, input, wait = 0) => api('POST', `/api/flows/${flowIds[name]}/run${wait ? `?wait=${wait}` : ''}`, { input }, 1);
+every('Channel publish', 5000, async () => { const r = await runApi('Soak channel publisher', { n: ++seq }, 30000); expect(r.status === 'done', `run ${r.status}: ${r.error}`); });
+every('Error handler', 5000, async () => { const r = await runApi('Soak error handler', { n: ++seq }, 30000); expect(['done'].includes(r.status), `run ${r.status}: ${r.error}`); });
+const approvalRuns = new Map();
+every('Called Sutra and approval', 30000, async () => {
+  const r = await runApi('Soak call and approval', { n: ++seq });
+  approvalRuns.set(r.id, Date.now());
+  // The approval comes about 5 seconds after it is asked for.
+  for (let i = 0; i < 60; i++) {
+    await sleep(2000);
+    const list = await api('GET', '/api/approvals');
+    const a = list.find(x => x.runId === r.id && x.nodeId === approvalNode);
+    if (a) { await sleep(5000); await api('POST', `/api/approvals/${a.id}`, { approved: true, comment: 'soak' }); break; }
+  }
+  for (let i = 0; i < 60; i++) {
+    const d = await api('GET', `/api/runs/${r.id}`);
+    if (['done', 'failed', 'cancelled'].includes(d.status)) { expect(d.status === 'done', `run ${d.status}: ${d.error}`); return; }
+    await sleep(1000);
+  }
+  throw new Error('the run did not end within 2 minutes of approval');
+}, 3);
+every('MCP tool', 10000, async () => {
+  const n = ++seq;
+  const r = await postJson(`${gw()}/mcp/soak`, { jsonrpc: '2.0', id: n, method: 'tools/call', params: { name: 'soak_total', arguments: { n } } }, { accept: 'application/json, text/event-stream', 'x-api-key': 'soak-mcp-key-123' });
+  expect(r.status === 200 && JSON.stringify(r.body).includes(`${n}`), `status ${r.status}: ${JSON.stringify(r.body).slice(0, 160)}`);
+});
+every('Bus message', 2000, async () => {
+  expect(bus.sender && bus.sender.sendable(), 'the subscriber is not connected');
+  bus.sent++;
+  bus.sender.send({ body: JSON.stringify({ n: ++seq }), content_type: 'application/json' });
+});
+every('RAG search', 60000, async () => { const r = await runApi('Soak RAG search', { q: 'order shipment invoice' }, 60000); expect(r.status === 'done', `run ${r.status}: ${r.error}`); }, 1);
+if (ai) {
+  every('RAG ask (Ollama)', 300000, async () => { const r = await runApi('Soak RAG ask', { q: 'What is said about shipments?' }, 600000); expect(r.status === 'done', `run ${r.status}: ${r.error}`); }, 1);
+  every('AI agent chat (Ollama)', 180000, async () => {
+    const r = await postJson(`${gw()}/chat/soak-desk/api`, { message: `Say hello to soak ${++seq}.` });
+    expect(r.status === 200 && r.body.status === 'answer' && r.body.answer, `status ${r.status}: ${JSON.stringify(r.body).slice(0, 160)}`);
+  }, 1);
+}
+// Big files in turn: CSV to the watched folder, CSV over SFTP, documents for RAG.
+const files = { csv: [], sftp: [], docs: [] };
+let sizeAt = 0;
+const nextSize = () => SIZES[sizeAt++ % SIZES.length];
+function writeCsv(file, mb) {
+  const fd = fs.openSync(file, 'w');
+  fs.writeSync(fd, 'id,customer,country,amount,paid,note\n');
+  let rows = 0, bytes = 0;
+  const target = mb * 1048576;
+  while (bytes < target) {
+    let chunk = '';
+    for (let i = 0; i < 2000; i++) { rows++; chunk += `${rows},Customer ${rows % 977},${['IN', 'DE', 'US', 'FR'][rows % 4]},${(rows % 1000) + 0.5},${rows % 3 === 0},"order note ${rows}"\n`; }
+    fs.writeSync(fd, chunk); bytes += chunk.length;
+  }
+  fs.closeSync(fd);
+  return rows;
+}
+const words = 'order shipment invoice customer payment refund delivery warehouse stock price discount return carrier address tracking'.split(' ');
+function writeDoc(file, mb) {
+  const fd = fs.openSync(file, 'w');
+  let bytes = 0, i = 0;
+  while (bytes < mb * 1048576) {
+    let p = `Section ${++i}. `;
+    for (let k = 0; k < 120; k++) p += words[(i * 7 + k * 3) % words.length] + (k % 12 === 11 ? '. ' : ' ');
+    p += '\n\n';
+    fs.writeSync(fd, p); bytes += p.length;
+  }
+  fs.closeSync(fd);
+}
+if (BIG) {
+  every('Folder CSV (streamed)', Number(opt('files-every', 20)) * 60000, async () => {
+    const mb = nextSize(), name = `soak-${++seq}-${mb}mb.csv`, tmp = path.join(WORK, name);
+    const rows = writeCsv(tmp, mb);
+    fs.renameSync(tmp, path.join(inbox, name));
+    files.csv.push({ name, mb, rows, at: Date.now() });
+    event('file', `${name}: ${rows} rows to the watched folder`);
+  }, 1);
+  every('SFTP CSV', Number(opt('sftp-every', 30)) * 60000, async () => {
+    const mb = Math.min(30, nextSize()), name = `soak-${++seq}-${mb}mb.csv`, tmp = path.join(WORK, name);
+    const rows = writeCsv(tmp, mb);
+    fs.renameSync(tmp, path.join(sftpRoot, 'inbox', name));
+    files.sftp.push({ name, mb, rows, at: Date.now() });
+    event('file', `${name}: ${rows} rows to the SFTP inbox`);
+  }, 1);
+  every('RAG document ingest', Number(opt('rag-every', 60)) * 60000, async () => {
+    const mb = nextSize(), name = `soak-doc-${++seq}-${mb}mb.txt`;
+    writeDoc(path.join(docs, name), mb);
+    const t = Date.now();
+    const r = await runApi('Soak RAG ingest', { name }, 120000);
+    let d = r;
+    while (!['done', 'failed', 'cancelled'].includes(d.status) && Date.now() - t < 2 * 3600e3) { await sleep(10000); d = await api('GET', `/api/runs/${r.id}`); }
+    files.docs.push({ name, mb, status: d.status, seconds: Math.round((Date.now() - t) / 1000), error: d.error || null });
+    event('document', `${name}: ${d.status} in ${Math.round((Date.now() - t) / 1000)} s${d.error ? `: ${d.error}` : ''}`);
+    expect(d.status === 'done', `run ${d.status}: ${d.error}`);
+  }, 1);
+}
+event('load', `${Object.keys(stats).length} scenarios running`);
+
+// ---------- faults ----------
+const faults = [];
+if (KILL) setTimeout(async () => {
+  const e = procs[procs.length - 1];
+  e.planned = true;
+  const at = Date.now();
+  e.p.kill('SIGKILL');
+  event('fault', `engine ${e.i} killed on purpose`);
+  await sleep(60000);
+  startEngine(e.i);
+  await ready(e).catch(() => {});
+  faults.push({ kind: 'engine killed', from: at, to: Date.now() + 30000 });
+  event('fault', `engine ${e.i} started again`);
+}, (MINUTES * 60000) / 3).unref();
+if (OUTAGE) setTimeout(async () => {
+  const at = Date.now();
+  event('fault', 'database cut for 20 seconds');
+  await proxy.cut(20000);
+  faults.push({ kind: 'database cut', from: at, to: Date.now() + 30000 });
+  event('fault', 'database back');
+}, (MINUTES * 60000 * 2) / 3).unref();
+
+// ---------- samples ----------
+const metric = (text, name, label) => { const re = new RegExp(`^${name}${label ? `\\{[^}]*${label}[^}]*\\}` : '(\\{[^}]*\\})?'} ([0-9.eE+-]+)$`, 'm'); const m = re.exec(text); return m ? Number(m[2] ?? m[1]) : null; };
+let lastCounts = {};
+async function sample() {
+  const engines = [];
+  for (const e of procs) {
+    const u = alive(e) ? usage(e.p.pid) : { cpu: 0, mem: 0 };
+    let m = '';
+    if (alive(e)) { try { m = await (await fetch(`${e.base}/metrics`, { headers: { authorization: `Bearer ${TOKEN}` }, signal: AbortSignal.timeout(10000) })).text(); } catch { /* busy */ } }
+    engines.push({ i: e.i, alive: alive(e), rssMb: Math.round(u.mem / 1048576), cpuSec: Math.round(u.cpu), restarts: e.restarts, poolWaiting: metric(m, 'sutra_db_pool_waiting'), poolOpen: metric(m, 'sutra_db_pool_connections', 'state="open"') });
+  }
+  let db = {};
+  try {
+    const [size] = await dbq('select pg_database_size(current_database()) b');
+    const runs = await dbq('select status, count(*)::int n from runs group by status');
+    const [pending] = await dbq("select count(*)::int n from tasks where status in ('pending', 'running')");
+    const [ws] = await dbq('select count(*)::int n from ws_connections');
+    db = { sizeMb: Math.round(Number(size.b) / 1048576), runs: Object.fromEntries(runs.map(r => [r.status, r.n])), queue: pending.n, wsConnections: ws.n };
+  } catch (e) { db = { error: e.message }; }
+  const counts = Object.fromEntries(Object.values(stats).map(s => [s.name, { ok: s.ok, fail: s.fail }]));
+  const perMin = Object.fromEntries(Object.entries(counts).map(([k, v]) => [k, { ok: v.ok - (lastCounts[k]?.ok || 0), fail: v.fail - (lastCounts[k]?.fail || 0) }]));
+  lastCounts = counts;
+  append('samples.jsonl', { type: 'minute', at: new Date().toISOString(), min: Math.round((Date.now() - T0) / 60000), engines, db, perMin, ws: { ...wsState }, bus: { ...bus, sender: undefined }, feed: feed.sent });
+}
+let hour = 0;
+function hourly() {
+  hour++;
+  const lat = {};
+  for (const s of Object.values(stats)) { lat[s.name] = { n: s.ms.length, p50: pct(s.ms, 50), p95: pct(s.ms, 95), p99: pct(s.ms, 99) }; s.hours.push(lat[s.name]); s.ms = []; }
+  append('samples.jsonl', { type: 'hour', hour, at: new Date().toISOString(), latency: lat });
+}
+const sampler = setInterval(() => { void sample(); }, 60000);
+const hourT = setInterval(hourly, Math.min(3600000, MINUTES * 60000 / 4));
+await sample();
+
+// ---------- wait, then end ----------
+while (Date.now() < END) await sleep(5000);
+for (const t of timers) clearInterval(t);
+event('load', 'load stopped; waiting for open runs to end (at most 10 minutes)');
+hourly();
+const drainEnd = Date.now() + 600000;
+for (;;) {
+  const [open] = await dbq("select count(*)::int n from runs where status in ('running', 'queued')").catch(() => [{ n: -1 }]);
+  if (open.n === 0 || Date.now() > drainEnd) break;
+  await sleep(10000);
+}
+await sleep(15000);
+clearInterval(sampler); clearInterval(hourT);
+await sample();
+
+// ---------- checks ----------
+const checks = [];
+const check = (name, ok, detail) => { checks.push({ name, ok, detail }); event('check', `${ok ? 'PASS' : 'FAIL'} ${name}: ${detail}`); };
+const flowRuns = async name => Object.fromEntries((await dbq('select status, count(*)::int n from runs where flow_id = $1 group by status', [flowIds[name]])).map(r => [r.status, r.n]));
+const inFault = t => faults.some(f => t >= f.from - 5000 && t <= f.to);
+const unexpected = procs.reduce((a, e) => a + e.restarts, 0);
+check('No engine stopped by itself', unexpected === 0, `${unexpected} unexpected stops${unexpected ? ' (see events)' : ''}`);
+const [stuck] = await dbq("select count(*)::int n from runs where status = 'running' and started_at < $1", [new Date(Date.now() - 600000).toISOString()]);
+check('No run left running', stuck.n === 0, `${stuck.n} runs still running 10 minutes after the load stopped`);
+const [repeated] = await dbq(`select count(*)::int n from (select run_id, node_id from tasks t join runs r on r.id = t.run_id
+  where t.status = 'done' and r.flow_id = any($1) group by run_id, node_id having count(*) > 1) x`, [[flowIds['Soak REST orders'], flowIds['Soak SOAP UsernameToken'], flowIds['Soak channel publisher'], flowIds['Soak WebSocket service']]]);
+check('No step ran twice', repeated.n === 0, `${repeated.n} steps of single-pass Sutras completed more than once`);
+const total = Object.values(stats).reduce((a, s) => a + s.ok + s.fail, 0), failed = Object.values(stats).reduce((a, s) => a + s.fail, 0);
+check('Requests that failed', failed / Math.max(1, total) < 0.005, `${failed} of ${total} (${(failed / Math.max(1, total) * 100).toFixed(3)}%), fault windows included`);
+const timerRuns = Object.values(await flowRuns('Soak timer')).reduce((a, b) => a + b, 0), timerWant = Math.floor((MINUTES * 60) / 10);
+check('Timer kept time', timerRuns >= timerWant * 0.9, `${timerRuns} runs of ${timerWant} expected (every 10 s)`);
+const pubRuns = (await flowRuns('Soak channel publisher')).done || 0, subRuns = (await flowRuns('Soak channel subscriber')).done || 0;
+check('Every channel message reached its subscriber', subRuns >= pubRuns, `${subRuns} subscriber runs for ${pubRuns} published`);
+check('Bus messages acknowledged', bus.accepted >= bus.sent * 0.99 && bus.rejected === 0, `${bus.accepted} accepted, ${bus.released} released, ${bus.rejected} rejected of ${bus.sent} sent`);
+const feedRuns = (await flowRuns('Soak WebSocket client')).done || 0;
+check('WebSocket client trigger ran for the server\'s messages', feedRuns >= feed.sent * 0.95, `${feedRuns} runs for ${feed.sent} messages pushed`);
+check('WebSocket broadcasts arrived', wsState.broadcastsGot >= wsState.broadcastsSent * 4, `${wsState.broadcastsGot} received by the clients for ${wsState.broadcastsSent} broadcasts (5 clients)`);
+if (BIG) {
+  const totals = await dbq(`select r.id, r.status, r.input from runs r where r.flow_id = $1`, [flowIds['Soak folder CSV']]);
+  const outs = await dbq(`select o.run_id, o.out from run_outputs o join runs r on r.id = o.run_id where r.flow_id = $1 and o.name = 'Totals'`, [flowIds['Soak folder CSV']]);
+  const byRun = new Map(outs.map(o => [o.run_id, JSON.parse(o.out)]));
+  const seen = totals.map(r => ({ name: JSON.parse(r.input || '{}').name, status: r.status, rows: byRun.get(r.id)?.rows }));
+  const okFiles = files.csv.filter(f => seen.some(s => s.name === f.name && s.status === 'done' && Number(s.rows) === f.rows));
+  check('Every CSV in the folder was streamed whole', okFiles.length === files.csv.length, `${okFiles.length} of ${files.csv.length} files with every row counted (${files.csv.map(f => `${f.mb} MB`).join(', ')})`);
+  const sftpDone = (await flowRuns('Soak SFTP files')).done || 0;
+  check('SFTP files were read', sftpDone >= files.sftp.length, `${sftpDone} runs for ${files.sftp.length} files`);
+  check('RAG documents were learned', files.docs.every(d => d.status === 'done'), files.docs.map(d => `${d.mb} MB ${d.status} in ${d.seconds} s`).join('; ') || 'none');
+}
+// Memory: the second half of the run, per engine; a steady climb is a leak.
+const minutes = fs.readFileSync(path.join(OUT, 'samples.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l)).filter(s => s.type === 'minute');
+for (const e of procs) {
+  const pts = minutes.slice(Math.floor(minutes.length / 2)).map(s => [s.min, s.engines[e.i]?.rssMb]).filter(([, y]) => y);
+  const slope = trend(pts) * 60;
+  check(`Engine ${e.i} memory steady`, slope < 50, `${slope.toFixed(1)} MB per hour over the second half; highest ${Math.max(0, ...minutes.map(s => s.engines[e.i]?.rssMb || 0))} MB`);
+}
+for (const s of Object.values(stats).filter(x => x.hours.length >= 2 && x.hours[0].n > 50)) {
+  const first = s.hours[0].p95, last = s.hours[s.hours.length - 1].p95;
+  if (first > 0) check(`${s.name} stays as fast`, last <= first * 2 + 50, `p95 ${first} ms in the first period, ${last} ms in the last`);
+}
+
+const summary = {
+  version: VERSION, started: new Date(T0).toISOString(), ended: new Date().toISOString(), minutes: MINUTES, engines: ENGINES, machine: `${os.cpus()[0].model.trim()}, ${os.cpus().length} threads, ${Math.round(os.totalmem() / 1073741824)} GB, ${os.platform()}`,
+  node: process.version, database: 'PostgreSQL (through a proxy)', model: AI ? `${MODEL} on Ollama` : null, sizes: SIZES, checks, faults,
+  scenarios: Object.values(stats).map(s => ({ name: s.name, ok: s.ok, fail: s.fail, errors: Object.entries(s.errors).sort((a, b) => b[1] - a[1]).slice(0, 5), hours: s.hours })),
+  files, ws: wsState, bus: { ...bus, sender: undefined }, feed: feed.sent,
+  restarts: procs.map(e => ({ engine: e.i, restarts: e.restarts })),
+};
+fs.writeFileSync(path.join(OUT, 'summary.json'), JSON.stringify(summary, null, 2));
+writeReport(OUT);
+event('end', `report written to ${OUT}`);
+
+stopping = true;
+for (const e of procs) { try { e.p.kill(); } catch { /* gone */ } }
+await sleep(3000);
+feedSrv.close(); brokerListener.close(); proxy.srv.close();
+try { await toolDb?.end(); } catch { /* closed */ }
+await adminDb.query(`DROP DATABASE IF EXISTS ${DBNAME} WITH (FORCE)`).catch(() => {});
+await adminDb.end().catch(() => {});
+fs.rmSync(WORK, { recursive: true, force: true });
+process.exit(checks.every(c => c.ok) ? 0 : 1);
+
+// ---------- pieces ----------
+/** Least-squares slope of [x, y] points. */
+function trend(pts) {
+  if (pts.length < 3) return 0;
+  const n = pts.length, sx = pts.reduce((a, p) => a + p[0], 0), sy = pts.reduce((a, p) => a + p[1], 0);
+  const sxy = pts.reduce((a, p) => a + p[0] * p[1], 0), sxx = pts.reduce((a, p) => a + p[0] * p[0], 0);
+  const d = n * sxx - sx * sx;
+  return d ? (n * sxy - sx * sy) / d : 0;
+}
+
+async function startSftp(root, user, password) {
+  const { STATUS_CODE, flagsToString } = sshUtils.sftp;
+  const hostKey = sshUtils.generateKeyPairSync('ecdsa', { bits: 256 });
+  const local = p => path.join(root, path.posix.normalize('/' + String(p || '/')).replace(/^\/+/, ''));
+  const attrsOf = st => ({ mode: st.mode, uid: 0, gid: 0, size: st.size, atime: Math.floor(st.atimeMs / 1000), mtime: Math.floor(st.mtimeMs / 1000) });
+  const server = new SshServer({ hostKeys: [hostKey.private] }, client => {
+    client.on('authentication', ctx => (ctx.username === user && ctx.method === 'password' && ctx.password === password ? ctx.accept() : ctx.reject(['password'])));
+    client.on('ready', () => client.on('session', accept => accept().on('sftp', acceptSftp => {
+      const sftp = acceptSftp();
+      const handles = new Map(); let next = 1;
+      const handle = h => handles.get(h.readUInt32BE(0));
+      const newHandle = v => { const b = Buffer.alloc(4); b.writeUInt32BE(next); handles.set(next++, v); return b; };
+      const fail = (id, e) => sftp.status(id, e?.code === 'ENOENT' ? STATUS_CODE.NO_SUCH_FILE : STATUS_CODE.FAILURE, e?.message);
+      sftp.on('OPEN', (id, file, flags) => { try { sftp.handle(id, newHandle({ fd: fs.openSync(local(file), flagsToString(flags)) })); } catch (e) { fail(id, e); } });
+      sftp.on('READ', (id, h, offset, length) => { const x = handle(h); if (!x?.fd) return sftp.status(id, STATUS_CODE.FAILURE); const buf = Buffer.alloc(length); const n = fs.readSync(x.fd, buf, 0, length, offset); return n ? sftp.data(id, buf.subarray(0, n)) : sftp.status(id, STATUS_CODE.EOF); });
+      sftp.on('WRITE', (id, h, offset, data) => { const x = handle(h); if (!x?.fd) return sftp.status(id, STATUS_CODE.FAILURE); fs.writeSync(x.fd, data, 0, data.length, offset); sftp.status(id, STATUS_CODE.OK); });
+      sftp.on('CLOSE', (id, h) => { const x = handle(h); if (x?.fd) fs.closeSync(x.fd); handles.delete(h.readUInt32BE(0)); sftp.status(id, STATUS_CODE.OK); });
+      const stat = (id, p) => { try { sftp.attrs(id, attrsOf(fs.statSync(local(p)))); } catch (e) { fail(id, e); } };
+      sftp.on('STAT', stat); sftp.on('LSTAT', stat);
+      sftp.on('FSTAT', (id, h) => { try { sftp.attrs(id, attrsOf(fs.fstatSync(handle(h).fd))); } catch (e) { fail(id, e); } });
+      sftp.on('SETSTAT', id => sftp.status(id, STATUS_CODE.OK)); sftp.on('FSETSTAT', id => sftp.status(id, STATUS_CODE.OK));
+      sftp.on('OPENDIR', (id, p) => { try { if (!fs.statSync(local(p)).isDirectory()) throw new Error('not a folder'); sftp.handle(id, newHandle({ dir: local(p) })); } catch (e) { fail(id, e); } });
+      sftp.on('READDIR', (id, h) => {
+        const x = handle(h); if (!x?.dir) return sftp.status(id, STATUS_CODE.FAILURE);
+        if (x.done) return sftp.status(id, STATUS_CODE.EOF);
+        x.done = true;
+        const names = fs.readdirSync(x.dir).map(n => { const st = fs.statSync(path.join(x.dir, n)); return { filename: n, longname: `${st.isDirectory() ? 'd' : '-'}rw-r--r-- 1 u g ${st.size} Jan 01 00:00 ${n}`, attrs: attrsOf(st) }; });
+        return names.length ? sftp.name(id, names) : sftp.status(id, STATUS_CODE.EOF);
+      });
+      sftp.on('REALPATH', (id, p) => sftp.name(id, [{ filename: path.posix.normalize('/' + p), longname: '', attrs: {} }]));
+      sftp.on('REMOVE', (id, p) => { try { fs.rmSync(local(p)); sftp.status(id, STATUS_CODE.OK); } catch (e) { fail(id, e); } });
+      sftp.on('MKDIR', (id, p) => { try { fs.mkdirSync(local(p)); sftp.status(id, STATUS_CODE.OK); } catch (e) { fail(id, e); } });
+      sftp.on('RENAME', (id, a, b) => { try { fs.renameSync(local(a), local(b)); sftp.status(id, STATUS_CODE.OK); } catch (e) { fail(id, e); } });
+    })));
+    client.on('error', () => {});
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  return server.address().port;
+}
+
+// ---------- the report ----------
+function writeReport(dir) {
+  const read = f => (fs.existsSync(path.join(dir, f)) ? fs.readFileSync(path.join(dir, f), 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l)) : []);
+  const samples = read('samples.jsonl'), events = read('events.jsonl');
+  const minutesS = samples.filter(s => s.type === 'minute');
+  const sum = fs.existsSync(path.join(dir, 'summary.json')) ? JSON.parse(fs.readFileSync(path.join(dir, 'summary.json'), 'utf8')) : null;
+  const esc = s => String(s ?? '').replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]);
+  const passed = sum ? sum.checks.filter(c => c.ok).length : 0;
+  const title = `SutraFlow ${sum?.version || ''} soak test`;
+  const lastHour = s => s.hours[s.hours.length - 1] || {};
+  const allMs = s => s.hours.filter(h => h.n);
+  // Markdown
+  const md = [];
+  md.push(`# ${title}`, '');
+  if (!sum) md.push('The run did not finish: this report is made from the samples and events written so far.', '');
+  else {
+    md.push(`${sum.started} to ${sum.ended} (${Math.round(sum.minutes / 6) / 10} hours), ${sum.engines} processes (a studio and ${sum.engines - 1} engines) on PostgreSQL, ${sum.machine}, Node ${sum.node}${sum.model ? `, AI: ${sum.model}` : ''}.`, '');
+    md.push(`**${passed} of ${sum.checks.length} checks passed.**`, '', '| Check | Result | Detail |', '|---|---|---|');
+    for (const c of sum.checks) md.push(`| ${c.name} | ${c.ok ? 'pass' : '**fail**'} | ${c.detail} |`);
+    md.push('', '## Scenarios', '', '| Scenario | Done | Failed | p50 / p95 / p99 ms (last period) | Most frequent error |', '|---|---|---|---|---|');
+    for (const s of sum.scenarios) { const h = lastHour(s); md.push(`| ${s.name} | ${s.ok} | ${s.fail} | ${h.n ? `${h.p50} / ${h.p95} / ${h.p99}` : '-'} | ${s.errors[0] ? `${s.errors[0][0].replace(/\|/g, '/')} (${s.errors[0][1]})` : ''} |`); }
+    md.push('', '## Faults on purpose', '', ...(sum.faults.length ? sum.faults.map(f => `- ${f.kind} at ${new Date(f.from).toISOString()}`) : ['- none']));
+    md.push('', '## Big files', '', '| Kind | File | Size | Result |', '|---|---|---|---|');
+    for (const f of sum.files.csv) md.push(`| Folder CSV (streamed) | ${f.name} | ${f.mb} MB, ${f.rows} rows | see check |`);
+    for (const f of sum.files.sftp) md.push(`| SFTP CSV | ${f.name} | ${f.mb} MB, ${f.rows} rows | see check |`);
+    for (const f of sum.files.docs) md.push(`| RAG document | ${f.name} | ${f.mb} MB | ${f.status} in ${f.seconds} s${f.error ? `: ${f.error}` : ''} |`);
+  }
+  const last = minutesS[minutesS.length - 1];
+  if (last) {
+    md.push('', '## Resources', '', '| Engine | Highest memory | Last memory | Restarts |', '|---|---|---|---|');
+    for (const e of last.engines) md.push(`| ${e.i === 0 ? 'studio' : `engine ${e.i}`} | ${Math.max(...minutesS.map(s => s.engines[e.i]?.rssMb || 0))} MB | ${e.rssMb} MB | ${e.restarts} |`);
+    md.push('', `Database: ${last.db.sizeMb} MB at the end; runs ${JSON.stringify(last.db.runs || {})}.`);
+  }
+  md.push('', '## Events', '', ...events.filter(e => !['retry'].includes(e.kind) || events.filter(x => x.kind === 'retry').length < 40).map(e => `- ${e.min} min, ${e.kind}: ${String(e.message).split('\n')[0]}`));
+  md.push('', '## Starters covered', '', 'Run here: Manual start (API), Timer, REST service, SOAP service, WebSocket service, WebSocket client, Folder (file) trigger, Remote file trigger (SFTP), Message bus subscriber (AMQP 1.0 stand-in), Channel trigger, Error handler, MCP tool, AI agent channel (chat).', '', 'Not run here (they need outside accounts or servers): Email (IMAP), Kafka and RabbitMQ subscribers, Google Drive, Microsoft files, Twitch, Discord, Telegram, Azure Data Factory.');
+  fs.writeFileSync(path.join(dir, 'report.md'), md.join('\n') + '\n');
+
+  // HTML with charts
+  const chart = (titleText, series, unit) => {
+    const W = 720, H = 220, L = 52, B = 28, pts = series.flatMap(s => s.pts);
+    if (!pts.length) return '';
+    const xmax = Math.max(1, ...pts.map(p => p[0])), ymax = Math.max(1, ...pts.map(p => p[1])) * 1.1;
+    const X = x => L + (x / xmax) * (W - L - 10), Y = y => H - B - (y / ymax) * (H - B - 10);
+    const lines = series.map((s, k) => `<polyline fill="none" stroke="var(--s${k % 5})" stroke-width="1.8" points="${s.pts.map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(' ')}"/>`).join('');
+    const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => `<text x="${L - 6}" y="${Y(ymax * f) + 4}" text-anchor="end">${Math.round(ymax * f)}</text><line x1="${L}" x2="${W - 10}" y1="${Y(ymax * f)}" y2="${Y(ymax * f)}" class="grid"/>`).join('');
+    const xt = [0, 0.5, 1].map(f => `<text x="${X(xmax * f)}" y="${H - 8}" text-anchor="middle">${Math.round(xmax * f)} min</text>`).join('');
+    const legend = series.map((s, k) => `<span><i style="background:var(--s${k % 5})"></i>${esc(s.name)}</span>`).join('');
+    return `<figure><figcaption>${esc(titleText)} (${unit})</figcaption><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(titleText)}">${ticks}${xt}${lines}</svg><div class="legend">${legend}</div></figure>`;
+  };
+  const engineIds = last ? last.engines.map(e => e.i) : [];
+  const memChart = chart('Memory per process', engineIds.map(i => ({ name: i === 0 ? 'studio' : `engine ${i}`, pts: minutesS.map(s => [s.min, s.engines[i]?.rssMb || 0]) })), 'MB');
+  const okChart = chart('Requests per minute', [
+    { name: 'done', pts: minutesS.map(s => [s.min, Object.values(s.perMin || {}).reduce((a, v) => a + v.ok, 0)]) },
+    { name: 'failed', pts: minutesS.map(s => [s.min, Object.values(s.perMin || {}).reduce((a, v) => a + v.fail, 0)]) },
+  ], 'requests');
+  const dbChart = chart('Database size and work queue', [
+    { name: 'size MB', pts: minutesS.map(s => [s.min, s.db?.sizeMb || 0]) },
+    { name: 'steps waiting or running', pts: minutesS.map(s => [s.min, s.db?.queue || 0]) },
+  ], 'MB, steps');
+  const hourS = samples.filter(s => s.type === 'hour');
+  const main = ['REST orders', 'SOAP UsernameToken', 'WebSocket echo', 'MCP tool'];
+  const latChart = chart('p95 per period', main.map(n => ({ name: n, pts: hourS.map((h, k) => [k + 1, h.latency?.[n]?.p95 || 0]) })), 'ms');
+  const rows = (sum?.checks || []).map(c => `<tr class="${c.ok ? 'ok' : 'bad'}"><td>${esc(c.name)}</td><td>${c.ok ? 'pass' : 'fail'}</td><td>${esc(c.detail)}</td></tr>`).join('');
+  const scen = (sum?.scenarios || []).map(s => { const h = lastHour(s); const all = allMs(s); return `<tr><td>${esc(s.name)}</td><td>${s.ok}</td><td>${s.fail}</td><td>${h.n ? `${h.p50} / ${h.p95} / ${h.p99}` : '-'}</td><td>${all.length ? Math.max(...all.map(x => x.p95)) : '-'}</td><td>${esc(s.errors[0] ? `${s.errors[0][0]} (${s.errors[0][1]})` : '')}</td></tr>`; }).join('');
+  const ev = events.map(e => `<tr><td>${e.min}</td><td>${esc(e.kind)}</td><td>${esc(String(e.message).split('\n')[0])}</td></tr>`).join('');
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Soak report ${esc(sum?.version || '')}</title>
+<style>
+:root{--bg:#fbfbfa;--fg:#1d2027;--muted:#5f6673;--line:#e3e4e8;--card:#fff;--ok:#1a7f4b;--bad:#c2410c;--s0:#2f6fd8;--s1:#c2410c;--s2:#1a7f4b;--s3:#8b5cf6;--s4:#b8860b}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#15171c;--fg:#e8e9ec;--muted:#9aa0ab;--line:#2c3039;--card:#1c1f26;--ok:#4ade80;--bad:#fb923c;--s0:#6ea8ff;--s1:#fb923c;--s2:#4ade80;--s3:#c4b5fd;--s4:#facc15}}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}main{max-width:980px;margin:0 auto;padding:24px 16px}
+h1{font-size:26px;margin:0 0 4px}h2{font-size:19px;margin:28px 0 10px}.muted{color:var(--muted)}.big{font-size:20px;font-weight:600;margin:14px 0}
+.wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;background:var(--card);font-size:14px}td,th{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+tr.ok td:nth-child(2){color:var(--ok);font-weight:600}tr.bad td:nth-child(2){color:var(--bad);font-weight:700}
+figure{margin:14px 0;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px}figcaption{font-weight:600;margin-bottom:6px}svg{width:100%;height:auto}svg text{fill:var(--muted);font-size:11px}svg .grid{stroke:var(--line)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--muted)}.legend i{display:inline-block;width:12px;height:3px;margin-right:5px;vertical-align:middle}
+</style></head><body><main>
+<h1>${esc(title)}</h1><p class="muted">${sum ? `${esc(sum.started)} to ${esc(sum.ended)} · ${Math.round(sum.minutes / 6) / 10} hours · ${sum.engines} processes on PostgreSQL · ${esc(sum.machine)} · Node ${esc(sum.node)}${sum.model ? ` · AI: ${esc(sum.model)}` : ''}` : 'The run did not finish: made from the samples and events written so far.'}</p>
+${sum ? `<p class="big">${passed} of ${sum.checks.length} checks passed</p><div class="wrap"><table><thead><tr><th>Check</th><th>Result</th><th>Detail</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}
+<h2>Over time</h2>${okChart}${latChart}${memChart}${dbChart}
+<h2>Scenarios</h2><div class="wrap"><table><thead><tr><th>Scenario</th><th>Done</th><th>Failed</th><th>p50 / p95 / p99 ms, last period</th><th>Worst p95</th><th>Most frequent error</th></tr></thead><tbody>${scen}</tbody></table></div>
+<h2>Events</h2><div class="wrap"><table><thead><tr><th>Minute</th><th>Kind</th><th>What</th></tr></thead><tbody>${ev}</tbody></table></div>
+<h2>Starters covered</h2><p>Run here: Manual start (API), Timer, REST service, SOAP service, WebSocket service, WebSocket client, Folder (file) trigger, Remote file trigger (SFTP), Message bus subscriber (AMQP 1.0 stand-in), Channel trigger, Error handler, MCP tool, AI agent channel (chat).</p><p class="muted">Not run here (they need outside accounts or servers): Email (IMAP), Kafka and RabbitMQ subscribers, Google Drive, Microsoft files, Twitch, Discord, Telegram, Azure Data Factory.</p>
+</main></body></html>`;
+  fs.writeFileSync(path.join(dir, 'report.html'), html);
+}

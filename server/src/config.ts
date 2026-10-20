@@ -67,6 +67,8 @@ export const config = {
   drainMs: Number(process.env.SUTRA_DRAIN_MS || 30000),
   /** Engines renew their heartbeat this often; one silent for three beats is presumed dead. */
   heartbeatMs: Number(process.env.SUTRA_HEARTBEAT_MS || 5000),
+  /** 0: this engine never becomes the leader (for example when it cannot reach the folders that folder triggers watch). */
+  canLead: process.env.SUTRA_CAN_LEAD !== '0',
   /** Finished runs older than this are deleted (0 = keep forever). */
   runRetentionDays: Number(process.env.SUTRA_RUN_RETENTION_DAYS ?? 30),
   /** text (default) or json: engine events on standard output as JSON lines. */

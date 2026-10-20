@@ -40,9 +40,9 @@ export function startCluster(h: ClusterHooks) {
   cluster.started = true;
   cluster.draining = false;
   cluster.gen = getSetting<number>('deployGen', 0);
-  q.run(`insert into engines(id, host, pid, mode, version, started_at, heartbeat_at, workers, active, draining) values(?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
-    on conflict(id) do update set host = excluded.host, pid = excluded.pid, mode = excluded.mode, version = excluded.version, started_at = excluded.started_at, heartbeat_at = excluded.heartbeat_at, workers = excluded.workers, active = 0, draining = 0, drain_requested = 0`,
-    config.engineId, os.hostname(), process.pid, config.mode, version, now(), Date.now(), engine.concurrency);
+  q.run(`insert into engines(id, host, pid, mode, version, started_at, heartbeat_at, workers, active, draining, can_lead) values(?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
+    on conflict(id) do update set host = excluded.host, pid = excluded.pid, mode = excluded.mode, version = excluded.version, started_at = excluded.started_at, heartbeat_at = excluded.heartbeat_at, workers = excluded.workers, active = 0, draining = 0, drain_requested = 0, can_lead = excluded.can_lead`,
+    config.engineId, os.hostname(), process.pid, config.mode, version, now(), Date.now(), engine.concurrency, config.canLead ? 1 : 0);
   beat();
   timer = setInterval(beat, config.heartbeatMs);
   timer.unref?.();
@@ -54,7 +54,9 @@ export function beat() {
   const t = Date.now();
   q.run('update engines set heartbeat_at = ?, active = ?, draining = ? where id = ?', t, engine.running, cluster.draining ? 1 : 0, config.engineId);
   const wasLeader = cluster.leader;
-  cluster.leader = !cluster.draining && tryLead(t);
+  // SUTRA_CAN_LEAD=0: this engine never takes the lease (and lets go of it at once if it held it).
+  cluster.leader = !cluster.draining && config.canLead && tryLead(t);
+  if (!config.canLead && wasLeader) q.run(`delete from leases where name = 'leader' and holder = ?`, config.engineId);
   if (cluster.leader && !wasLeader) hooks.becameLeader();
   if (!cluster.leader && wasLeader) hooks.lostLeader();
   if (cluster.leader) {
@@ -139,7 +141,7 @@ export function clusterStatus() {
   const lease = q.get<{ holder: string; expires_at: number }>(`select holder, expires_at from leases where name = 'leader'`);
   const engines = q.all<any>('select * from engines order by started_at').map(e => ({
     id: e.id, name: names[e.id] || '', host: e.host, pid: Number(e.pid), mode: e.mode, version: e.version, startedAt: e.started_at,
-    alive: Number(e.heartbeat_at) >= t - deadAfter(), heartbeatAgeMs: t - Number(e.heartbeat_at), workers: Number(e.workers), running: Number(e.active), draining: !!Number(e.draining),
+    alive: Number(e.heartbeat_at) >= t - deadAfter(), heartbeatAgeMs: t - Number(e.heartbeat_at), workers: Number(e.workers), running: Number(e.active), draining: !!Number(e.draining), canLead: e.can_lead === undefined || e.can_lead === null ? true : !!Number(e.can_lead),
     leader: !!lease && lease.holder === e.id && Number(lease.expires_at) >= t,
   }));
   const counts = Object.fromEntries(q.all<{ status: string; n: number }>(`select status, count(*) as n from tasks where status in ('pending', 'running', 'waiting', 'paused') group by status`).map(r => [r.status, Number(r.n)]));

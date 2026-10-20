@@ -9,7 +9,7 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-7-3178c6?logo=typescript&logoColor=white)
 ![Database](https://img.shields.io/badge/database-SQLite%20%7C%20PostgreSQL-4169e1?logo=postgresql&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Docker-555)
-![Tests](https://img.shields.io/badge/tests-303-success)
+![Tests](https://img.shields.io/badge/tests-326-success)
 
 ![The SutraFlow designer: palettes, canvas and the step inspector](docs/guide-images/designer.jpg)
 
@@ -35,14 +35,14 @@
 
 ## Features
 
-- **Visual designer**: 118 activities in 18 palettes, drag-and-drop data mapping with For-Each, Where, Group by and Sort by, more than 100 formula functions, JSONata, live previews, step-by-step debugging with breakpoints, undo and redo, folders, and a description on every step.
+- **Visual designer**: 127 activities in 20 palettes, drag-and-drop data mapping with For-Each, Where, Group by and Sort by, more than 100 formula functions, JSONata, live previews, step-by-step debugging with breakpoints, undo and redo, folders, and a description on every step.
 - **Durable engine**: every step is checkpointed in the database; approvals and long waits cost nothing while they wait; runs survive restarts and resume where they stopped; retries with backoff, error branches, an Error handler, loops, Merge, sub-Sutras, and resubmitting failed runs from the failed step. Short request-reply Sutras can run **in memory** instead, saved once when they end, several times faster.
 - **Memory tables**: small reference data (rates, codes, routing, reusable values) in each engine's memory for lookups without a database round trip, loaded from a query or filled by Sutras, with a failsafe copy, hot reload from the Admin Console and enforced limits.
 - **Big files on small servers**: CSV and line files of any size are streamed in batches of rows, each batch a step of its own, so memory depends on the batch, not the file.
-- **APIs and gateway**: REST and SOAP services with generated WSDL and OpenAPI; security policies (API keys, Basic, JWT, mutual TLS, WS-Security UsernameToken, IP allow lists, rate limits, CORS); gateway apps with keys, OAuth client-credentials tokens, plans and a firewall; TLS with your own certificate or Let's Encrypt.
+- **APIs and gateway**: REST, SOAP and WebSocket services with generated WSDL and OpenAPI; security policies (API keys, Basic, JWT, OAuth token introspection, HMAC-signed requests, mutual TLS, WS-Security UsernameToken, X.509 signatures and SAML assertions, encrypted SOAP, IP allow lists, rate limits, CORS); scopes per service and operation; bodies validated against JSON Schema or XSD; threat protection (depth, fields, sizes, no DOCTYPE); gateway apps with keys, OAuth client-credentials tokens, plans and a firewall; TLS with your own certificate or Let's Encrypt.
 - **AI**: AI steps (prompt, classify, route, extract, summarize, translate, sentiment) on Claude, OpenAI, Gemini, Ollama and other providers; AI agents with tools, memory, guardrails, people in the loop and hand-offs; knowledge bases for RAG (built-in, pgvector, Qdrant, Chroma, Pinecone); Sutras published as MCP tools for Claude and other assistants; agents as chat pages, an OpenAI-compatible API and A2A.
 - **Connectors**: HTTP, SOAP with WS-Security, files, SFTP and FTP, PostgreSQL, MySQL, SQL Server, Oracle and SQLite, Kafka, RabbitMQ and ActiveMQ, email, Firebase, Google Drive, Sheets and Docs, SharePoint and OneDrive, Dropbox, YouTube, Twitch, Discord, Telegram, Facebook Pages, Azure Data Factory, Databricks, Python, PowerShell and shell scripts, and any OAuth REST API.
-- **Operations**: an Admin Console for deployed applications (start, stop, tuning, runs, approvals, engines, alerts, gateway traffic, users and roles, system accounts, audit log, releases, the database); clusters of engines on PostgreSQL with a leader, failover and graceful drain; Prometheus metrics, OpenTelemetry traces and JSON logs.
+- **Operations**: an Admin Console for deployed applications (start, stop, tuning, runs, approvals, engines, alerts, gateway traffic, users and roles, system accounts, audit log, releases, the database); clusters of engines on PostgreSQL with a leader, failover and graceful drain; Prometheus metrics, OpenTelemetry traces and JSON logs; single sign-on for people with OpenID Connect, roles from identity provider groups.
 - **Releases**: projects in Git from the designer; release zips with the deployment config, documentation and files; built by a CI/CD pipeline straight from Git with the `sutra` command; deployed by command line or the Admin Console, with history and rollback.
 - **Documentation from the design**: each Sutra and project produces its own documentation (HTML and Markdown) from its steps and their descriptions.
 
@@ -90,9 +90,10 @@ The guide and the architecture page are built from the code (`npm run guide`, `n
 
 | Palette | Activities |
 |---|---|
-| Triggers | Manual start, Timer, REST service, SOAP service, Channel trigger |
+| Triggers | Manual start, Timer, REST service, SOAP service, WebSocket service, WebSocket client, Channel trigger |
 | HTTP / REST | Send HTTP request, Send HTTP response |
 | SOAP / Web services | Invoke SOAP service, SOAP reply |
+| WebSocket | WebSocket send (answer, push, broadcast, close), WebSocket client send |
 | Data & mapping | Map data, Parse / Render JSON, Parse / Render XML, Parse / Render CSV, Filter list, Sort list, Aggregate, Transform (JSONata) |
 | Flow control | If / else, Switch, Router, For each, Merge, Wait, Human approval, Set variables, Throw error, End, Call Sutra, Return, Error handler, No operation |
 | Files | File trigger, Read file, List / read directory, Write file, Move / copy / delete file |
@@ -205,33 +206,17 @@ Tested against stand-in services that answer like the real ones, but not yet aga
 
 ## Known limitations
 
-- **WS-Security**: no XML encryption, and signatures of incoming SAML and X.509 tokens are not validated. Incoming SOAP calls accept UsernameToken (with replay protection); outgoing calls can sign with X.509 and send SAML tokens.
-- **Message validation**: a REST service's body schema describes the data for mapping but is not enforced as JSON Schema or XSD; *Validate fields* checks required fields.
-- **Single sign-on for people**: studio and Admin Console users sign in with SutraFlow accounts; JWT from an identity provider protects APIs, not the studio.
+- **WS-Security**: replies of SOAP services are not encrypted for the caller (requests are decrypted, and outgoing calls can encrypt). Single sign-on for people uses OpenID Connect; SAML sign-on is not offered.
 - **Twitch and Discord triggers** poll (every minute and every few seconds) rather than receive pushed events.
+- **The soak test** covers the starters that run on one machine; Email (IMAP), Kafka, RabbitMQ and the cloud triggers are tested against stand-ins in the test suite only.
 
 ## Roadmap
 
-- **Leaner run state**: each step currently rewrites the run state with the outputs of earlier steps, which costs Sutras that pass big data along (64 KB outputs measured about a third of the throughput of small ones). Keeping outputs only in the step rows removes that cost.
 - **Waking engines on new work**: PostgreSQL can notify engines when work arrives (LISTEN/NOTIFY), instead of them polling the queue.
-- **Longer soak tests**: 8 to 24 hours on a cluster of engines with PostgreSQL on its own machine, under a steady mixed load (REST, SOAP, files, waits), with an engine stopped and restarted on the way. The test keeps throughput, latency percentiles, memory, pool waits and database size over time, and checks that no run is lost or run twice. The results will be published in `docs/benchmarks`.
+- **A 24-hour soak with PostgreSQL on its own machine**: the soak tool (`tools/soak.mjs`) runs unattended for any length and writes its own report; the next run moves the database to a separate machine.
+- **Encrypted SOAP replies** for callers who send their certificate, and SAML sign-on for people.
 
-**WS-Security**
-- **Incoming X.509 signatures**: verify signed SOAP requests (BinarySecurityToken, the signed body and timestamp) against trusted certificates per policy.
-- **Incoming SAML tokens**: validate the issuer's signature, audience and validity times.
-- **XML encryption**: encrypt outgoing bodies and decrypt incoming ones with the policy's certificates.
-- **Timestamps** required and checked on incoming messages, with a configurable clock skew.
-
-**API security**
-- **Message validation**: enforce a REST service's body schema as JSON Schema, and SOAP bodies against their XSD, rejecting bad requests before a run starts.
-- **Threat protection** per policy: limits on body size, JSON and XML depth, field counts and string lengths.
-- **HMAC request signing**: incoming and outgoing requests signed with a shared secret (with timestamp and replay protection), as many webhook senders use.
-- **OAuth for the gateway**: token introspection for opaque tokens, and scopes per operation from any identity provider.
-- **Single sign-on** for studio and Admin Console users (OpenID Connect, then SAML), with roles from identity provider groups.
-
-**WebSockets**
-- **WebSocket services** on the gateway: a trigger per message or per connection, replies and pushed messages, with the same security policies.
-- **WebSocket client** connector: connect, send, and a trigger for received messages, with reconnects.
+Done in 1.8.0: leaner run state (each step writes only its own output: 1 MB outputs three times faster), message validation (JSON Schema, XSD) and threat protection, single sign-on with OpenID Connect, WS-Security completed (X.509 and SAML on incoming requests, timestamps, XML encryption both ways), HMAC request signing, OAuth token introspection and scopes per operation, WebSocket services and clients, `SUTRA_CAN_LEAD`, and an unattended soak test with a Markdown and HTML report.
 
 Done in 1.7.6: asynchronous PostgreSQL storage (a connection pool, explicit transactions, fencing of claimed steps, three round trips per step).
 

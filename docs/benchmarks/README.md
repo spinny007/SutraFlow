@@ -1,6 +1,6 @@
 # Benchmarks
 
-Load test results measured during the 1.6 to 1.7.6 load work, written by `tools/loadtest.mjs` and `tools/bigfiletest.mjs`. The user guide chapter *Sizing and performance* turns them into tables (`tools/guide/benchmarks.ts`), so the guide always shows these files.
+Load test results measured during the 1.6 to 1.8.0 load work, written by `tools/loadtest.mjs` and `tools/bigfiletest.mjs`. The user guide chapter *Sizing and performance* turns them into tables (`tools/guide/benchmarks.ts`), so the guide always shows these files.
 
 Machine: AMD Ryzen 7 7435HS (8 cores, 16 threads), 23.7 GB memory, NVMe, Windows 11, Node.js 24.21. PostgreSQL 18.2 ran on the same machine as the engines.
 
@@ -20,6 +20,9 @@ Machine: AMD Ryzen 7 7435HS (8 cores, 16 threads), 23.7 GB memory, NVMe, Windows
 | `async-before-remote.json`, `async-after-remote.json` | The same with the engines reaching PostgreSQL through a delaying proxy (about 28 ms round trip, measured; a database in another region) |
 | `async-before-sqlite.json`, `async-after-sqlite.json` | 1.7.5 and 1.7.6 on SQLite, one engine |
 | `async-after-64kb.json` | 1.7.6, one engine, 64 KB outputs per step |
+| `lean-after.json` | 1.8.0 (outputs apart from the run state), one engine, 64 KB and 0.1 KB outputs |
+| `lean-before-1mb.json`, `lean-after-1mb.json` | 1.7.6 and 1.8.0, one engine, 256 KB and 1 MB outputs |
+| `soak-1.8.0/` | The 1.8.0 soak test: `report.md`, `report.html`, and the samples and events they are made from |
 
 The benchmark Sutra is a trigger and ten Transform steps; each run is 11 steps. Steps per second count finished steps.
 
@@ -65,6 +68,21 @@ The engine talks to PostgreSQL through a pool of connections instead of one sync
 | 1 engine, 64 KB outputs | 47 | 60 |
 
 With the database far away, 1.7.5's synchronous connection held each engine's event loop so long that heartbeats were missed: the leader took engines for dead and handed their running steps to others, which ran them again. 1.7.6 keeps the event loop free, and fencing would refuse such a stale completion in any case.
+
+## 1.8.0: leaner run state
+
+Each step writes only its own output (table `run_outputs`) instead of the run state with all earlier outputs. One engine, PostgreSQL, REST calls:
+
+| Output per step | 1.7.6 | 1.8.0 |
+|---|---|---|
+| 0.1 KB | 719 steps/s | 845 |
+| 64 KB | 60 | 145 |
+| 256 KB | 14.3 | 40.7 |
+| 1 MB | 2.6 | 7.7 (runs of ten 1 MB steps: p95 35 s to 12 s) |
+
+## The soak test
+
+`node tools/soak.mjs --pg postgres://... --hours 8` runs unattended and writes `report.md` and `report.html` (see `soak-1.8.0/`). `--report-only <folder>` makes the report again from the samples.
 
 ## The second assessment
 

@@ -320,6 +320,7 @@ function migrate(d = getDb()) {
   // Each claim of a step counts up: a transition applies only for the claim that made it (fencing).
   add('tasks', 'claim', 'claim integer not null default 0');
   add('engines', 'drain_requested', 'drain_requested integer not null default 0');
+  add('engines', 'can_lead', 'can_lead integer not null default 1');
   add('users', 'kind', "kind text not null default 'user'");
   add('users', 'display_name', 'display_name text');
   add('users', 'email', 'email text');

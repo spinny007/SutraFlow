@@ -13,7 +13,7 @@ import { PageHead, State, Err, Confirm, useLoad, useEvery, ago, when, can, useMe
 import { act, type Action } from './log';
 import { EngineTuning } from './Tuning';
 
-interface EngineRow { id: string; name: string; host: string; pid: number; mode: string; version: string; startedAt: string; alive: boolean; heartbeatAgeMs: number; workers: number; running: number; draining: boolean; leader: boolean }
+interface EngineRow { id: string; name: string; host: string; pid: number; mode: string; version: string; startedAt: string; alive: boolean; heartbeatAgeMs: number; workers: number; running: number; draining: boolean; leader: boolean; canLead?: boolean }
 interface ClusterData { self: string; leader: string | null; engines: EngineRow[]; tasks: { pending: number; running: number; waiting: number; paused: number } }
 
 const drainCmd = (id: string): Action => ({ label: `Drain ${id}`, method: 'POST', url: `/api/console/engines/${encodeURIComponent(id)}/drain`, cli: ['engines', 'drain', id] });
@@ -56,7 +56,7 @@ export function Engines() {
               <tr key={e.id}>
                 <td>
                   {e.name ? <><b>{e.name}</b><div className="muted xs">id <code>{e.id}</code></div></> : <code>{e.id}</code>}
-                  {e.leader && <span className="c-badge">leader</span>}{e.id === data.self && <span className="c-badge soft">this one</span>}
+                  {e.leader && <span className="c-badge">leader</span>}{e.canLead === false && <span className="c-badge soft">never leads</span>}{e.id === data.self && <span className="c-badge soft">this one</span>}
                   {manage && <button className="btn link xs" onClick={() => setRename({ id: e.id, name: e.name })}>Rename</button>}
                 </td>
                 <td>{!e.alive ? <State kind="err">silent</State> : e.draining ? <State kind="warn">draining</State> : <State kind="ok">alive</State>}</td>

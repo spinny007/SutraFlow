@@ -1,43 +1,66 @@
-# SutraFlow 1.7.6 release notes
+# SutraFlow 1.8.0 release notes
 
 Released 2026-10-20. Copyright (c) 2026-27 Surya Partap Singh, [MixAgile.com](https://mixagile.com). Licensed under the GNU Affero General Public License v3.0 only (AGPL-3.0-only); a commercial licence is available, see `COMMERCIAL-LICENSE.md`.
 
 | Download | For |
 |---|---|
-| `sutraflow-1.7.6-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
-| `sutraflow-1.7.6-linux.tar.gz` | Linux (x64 or arm64); also macOS |
+| `sutraflow-1.8.0-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
+| `sutraflow-1.8.0-linux.tar.gz` | Linux (x64 or arm64); also macOS |
 
 Each comes with a `.sha256` file to check the download.
 
-## What is new since 1.7.5
+## What is new since 1.7.6
 
-### Asynchronous PostgreSQL storage
-- **The engine works with PostgreSQL through a pool of connections** instead of one synchronous connection, so one engine overlaps the database work of many steps. Measured with REST calls spread over the engines (results in `docs/benchmarks`):
+### Leaner run state
+- Each step writes only its own output (a table of step outputs) instead of the run state with every earlier output. One engine on PostgreSQL:
 
-  | Scenario | 1.7.5 | 1.7.6 |
+  | Output per step | 1.7.6 | 1.8.0 |
   |---|---|---|
-  | 1 engine, local PostgreSQL | 153 steps/s | 719 |
-  | 4 engines, local PostgreSQL | 457 | 1,602 |
-  | 1 engine, database 28 ms away | 3.4 | 102 |
-  | 4 engines, database 28 ms away | 17.7, 125 steps run twice | 622, none |
-  | 1 engine, SQLite | 390 to 412 | 419 to 427 |
+  | 0.1 KB | 719 steps/s | 845 |
+  | 64 KB | 60 | 145 |
+  | 256 KB | 14.3 | 40.7 |
+  | 1 MB | 2.6 | 7.7 |
 
-- **Explicit transactions.** Each transaction hands its body its own query object; a synchronous write or transaction while an asynchronous one is open is refused, never mixed in.
-- **Fencing.** Every claimed step carries a claim number; a completion, failure or retry applies only while the same engine still holds the same claim, and a run ends exactly once. A slow engine whose step was taken over can no longer overwrite the newer result.
-- **Fewer round trips.** Several steps are claimed in one statement together with their runs; the begin, the lock and the run travel together, and the last statement goes with the commit.
-- **Pool figures** on `/metrics`: connections (size, open, idle), waiting acquisitions, acquire, transaction and query times, retries. Also in *Admin Console → Engines → This machine*.
-- Deadlocks and serialization failures are retried.
+- Runs started by an older version (their outputs in the state) go on after the upgrade.
 
-### MySQL, SQLite and the in-memory store
-- They keep their single connection, now behind the same transaction interface; their steps take turns as before. SQLite gains a cache of prepared statements and stays at least as fast as 1.7.5.
+### API security
+- **Message validation**: REST bodies against a JSON Schema (drafts 07, 2019-09, 2020-12), a JSON sample or an XSD element; SOAP operations against an XSD element. *Validate requests: reject invalid* answers 400 with the errors, or a Client fault, before a run starts.
+- **Threat protection** on every API security policy: nesting depth (checked before parsing), fields, list items, text length, body size. XML with a DOCTYPE is always refused.
+- **HMAC-signed requests**, incoming and outgoing: timestamp and body, or method, path, timestamp and body, or the body only; several secrets while one is replaced; old timestamps and replays refused on every engine.
+- **OAuth token introspection** for opaque access tokens, with audience and scopes; answers kept until the token expires.
+- **Scopes per REST service and per SOAP operation**, from tokens and gateway apps.
 
-### Other changes
-- The gateway's request log is written without holding the engine, and its firewall rules are cached for 2 seconds.
-- Fixed: SOAP X.509 signing printed a deprecation warning from the XML signature library; the signature is now placed in the Security header through the supported call.
-- Load test: `--db-latency` (a measured delay between engine and database), `--profile` (CPU profiles of every engine), `--spread`.
-- Guide: load balancer and database connection sections in the production chapter; corrected SQLite and PostgreSQL advice.
-- The README test badge is kept equal to the test files by a test; the tests are type checked with the server.
-- New settings: `SUTRA_PG_POOL` (connections per engine, default from Steps at once), `SUTRA_PG_ASYNC=0` (the 1.7.5 synchronous connection, as a fallback), `SUTRA_COUNT_SYNC_SQL` (diagnostic).
+### WS-Security completed
+- Incoming **X.509 signatures**: the certificate trusted (listed, or issued by a listed CA), Body and Timestamp signed, one Body only.
+- Incoming **SAML assertions**: the identity provider's signature, issuer, audience and validity.
+- **Timestamps** checked with an allowed clock difference, and can be required.
+- **XML encryption** both ways: encrypted requests decrypted with the service's key (and can be required); outgoing calls encrypt the Body for the receiver after signing. AES-GCM or AES-CBC, keys by RSA-OAEP; RSA 1.5 refused.
+
+### Single sign-on
+- People sign in to the designer and the Admin Console with an OpenID Connect provider (authorization code with PKCE, state and nonce; the ID token checked against the provider's keys). Accounts are created or linked only when allowed; roles follow the provider's groups. Password sign-in stays available. Admin Console → Users → Single sign-on.
+
+### WebSockets
+- **WebSocket service** trigger on the gateway: a run per message (in order per connection), and on connect and disconnect; the same security policies, with the token or key in the query for browsers; size, nesting and schema checks.
+- **WebSocket send**: answer, push to a connection, broadcast to a service, close; across engines through the database.
+- **WebSocket connections**, a **client trigger** that reconnects and subscribes again (leader engine), and a **client send** step that can wait for its answer.
+
+### Clusters and operations
+- `SUTRA_CAN_LEAD=0` keeps an engine from becoming the leader (for machines that cannot reach watched folders); the Admin Console shows *never leads*.
+- `sutra_event_loop_delay_ms` on `/metrics`: how long work waited for an engine's event loop.
+- Read remote file (SFTP, FTP) can **stream** big CSV and line files in batches, like Read file.
+- Built-in knowledge bases write and read through the connection pool in batches, and make vectors in slices, so learning a big document no longer holds the engine.
+- A new user guide chapter, *Setting up a cluster, step by step*: one machine, two machines, engines only, Docker; what every engine and what the leader does. And *WebSockets: live connections*.
+
+### Soak test
+- `tools/soak.mjs` runs unattended for hours on a cluster: every starter that runs on one machine (REST, SOAP with WS-Security, WebSocket service and client, timer, called Sutras and approvals, error handler, channels, MCP, a message bus, SFTP and folder files of 10 to 60 MB, RAG documents of 10 to 60 MB, an AI agent on a local Ollama model), with an engine killed and the database cut on the way. Database connections are tried 10 times, engines that stop are started again, and it writes `report.md` and `report.html` itself. The 1.8.0 report is in `docs/benchmarks/soak-1.8.0`.
+
+### New settings
+`SUTRA_CAN_LEAD`, `SUTRA_PUBLIC_URL` (the studio's address behind a proxy, for single sign-on).
+
+## In 1.7.6
+
+- Asynchronous PostgreSQL storage: a connection pool, explicit transactions, fencing of claimed steps. One engine 153 to 719 steps a second; four engines 1,602; a database 28 ms away 3.4 to 102.
+- Pool figures on `/metrics`; SOAP X.509 signing without the deprecated call; `SUTRA_PG_POOL`, `SUTRA_PG_ASYNC`.
 
 ## Since 1.6.0 (in 1.7.5)
 
@@ -61,14 +84,14 @@ Each comes with a `.sha256` file to check the download.
 1. Install Node.js 24 from nodejs.org (or with nvm-windows) and open a new PowerShell window.
 2. Check the download:
    ```powershell
-   (Get-FileHash .\sutraflow-1.7.6-windows.zip -Algorithm SHA256).Hash.ToLower()
-   Get-Content .\sutraflow-1.7.6-windows.zip.sha256
+   (Get-FileHash .\sutraflow-1.8.0-windows.zip -Algorithm SHA256).Hash.ToLower()
+   Get-Content .\sutraflow-1.8.0-windows.zip.sha256
    ```
    The two values must match.
 3. Unpack it, for example to `C:\SutraFlow`:
    ```powershell
-   Expand-Archive .\sutraflow-1.7.6-windows.zip -DestinationPath C:\SutraFlow
-   cd C:\SutraFlow\sutraflow-1.7.6
+   Expand-Archive .\sutraflow-1.8.0-windows.zip -DestinationPath C:\SutraFlow
+   cd C:\SutraFlow\sutraflow-1.8.0
    ```
 4. Install the runtime packages and make the settings file:
    ```powershell
@@ -88,13 +111,13 @@ Each comes with a `.sha256` file to check the download.
 1. Install Node.js 24 (from your distribution, NodeSource or nvm).
 2. Check the download:
    ```sh
-   sha256sum -c sutraflow-1.7.6-linux.tar.gz.sha256
+   sha256sum -c sutraflow-1.8.0-linux.tar.gz.sha256
    ```
 3. Unpack it, for example to `/opt`:
    ```sh
    sudo mkdir -p /opt/sutraflow && sudo chown "$USER" /opt/sutraflow
-   tar -xzf sutraflow-1.7.6-linux.tar.gz -C /opt/sutraflow
-   cd /opt/sutraflow/sutraflow-1.7.6
+   tar -xzf sutraflow-1.8.0-linux.tar.gz -C /opt/sutraflow
+   cd /opt/sutraflow/sutraflow-1.8.0
    ```
 4. Install the runtime packages and make the settings file:
    ```sh
@@ -109,26 +132,28 @@ Each comes with a `.sha256` file to check the download.
    Browse to http://127.0.0.1:4800 (through an SSH tunnel on a remote server); the first visit asks you to create the administrator account.
 7. Start at boot (optional): `bin/sutraflow service` prints a systemd unit with the steps to enable it.
 
-## Upgrade from 1.7.5 or 1.6.x
+## Upgrade from 1.7.x or 1.6.x
 
 1. Back up: the data folder with `master.key`, and for PostgreSQL a `pg_dump` of the database.
 2. Stop gracefully: `sutraflow stop all` (running steps finish first).
-3. Unpack 1.7.6 into a new folder beside the old one. Copy `sutraflow.env` from the old folder; keep `SUTRA_DATA_DIR` pointing at the same data folder (or copy the folder).
-4. Run `sutraflow setup`, then `sutraflow start`. The database is upgraded at start (from 1.7.5: the `claim` column of `tasks`; from 1.6: also the new indexes and the memory table tables); nothing is removed.
-5. In a cluster, **upgrade every engine before starting any of them again**: older engines do not fence claimed steps and must not share a database with 1.7.6 engines.
+3. Unpack 1.8.0 into a new folder beside the old one. Copy `sutraflow.env` from the old folder; keep `SUTRA_DATA_DIR` pointing at the same data folder (or copy the folder).
+4. Run `sutraflow setup`, then `sutraflow start`. The database is upgraded at start (from 1.7.6: the tables `run_outputs`, `replay_guard`, `ws_connections` and `ws_outbox`, and the columns `users.idp_subject` and `engines.can_lead`; from 1.7.5 also `tasks.claim`; from 1.6 also the new indexes and the memory table tables); nothing is removed. Runs that were open go on.
+5. In a cluster, **upgrade every engine before starting any of them again**: 1.8.0 engines keep step outputs apart from the run state, which older engines do not read, so the two must not share a database.
 6. On PostgreSQL, check `max_connections`: each engine opens its pool (`SUTRA_PG_POOL`, at most 20 by default) plus one connection. Engines × (pool + 1) must fit, with room for other clients.
 7. Optional: *Admin Console → Engines → This machine → Apply recommended tuning*.
 
-To go back, stop 1.7.6, start the old folder, and restore the backup if 1.7.6 already ran on the data (the added column is not used by older versions, so the data stays readable).
+To go back, stop 1.8.0 and restore the backup taken before the upgrade: runs that 1.8.0 ran keep their outputs in a table older versions do not read.
 
 ## Docker
 
-The images are built from the source repository (`Dockerfile`, `docker-compose.yml`): `docker build -t sutraflow:1.7.6 .`. The release archives are for installs without Docker.
+The images are built from the source repository (`Dockerfile`, `docker-compose.yml`): `docker build -t sutraflow:1.8.0 .`. The release archives are for installs without Docker.
 
 ## Known limitations
 
 - MySQL and the other single-connection stores run one transaction at a time per engine; use PostgreSQL for the highest throughput.
-- Engines poll the work queue; a long soak (8 to 24 hours) on a separate database machine is still to be run.
+- Engines poll the work queue (waking them through LISTEN/NOTIFY is on the roadmap).
+- The soak test ran with PostgreSQL on the same machine; a run with the database on its own machine is on the roadmap.
+- SOAP replies are not encrypted for the caller; SAML sign-on for people is not offered (OpenID Connect is).
 - A Sutra that runs in memory loses the runs open at a restart, and cannot wait (approvals, Call Sutra with wait).
 - Memory tables are for small reference data: at most 100,000 rows and 256 MB each.
 - See also *Known limitations* in `README.md`.

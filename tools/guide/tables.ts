@@ -55,16 +55,20 @@ export const TABLE_TEXT: Record<string, string> = {
   grants: 'Which role each account holds, for all projects (empty project) or one project.',
   api_tokens: 'API tokens of system accounts: hash, name, expiry and last use. Token values are never stored.',
   audit: 'Audit log: time, actor, address, action, target, project, status, outcome and safe details.',
+  run_outputs: 'The output of each step of a run, one row per step name (a later pass of a loop replaces it), read by the steps after it. Kept apart from the run state so a step writes only its own output.',
+  replay_guard: 'Signatures of HMAC-signed requests seen recently, so a replay to any engine is refused; each row expires after twice the allowed age.',
+  ws_connections: 'Open WebSocket connections of every engine: id, engine, service path, Sutra, caller. Lets a step on one engine reach a connection held by another.',
+  ws_outbox: 'Messages for WebSocket connections held by another engine, waiting a fraction of a second for that engine to deliver them.',
 };
 
 /** The tables by what they are for, in the order the guide shows them. */
 export const TABLE_GROUPS: [string, string[]][] = [
   ['Projects and Sutras', ['projects', 'flows', 'flow_versions', 'deployments', 'resources', 'schemas', 'folders', 'counters', 'mem_rows', 'mem_meta']],
-  ['Runs and the work queue', ['runs', 'tasks']],
+  ['Runs and the work queue', ['runs', 'tasks', 'run_outputs']],
   ['Releases and the cluster', ['package_deployments', 'engines', 'leases']],
   ['People, access and audit', ['users', 'roles', 'grants', 'api_tokens', 'audit']],
   ['Vault and server settings', ['secrets', 'settings']],
-  ['API gateway', ['gw_apps', 'gw_keys', 'gw_plans', 'gw_usage', 'gw_requests']],
+  ['API gateway', ['gw_apps', 'gw_keys', 'gw_plans', 'gw_usage', 'gw_requests', 'replay_guard', 'ws_connections', 'ws_outbox']],
   ['Alerts', ['alert_rules', 'alert_channels', 'alerts']],
   ['AI', ['ai_sessions', 'ai_memory', 'ai_session_queue', 'ai_agent_state', 'ai_knowledge']],
   ['Git', ['git_accounts', 'git_workspaces', 'git_ids']],
@@ -79,6 +83,8 @@ export const TABLE_NOTES: Record<string, { encrypted?: string; grows?: string }>
   users: { encrypted: 'passwords are salted hashes, never reversible' },
   runs: { grows: 'one row per run; housekeeping deletes runs older than the retention days (Admin Console > Engines > Tuning)' },
   tasks: { grows: 'one row per step; deleted with their run' },
+  run_outputs: { grows: 'one row per step name of a run; deleted with their run' },
+  replay_guard: { grows: 'one row per signed request; housekeeping deletes expired rows' },
   audit: { grows: 'one row per change; the audit retention days apply (Admin Console > Audit log)' },
   gw_requests: { grows: 'one row per gateway request; kept for the retention days' },
   gw_usage: { grows: 'short windows, replaced as they pass' },
