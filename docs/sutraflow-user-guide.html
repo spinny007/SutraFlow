@@ -2048,7 +2048,7 @@ docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=...
 </ul>
 
 <p class="h">Soak test: hours of mixed load, unattended</p>
-<p><code>tools/soak.mjs</code> runs a studio and engines on a PostgreSQL database of their own for hours and writes its own report (<code>report.md</code> and <code>report.html</code>, with charts), so nobody has to watch it:</p>
+<p><code>tools/soak.mjs</code>, in the source repository (it is a test tool, not part of the release packages), runs a studio and engines on a PostgreSQL database of their own for hours and writes its own report (<code>report.md</code> and <code>report.html</code>, with charts), so nobody has to watch it:</p>
 <pre class="code">node tools/soak.mjs --pg postgres://postgres@db:5432/postgres --hours 8
 node tools/soak.mjs --pg ... --hours 24 --share //fileserver/soak     # the folder trigger watches a real share
 node tools/soak.mjs --report-only docs/benchmarks/soak-1.8.0               # the report again, from the samples</pre>
