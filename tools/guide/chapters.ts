@@ -1217,7 +1217,28 @@ print(json.dumps({"total": 42}))                              # the last line, a
   {
     id: 'oauth-setup', title: 'OAuth connections step by step: Google, Microsoft, Dropbox, Facebook, Twitch',
     html: `
-<p>Google Drive, Sheets, Docs and YouTube, SharePoint and OneDrive, Dropbox, Facebook Pages and Twitch all sign in with <strong>OAuth</strong>: SutraFlow never sees the account's password. Every one is set up the same way, in three places:</p>
+<p class="h">How OAuth works in SutraFlow</p>
+<p>OAuth lets SutraFlow act for an account without ever knowing its password. The account owner signs in at the provider (Google, Microsoft and the others) and agrees to what SutraFlow may do (the <em>scopes</em>); the provider then gives SutraFlow two tokens:</p>
+<ul>
+<li>an <strong>access token</strong>: the key a step shows with every call; it works for about an hour;</li>
+<li>a <strong>refresh token</strong>: used by SutraFlow to get a new access token when the old one runs out, without asking the person again. It lasts until the access is withdrawn (or, for some providers and settings, a set time: see the notes below).</li>
+</ul>
+<ol>
+<li>You press <em>Connect account</em>. SutraFlow opens the provider's sign-in page with your client ID, the scopes and its redirect address, plus a signed code (<em>state</em>) that expires in 10 minutes.</li>
+<li>The account owner signs in and allows the access. The provider sends the browser back to SutraFlow's redirect address with a one-time code.</li>
+<li>SutraFlow checks the state, then exchanges the code for the tokens with your client secret, read from the vault at that moment.</li>
+<li>The tokens are stored <strong>encrypted</strong> in SutraFlow's database. Every engine of a cluster reads them there, so one sign-in serves them all; another server (test, production) signs in on its own.</li>
+<li>Each step that calls the service uses the access token. Shortly before it expires SutraFlow refreshes it by itself; you see nothing of this.</li>
+</ol>
+<p>So the <em>client ID and secret</em> identify SutraFlow (your app at the provider), the <em>sign-in</em> picks the account, and the <em>scopes</em> say what may be done with it. Disconnect (or withdraw the access at the provider) and the tokens stop working.</p>
+<table class="t"><thead><tr><th>OAuth also appears in SutraFlow as</th><th>What it is for</th></tr></thead><tbody>
+<tr><td>Outbound security profile <em>OAuth client credentials</em></td><td>Calling an API as a machine (no person signs in): a client ID and secret get a token directly. See <a href="#ch-call">Calling services</a>.</td></tr>
+<tr><td>Gateway apps</td><td>The other way round: SutraFlow gives tokens (<code>POST /oauth/token</code>) to the apps that call your services. See <a href="#ch-gateway">The API gateway</a>.</td></tr>
+<tr><td>JWT and token introspection in API security policies</td><td>Checking tokens your identity provider gave to callers of your services. See <a href="#ch-expose">Exposing APIs</a>.</td></tr>
+<tr><td>Single sign-on</td><td>People signing in to the designer, the Admin Console and the Approval Center with your identity provider (OpenID Connect, built on OAuth). See <a href="#ch-secrets">Secrets and studio security</a>.</td></tr>
+</tbody></table>
+<p class="h">Setting up a connection</p>
+<p>Google Drive, Sheets, Docs and YouTube, SharePoint and OneDrive, Dropbox, Facebook Pages and Twitch are all set up the same way, in three places:</p>
 <ol>
 <li><strong>At the provider</strong> (once): register an app. It gives a <em>client ID</em> and a <em>client secret</em>, and you tell it SutraFlow's <em>redirect address</em>.</li>
 <li><strong>In the designer</strong>: an <em>OAuth connection</em> holds the client ID, the secret's name and the scopes; <em>Connect account</em> signs in once, and the tokens are kept encrypted.</li>

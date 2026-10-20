@@ -180,6 +180,26 @@ export const DIAGRAMS = {
     ])
     + arrow([[972, 110], [972, 160], [84, 160], [84, 112]], 'response, 403, 401, 429, or a SOAP fault', '', [528, 154])),
 
+  oauth: figure('oauth', 1060, 300, 'An OAuth connection. Above: signing in, once per server. Below: every call a step makes; the access token is refreshed shortly before it expires, and the tokens live encrypted in the shared database, so every engine of a cluster uses the same sign-in.',
+    row(20, 40, 150, 84, 26, [
+      ['Connect account', ['an administrator,', 'studio or console'], 'ext'],
+      ['Start address', ['/api/oauth/:id/start', 'signed state, 10 min']],
+      ['Provider sign-in', ['the account owner', 'allows the scopes'], 'ext'],
+      ['Callback', ['/api/oauth/callback', 'code + state checked'], 'acc'],
+      ['Token endpoint', ['code + client secret', 'from the vault'], 'ext'],
+      ['Database', ['settings oauth:<id>', 'AES-256-GCM'], 'acc'],
+    ])
+    + note(20, 22, ['Signing in (once per server)'])
+    + note(20, 172, ['Every call'])
+    + row(20, 190, 150, 84, 26, [
+      ['A step', ['Drive, Sheets, YouTube,', 'SharePoint, Dropbox'], ''],
+      ['accessToken()', ['reads the tokens,', 'decrypts'], 'acc'],
+      ['Still valid?', ['more than a minute', 'left: use it']],
+      ['Refresh', ['refresh token + secret;', 'one at a time'], 'acc'],
+      ['Save', ['new access token', 'encrypted']],
+      ['Provider API', ['Bearer access token', '(streamed for files)'], 'ext'],
+    ])),
+
   stop: figure('stop', 1010, 130, 'A graceful stop (SIGTERM, docker stop, or POST /api/engine/drain).',
     row(20, 30, 140, 74, 26, [
       ['Stop signal', ['SIGTERM or', 'drain API'], 'ext'],
