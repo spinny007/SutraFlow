@@ -14,7 +14,7 @@ import { testEnv, node, edge } from './helpers.js';
 
 testEnv(18990);
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const { shellPath } = await import('../server/src/palettes/scripts.js');
 const projects = await import('../server/src/projects.js');
@@ -31,7 +31,7 @@ async function run(nodes: any[], edges: any[], input?: any) {
   const id = await engine.startRun({ doc: { name: 'S', nodes, edges }, projectId: pid, input });
   await engine.waitFor(id, 30000);
   const r: any = q.get('select * from runs where id = ?', id);
-  return { status: r.status, error: r.error, state: JSON.parse(r.state) };
+  return { status: r.status, error: r.error, state: runState(r.id)! };
 }
 const has = (cmd: string) => { try { execSync(cmd, { stdio: 'ignore' }); return true; } catch { return false; } };
 const win = process.platform === 'win32';

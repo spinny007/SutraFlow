@@ -16,7 +16,7 @@ import { testEnv, captureServer, node, edge } from './helpers.js';
 testEnv(18610);
 const require = createRequire(import.meta.url);
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const flows = await import('../server/src/flows.js');
 const { setSecret } = await import('../server/src/secrets.js');
@@ -33,7 +33,7 @@ async function run(nodes: any[], edges: any[], input?: any) {
   const id = await engine.startRun({ doc: { name: 'C', nodes, edges }, input });
   await engine.waitFor(id, 20000, true);
   const r: any = q.get('select * from runs where id = ?', id);
-  return { status: r.status, error: r.error, state: JSON.parse(r.state) };
+  return { status: r.status, error: r.error, state: runState(r.id)! };
 }
 const until = async (fn: () => boolean, ms = 8000) => {
   const t = Date.now();

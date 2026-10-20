@@ -20,7 +20,7 @@ import { testEnv, node, edge, port } from './helpers.js';
 const env = testEnv(20450);
 process.env.SUTRA_ADMIN_TOKEN = 'performance-admin-token-0123456789';
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q, lockId, memoryStore, dbKind } = await import('../server/src/db.js');
 const { config } = await import('../server/src/config.js');
 const flows = await import('../server/src/flows.js');
@@ -81,10 +81,10 @@ test('in memory: steps run without database writes and the whole run is saved wh
   assert.equal(open.inMemory, true, 'the run API knows it while it is in memory');
   assert.equal(open.status, 'running');
   assert.equal(await engine.waitFor(runId, 10000), 'done');
-  const row = q.get<any>('select status, steps, state, flow_id from runs where id = ?', runId);
+  const row = q.get<any>('select id, status, steps, state, flow_id from runs where id = ?', runId);
   assert.equal(row.status, 'done');
   assert.equal(row.flow_id, id);
-  assert.equal(JSON.parse(row.state).outputs.Double.n, 10);
+  assert.equal(runState(row.id)!.outputs.Double.n, 10);
   const tasks = q.all<any>('select node_id, status, output from tasks where run_id = ? order by id', runId);
   assert.deepEqual(tasks.map(t => t.status), ['done', 'done', 'done'], 'every step is in the history');
   assert.equal(engine.memoryRuns, 0, 'nothing left in memory');
@@ -109,7 +109,7 @@ test('in memory: tests and debugging stay durable; retries and the error port wo
   const r2 = await start(id2);
   assert.equal(await engine.waitFor(r2, 10000), 'done');
   assert.equal(q.get<any>(`select attempt from tasks where run_id = ? and node_id = ?`, r2, boom.id).attempt, 2, 'retried twice in memory');
-  assert.equal(JSON.parse(q.get<any>('select state from runs where id = ?', r2).state).outputs.Handled.handled, 'no');
+  assert.equal(runState(r2)!.outputs.Handled.handled, 'no');
 
   const s3 = node('start', 'Start'), w = node('approval', 'Approve', { title: 'OK?' });
   const id3 = deployed('Fast but waits', [s3, w], [edge(s3, w)]);
@@ -262,7 +262,7 @@ test('streaming with step data none: batch steps keep no input or output; the re
   const rows = q.all<any>('select input, output from tasks where run_id = ? and node_id = ?', runId, slow.id);
   assert.equal(rows.length, 200);
   assert.ok(rows.every(r => r.input === null && r.output === null), 'nothing kept');
-  const st = JSON.parse(q.get<any>('select state from runs where id = ?', runId).state);
+  const st = runState(runId)!;
   assert.equal(st.outputs['Read many'].rows, undefined, 'the run state keeps a summary, not the rows');
 });
 

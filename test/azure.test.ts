@@ -21,7 +21,7 @@ import { testEnv, node, edge } from './helpers.js';
  */
 testEnv(20200);
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const projects = await import('../server/src/projects.js');
 const { saveResource } = await import('../server/src/resources.js');
@@ -128,8 +128,8 @@ const run = async (n: ReturnType<typeof node>) => {
   const s = node('start', 'Start', { payload: JSON.stringify({ date: '2026-10-18', zip: '10001' }) });
   const id = await engine.startRun({ doc: { name: 'T', nodes: [s, n], edges: [edge(s, n)] }, projectId: pid, source: 'test' });
   await engine.waitFor(id, 60000);
-  const r: any = q.get('select status, error, state from runs where id = ?', id);
-  const st = JSON.parse(r.state);
+  const r: any = q.get('select id, status, error, state from runs where id = ?', id);
+  const st = runState(r.id)!;
   return { status: r.status, error: r.error, out: st.outputs[n.name], logs: (st.logs || []).map((l: any) => l.msg).join('\n') };
 };
 
@@ -162,7 +162,7 @@ test('a failed pipeline goes to failed with the failing activity; a rerun starts
   const f = node('log', 'Failed', { message: '{{input.failedActivities}}' });
   const id = await engine.startRun({ doc: { name: 'T', nodes: [s, a, f], edges: [edge(s, a), edge(a, f, 'failed')] }, projectId: pid, source: 'test' });
   await engine.waitFor(id, 60000);
-  const st = JSON.parse((q.get<any>('select state from runs where id = ?', id)).state);
+  const st = runState(id)!;
   assert.equal(st.outputs['Build mart'].status, 'Failed');
   assert.deepEqual(st.outputs['Build mart'].failedActivities, [{ activity: 'Load mart', error: 'Violation of PRIMARY KEY constraint' }]);
   assert.ok(st.outputs.Failed, 'the failed branch ran');
@@ -209,7 +209,7 @@ test('Databricks: Test connection, a notebook with parameters and its exit value
   const s = node('start', 'Start'), b = node('databricksRun', 'Broken', { connection: c.id, notebookPath: '/Workspace/broken', wait: true, waitMinutes: 2 }), l = node('log', 'Why', { message: '{{input.error}}' });
   const id = await engine.startRun({ doc: { name: 'T', nodes: [s, b, l], edges: [edge(s, b), edge(b, l, 'failed')] }, projectId: pid, source: 'test' });
   await engine.waitFor(id, 60000);
-  const st = JSON.parse((q.get<any>('select state from runs where id = ?', id)).state);
+  const st = runState(id)!;
   assert.equal(st.outputs.Broken.error, 'ZeroDivisionError: division by zero');
   const job = await run(node('databricksRun', 'Job', { connection: c.id, what: 'job', jobId: '123', jobParams: [{ k: 'env', v: 'prod' }], wait: false }));
   assert.equal(job.status, 'done', job.error);

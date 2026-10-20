@@ -17,7 +17,7 @@ import { testEnv, node, edge } from './helpers.js';
 /** Published agents: chat page and API, OpenAI-compatible API, MCP tool, A2A, jobs, policies; MCP client; hand-off. */
 const env = testEnv(19910);
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const flows = await import('../server/src/flows.js');
 const projects = await import('../server/src/projects.js');
@@ -164,7 +164,7 @@ test('MCP client over a command; Call MCP tool; an agent uses outside tools; han
   const errLog = node('log', 'Tool error', { message: 'TOOLERR {{input.text}}' });
   let id = await engine.startRun({ doc: { name: 'MCP', nodes: [s, call, bad, errLog], edges: [edge(s, call), edge(call, bad), edge(bad, errLog, 'tool error')] }, projectId: pid });
   await engine.waitFor(id, 20000);
-  let st = JSON.parse(q.get<any>('select state from runs where id = ?', id).state);
+  let st = runState(id)!;
   assert.deepEqual(st.outputs.Add.result, { sum: 9 });
   assert.match(st.logs.map((l: any) => l.msg).join('\n'), /TOOLERR a and b must be numbers/);
 
@@ -172,7 +172,7 @@ test('MCP client over a command; Call MCP tool; an agent uses outside tools; han
   const ag = node('aiAgent', 'Calc agent', { provider: prov, task: 'add two and three', mcp: cmd.id, tools: 'none', maxSteps: 4 });
   id = await engine.startRun({ doc: { name: 'Calc', nodes: [s, ag], edges: [edge(s, ag)] }, projectId: pid });
   await engine.waitFor(id, 20000);
-  st = JSON.parse(q.get<any>('select state from runs where id = ?', id).state);
+  st = runState(id)!;
   assert.equal(st.outputs['Calc agent'].answer, 'The sum is 5');
   assert.deepEqual(st.outputs['Calc agent'].steps[0].result, { sum: 5 });
 
@@ -180,6 +180,6 @@ test('MCP client over a command; Call MCP tool; an agent uses outside tools; han
   const h = node('agentHandoff', 'To order desk', { process: agentFlow, use: 'draft', message: 'Handed over', sessionId: 'handoff-1', note: 'customer asks about A-1' });
   id = await engine.startRun({ doc: { name: 'Supervisor', nodes: [s, h], edges: [edge(s, h)] }, projectId: pid });
   await engine.waitFor(id, 20000);
-  st = JSON.parse(q.get<any>('select state from runs where id = ?', id).state);
+  st = runState(id)!;
   assert.match(st.outputs['To order desk'].answer, /^You said "Handed over/);
 });

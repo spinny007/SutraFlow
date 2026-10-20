@@ -22,7 +22,7 @@ process.env.SUTRA_ADMIN_TOKEN = 'obs-admin-token-0123456789';
 const ADMIN = { authorization: 'Bearer obs-admin-token-0123456789' };
 
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const projects = await import('../server/src/projects.js');
 const flows = await import('../server/src/flows.js');
@@ -182,10 +182,10 @@ test('run again from the failed step: the failed HTTP call is repeated once the 
     assert.equal(res.statusCode, 200, res.body);
     assert.equal(res.json().resubmitted, 1);
     await engine.waitFor(failed.id, 20000);
-    const row = q.get<any>('select status, error, state from runs where id = ?', failed.id);
+    const row = q.get<any>('select id, status, error, state from runs where id = ?', failed.id);
     assert.equal(row.status, 'done');
     assert.equal(row.error, null);
-    const st = JSON.parse(row.state);
+    const st = runState(row.id)!;
     assert.equal(st.outputs['Call service'].status, 200);
     assert.ok(st.outputs.Before, 'earlier results kept');
     assert.ok(st.logs.some((l: any) => /Run again from Call service by token/.test(l.msg)));

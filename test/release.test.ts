@@ -17,7 +17,7 @@ import { testEnv, node, edge, port } from './helpers.js';
 testEnv(19610);
 process.env.SUTRA_ADMIN_TOKEN = 'release-token-0123456789abcdef';
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const projects = await import('../server/src/projects.js');
 const flows = await import('../server/src/flows.js');
@@ -43,8 +43,8 @@ async function run(nodes: any[], edges: any[]) {
   const pid = projects.listProjects().find(p => p.name === 'Release pipelines')?.id || projects.saveProject({ name: 'Release pipelines', config: { variables: [] } }).id;
   const id = await engine.startRun({ doc: { name: 'Release', nodes, edges }, projectId: pid });
   await engine.waitFor(id, 30000);
-  const r: any = q.get('select status, error, state from runs where id = ?', id);
-  return { status: r.status, error: r.error, out: JSON.parse(r.state).outputs };
+  const r: any = q.get('select id, status, error, state from runs where id = ?', id);
+  return { status: r.status, error: r.error, out: runState(r.id)!.outputs };
 }
 
 test('release activities are off until an administrator allows them', async () => {

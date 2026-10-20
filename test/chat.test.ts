@@ -22,7 +22,7 @@ import { testEnv, node, edge } from './helpers.js';
  */
 testEnv(20300);
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const projects = await import('../server/src/projects.js');
 const flows = await import('../server/src/flows.js');
@@ -96,8 +96,8 @@ const run = async (n: ReturnType<typeof node>) => {
   const s = node('start', 'Start', { payload: JSON.stringify({ orderId: 'A-1001' }) });
   const id = await engine.startRun({ doc: { name: 'T', nodes: [s, n], edges: [edge(s, n)] }, projectId: pid, source: 'test' });
   await engine.waitFor(id, 30000);
-  const r: any = q.get('select status, error, state from runs where id = ?', id);
-  return { status: r.status, error: r.error, out: JSON.parse(r.state).outputs[n.name] };
+  const r: any = q.get('select id, status, error, state from runs where id = ?', id);
+  return { status: r.status, error: r.error, out: runState(r.id)!.outputs[n.name] };
 };
 
 test('Test connection: a Discord webhook, a Discord bot and its channel, a Telegram bot and its chat', async () => {
@@ -182,10 +182,10 @@ test('the Discord trigger starts the Sutra for a !command, and leaves out bots',
   await new Promise(r => setTimeout(r, 1000));
   discordMessages = [...discordMessages, { id: '101', channel_id: 'C1', author: { username: 'other-bot', id: 'x', bot: true }, content: '!status A-9', timestamp: '2026-10-19T10:00:00Z' }, { id: '102', channel_id: 'C1', author: { username: 'meera', id: 'u1' }, content: '!status A-1001', timestamp: '2026-10-19T10:00:01Z' }];
   let runs: any[] = [];
-  for (let i = 0; i < 40 && !runs.length; i++) { await new Promise(r => setTimeout(r, 300)); runs = q.all<any>("select state from runs where flow_id = ? and status = 'done'", f.id); }
+  for (let i = 0; i < 40 && !runs.length; i++) { await new Promise(r => setTimeout(r, 300)); runs = q.all<any>("select id, state from runs where flow_id = ? and status = 'done'", f.id); }
   flows.undeploy(f.id);
   assert.equal(runs.length, 1, 'one run: the bot message was left out');
-  const out = JSON.parse(runs[0].state).outputs;
+  const out = runState(runs[0].id)!.outputs;
   assert.equal(out.Channel.author, 'meera');
   assert.equal(out.Channel.command, 'status');
   assert.equal(out.Channel.args, 'A-1001');

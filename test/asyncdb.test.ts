@@ -18,7 +18,7 @@ import { testEnv, node, edge, port } from './helpers.js';
  */
 testEnv(20550);
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q, tx } = await import('../server/src/db.js');
 const { asyncDatabase } = await import('../server/src/asyncdb.js');
 const flows = await import('../server/src/flows.js');
@@ -99,6 +99,6 @@ test('many runs at once all finish with every step done once', async () => {
   const rows = q.all<any>(`select run_id, node_id, count(*) n from tasks where run_id in (${ids.map(() => '?').join(',')}) and status = 'done' group by run_id, node_id`, ...ids);
   assert.equal(rows.length, 180);
   assert.ok(rows.every(r => Number(r.n) === 1), 'no step done twice');
-  const out = JSON.parse(q.get<any>('select state from runs where id = ?', ids[7]).state).outputs.B.n;
+  const out = runState(ids[7])!.outputs.B.n;
   assert.equal(out, 16);
 });

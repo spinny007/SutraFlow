@@ -33,7 +33,7 @@ before(async () => {
   await admin.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``);
   await admin.end();
   const { boot } = await import('../server/src/index.js');
-  const { engine } = await import('../server/src/engine/engine.js');
+  const { engine, runState } = await import('../server/src/engine/engine.js');
   const { q } = await import('../server/src/db.js');
   const { saveResource } = await import('../server/src/resources.js');
   const { setSecret } = await import('../server/src/secrets.js');
@@ -43,8 +43,8 @@ before(async () => {
   run = async (nodes, edges) => {
     const id = await engine.startRun({ doc: { name: 'MySQL test', nodes, edges } });
     await engine.waitFor(id, 30000);
-    const r: any = q.get('select status, error, state from runs where id = ?', id);
-    return { status: r.status, error: r.error, out: JSON.parse(r.state).outputs };
+    const r: any = q.get('select id, status, error, state from runs where id = ?', id);
+    return { status: r.status, error: r.error, out: runState(r.id)!.outputs };
   };
 });
 after(async () => { if (srv) await srv.stop(); });

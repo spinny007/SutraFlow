@@ -15,7 +15,7 @@ import { testEnv, node, edge, port } from './helpers.js';
 /** RAG: vector databases (Qdrant, Chroma, Pinecone), document text, SharePoint / OneDrive feeding a knowledge base. */
 testEnv(19930);
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q, setSetting } = await import('../server/src/db.js');
 const projects = await import('../server/src/projects.js');
 const { saveResource, getResource } = await import('../server/src/resources.js');
@@ -197,9 +197,9 @@ test('SharePoint: list a library folder, read a Word file as text, feed a knowle
   const add = node('knowledgeAdd', 'Add', { knowledge: kb, source: '{{input.path}}', text: '{{input.text}}', meta: [{ k: 'url', v: '{{input.webUrl}}' }] });
   const id = await engine.startRun({ doc: { name: 'Feed', nodes: [s, list, each, read, add], edges: [edge(s, list), edge(list, each), edge(each, read, 'item'), edge(read, add)] }, projectId: pid });
   await engine.waitFor(id, 20000);
-  const r: any = q.get('select status, error, state from runs where id = ?', id);
+  const r: any = q.get('select id, status, error, state from runs where id = ?', id);
   assert.equal(r.status, 'done', r.error);
-  const st = JSON.parse(r.state);
+  const st = runState(r.id)!;
   assert.equal(st.outputs.List.count, 1, 'the sub-folder is not a file');
   assert.equal(st.outputs.Read.text, 'Returns are accepted within 30 days.\nRefunds take 7 days & go to the card.');
   assert.ok(graphCalls.some(c => c.includes('Bearer graph-token')));

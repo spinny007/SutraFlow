@@ -13,7 +13,7 @@ import { testEnv, captureServer, node, edge } from './helpers.js';
 
 testEnv(18110);
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const { setSecret } = await import('../server/src/secrets.js');
 const { saveResource } = await import('../server/src/resources.js');
@@ -27,7 +27,7 @@ async function run(nodes: any[], edges: any[], input?: any) {
   const status = await engine.waitFor(id, 20000, true);
   const r: any = q.get('select * from runs where id = ?', id);
   const tasks = q.all<any>('select * from tasks where run_id = ? order by id', id);
-  return { id, status, state: JSON.parse(r.state), error: r.error, tasks };
+  return { id, status, state: runState(r.id)!, error: r.error, tasks };
 }
 
 test('mapping, if/else, merge with dead-path elimination', async () => {
@@ -91,7 +91,7 @@ test('human approval waits as saved state and resumes on decision', async () => 
   assert.equal(JSON.parse(t.wait).message, 'OK A-9?');
   await engine.decide(t.id, true, 'tester', 'fine');
   assert.equal(await engine.waitFor(id), 'done');
-  const st = JSON.parse((q.get('select state from runs where id = ?', id) as any).state);
+  const st = runState(id)!;
   assert.equal(st.outputs.Approve.approval.by, 'tester');
   assert.ok('Approved' in st.outputs && !('Rejected' in st.outputs));
 });
@@ -107,7 +107,7 @@ test('crash recovery: a task left running resumes after restart', async () => {
   engine.stop();
   engine.start();
   assert.equal(await engine.waitFor('crash1'), 'done');
-  const st = JSON.parse((q.get(`select state from runs where id = 'crash1'`) as any).state);
+  const st = runState('crash1')!;
   assert.ok(st.logs.some((x: any) => x.msg === 'resumed 1'));
 });
 
@@ -156,4 +156,30 @@ test('durable wait over 5 seconds is deferred, not held in memory', async () => 
   assert.equal(t.phase, 'resume');
   assert.ok(t.not_before > Date.now() + 3000);
   assert.equal(await engine.waitFor(id, 15000), 'done');
+});
+
+test('step outputs are kept apart from the run state, and a run started before 1.8.0 keeps its outputs', async () => {
+  // Three steps of about 20 KB each: the state row stays small, the outputs are one row per step.
+  const s = node('start', 'Start', { payload: '{"n":1}' });
+  const big = (name: string) => node('jsonata', name, { source: '{{input}}', expression: `{ "name": "${name}", "data": $pad("", 20000, "x") }` });
+  const a = big('A'), b = big('B'), c = node('mapper', 'C', { map: [{ k: 'fromA', v: '{{nodes.A.name}}' }, { k: 'fromB', v: '{{nodes.B.name}}' }] });
+  const r = await run([s, a, b, c], [edge(s, a), edge(a, b), edge(b, c)]);
+  assert.equal(r.status, 'done', r.error);
+  assert.deepEqual(r.state.outputs.C, { fromA: 'A', fromB: 'B' });
+  const raw = q.get<any>('select state from runs where id = ?', r.id).state as string;
+  assert.ok(raw.length < 4000, `the state row holds no outputs (${raw.length} characters)`);
+  assert.deepEqual(q.all<any>('select name from run_outputs where run_id = ? order by name', r.id).map(x => x.name), ['A', 'B', 'C', 'Start']);
+
+  // A run in progress whose outputs are in its state (as an older version kept them) goes on with them.
+  const w = node('wait', 'Hold', { ms: 1500 }), d = node('mapper', 'D', { map: [{ k: 'got', v: '{{nodes.First.v}}' }] });
+  const first = node('jsonata', 'First', { source: '{{input}}', expression: '{ "v": 42 }' });
+  const id = await engine.startRun({ doc: { name: 'Old', nodes: [s, first, w, d], edges: [edge(s, first), edge(first, w), edge(w, d)] } });
+  for (let i = 0; i < 100 && !q.get('select 1 from run_outputs where run_id = ? and name = ?', id, 'First'); i++) await new Promise(res => setTimeout(res, 20));
+  const st = JSON.parse(q.get<any>('select state from runs where id = ?', id).state);
+  st.outputs = Object.fromEntries(q.all<any>('select name, out from run_outputs where run_id = ?', id).map(x => [x.name, JSON.parse(x.out)]));
+  q.run('update runs set state = ? where id = ?', JSON.stringify(st), id);
+  q.run('delete from run_outputs where run_id = ?', id);
+  assert.equal(await engine.waitFor(id, 20000, true), 'done');
+  assert.deepEqual(runState(id)!.outputs.D, { got: 42 });
+  assert.equal(runState(id)!.outputs.First.v, 42, 'the outputs kept in the state are still read');
 });

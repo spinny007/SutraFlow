@@ -6,7 +6,7 @@
 # A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
 # SPDX-License-Identifier: AGPL-3.0-only
 #
-# Release: pushing a tag such as v1.7.6 tests SutraFlow, builds the release archives on Windows and
+# Release: pushing a tag such as v1.8.0 tests SutraFlow, builds the release archives on Windows and
 # Linux (each with an offline archive holding the runtime packages for that system), and attaches
 # them with their SHA-256 files and RELEASE-NOTES.md to a GitHub Release.
 name: Release

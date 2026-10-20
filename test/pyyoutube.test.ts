@@ -22,7 +22,7 @@ import { testEnv, node, edge } from './helpers.js';
  */
 testEnv(20250);
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const projects = await import('../server/src/projects.js');
 const { saveResource } = await import('../server/src/resources.js');
@@ -82,8 +82,8 @@ const run = async (nodes: ReturnType<typeof node>[], input?: unknown) => {
   const edges = [edge(s, nodes[0]), ...nodes.slice(1).map((n, i) => edge(nodes[i], n))];
   const id = await engine.startRun({ doc: { name: 'T', nodes: [s, ...nodes], edges }, projectId: pid, source: 'test' });
   await engine.waitFor(id, 60000);
-  const r: any = q.get('select status, error, state from runs where id = ?', id);
-  return { status: r.status, error: r.error, out: JSON.parse(r.state).outputs };
+  const r: any = q.get('select id, status, error, state from runs where id = ?', id);
+  return { status: r.status, error: r.error, out: runState(r.id)!.outputs };
 };
 
 test('Python is found on this server (py, python3 or python), or the reason says how to install it', () => {
@@ -192,7 +192,7 @@ test('the ADF, Databricks, Python, YouTube and Twitch templates are complete, de
   const f = made.find(m => m.name === 'Sample: Python script file')!;
   const id = await engine.startRun({ doc: flows.getFlow(f.id)!.doc, flowId: f.id, projectId: p2, source: 'test' });
   await engine.waitFor(id, 60000);
-  const r: any = q.get('select status, error, state from runs where id = ?', id);
+  const r: any = q.get('select id, status, error, state from runs where id = ?', id);
   assert.equal(r.status, 'done', r.error);
-  assert.deepEqual(JSON.parse(r.state).outputs['Sales report'].result, { region: 'West', count: 4, total: 4830, average: 1207.5, median: 1090, mode: 'quick' });
+  assert.deepEqual(runState(r.id)!.outputs['Sales report'].result, { region: 'West', count: 4, total: 4830, average: 1207.5, median: 1090, mode: 'quick' });
 });

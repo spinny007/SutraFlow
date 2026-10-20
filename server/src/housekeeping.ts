@@ -42,7 +42,7 @@ export function clearTestRuns(projectId: string) {
   for (;;) {
     const ids = q.all<{ id: string }>(`select id from runs where project_id = ? and source in ('test', 'debug') and status in ('done', 'failed', 'cancelled') limit 500`, projectId).map(r => r.id);
     if (!ids.length) break;
-    tx(() => { for (const id of ids) { q.run('delete from tasks where run_id = ?', id); q.run('delete from runs where id = ?', id); } });
+    tx(() => { for (const id of ids) { q.run('delete from tasks where run_id = ?', id); q.run('delete from run_outputs where run_id = ?', id); q.run('delete from runs where id = ?', id); } });
     n += ids.length;
   }
   return n;
@@ -57,6 +57,7 @@ function prune(cutoff: string, flowId?: string) {
     tx(() => {
       for (const id of ids) {
         q.run('delete from tasks where run_id = ?', id);
+        q.run('delete from run_outputs where run_id = ?', id);
         q.run('delete from runs where id = ?', id);
       }
     });

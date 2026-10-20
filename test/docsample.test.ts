@@ -23,7 +23,7 @@ import { testEnv } from './helpers.js';
 const env = testEnv(20150);
 process.env.SUTRA_ADMIN_TOKEN = 'docsample-admin-token-0123456789';
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const { config } = await import('../server/src/config.js');
 const projects = await import('../server/src/projects.js');
@@ -62,8 +62,8 @@ const runFlow = async (name: string, input?: any) => {
   const f = flows.listFlows(pid).find(x => x.name === name)!;
   const id = await engine.startRun({ doc: flows.getFlow(f.id)!.doc, flowId: f.id, projectId: pid, input, source: 'test' });
   await engine.waitFor(id, 60000);
-  const r: any = q.get('select status, error, state from runs where id = ?', id);
-  return { status: r.status, error: r.error, out: JSON.parse(r.state).outputs };
+  const r: any = q.get('select id, status, error, state from runs where id = ?', id);
+  return { status: r.status, error: r.error, out: runState(r.id)!.outputs };
 };
 
 test('the sample documents are a real PDF, Word document, PowerPoint deck and Markdown file', async () => {

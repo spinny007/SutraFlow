@@ -18,7 +18,7 @@ import { sftpServer } from './sftpserver.js';
 
 testEnv(19830);
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const flows = await import('../server/src/flows.js');
 const projects = await import('../server/src/projects.js');
@@ -59,8 +59,8 @@ after(async () => { await srv.stop(); await sftp.close(); await ftp.close().catc
 const run = async (nodes: any[], edges: any[]) => {
   const id = await engine.startRun({ doc: { name: 'Remote', nodes, edges }, projectId: shop });
   await engine.waitFor(id, 30000);
-  const r: any = q.get('select status, error, state from runs where id = ?', id);
-  return { status: r.status, error: r.error, out: JSON.parse(r.state).outputs };
+  const r: any = q.get('select id, status, error, state from runs where id = ?', id);
+  return { status: r.status, error: r.error, out: runState(r.id)!.outputs };
 };
 
 test('paths stay inside the base folder', () => {
@@ -141,7 +141,7 @@ test('remote file trigger: a new file starts the Sutra once it stops changing, w
   let run1: any;
   for (let i = 0; i < 100 && !run1; i++) { await new Promise(r => setTimeout(r, 200)); run1 = q.get<any>(`select id, status, state from runs where flow_id = ? and status = 'done'`, f.id); }
   assert.ok(run1, 'the trigger started a run');
-  const out = JSON.parse(run1.state).outputs;
+  const out = runState(run1.id)!.outputs;
   assert.equal(out['New file'].name, 'batch-1.csv');
   assert.deepEqual(out['New file'].rows.map((x: any) => x.id), ['B-1', 'B-2']);
   for (let i = 0; i < 50 && fs.existsSync(path.join(sftpRoot, 'partner', 'inbox', 'batch-1.csv')); i++) await new Promise(r => setTimeout(r, 100));

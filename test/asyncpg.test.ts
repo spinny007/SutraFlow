@@ -33,10 +33,10 @@ if (ADMIN) {
 }
 const skip = ADMIN ? false : 'SUTRA_TEST_PG_URL is not set';
 
-let srv: any, engine: any, q: any, flows: any, projects: any, asyncDatabase: any, poolFigures: any;
+let srv: any, engine: any, runState: any, q: any, flows: any, projects: any, asyncDatabase: any, poolFigures: any;
 before(async () => {
   if (!ADMIN) return;
-  ({ engine } = await import('../server/src/engine/engine.js'));
+  ({ engine, runState } = await import('../server/src/engine/engine.js'));
   ({ q } = await import('../server/src/db.js'));
   ({ asyncDatabase, poolFigures } = await import('../server/src/asyncdb.js'));
   flows = await import('../server/src/flows.js');
@@ -75,7 +75,7 @@ test('the engine uses the pool on PostgreSQL, and its transactions run at the sa
   const rows = q.all(`select run_id, node_id, count(*) n from tasks where status = 'done' and run_id in (${ids.map(() => '?').join(',')}) group by run_id, node_id`, ...ids);
   assert.equal(rows.length, 800, 'every step of every run');
   assert.ok(rows.every((r: any) => Number(r.n) === 1), 'none twice');
-  assert.equal(JSON.parse(q.get('select state from runs where id = ?', ids[10]).state).outputs.C.n, 21);
+  assert.equal(runState(ids[10])!.outputs.C.n, 21);
   assert.ok(poolFigures.total >= 2, `more than one connection was in use (${poolFigures.total})`);
   assert.ok(poolFigures.txMs.count > 0 && poolFigures.acquireMs.count > 0);
 });

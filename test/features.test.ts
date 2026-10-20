@@ -18,7 +18,7 @@ import { testEnv, captureServer, node, edge } from './helpers.js';
 testEnv(18710);
 const require = createRequire(import.meta.url);
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const projects = await import('../server/src/projects.js');
 const schemas = await import('../server/src/schemas.js');
@@ -45,7 +45,7 @@ async function run(nodes: any[], edges: any[], input?: any) {
   const id = await engine.startRun({ doc: { name: 'F', nodes, edges }, projectId: pid, input });
   await engine.waitFor(id, 15000, true);
   const r: any = q.get('select * from runs where id = ?', id);
-  return { status: r.status, error: r.error, state: JSON.parse(r.state) };
+  return { status: r.status, error: r.error, state: runState(r.id)! };
 }
 const until = async (fn: () => boolean, ms = 8000) => {
   const t = Date.now();
@@ -169,7 +169,7 @@ test('Service Bus: JMS headers and properties; explicit acknowledgement with Con
     await until(() => outcomes.includes('accepted'));
     toSub.send({ body: JSON.stringify({ confirm: false }), subject: 'order', message_id: 'm-2' });
     await until(() => outcomes.includes('released'));
-    const runs = q.all<any>('select state from runs where flow_id = ? order by started_at', f.id).map(x => JSON.parse(x.state).outputs.In);
+    const runs = q.all<any>('select id, state from runs where flow_id = ? order by started_at', f.id).map(x => runState(x.id)!.outputs.In);
     assert.equal(runs[0].headers.messageId, 'm-1');
     assert.equal(runs[0].headers.type, 'order');
     flows.undeploy(f.id);

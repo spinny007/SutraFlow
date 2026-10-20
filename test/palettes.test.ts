@@ -16,7 +16,7 @@ import { testEnv, node, edge } from './helpers.js';
 
 testEnv(18510);
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const flows = await import('../server/src/flows.js');
 const { runSandboxed, renderHtml } = await import('../server/src/palettes/code.js');
@@ -30,7 +30,7 @@ async function run(nodes: any[], edges: any[]) {
   const id = await engine.startRun({ doc: { name: 'P', nodes, edges } });
   await engine.waitFor(id, 15000, true);
   const r: any = q.get('select * from runs where id = ?', id);
-  return { status: r.status, error: r.error, state: JSON.parse(r.state) };
+  return { status: r.status, error: r.error, state: runState(r.id)! };
 }
 const until = async (fn: () => boolean, ms = 8000) => {
   const t = Date.now();
@@ -94,7 +94,7 @@ test('file activities stay inside their folder; file trigger fires on added, mod
   flows.deploy(f.id);
   await rebuildListeners();
   await new Promise(r => setTimeout(r, 300));
-  const events = () => q.all<any>(`select state from runs where flow_id = ? order by started_at`, f.id).map(x => JSON.parse(x.state).outputs.Inbox?.event);
+  const events = () => q.all<any>(`select id, state from runs where flow_id = ? order by started_at`, f.id).map(x => runState(x.id)!.outputs.Inbox?.event);
   fs.writeFileSync(path.join(dir, 'orders.csv'), 'id\n1');
   await until(() => events().includes('added'));
   await new Promise(r => setTimeout(r, 1100));
@@ -102,7 +102,7 @@ test('file activities stay inside their folder; file trigger fires on added, mod
   await until(() => events().includes('modified'));
   fs.rmSync(path.join(dir, 'orders.csv'));
   await until(() => events().includes('removed'));
-  const added = q.all<any>(`select state from runs where flow_id = ?`, f.id).map(x => JSON.parse(x.state).outputs.Inbox).find(o => o.event === 'added');
+  const added = q.all<any>(`select id, state from runs where flow_id = ?`, f.id).map(x => runState(x.id)!.outputs.Inbox).find(o => o.event === 'added');
   assert.equal(added.content, 'id\n1');
   assert.equal([...listenerStatus.values()].find(s => s.type === 'fileTrigger')?.state, 'ok');
   flows.undeploy(f.id);

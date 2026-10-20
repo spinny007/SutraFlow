@@ -19,7 +19,7 @@ import { root } from './proc.js';
 testEnv(19810);
 process.env.SUTRA_ADMIN_TOKEN = 'alerts-admin-token-0123456789';
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const flows = await import('../server/src/flows.js');
 const projects = await import('../server/src/projects.js');
@@ -102,8 +102,8 @@ test('failed runs open one alert, notify every channel, remind, and resolve with
   const started = q.get<any>(`select id from runs where flow_id = ? and source = 'alert'`, receiver);
   assert.ok(started, 'the alert Sutra ran');
   await engine.waitFor(started.id, 10000);
-  const fromSutra = q.get<any>('select state from runs where id = ?', started.id);
-  assert.equal(JSON.parse(fromSutra.state).outputs.Start.alert.rule, 'Payments failing');
+  const fromSutra = q.get<any>('select id, state from runs where id = ?', started.id);
+  assert.equal(runState(fromSutra.id)!.outputs.Start.alert.rule, 'Payments failing');
 
   assert.equal((await alerts.evaluate()).opened, 0, 'still open: no second alert');
   assert.equal((await alerts.evaluate(later(6))).reminded, 1, 'reminder after repeatMin');

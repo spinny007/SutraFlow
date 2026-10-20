@@ -19,7 +19,7 @@ import { sftpServer } from './sftpserver.js';
 /** Sutra folders, and the samples for SOAP, JSON microservices, SQL install scripts and SFTP / FTP. */
 const env = testEnv(19850);
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const flows = await import('../server/src/flows.js');
 const projects = await import('../server/src/projects.js');
@@ -121,8 +121,8 @@ test('missing project variables are warnings on the step that reads them', () =>
 const run = async (doc: any, projectId: string, input?: any) => {
   const id = await engine.startRun({ doc, projectId, input });
   await engine.waitFor(id, 30000);
-  const r: any = q.get('select status, error, state from runs where id = ?', id);
-  const st = JSON.parse(r.state);
+  const r: any = q.get('select id, status, error, state from runs where id = ?', id);
+  const st = runState(r.id)!;
   return { status: r.status, error: r.error, out: st.outputs, logs: (st.logs || []).map((l: any) => `${l.level} ${l.msg}`).join('\n') };
 };
 

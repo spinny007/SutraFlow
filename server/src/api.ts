@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { q, getSetting, setSetting, dbKind } from './db.js';
-import { engine } from './engine/engine.js';
+import { engine, runState } from './engine/engine.js';
 import * as flows from './flows.js';
 import { PALETTES } from './palettes/index.js';
 import { describeWsdl } from './palettes/soap.js';
@@ -108,7 +108,7 @@ function runDetail(id: string) {
   }
   const tasks = q.all<any>('select id, node_id, status, attempt, port, input, output, error, ms, wait, started_at, finished_at, owner from tasks where run_id = ? order by id', id)
     .map(t => ({ ...t, input: t.input ? JSON.parse(t.input) : null, output: t.output ? JSON.parse(t.output) : null, wait: t.wait ? JSON.parse(t.wait) : null }));
-  const state = JSON.parse(r.state);
+  const state = runState(id)!;
   return {
     id: r.id, flowId: r.flow_id, flowName: r.flow_name, version: r.version, status: r.status, source: r.source,
     triggerNode: r.trigger_node, error: r.error, steps: r.steps, startedAt: r.started_at, finishedAt: r.finished_at,

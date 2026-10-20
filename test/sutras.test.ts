@@ -17,7 +17,7 @@ import { testEnv, captureServer, node, edge, port } from './helpers.js';
 
 testEnv(18910);
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const projects = await import('../server/src/projects.js');
 const flows = await import('../server/src/flows.js');
@@ -41,7 +41,7 @@ async function runDoc(doc: any, input?: any) {
   const id = await engine.startRun({ doc, projectId: pid, input });
   await engine.waitFor(id, 20000);
   const r: any = q.get('select * from runs where id = ?', id);
-  return { status: r.status, error: r.error, state: JSON.parse(r.state) };
+  return { status: r.status, error: r.error, state: runState(r.id)! };
 }
 
 test('sample Sutras: For-Each mapping, activity loops, sub-Sutra, try and catch', async () => {

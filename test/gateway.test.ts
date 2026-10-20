@@ -17,7 +17,7 @@ import { testEnv, captureServer, node, edge } from './helpers.js';
 
 const env = testEnv(18210);
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const { setSecret } = await import('../server/src/secrets.js');
 const { saveResource } = await import('../server/src/resources.js');
@@ -38,7 +38,7 @@ async function runFlow(nodes: any[], edges: any[]) {
   const id = await engine.startRun({ doc: { name: 'Client', nodes, edges } });
   await engine.waitFor(id, 20000);
   const r: any = q.get('select * from runs where id = ?', id);
-  return { status: r.status, error: r.error, outputs: JSON.parse(r.state).outputs };
+  return { status: r.status, error: r.error, outputs: runState(r.id)!.outputs };
 }
 
 test('REST service with API key policy, path params, JSON reply and rate limit', async () => {

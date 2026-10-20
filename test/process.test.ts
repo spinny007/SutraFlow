@@ -13,7 +13,7 @@ import { testEnv, captureServer, node, edge } from './helpers.js';
 
 testEnv(18810);
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const projects = await import('../server/src/projects.js');
 const flows = await import('../server/src/flows.js');
@@ -32,7 +32,7 @@ async function run(nodes: any[], edges: any[], input?: any, name = 'P') {
   const id = await engine.startRun({ doc: { name, nodes, edges }, projectId: pid, input });
   await engine.waitFor(id, 15000);
   const r: any = q.get('select * from runs where id = ?', id);
-  return { id, status: r.status, error: r.error, state: JSON.parse(r.state) };
+  return { id, status: r.status, error: r.error, state: runState(r.id)! };
 }
 
 /** A reusable process: doubles the amount and returns it. */
@@ -143,8 +143,8 @@ test('Counter, channels between deployed Sutras, and the circuit breaker', async
   r = await run([s, send], [edge(s, send)], { id: 7 });
   assert.equal(r.state.outputs.Send.delivered, 1);
   assert.equal(await engine.waitFor(r.state.outputs.Send.runIds[0], 15000), 'done');
-  const got: any = q.get('select state from runs where id = ?', r.state.outputs.Send.runIds[0]);
-  assert.deepEqual(JSON.parse(got.state).outputs['On order'], { id: 7 });
+  const got: any = q.get('select id, state from runs where id = ?', r.state.outputs.Send.runIds[0]);
+  assert.deepEqual(runState(got.id)!.outputs['On order'], { id: 7 });
   const none = node('channelPublish', 'Nobody', { channel: 'empty', message: '{{input}}', required: true });
   r = await run([s, none], [edge(s, none)], {});
   assert.match(r.error, /No deployed Sutra listens/);

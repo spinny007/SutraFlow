@@ -38,7 +38,7 @@ const env = testEnv(20050);
 process.env.SUTRA_ADMIN_PORT = String(port(20058));
 process.env.SUTRA_ADMIN_TOKEN = 'regression-admin-token-0123456789';
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q, tx, openDb, closeDb } = await import('../server/src/db.js');
 const { config } = await import('../server/src/config.js');
 const flows = await import('../server/src/flows.js');
@@ -57,8 +57,8 @@ after(async () => { await srv.stop(); });
 const run = async (doc: any, input?: any) => {
   const id = await engine.startRun({ doc, projectId: pid, input });
   await engine.waitFor(id, 30000);
-  const r: any = q.get('select status, error, state from runs where id = ?', id);
-  const st = JSON.parse(r.state);
+  const r: any = q.get('select id, status, error, state from runs where id = ?', id);
+  const st = runState(r.id)!;
   return { id, status: r.status, error: r.error, out: st.outputs, logs: (st.logs || []).map((l: any) => `${l.level} ${l.msg}`).join('\n') };
 };
 

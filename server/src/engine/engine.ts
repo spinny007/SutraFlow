@@ -9,8 +9,8 @@
  */
 import crypto from 'node:crypto';
 import { restrictedReason } from '../git/restricted.js';
-import { now, dbKind, memoryStore } from '../db.js';
-import { asyncDatabase, localStore, type AsyncStore, type TxQ } from '../asyncdb.js';
+import { now, dbKind, memoryStore, q } from '../db.js';
+import { asyncDatabase, localStore, type AsyncStore, type TxBody, type TxQ } from '../asyncdb.js';
 import { config } from '../config.js';
 import { resolve, resolveDeep } from '../template.js';
 import { getSecret, maskSecrets } from '../secrets.js';
@@ -122,7 +122,31 @@ const MAX_LOGS = 500;
 const DEFAULT_TIMEOUT_MS = 120000;
 const OPEN = `('running', 'waiting', 'paused', 'queued')`;
 
-type Loaded = { row: any; doc: FlowDoc; state: RunState };
+/**
+ * A run as the engine uses it. Step outputs live in run_outputs, one row per step name, so a step
+ * writes only its own output instead of the run state with every earlier output (runs started by a
+ * version before 1.8.0 keep theirs in state.outputs, read first). outs: the rows once read; fresh:
+ * the output of the step being completed, which conditions on its connections can already read.
+ */
+type Loaded = { row: any; doc: FlowDoc; state: RunState; outs?: Record<string, any>; fresh?: Record<string, any> };
+/**
+ * A run's state with every step output in state.outputs (run_outputs over what a run of an older
+ * version kept in its state): for the API, the run views and tests. Undefined for an unknown run.
+ */
+export function runState(runId: string): RunState | undefined {
+  const r = q.get<{ state: string }>('select state from runs where id = ?', runId);
+  if (!r) return undefined;
+  const st = JSON.parse(r.state) as RunState;
+  st.outputs = { ...(st.outputs || {}), ...outputsFrom(q.all<{ name: string; out: string | null }>('select name, out from run_outputs where run_id = ?', runId)) };
+  return st;
+}
+/** Keeps a step's output: one row per step name (a loop's later pass replaces it). */
+const OUT_SQL = 'insert into run_outputs(run_id, name, out) values(?, ?, ?) on conflict(run_id, name) do update set out = excluded.out';
+/** run_outputs rows (or PostgreSQL's json_object_agg of them) as outputs by step name. */
+export function outputsFrom(rows: { name: string; out: string | null }[] | Record<string, string | null> | null | undefined): Record<string, any> {
+  const pairs = Array.isArray(rows) ? rows.map(r => [r.name, r.out] as const) : Object.entries(rows || {});
+  return Object.fromEntries(pairs.map(([k, v]) => [k, v == null ? undefined : JSON.parse(v)]));
+}
 
 export class Engine {
   private activities = new Map<string, Activity>();
@@ -349,27 +373,49 @@ export class Engine {
    * Claims up to n due steps in one statement: with several engines on one database, only one of them
    * changes a step from pending to running; it records itself as the owner and counts the claim up.
    */
-  private async claim(n: number): Promise<(TaskRow & { run_row?: any })[]> {
+  private async claim(n: number): Promise<(TaskRow & { run_row?: any; run_outs?: any })[]> {
     const limit = Math.max(1, Math.floor(n));
     const update = `update tasks set status = 'running', started_at = ?, owner = ?, claim = claim + 1
        where id in (select id from tasks where status = 'pending' and not_before <= ? order by priority desc, id limit ?${this.skipLocked}) and status = 'pending'
        returning *`;
     // PostgreSQL: each step's run comes back with it (one round trip instead of two).
     const rows = this.a.backend === 'postgres' && !this.parent
-      ? await this.a.all<TaskRow & { run_row?: any }>(`with t as (${update}) select t.*, row_to_json(r) as run_row from t left join runs r on r.id = t.run_id order by t.priority desc, t.id`, now(), this.id, Date.now(), limit)
+      ? await this.a.all<TaskRow & { run_row?: any; run_outs?: any }>(`with t as (${update}) select t.*, row_to_json(r) as run_row,
+          (select json_object_agg(o.name, o.out) from run_outputs o where o.run_id = t.run_id) as run_outs
+          from t left join runs r on r.id = t.run_id order by t.priority desc, t.id`, now(), this.id, Date.now(), limit)
       : (await this.a.all<TaskRow>(update, now(), this.id, Date.now(), limit)).sort((a, b) => Number(a.id) - Number(b.id));
     for (const t of rows) { t.id = Number(t.id); t.claim = Number(t.claim); t.attempt = Number(t.attempt); }
     return rows;
   }
 
   /** A run row as the engine uses it (the document cached per run). */
-  private loaded(r: any): Loaded | undefined {
+  private loaded(r: any, outs?: any): Loaded | undefined {
     if (!r) return undefined;
     let doc = this.docs.get(r.id);
     if (!doc) { doc = (typeof r.doc === 'string' ? JSON.parse(r.doc) : r.doc) as FlowDoc; this.docs.set(r.id, doc); }
-    return { row: r, doc, state: (typeof r.state === 'string' ? JSON.parse(r.state) : r.state) as RunState };
+    const state = (typeof r.state === 'string' ? JSON.parse(r.state) : r.state) as RunState;
+    state.outputs ||= {};
+    return { row: r, doc, state, ...(outs !== undefined ? { outs: outputsFrom(outs) } : {}) };
   }
   private static RUN = 'select * from runs where id = ?';
+
+  /** The outputs of a run's steps, read once per transition (and only when something needs them). */
+  private async outputsOf(db: TxQ, run: Loaded): Promise<Record<string, any>> {
+    run.outs ||= outputsFrom(await db.all<{ name: string; out: string | null }>('select name, out from run_outputs where run_id = ?', run.row.id));
+    return { ...run.state.outputs, ...run.outs, ...run.fresh };
+  }
+
+  /**
+   * Commits a transition with a run statement last, and a step's output with it: on PostgreSQL in the
+   * same statement (a data-changing with), elsewhere just before it.
+   */
+  private async commitRun<T = any>(tx: TxBody, runId: string, sql: string, args: any[], out?: [string, any]): Promise<T | undefined> {
+    if (!out) return tx.commitWith<T>(sql, ...args);
+    const o = [runId, out[0], out[1] === undefined ? null : JSON.stringify(out[1])];
+    if (this.a.backend === 'postgres') return tx.commitWith<T>(`with o as (${OUT_SQL}) ${sql}`, ...o, ...args);
+    await tx.run(OUT_SQL, ...o);
+    return tx.commitWith<T>(sql, ...args);
+  }
 
   /** The condition under which this engine may change a step: still running here under its claim, or still waiting. */
   private fence(t: TaskRow): [string, any[]] {
@@ -388,8 +434,8 @@ export class Engine {
     return this.loaded(await db.get<any>(Engine.RUN, runId));
   }
 
-  private async execute(t: TaskRow & { run_row?: any }) {
-    const run = 'run_row' in t ? this.loaded(t.run_row) : await this.loadRun(this.a, t.run_id);
+  private async execute(t: TaskRow & { run_row?: any; run_outs?: any }) {
+    const run = 'run_row' in t ? this.loaded(t.run_row, t.run_outs ?? null) : await this.loadRun(this.a, t.run_id);
     if (!run || !['running', 'waiting', 'paused'].includes(run.row.status)) {
       const [where, w] = this.fence(t);
       await this.a.run(`update tasks set status = 'cancelled', finished_at = ? where ${where}`, now(), ...w);
@@ -419,16 +465,17 @@ export class Engine {
     const s = node.settings || {};
     const timeoutMs = Number(s.timeoutMs) > 0 ? Number(s.timeoutMs) : act.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const trigName = run.doc.nodes.find(n => n.id === run.row.trigger_node)?.name;
+    const outputs = await this.outputsOf(this.a, run);
     const gv = effectiveVariables(run.row.project_id);
     gv.secrets.forEach(v => revealed.add(v));
     const runInfo = { id: t.run_id, name: run.doc.name, flow: run.doc.name, sutraId: run.row.flow_id, flowId: run.row.flow_id, version: run.row.version, project: run.row.project_id, startedAt: run.row.started_at, source: run.row.source, step: node.name, attempt: t.attempt };
     const scope: Record<string, any> = {
       input,
-      nodes: run.state.outputs,
+      nodes: outputs,
       vars: run.state.vars,
       gv: gv.values,
       ev: engineVariableValues(),
-      trigger: trigName ? run.state.outputs[trigName] : undefined,
+      trigger: trigName ? outputs[trigName] : undefined,
       run: runInfo,
       sutra: runInfo,
       process: runInfo,
@@ -608,7 +655,7 @@ export class Engine {
         if ('result' in res) st.result = maskSecrets(res.result, extra.revealed);
         const emits = res.emits || [{ port: res.port || 'out', out: res.out }];
         const stored = maskSecrets('store' in res ? res.store : emits.length ? emits[emits.length - 1].out : undefined, extra.revealed);
-        st.outputs[node.name] = stored;
+        run.fresh = { [node.name]: stored };
         st.last = stored;
         // Step data "none": the step's input and output are not kept, also not until the run ends (a
         // streamed file of many batches would otherwise fill the disk first).
@@ -624,7 +671,7 @@ export class Engine {
           st.logs.push({ t: now(), level: res.stop.status === 'failed' ? 'error' : 'info', msg: `${node.name}: Sutra stopped (${res.stop.status === 'failed' ? 'error' : 'success'})${res.stop.message ? `: ${res.stop.message}` : ''}`, step: node.name });
         } else await this.route(tx, turn, run, st, node, emits.map(e => ({ port: e.port, out: maskSecrets(e.out, extra.revealed) })));
         // State, step count and the count back in one statement, sent with the commit.
-        const steps = Number((await tx.commitWith<{ steps: number }>('update runs set state = ?, steps = steps + 1 where id = ? returning steps', JSON.stringify(st), t.run_id))!.steps);
+        const steps = Number((await this.commitRun<{ steps: number }>(tx, t.run_id, 'update runs set state = ?, steps = steps + 1 where id = ? returning steps', [JSON.stringify(st), t.run_id], [node.name, stored]))!.steps);
         runStatus = run.row.status;
         if (steps > config.maxStepsPerRun) over = st;
       }, { sql: Engine.RUN, args: [t.run_id] });
@@ -699,9 +746,11 @@ export class Engine {
         if (!run) throw new StaleStep();
         // The run state keeps a summary (a batch number, a count, the file), not the rows: the rows go
         // with the next steps' input, and the state stays small however many batches there are.
-        run.state.outputs[node.name] = out && typeof out === 'object' && !Array.isArray(out)
+        const summary = out && typeof out === 'object' && !Array.isArray(out)
           ? Object.fromEntries(Object.entries(out).filter(([, v]) => !Array.isArray(v))) : out;
+        run.fresh = { [node.name]: summary };
         await this.route(tx, null, run, run.state, node, [{ port, out }], true);
+        await tx.run(OUT_SQL, t.run_id, node.name, summary === undefined ? null : JSON.stringify(summary));
         await this.saveState(tx, t.run_id, run.state);
       });
     } catch (e) {
@@ -734,7 +783,7 @@ export class Engine {
       const conditional = onPort.filter(x => x.when === 'when');
       const taken = new Set<string>();
       if (conditional.length) {
-        const scope = this.conditionScope(run, st, em.out);
+        const scope = this.conditionScope(run, await this.outputsOf(tx, run), st, em.out);
         for (const e of conditional) {
           let ok = false;
           try { ok = truthy(resolve(e.condition || 'false', scope)); } catch (err: any) {
@@ -752,9 +801,9 @@ export class Engine {
   }
 
   /** What a connection condition can read: the output as {input}, earlier activities, variables. */
-  private conditionScope(run: Loaded, st: RunState, out: any) {
+  private conditionScope(run: Loaded, outputs: Record<string, any>, st: RunState, out: any) {
     const trig = run.doc.nodes.find(n => n.id === run.row.trigger_node)?.name;
-    return { input: out, output: out, nodes: st.outputs, vars: st.vars, gv: effectiveVariables(run.row.project_id ?? null).values, ev: engineVariableValues(), trigger: trig ? st.outputs[trig] : undefined, now: new Date().toISOString() };
+    return { input: out, output: out, nodes: outputs, vars: st.vars, gv: effectiveVariables(run.row.project_id ?? null).values, ev: engineVariableValues(), trigger: trig ? outputs[trig] : undefined, now: new Date().toISOString() };
   }
 
   private async deliver(tx: TxQ, turn: Turn | null, runId: string, doc: FlowDoc, st: RunState, edge: FlowEdge, live: boolean, out: any, priority?: number) {
@@ -820,7 +869,7 @@ export class Engine {
         const details = (err as any).details;
         const errOut = { error: { message: err.message, step: node?.name, type: node?.type, at: now(), ...(details !== undefined ? { details } : {}) }, input };
         if (node && errorEdges.length) {
-          st.outputs[node.name] = errOut;
+          run.fresh = { [node.name]: errOut };
           await this.fenced(tx, t, `status = 'error', port = 'error', error = ?, output = ?, ms = ?, finished_at = ?`, err.message, cap(errOut), extra.ms ?? null, now());
           await this.route(tx, null, run, st, node, [{ port: 'error', out: errOut }]);
         } else {
@@ -838,7 +887,7 @@ export class Engine {
             await tx.run(`update runs set error = ? where id = ?`, `${node?.name ?? t.node_id}: ${err.message}`, t.run_id);
           }
         }
-        await tx.commitWith('update runs set state = ? where id = ?', JSON.stringify(st), t.run_id);
+        await this.commitRun(tx, t.run_id, 'update runs set state = ? where id = ?', [JSON.stringify(st), t.run_id], node && errorEdges.length ? [node.name, errOut] : undefined);
         if (node) this.observeStep(t, node, extra.ms ?? 0, errorEdges.length ? 'error' : 'failed', st.trace, err.message);
       }, { sql: Engine.RUN, args: [t.run_id] });
     } catch (e) {
@@ -1035,6 +1084,7 @@ export class Engine {
     const run = await this.a.get<any>('select * from runs where id = ?', runId);
     if (!run) return;
     const tasks = (await this.a.all<any>('select * from tasks where run_id = ? order by id', runId)).map(({ id: _id, ...t }) => t);
+    const outs = await this.a.all<any>('select * from run_outputs where run_id = ?', runId);
     const insert = async (tx: TxQ, table: string, rows: any[]) => {
       if (!rows.length) return;
       const cols = Object.keys(rows[0]);
@@ -1046,7 +1096,7 @@ export class Engine {
       }
     };
     try {
-      await this.parent!.a.transaction(`run:${runId}`, async tx => { await insert(tx, 'runs', [run]); await insert(tx, 'tasks', tasks); });
+      await this.parent!.a.transaction(`run:${runId}`, async tx => { await insert(tx, 'runs', [run]); await insert(tx, 'tasks', tasks); await insert(tx, 'run_outputs', outs); });
     } catch (e: any) {
       if (attempt === 0) projectLog(run.project_id, { level: 'error', msg: `Run in memory could not be written to the database, trying again: ${e?.message || e}`, flow: run.flow_name, run: runId, origin: runOrigin(run.source, run.version) });
       setTimeout(() => { void this.persist(runId, attempt + 1); }, Math.min(60000, 1000 * 2 ** attempt)).unref?.();
@@ -1054,6 +1104,7 @@ export class Engine {
     }
     await this.a.transaction(undefined, async tx => {
       await tx.run('delete from tasks where run_id = ?', runId);
+      await tx.run('delete from run_outputs where run_id = ?', runId);
       await tx.run('delete from runs where id = ?', runId);
     });
   }

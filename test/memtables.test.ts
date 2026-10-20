@@ -18,7 +18,7 @@ const env = testEnv(20500);
 process.env.SUTRA_ADMIN_TOKEN = 'memtables-admin-token-0123456789';
 process.env.SUTRA_MEMORY_SYNC_MS = '0';
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const flows = await import('../server/src/flows.js');
 const projects = await import('../server/src/projects.js');
@@ -48,7 +48,7 @@ const run = async (flowId: string, input: any = {}) => {
   const d = flows.deployedFlows().find(x => x.flowId === flowId)!;
   const id = await engine.startRun({ doc: d.doc, flowId, projectId: shop, version: d.version, source: 'api', input });
   const status = await engine.waitFor(id, 15000);
-  return { status, out: JSON.parse(q.get<any>('select state from runs where id = ?', id).state).outputs, error: q.get<any>('select error from runs where id = ?', id).error };
+  return { status, out: runState(id)!.outputs, error: q.get<any>('select error from runs where id = ?', id).error };
 };
 
 test('loads part of a table at first use; Memory get finds a row, fetches a missing one with the lookup query, says missing otherwise', async () => {

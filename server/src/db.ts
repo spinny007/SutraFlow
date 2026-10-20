@@ -168,6 +168,8 @@ create table if not exists tasks(
   started_at text, finished_at text);
 create index if not exists tasks_pick on tasks(status, not_before);
 create index if not exists tasks_run on tasks(run_id);
+create table if not exists run_outputs(
+  run_id text not null, name text not null, out text, primary key(run_id, name));
 create table if not exists resources(
   id text primary key, kind text not null, name text not null, config text not null, updated_at text not null);
 create table if not exists secrets(

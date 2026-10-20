@@ -15,7 +15,7 @@ import { testEnv, node, edge } from './helpers.js';
 /** AI agent palette: the agent loop with tool Sutras, memory and the session queue, knowledge, asking a person, the guard. */
 testEnv(19890);
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const flows = await import('../server/src/flows.js');
 const projects = await import('../server/src/projects.js');
@@ -70,8 +70,8 @@ after(async () => { await srv.stop(); fake.close(); });
 const run = async (doc: any, input?: any, ms = 30000) => {
   const id = await engine.startRun({ doc, projectId: pid, input });
   await engine.waitFor(id, ms);
-  const r: any = q.get('select status, error, state from runs where id = ?', id);
-  const st = JSON.parse(r.state);
+  const r: any = q.get('select id, status, error, state from runs where id = ?', id);
+  const st = runState(r.id)!;
   return { id, status: r.status, error: r.error, out: st.outputs, logs: (st.logs || []).map((l: any) => `${l.level} ${l.msg}`).join('\n') };
 };
 const agentDoc = (cfg: Record<string, any> = {}, extra: { nodes?: any[]; edges?: (a: any) => any[] } = {}) => {
@@ -155,7 +155,7 @@ test('the agent asks a person; the answer comes back through Ask a person', asyn
   await assert.rejects(engine.decide(task.id, true, 'meera', '  '), /Write the answer first/);
   await engine.decide(task.id, true, 'meera', 'Yes, refund it.');
   await engine.waitFor(id, 10000);
-  const st = JSON.parse(q.get<any>('select state from runs where id = ?', id).state);
+  const st = runState(id)!;
   assert.equal(st.outputs.Ask.answer, 'Yes, refund it.');
   assert.match(st.logs.map((l: any) => l.msg).join('\n'), /GOT Yes, refund it\./);
 });

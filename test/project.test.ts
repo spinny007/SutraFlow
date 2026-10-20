@@ -14,7 +14,7 @@ import { testEnv, node, edge } from './helpers.js';
 
 testEnv(18410);
 const { boot } = await import('../server/src/index.js');
-const { engine } = await import('../server/src/engine/engine.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const projects = await import('../server/src/projects.js');
 const schemas = await import('../server/src/schemas.js');
@@ -46,7 +46,7 @@ async function run(nodes: any[], edges: any[], extra: any = {}) {
   const id = await engine.startRun({ doc: { name: 'P', nodes, edges, ...(extra.doc || {}) }, projectId: pid, ...extra.opts });
   await engine.waitFor(id, 15000, true);
   const r: any = q.get('select * from runs where id = ?', id);
-  return { id, status: r.status, error: r.error, state: JSON.parse(r.state) };
+  return { id, status: r.status, error: r.error, state: runState(r.id)! };
 }
 
 test('project variables, Sutra variables and ops overrides with ${env:}', async () => {
@@ -207,7 +207,7 @@ test('debugger: step one activity at a time, breakpoints, continue', async () =>
   assert.equal(pausedAt(), a.id);
   await engine.debug(id, 'step'); await settle();
   assert.equal(pausedAt(), b.id);
-  const st = JSON.parse((q.get('select state from runs where id = ?', id) as any).state);
+  const st = runState(id)!;
   assert.deepEqual(st.outputs.A, { n: 2 }, 'output of the stepped activity is visible while paused');
   await engine.debug(id, 'continue', [c.id]); await settle();
   assert.equal(pausedAt(), c.id, 'continue runs until the breakpoint');
