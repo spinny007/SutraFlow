@@ -214,7 +214,24 @@ Tested against stand-in services that answer like the real ones, but not yet aga
 
 - **Leaner run state**: each step currently rewrites the run state with the outputs of earlier steps, which costs Sutras that pass big data along (64 KB outputs measured about a third of the throughput of small ones). Keeping outputs only in the step rows removes that cost.
 - **Waking engines on new work**: PostgreSQL can notify engines when work arrives (LISTEN/NOTIFY), instead of them polling the queue.
-- **Longer soak tests**: 8 to 24 hours on a cluster with PostgreSQL on its own machine.
+- **Longer soak tests**: 8 to 24 hours on a cluster of engines with PostgreSQL on its own machine, under a steady mixed load (REST, SOAP, files, waits), with an engine stopped and restarted on the way. The test keeps throughput, latency percentiles, memory, pool waits and database size over time, and checks that no run is lost or run twice. The results will be published in `docs/benchmarks`.
+
+**WS-Security**
+- **Incoming X.509 signatures**: verify signed SOAP requests (BinarySecurityToken, the signed body and timestamp) against trusted certificates per policy.
+- **Incoming SAML tokens**: validate the issuer's signature, audience and validity times.
+- **XML encryption**: encrypt outgoing bodies and decrypt incoming ones with the policy's certificates.
+- **Timestamps** required and checked on incoming messages, with a configurable clock skew.
+
+**API security**
+- **Message validation**: enforce a REST service's body schema as JSON Schema, and SOAP bodies against their XSD, rejecting bad requests before a run starts.
+- **Threat protection** per policy: limits on body size, JSON and XML depth, field counts and string lengths.
+- **HMAC request signing**: incoming and outgoing requests signed with a shared secret (with timestamp and replay protection), as many webhook senders use.
+- **OAuth for the gateway**: token introspection for opaque tokens, and scopes per operation from any identity provider.
+- **Single sign-on** for studio and Admin Console users (OpenID Connect, then SAML), with roles from identity provider groups.
+
+**WebSockets**
+- **WebSocket services** on the gateway: a trigger per message or per connection, replies and pushed messages, with the same security policies.
+- **WebSocket client** connector: connect, send, and a trigger for received messages, with reconnects.
 
 Done in 1.7.6: asynchronous PostgreSQL storage (a connection pool, explicit transactions, fencing of claimed steps, three round trips per step).
 
