@@ -75,4 +75,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ls -la out
-          gh release create "${GITHUB_REF_NAME}" out/* --title "SutraFlow ${GITHUB_REF_NAME#v}" --notes-file RELEASE-NOTES.md
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" out/* --clobber
+            gh release edit "${GITHUB_REF_NAME}" --title "SutraFlow ${GITHUB_REF_NAME#v}" --notes-file RELEASE-NOTES.md
+          else
+            gh release create "${GITHUB_REF_NAME}" out/* --title "SutraFlow ${GITHUB_REF_NAME#v}" --notes-file RELEASE-NOTES.md
+          fi
