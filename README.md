@@ -20,6 +20,7 @@
 - [Quick start](#quick-start)
 - [Documentation](#documentation)
 - [Palettes](#palettes)
+- [Running Python](#running-python)
 - [Releases and CI/CD](#releases-and-cicd)
 - [Running in production](#running-in-production)
 - [Performance and sizing](#performance-and-sizing)
@@ -110,7 +111,33 @@ The guide and the architecture page are built from the code (`npm run guide`, `n
 | General | Log, Validate fields, Send to channel, Counter |
 | AI | AI prompt, classify, router, extract, summarize, translate, sentiment, Ollama; AI agent, Ask a person, Hand off to agent, memory, knowledge (add, read document text, search, ask, remove, embed), Call MCP tool, Agent channel, Agent reply, AI guard, AI tool, Reply to AI |
 
-Every activity except triggers has an **error** output, retries with backoff, a time limit, a breakpoint, a loop setting, and a description. Connections (22 kinds) are shared per project with secrets kept in an encrypted vault and named, never copied.
+Every activity except triggers has an **error** output, retries with backoff, a time limit, a breakpoint, a loop setting, and a description. Connections (24 kinds) are shared per project with secrets kept in an encrypted vault and named, never copied.
+
+## Running Python
+
+The **Python script** activity runs Python 3 code written in the designer or a `.py` file on the SutraFlow server. An administrator must first open **Server & APIs**, enable script activities, and confirm the detected interpreter. From a shell, the same check and configuration are available through:
+
+```bash
+bin/sutraflow cli python                         # show the Python used by this server
+bin/sutraflow cli python --set /path/to/python  # choose an interpreter
+```
+
+You can also set `SUTRA_PYTHON` in `sutraflow.env`, choose an interpreter on an individual activity, or give the activity a virtual-environment folder. SutraFlow otherwise tries the Windows `py` launcher, then `python3` and `python` on `PATH`.
+
+Add **Python script** from the **Scripts** palette. Its Parameters are available as a JSON file and as environment variables; the previous activity's output is another JSON file. Arguments arrive through `sys.argv`. Print JSON on the last line to give structured `result` data to the next activity:
+
+```python
+import json, os, sys
+
+params = json.load(open(os.environ["SUTRA_PARAMS_FILE"]))
+previous = json.load(open(os.environ["SUTRA_INPUT_FILE"]))
+mode = sys.argv[1] if len(sys.argv) > 1 else "standard"
+
+total = sum(float(row.get("amount", 0)) for row in previous.get("lines", []))
+print(json.dumps({"orderId": params["orderId"], "mode": mode, "total": total}))
+```
+
+The activity returns `stdout`, `stderr`, `exitCode`, elapsed time, output lines and parsed `json`/`result`. A non-zero exit code or uncaught exception fails the activity by default. List imported modules such as `pandas, requests` in **Packages it imports**: the designer and Deploy check the interpreter, syntax, script file, virtual environment and packages before the Sutra runs. SutraFlow does not install packages; install them on the server or in the activity's virtual environment. For ready-to-run designs, choose **+ New Sutra → Samples → Python scripts**. See the user guide's [Python scripts chapter](docs/sutraflow-user-guide.html#ch-python) for all settings and production guidance.
 
 ## Releases and CI/CD
 
