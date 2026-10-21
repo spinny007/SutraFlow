@@ -2,7 +2,7 @@
  * SutraFlow
  * Copyright (c) 2026-27 Surya Partap Singh
  * Developer: Surya Partap Singh | Website: MixAgile.com
- * File version: 1.7.5
+ * File version: 1.9.1
  * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
  * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
  * SPDX-License-Identifier: AGPL-3.0-only
@@ -52,7 +52,7 @@ export function App() {
     r.dataset.theme = dark ? 'light' : 'dark';
     try { localStorage.setItem('sutra.theme', r.dataset.theme); } catch { /* ignore */ }
   };
-  const nav: [Page, string][] = [['designer', 'Designer'], ['runs', 'Runs'], ['resources', 'Resources'], ['server', 'Server & APIs']];
+  const nav: [Page, string][] = [['designer', 'Designer'], ['runs', 'Runs'], ['resources', 'Resources'], ['server', 'Services']];
   return (
     <ToastHost>
       <CatalogHost>

@@ -19,7 +19,7 @@ import { findPython, missingPackages, pythonDesignCheck } from '../python.js';
 /**
  * Scripts palette: PowerShell, shell scripts, Python and programs run on the SutraFlow server.
  *
- * Safety: nothing runs until an administrator allows scripts (Server & APIs). Values reach a script as
+ * Safety: nothing runs until an administrator allows scripts (Admin Console > Server > Runtime). Values reach a script as
  * environment variables and the previous step's output as a JSON file, never pasted into the script
  * text, so data from a request or a file cannot become commands. Programs get their arguments one by
  * one, without a shell. Each run has a time limit and an output cap.
@@ -84,7 +84,7 @@ function envFor(c: ExecCtx, dir: string) {
 }
 
 function guard(c: ExecCtx) {
-  if (!scriptsAllowed()) throw new Error('Script activities are switched off on this server. An administrator can allow them in Server & APIs.');
+  if (!scriptsAllowed()) throw new Error('Script activities are switched off on this server. An administrator can allow them in Admin Console > Server > Runtime.');
   const cwd = String(c.raw('workDir') || '').trim();
   if (cwd && !fs.existsSync(cwd)) throw new Error(`Working folder not found: ${cwd}`);
   return cwd;
@@ -158,14 +158,14 @@ async function runScript(c: ExecCtx, kind: 'powershell' | 'shell') {
 export const scriptActivities: Activity[] = [
   {
     type: 'python', palette: 'scripts', name: 'Python script', glyph: 'Py', ports: ['out'], timeoutMs: 3600000,
-    desc: 'Runs Python 3 code written here, or a .py file on the server, with arguments and parameters, and captures its output, error output and exit code. Printed JSON becomes json and result. The designer and Deploy warn when Python, the file or a package is missing, or the code does not parse. Needs scripts to be allowed in Server & APIs.',
+    desc: 'Runs Python 3 code written here, or a .py file on the server, with arguments and parameters, and captures its output, error output and exit code. Printed JSON becomes json and result. The designer and Deploy warn when Python, the file or a package is missing, or the code does not parse. Needs scripts to be allowed in Admin Console > Server > Runtime.',
     fields: [
       F('source', 'Code from', 'select', 'code', { options: ['code', 'file'] }),
       F('code', 'Code', 'code', 'import json, os, sys\n\nparams = json.load(open(os.environ["SUTRA_PARAMS_FILE"]))\nprevious = json.load(open(os.environ["SUTRA_INPUT_FILE"]))\n\ntotal = sum(float(line.get("amount", 0)) for line in previous.get("lines", []))\nprint(json.dumps({"orderId": params.get("orderId"), "total": round(total * (1 + float(params.get("taxRate", 0))), 2)}))', { ...when('source', 'code'), help: 'Print JSON (json.dumps) on the last line to hand structured data to the next step.' }),
       F('file', 'Script file', 'text', process.platform === 'win32' ? 'C:/scripts/report.py' : '/opt/scripts/report.py', { ...when('source', 'file'), help: 'A .py file on the SutraFlow server. May use {{gv.SCRIPTS}}.' }),
       F('args', 'Arguments', 'list', [], { tpl: true, help: 'One per line, each passed as one argument (sys.argv[1:]).' }),
       F('params', 'Parameters', 'kv', [{ k: 'orderId', v: '{{input.orderId}}' }, { k: 'taxRate', v: '0.18' }], { tpl: true, help: 'A JSON file named by SUTRA_PARAMS_FILE, and environment variables of the same names. The previous step\'s output is in SUTRA_INPUT_FILE.' }),
-      F('python', 'Python', 'select', 'detected', { options: ['detected', 'this interpreter'], help: 'detected: the server\'s Python (Server & APIs shows which). this interpreter: a path you give, such as a virtual environment\'s python.' }),
+      F('python', 'Python', 'select', 'detected', { options: ['detected', 'this interpreter'], help: 'detected: the server\'s Python (Admin Console > Server > Runtime shows which). this interpreter: a path you give, such as a virtual environment\'s python.' }),
       F('pythonPath', 'Interpreter path', 'text', '', when('python', 'this interpreter')),
       F('venv', 'Virtual environment folder', 'text', '', { help: 'Optional: a venv folder; its python is used and its packages are available.' }),
       F('packages', 'Packages it imports', 'text', '', { help: 'Comma separated import names, such as pandas, requests, openpyxl: checked before it runs, so a missing one is found in the designer, not in production.' }),
@@ -219,7 +219,7 @@ export const scriptActivities: Activity[] = [
   },
   {
     type: 'powershell', palette: 'scripts', name: 'PowerShell script', glyph: '❯', ports: ['out'],
-    desc: 'Runs a PowerShell script on the server and captures its output, error output and exit code. Values come in as environment variables. Needs scripts to be allowed in Server & APIs.',
+    desc: 'Runs a PowerShell script on the server and captures its output, error output and exit code. Values come in as environment variables. Needs scripts to be allowed in Admin Console > Server > Runtime.',
     fields: [
       F('interpreter', 'PowerShell', 'select', POWERSHELLS[0], { options: POWERSHELLS, help: 'Windows PowerShell 5.1 comes with Windows; PowerShell 7 must be installed (pwsh).' }),
       F('script', 'Script', 'code', '$order = Get-Content $env:SUTRA_INPUT_FILE -Raw | ConvertFrom-Json\n$files = Get-ChildItem -Path $env:TEMP -Filter *.log | Select-Object -First 5 Name, Length\n[pscustomobject]@{ orderId = $env:ORDER_ID; logs = $files } | ConvertTo-Json -Depth 4', { help: 'Print JSON (ConvertTo-Json) to hand structured data to the next step; it arrives as json.' }),
@@ -230,7 +230,7 @@ export const scriptActivities: Activity[] = [
   },
   {
     type: 'shellScript', palette: 'scripts', name: 'Shell script', glyph: '$', ports: ['out'],
-    desc: 'Runs a bash, sh or Windows cmd script on the server and captures its output, error output and exit code. Values come in as environment variables. Needs scripts to be allowed in Server & APIs.',
+    desc: 'Runs a bash, sh or Windows cmd script on the server and captures its output, error output and exit code. Values come in as environment variables. Needs scripts to be allowed in Admin Console > Server > Runtime.',
     fields: [
       F('interpreter', 'Shell', 'select', 'bash', { options: SHELLS, help: 'On Windows, bash comes with Git for Windows or WSL.' }),
       F('script', 'Script', 'code', 'set -e\necho "Order $ORDER_ID"\nls -1 "${TMPDIR:-/tmp}" | head -5', { help: 'Print JSON to hand structured data to the next step; it arrives as json.' }),
@@ -241,7 +241,7 @@ export const scriptActivities: Activity[] = [
   },
   {
     type: 'runProgram', palette: 'scripts', name: 'Run program', glyph: '▷', ports: ['out'],
-    desc: 'Starts a program with its arguments, without a shell, and captures its output, error output and exit code. Each argument is passed as it is, so values cannot add commands. Needs scripts to be allowed in Server & APIs.',
+    desc: 'Starts a program with its arguments, without a shell, and captures its output, error output and exit code. Each argument is passed as it is, so values cannot add commands. Needs scripts to be allowed in Admin Console > Server > Runtime.',
     fields: [
       F('program', 'Program', 'text', process.platform === 'win32' ? 'C:/Program Files/7-Zip/7z.exe' : '/usr/bin/zip', { help: 'Full path, or a name on the server\'s PATH.' }),
       F('args', 'Arguments', 'list', ['a', 'archive.zip', '{{input.path}}'], { tpl: true, help: 'One per line; each may use {{ }} references and is passed as one argument.' }),

@@ -38,7 +38,7 @@ export const venvPython = (venv: string) => path.join(venv, process.platform ===
 
 /**
  * The Python to use: a given interpreter or virtual environment, else SUTRA_PYTHON, the server setting
- * (Server & APIs), then the py launcher (Windows), python3 and python on the PATH.
+ * (Admin Console > Server > Runtime), then the py launcher (Windows), python3 and python on the PATH.
  */
 export function findPython(o: { interpreter?: string; venv?: string } = {}): PythonInfo {
   const explicit = o.venv ? venvPython(o.venv) : o.interpreter || '';
@@ -55,7 +55,7 @@ export function findPython(o: { interpreter?: string; venv?: string } = {}): Pyt
       ['python3', []], ['python', []],
     ];
     for (const [exe, prefix] of tries) { info = probe(exe, prefix); if (info) break; }
-    info ||= { ok: false, exe: '', prefix: [], version: '', path: '', message: `Python 3 is not installed on this server${configured ? ` (and ${configured} does not work)` : ''}. Install it from python.org (tick "Add python.exe to PATH") or with the package manager (apt install python3), or set its path in Server & APIs or SUTRA_PYTHON.` };
+    info ||= { ok: false, exe: '', prefix: [], version: '', path: '', message: `Python 3 is not installed on this server${configured ? ` (and ${configured} does not work)` : ''}. Install it from python.org (tick "Add python.exe to PATH") or with the package manager (apt install python3), or set its path in Admin Console > Server > Runtime or SUTRA_PYTHON.` };
   }
   found = { at: Date.now(), key, info };
   return info;
@@ -95,7 +95,7 @@ export function missingPackages(py: PythonInfo, packages: string[]): string[] {
 /** What the Python step would meet on this server, as warnings for the designer and Deploy. */
 export function pythonDesignCheck(cfg: Record<string, any>, scriptsOn: boolean): string[] {
   const w: string[] = [];
-  if (!scriptsOn) w.push('Script activities are switched off on this server; an administrator can allow them in Server & APIs');
+  if (!scriptsOn) w.push('Script activities are switched off on this server; an administrator can allow them in Admin Console > Server > Runtime');
   const dynamic = (v: unknown) => typeof v === 'string' && (v.includes('{{') || v.startsWith('='));
   if (cfg.venv && !dynamic(cfg.venv) && !fs.existsSync(String(cfg.venv))) w.push(`Virtual environment folder not found on this server: ${cfg.venv}`);
   const py = findPython({ interpreter: cfg.python === 'this interpreter' && !dynamic(cfg.pythonPath) ? cfg.pythonPath : undefined, venv: cfg.venv && !dynamic(cfg.venv) && fs.existsSync(String(cfg.venv)) ? cfg.venv : undefined });

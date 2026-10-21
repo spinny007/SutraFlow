@@ -298,7 +298,7 @@ export function releasesAllowed() { return getSetting<boolean>('releasesAllowed'
 export function setReleasesAllowed(on: boolean) { setSetting('releasesAllowed', !!on); }
 
 export function setEngineVariable(name: string, value: unknown) {
-  if (!sutrasMayChangeSengine()) throw new Error(`Sengine variables are read-only for Sutras, so ${name} was not changed. An administrator can allow changes in Server & APIs.`);
+  if (!sutrasMayChangeSengine()) throw new Error(`Sengine variables are read-only for Sutras, so ${name} was not changed. An administrator can allow changes in Admin Console > Server > Runtime.`);
   const vars = listEngineVariables();
   const v = vars.find(x => x.name === name);
   const text = typeof value === 'object' ? JSON.stringify(value) : String(value ?? '');

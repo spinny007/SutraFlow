@@ -22,7 +22,7 @@ export const CHAPTERS: Chapter[] = [
 <p>SutraFlow is a visual integration designer and engine. You build a <strong>Sutra</strong> by dragging <strong>activities</strong> from palettes onto a canvas and connecting them; you map data from earlier activities into later ones; you test and debug it in the studio; and you <strong>deploy</strong> it to run on the server: on a schedule, when a file or message arrives, or as a REST or SOAP API protected by a security policy and TLS.</p>
 <p>One program contains three parts:</p>
 <ul>
-<li><strong>The studio</strong> at <code>http://127.0.0.1:4800</code>: the Designer, Runs, Resources and Server &amp; APIs screens.</li>
+<li><strong>The studio</strong> at <code>http://127.0.0.1:4800</code>: the Designer, Runs, Resources and read-only Services screens.</li>
 <li><strong>The engine</strong>, which runs Sutras step by step and saves each finished step, so runs survive a restart and long waits cost nothing.</li>
 <li><strong>The gateway</strong> on ports 8080 (HTTP) and 8443 (HTTPS), which serves deployed APIs, separately from the studio.</li>
 </ul>
@@ -36,8 +36,8 @@ export const CHAPTERS: Chapter[] = [
 <p class="h">From a release (servers)</p>
 <p>Each release comes as <code>sutraflow-&lt;version&gt;-windows.zip</code> and <code>sutraflow-&lt;version&gt;-linux.tar.gz</code>, already built, each with a <code>.sha256</code> file; offline archives with the packages inside are there for servers without access to the npm registry. <code>RELEASE-NOTES.md</code> in the archive has the steps for each system and for upgrades.</p>
 <ol>
-<li>Check the download: <code>sha256sum -c sutraflow-1.9.0-linux.tar.gz.sha256</code>, or on Windows <code>Get-FileHash sutraflow-1.9.0-windows.zip -Algorithm SHA256</code> against the <code>.sha256</code> file.</li>
-<li>Unpack it: <code>tar -xzf sutraflow-1.9.0-linux.tar.gz -C /opt/sutraflow</code>, or <code>Expand-Archive sutraflow-1.9.0-windows.zip C:\\SutraFlow</code>.</li>
+<li>Check the download: <code>sha256sum -c sutraflow-1.9.1-linux.tar.gz.sha256</code>, or on Windows <code>Get-FileHash sutraflow-1.9.1-windows.zip -Algorithm SHA256</code> against the <code>.sha256</code> file.</li>
+<li>Unpack it: <code>tar -xzf sutraflow-1.9.1-linux.tar.gz -C /opt/sutraflow</code>, or <code>Expand-Archive sutraflow-1.9.1-windows.zip C:\\SutraFlow</code>.</li>
 <li>In the unpacked folder: <code>bin/sutraflow setup</code> (Windows: <code>bin\\sutraflow.cmd setup</code>) installs the runtime packages and makes <code>sutraflow.env</code>.</li>
 <li><code>bin/sutraflow start</code>, then open <code>http://127.0.0.1:4800</code> and create the administrator account.</li>
 </ol>
@@ -68,7 +68,7 @@ export const CHAPTERS: Chapter[] = [
 <tr><td><code>SUTRA_DATA_DIR</code></td><td><code>./data</code></td><td>Database, master key, deployment config files.</td></tr>
 <tr><td><code>SUTRA_MASTER_KEY</code></td><td>the key file</td><td>The vault key, 32 bytes in base64.</td></tr>
 <tr><td><code>SUTRA_ADMIN_HOST</code>, <code>SUTRA_ADMIN_PORT</code></td><td>127.0.0.1, 4800</td><td>Where the studio listens.</td></tr>
-<tr><td><code>SUTRA_GATEWAY_HTTP_PORT</code>, <code>SUTRA_GATEWAY_HTTPS_PORT</code></td><td>8080, 8443</td><td>Gateway ports until changed in Server &amp; APIs.</td></tr>
+<tr><td><code>SUTRA_GATEWAY_HTTP_PORT</code>, <code>SUTRA_GATEWAY_HTTPS_PORT</code></td><td>8080, 8443</td><td>Gateway ports until changed in Admin Console &rarr; Server &rarr; Gateway &amp; TLS.</td></tr>
 <tr><td><code>SUTRA_WORKERS</code></td><td>by machine</td><td>Steps that run at the same time: 4 on 1 vCPU / 1 GB, up to 32 on 8 cores (see <a href="#ch-sizing">Sizing and performance</a>).</td></tr>
 <tr><td><code>SUTRA_MAX_STEPS</code></td><td>10000</td><td>Safety limit of steps per run.</td></tr>
 <tr><td><code>SUTRA_REPLY_TIMEOUT_MS</code></td><td>60000</td><td>How long an API caller waits for the reply step.</td></tr>
@@ -122,7 +122,7 @@ export const CHAPTERS: Chapter[] = [
 <tr><td><strong>Designer</strong></td><td>Building, testing, debugging and deploying Sutras. Left: the <em>Project</em> explorer and the <em>Palettes</em>. Middle: the canvas and its toolbar. Right: the selected activity's General, Input, Output and Settings tabs.</td></tr>
 <tr><td><strong>Runs</strong></td><td>Every run with its status, steps, inputs and outputs, logs; approvals waiting for a person (approvers decide in the Approval Center, <code>/approvals</code>).</td></tr>
 <tr><td><strong>Resources</strong></td><td>Shared connections and security of the current project, and the secrets vault.</td></tr>
-<tr><td><strong>Server &amp; APIs</strong></td><td>Exposed services, Sengine variables, gateway ports, TLS certificate, active listeners.</td></tr>
+<tr><td><strong>Services</strong></td><td>Read-only addresses and listener health for exposed services. Server-wide controls are in <strong>Admin Console → Server</strong>.</td></tr>
 </tbody></table>
 <p class="h">The Designer toolbar</p>
 <ul>
@@ -375,10 +375,10 @@ export const CHAPTERS: Chapter[] = [
 <table class="t"><thead><tr><th>Kind</th><th>Read as</th><th>Set where</th><th>Lifetime</th></tr></thead><tbody>
 <tr><td><strong>Sutra variables</strong></td><td><code>{vars.name}</code></td><td>Sutra properties; [[setVar]]</td><td>One run.</td></tr>
 <tr><td><strong>Project variables</strong></td><td><code>{gv.NAME}</code>, <code>{{gv.NAME}}</code>, <code>get-project-variable('NAME')</code></td><td>Project &rarr; Configuration; the deployment config; <code>set-project-variable</code></td><td>Kept; a value set at run time lasts until the server restarts or the config changes.</td></tr>
-<tr><td><strong>Sengine variables</strong></td><td><code>{ev.NAME}</code>, <code>{{ev.NAME}}</code>, <code>get-sengine-variable('NAME')</code></td><td>Server &amp; APIs (administrator)</td><td>Kept; shared by every project on the server. Sutras read them only.</td></tr>
+<tr><td><strong>Sengine variables</strong></td><td><code>{ev.NAME}</code>, <code>{{ev.NAME}}</code>, <code>get-sengine-variable('NAME')</code></td><td>Admin Console → Server → Runtime</td><td>Kept; shared by every project on the server. Sutras read them only.</td></tr>
 </tbody></table>
 <p>Project variables have a type: string, number, boolean or secret. A secret variable holds the name of a vault secret, never the value.</p>
-[[tip:Read Sengine variables, do not change them|Sengine variables are mostly engine settings (a region, a data centre, a shared folder) that every project relies on. Read them in Sutras; change them only in Server &amp; APIs. <code>set-sengine-variable</code> works only when the administrator ticks <em>Allow Sutras to change Sengine variables</em>, and one Sutra could then change the behaviour of every project.]]
+[[tip:Read Sengine variables, do not change them|Sengine variables are mostly engine settings (a region, a data centre, a shared folder) that every project relies on. Read them in Sutras; change them only in <strong>Admin Console → Server → Runtime</strong>. <code>set-sengine-variable</code> works only when the administrator ticks <em>Allow Sutras to change Sengine variables</em>, and one Sutra could then change the behaviour of every project.]]
 <p class="h">The deployment config file</p>
 <p>Operations staff change settings per environment without opening the studio. The deployment config holds overrides for project variables, resource settings (hosts, ports, URLs, queue names) and logging. Export it from the project, edit it, and import it, or place it at <code>data/config/&lt;project&gt;.json</code>.</p>
 <pre>{
@@ -646,7 +646,7 @@ export const CHAPTERS: Chapter[] = [
 <tr><td>Gateway HTTPS</td><td><code>8443</code> (all addresses)</td><td>The same, with TLS (a self-signed, your own or a Let's Encrypt certificate)</td><td>Callers over the internet</td></tr>
 <tr><td>Headless engine</td><td>admin <code>4801</code>, gateway <code>9080</code> / <code>9443</code></td><td>An engine without the designer: its Admin Console and its own gateway, serving the same deployed Sutras</td><td>Admin port: operations; gateway: callers</td></tr>
 </tbody></table>
-<p>The ports are set in <code>sutraflow.env</code> (<code>STUDIO_PORT</code>, <code>STUDIO_GATEWAY_HTTP</code>, <code>STUDIO_GATEWAY_HTTPS</code>, and <code>ENGINE_...</code> for an engine); <strong>Server &amp; APIs</strong> in the designer shows the gateway's addresses and every service on it. A Laragon installation uses for example studio 4810 and gateway 8090 and 8453, with Apache forwarding <code>http://sutra.test</code> to the studio.</p>
+<p>The ports are set in <code>sutraflow.env</code> (<code>STUDIO_PORT</code>, <code>STUDIO_GATEWAY_HTTP</code>, <code>STUDIO_GATEWAY_HTTPS</code>, and <code>ENGINE_...</code> for an engine). The Designer's read-only <strong>Services</strong> page shows every gateway address; administrators change listener settings in <strong>Admin Console &rarr; Server &rarr; Gateway &amp; TLS</strong>. A Laragon installation uses for example studio 4810 and gateway 8090 and 8453, with Apache forwarding <code>http://sutra.test</code> to the studio.</p>
 <p class="h">What the gateway serves</p>
 <table class="t"><thead><tr><th>Address on the gateway</th><th>What</th><th>Made by</th></tr></thead><tbody>
 <tr><td>Your paths, for example <code>GET /orders/:id</code></td><td>REST services</td><td>A deployed Sutra that starts with [[restService]]</td></tr>
@@ -670,7 +670,7 @@ export const CHAPTERS: Chapter[] = [
 </ol>
 <pre>curl http://127.0.0.1:8080/orders/A-1001 -H "X-API-Key: your-key"
 Invoke-RestMethod http://127.0.0.1:8080/orders/A-1001 -Headers @{ "X-API-Key" = "your-key" }</pre>
-<p>Server &amp; APIs lists the service with its full address; the Admin Console's Applications shows it running, and Gateway &rarr; Traffic shows its calls.</p>
+<p>The Designer's <strong>Services</strong> page lists the service with its full address; the Admin Console's Applications shows it running, and Gateway &rarr; Traffic shows its calls.</p>
 <p class="h">Who may call, and how much</p>
 <p>Every request passes through, in order: the <strong>firewall</strong> (addresses allowed or refused for the whole gateway), the service's <strong>API security policy</strong> (HTTPS only, IP allow list, authentication, a rate limit per caller, CORS for browsers), and for gateway apps their <strong>plan</strong>. A refused request gets 403, 401 or 429 and never starts the Sutra.</p>
 <ul>
@@ -682,7 +682,7 @@ curl http://127.0.0.1:8080/orders/A-1001 -H "Authorization: Bearer ACCESS_TOKEN"
 <p>Disabling an app, or deleting a key, stops it at once on every engine. Gateway &rarr; Traffic shows requests, errors and time taken by service and app; the request log keeps every call (path, app, status, time, run) for the days set there.</p>
 <p class="h">HTTPS and the internet</p>
 <ul>
-<li>Give the gateway a certificate in Server &amp; APIs: your own, or Let's Encrypt (the gateway's HTTP port must answer as port 80 for the domain while the certificate is made and renewed).</li>
+<li>Give the gateway a certificate in Admin Console &rarr; Server &rarr; Gateway &amp; TLS: your own, or Let's Encrypt (the gateway's HTTP port must answer as port 80 for the domain while the certificate is made and renewed).</li>
 <li>Or put a reverse proxy or load balancer in front (Apache, nginx, IIS, Azure Application Gateway, AWS ALB) that ends TLS and forwards to the gateway's HTTP port; send <code>/health</code> as its health check, and <code>/ready</code> on the admin port for engines.</li>
 <li>Open only the gateway port in the firewall, never the studio port.</li>
 </ul>
@@ -691,8 +691,8 @@ curl http://127.0.0.1:8080/orders/A-1001 -H "Authorization: Bearer ACCESS_TOKEN"
   {
     id: 'expose', title: 'Exposing APIs: security and TLS',
     html: `
-<p>A [[restService]] or [[soapService]] trigger publishes the Sutra on the gateway. Server &amp; APIs lists every exposed service with its addresses and security policy.</p>
-[[img:server|Server &amp; APIs: exposed services, engine variables, gateway ports and the TLS certificate.]]
+<p>A [[restService]] or [[soapService]] trigger publishes the Sutra on the gateway. The Designer's read-only <strong>Services</strong> page lists every exposed service with its addresses and security policy.</p>
+[[img:server|Services: the read-only inventory of exposed services and listener health.]]
 <p class="h">API security policy</p>
 <p>Create a policy in Resources &rarr; <em>API security policy</em> and pick it on the trigger. It checks, in order: HTTPS required, IP allow list (addresses or IPv4 ranges), caller authentication, then a rate limit per caller. CORS origins are optional.</p>
 <table class="t"><thead><tr><th>Authentication</th><th>How callers prove who they are</th></tr></thead><tbody>
@@ -706,7 +706,7 @@ curl http://127.0.0.1:8080/orders/A-1001 -H "Authorization: Bearer ACCESS_TOKEN"
 <tr><td>WS-Security UsernameToken</td><td>SOAP only; password digest with a time window and replay protection.</td></tr>
 <tr><td>WS-Security X.509</td><td>SOAP only; the request signed with a certificate the policy trusts (the certificate itself, or a CA that issued it). The Body and the Timestamp must be signed.</td></tr>
 <tr><td>WS-Security SAML</td><td>SOAP only; a SAML 1.1 or 2.0 assertion signed by the identity provider, from the expected issuer, for this audience, in its validity period.</td></tr>
-<tr><td>Mutual TLS</td><td>A client certificate signed by the client CA set in Server &amp; APIs; optionally only listed subjects.</td></tr>
+<tr><td>Mutual TLS</td><td>A client certificate signed by the client CA set in Admin Console &rarr; Server &rarr; Gateway &amp; TLS; optionally only listed subjects.</td></tr>
 </tbody></table>
 <p class="h">Scopes per service and per operation</p>
 <p>A token or gateway app carries scopes. The policy can require some for everything it protects; a [[restService]] can require more (<em>Required scopes</em>), and a [[soapService]] per operation (<em>Scopes per operation</em>: <code>CancelOrder = orders:cancel</code>). A caller without them gets 403 <code>insufficient_scope</code>.</p>
@@ -799,7 +799,7 @@ ws.onopen = () =&gt; ws.send(JSON.stringify({ type: 'watch', orderId: 'A-1001' }
 <li>Each message is checked for size (<em>Max message size</em>), nesting and the policy's threat limits, and against the message schema when <em>Validate messages</em> is on. A bad message gets an error message back and starts no run.</li>
 </ul>
 <p class="h">Pushing and broadcasting</p>
-<p>[[wsSend]] can write to any connection by its id (from an earlier message, a memory table, or a database), or to every connection of a service. In a cluster a connection stays on the engine that accepted it; a step on another engine leaves the message in the database and that engine delivers it within a fraction of a second. Server &amp; APIs lists the WebSocket services with their ws:// and wss:// addresses.</p>
+<p>[[wsSend]] can write to any connection by its id (from an earlier message, a memory table, or a database), or to every connection of a service. In a cluster a connection stays on the engine that accepted it; a step on another engine leaves the message in the database and that engine delivers it within a fraction of a second. The Designer's <strong>Services</strong> page lists the WebSocket services with their ws:// and wss:// addresses.</p>
 <p class="h">Order and load</p>
 <p>By default a connection's messages are handled one at a time, so answers come back in order. Turn <em>One message at a time per connection</em> off for independent messages that may run side by side. A client that sends faster than its runs finish is closed after 1,000 waiting messages rather than filling memory; a client that stops answering pings is dropped after 30 seconds.</p>
 <p class="h">Connecting to other WebSocket servers</p>
@@ -904,7 +904,7 @@ ws.onopen = () =&gt; ws.send(JSON.stringify({ type: 'watch', orderId: 'A-1001' }
 <li>[[jsCode]] runs your JavaScript in a sandbox without host access, with time and memory limits.</li>
 <li>[[htmlTemplate]] builds HTML with escaped placeholders, loops and conditions.</li>
 <li>[[jsonata]] transforms JSON with one expression.</li>
-<li>The <strong>Scripts</strong> palette runs [[powershell]], [[shellScript]] (bash, sh or cmd) and [[runProgram]] on the server, capturing the output, the error output and the exit code. An administrator must allow scripts in Server &amp; APIs first; values reach scripts as environment variables, never as script text.</li>
+<li>The <strong>Scripts</strong> palette runs [[powershell]], [[shellScript]] (bash, sh or cmd) and [[runProgram]] on the server, capturing the output, the error output and the exit code. An administrator must allow scripts in Admin Console &rarr; Server &rarr; Runtime first; values reach scripts as environment variables, never as script text.</li>
 <li>The <strong>AI</strong> palette: [[aiPrompt]], [[aiClassify]], [[aiRouter]], [[aiExtract]], [[aiSummarize]], [[aiTranslate]] and [[aiSentiment]]. Each also returns <code>ai</code>: the provider, engine, model, input, output and total tokens, and the time taken.</li>
 </ul>
 <p class="h">AI providers</p>
@@ -993,7 +993,7 @@ ws.onopen = () =&gt; ws.send(JSON.stringify({ type: 'watch', orderId: 'A-1001' }
 <li>Under Resources, add an <strong>MCP server</strong>: its address on the gateway (for example <code>/mcp/orders</code>), a title, instructions for the AI, and an API security policy. One server holds many skills.</li>
 <li>Create a Sutra that starts with <strong>AI tool</strong>, choose the server, and describe the tool: name, title, what it does and when to use it, and its inputs.</li>
 <li>Build the work, and end every branch with <strong>Reply to AI</strong>; on error branches tick <em>Is an error</em>.</li>
-<li>Test it in the studio with the trigger's test arguments, then Deploy. Server &amp; APIs lists each skill with its address.</li>
+<li>Test it in the studio with the trigger's test arguments, then Deploy. The <strong>Services</strong> page lists each skill with its address.</li>
 </ol>
 <p class="h">Connect an assistant</p>
 <p>Give the assistant the server's address and, when a policy is set, the key or token as a header. With Claude Code:</p>
@@ -1190,7 +1190,7 @@ sudo -u postgres psql -d sutraflow -c "CREATE EXTENSION IF NOT EXISTS vector;"</
   {
     id: 'python', title: 'Python scripts',
     html: `
-<p>[[python]] runs Python 3 on the SutraFlow server: code written in the step, or a .py file. It is in the Scripts palette, so an administrator first allows scripts in <strong>Server &amp; APIs</strong>, which also shows which Python is used and lets you choose another (<code>sutra python</code> does the same from a shell).</p>
+<p>[[python]] runs Python 3 on the SutraFlow server: code written in the step, or a .py file. It is in the Scripts palette, so an administrator first opens <strong>Admin Console → Server → Runtime</strong> and allows scripts in the <strong>Scripts</strong> card. The same card shows which Python is used and lets you choose another (<code>sutra python</code> does the same from a shell).</p>
 <p class="h">Install Python</p>
 <ul>
 <li><strong>Windows</strong>: python.org, and tick <em>Add python.exe to PATH</em>; SutraFlow also finds the <code>py</code> launcher.</li>
@@ -1462,7 +1462,7 @@ sutra package --from-git https://github.com/acme/orders.git --ref v1.4.0 --versi
 <li><strong>Roll back</strong>: Admin Console &rarr; Releases &rarr; <em>Roll back</em>, or <em>Deploy again</em> on any earlier package; <code>sutra rollback --project "Orders"</code>. A rollback is itself a deployment, recorded like any other.</li>
 </ul>
 <p class="h">From a Sutra</p>
-<p>The <strong>Release</strong> palette does the same steps inside a Sutra, so a release can itself be a Sutra: on a timer or a REST call, [[releasePackage]], [[releaseDeploy]] to a test engine, [[approval]], [[releaseDeploy]] to production, then [[emailSend]] the result. [[releaseCheck]] and [[releaseRollback]] complete it. These activities are off until an administrator allows them in Server &amp; APIs.</p>
+<p>The <strong>Release</strong> palette does the same steps inside a Sutra, so a release can itself be a Sutra: on a timer or a REST call, [[releasePackage]], [[releaseDeploy]] to a test engine, [[approval]], [[releaseDeploy]] to production, then [[emailSend]] the result. [[releaseCheck]] and [[releaseRollback]] complete it. These activities are off until an administrator allows them in Admin Console &rarr; Server &rarr; Runtime.</p>
 [[tip:Good practice|Promote the same zip from UAT to production; never rebuild it for production.<br>Keep deployment configs and secrets out of the package and out of Git; keep configs per environment, secrets in each vault.<br>Write the note: it shows in the history and the README.]]`,
   },
   {
@@ -1596,7 +1596,7 @@ stages:
   post { success { archiveArtifacts 'release.zip' } }
 }</pre>
 <p class="h">Container images</p>
-<p>For immutable production, bake the release into an engine image: <code>FROM sutraflow:1.9.0</code>, <code>COPY release.zip /deploy/</code>, and start it with <code>SUTRA_MODE=engine SUTRA_DEPLOY_DIR=/deploy</code>; the engine deploys every package in the folder at start. A new release is a new image.</p>
+<p>For immutable production, bake the release into an engine image: <code>FROM sutraflow:1.9.1</code>, <code>COPY release.zip /deploy/</code>, and start it with <code>SUTRA_MODE=engine SUTRA_DEPLOY_DIR=/deploy</code>; the engine deploys every package in the folder at start. A new release is a new image.</p>
 [[tip:Good practice|One zip, many environments: build once, deploy the same artifact to UAT and production.<br>Give each environment its own system account and token, with Deploy on the project only.<br>Let the pipeline fail on <code>sutra check</code> before anything changes; keep rollback one command away.<br>Store the zip with the pipeline run: it is the record of exactly what went live.]]`,
   },
   {
@@ -1852,9 +1852,9 @@ tools/migrate-to-postgres.sh --url "postgres://sutra:password@db.example.com:543
 <p class="h">Headless engines</p>
 <p>The same program started with <code>SUTRA_MODE=engine</code> runs Sutras without the studio: no designer pages and no editing. It keeps <code>/health</code>, <code>/ready</code> and <code>/metrics</code>, the Admin Console at <code>/admin</code> for its users, and an automation API for API tokens (the admin token or system account tokens). Packages in <code>SUTRA_DEPLOY_DIR</code> are deployed when it starts; a package that cannot be deployed stops the start.</p>
 <p class="h">Docker</p>
-<pre>docker build -t sutraflow:1.9.0 .
+<pre>docker build -t sutraflow:1.9.1 .
 docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=... \\
-           -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:1.9.0</pre>
+           -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:1.9.1</pre>
 <p>The image runs as a non-root user, checks its own health, and writes JSON logs. <code>docker-compose.yml</code> has a studio and an engine; <code>docker-compose.cluster.yml</code> has PostgreSQL, a studio and two engines.</p>
 <p class="h">Clusters</p>
 <p>Several engines share one database (<code>SUTRA_DB=postgres://...</code>), each with its own <code>SUTRA_ENGINE_ID</code> and all with the same <code>SUTRA_MASTER_KEY</code>.</p>
@@ -2115,7 +2115,7 @@ node tools/bigfiletest.mjs --mb 1000 --mem 384             # stream a 1 GB file 
 <table class="t"><thead><tr><th>Symptom</th><th>Cause and remedy</th></tr></thead><tbody>
 <tr><td>A mapping shows <em>not run</em></td><td>The activity was on a branch that was not taken in the last test. Test with data that takes that branch.</td></tr>
 <tr><td>An API caller waits a minute, then gets 504</td><td>A branch ended without [[httpResponse]] or [[soapReply]]. Add replies on every branch, including error branches.</td></tr>
-<tr><td>A timer or file trigger does nothing</td><td>Only the deployed version listens. Deploy, then check the listeners table in Server &amp; APIs.</td></tr>
+<tr><td>A timer or file trigger does nothing</td><td>Only the deployed version listens. Deploy, then check listener health on the Designer's <strong>Services</strong> page.</td></tr>
 <tr><td>Required fields not mapped</td><td>The Input tab names them. Map them, or remove the requirement from the schema.</td></tr>
 <tr><td>Formula error</td><td>The preview under the formula names the problem: an unknown function, a missing bracket, or a quote not doubled.</td></tr>
 <tr><td>The run stops after 10000 steps</td><td>A loop that never ends. Check the condition that leaves it.</td></tr>

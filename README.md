@@ -2,7 +2,7 @@
 
 **A visual integration designer and engine.** Drag activities onto a canvas, map data between steps, test and debug, and deploy *Sutras* (integration processes) that run as REST, SOAP and MCP services, on schedules, or on events: files, queues, mail, cloud drives, chat messages and more.
 
-![Version](https://img.shields.io/badge/version-1.9.0-2f6fd8)
+![Version](https://img.shields.io/badge/version-1.9.1-2f6fd8)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Commercial licence available](https://img.shields.io/badge/commercial%20licence-available-orange)](COMMERCIAL-LICENSE.md)
 ![Node.js](https://img.shields.io/badge/node-%E2%89%A5%2022.13-339933?logo=node.js&logoColor=white)
@@ -115,7 +115,7 @@ Every activity except triggers has an **error** output, retries with backoff, a 
 
 ## Running Python
 
-The **Python script** activity runs Python 3 code written in the designer or a `.py` file on the SutraFlow server. An administrator must first open **Server & APIs**, enable script activities, and confirm the detected interpreter. From a shell, the same check and configuration are available through:
+The **Python script** activity runs Python 3 code written in the designer or a `.py` file on the SutraFlow server. An administrator must first open **Admin Console → Server → Runtime**, enable script activities in the **Scripts** card, and confirm the detected interpreter. From a shell, the same check and configuration are available through:
 
 ```bash
 bin/sutraflow cli python                         # show the Python used by this server

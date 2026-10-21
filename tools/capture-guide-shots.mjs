@@ -185,7 +185,7 @@ async function main() {
       [...document.querySelectorAll('.list li button')].find(b => b.textContent.includes('Partner API keys'))?.click(); await wait(600);`);
     await shot('resources');
 
-    // 10. Server & APIs.
+    // 10. Read-only Services page.
     await go('#server');
     await shot('server');
 

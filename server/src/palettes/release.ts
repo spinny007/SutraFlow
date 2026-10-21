@@ -18,12 +18,12 @@ import { buildPackage, checkPackage, deployPackage, readPackage, rollbackPackage
  * Release palette: a Sutra that builds, checks, deploys and rolls back project packages, on this
  * server or on a remote engine (its admin token comes from the vault). A release becomes a Sutra:
  * timer or REST call, build, deploy to test, approval, deploy to production, email the result.
- * Off until an administrator allows release activities (Server & APIs).
+ * Off until an administrator allows release activities (Admin Console > Server > Runtime).
  */
 const TARGETS = ['this server', 'remote server'];
 
 function guard() {
-  if (!releasesAllowed()) throw new Error('Release activities are switched off on this server. An administrator can allow them in Server & APIs.');
+  if (!releasesAllowed()) throw new Error('Release activities are switched off on this server. An administrator can allow them in Admin Console > Server > Runtime.');
 }
 
 const targetFields = () => [

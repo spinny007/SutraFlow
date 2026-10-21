@@ -1,15 +1,27 @@
-# SutraFlow 1.9.0 release notes
+# SutraFlow 1.9.1 release notes
 
 Released 2026-10-21. Copyright (c) 2026-27 Surya Partap Singh, [MixAgile.com](https://mixagile.com). Licensed under the GNU Affero General Public License v3.0 only (AGPL-3.0-only); a commercial licence is available, see `COMMERCIAL-LICENSE.md`.
 
 | Download | For |
 |---|---|
-| `sutraflow-1.9.0-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
-| `sutraflow-1.9.0-linux.tar.gz` | Linux (x64 or arm64); also macOS |
+| `sutraflow-1.9.1-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
+| `sutraflow-1.9.1-linux.tar.gz` | Linux (x64 or arm64); also macOS |
 
 Each comes with a `.sha256` file to check the download.
 
-## What is new in 1.9.0
+## What is new in 1.9.1
+
+- **Server controls belong to administrators**: Sengine variables, script permission and Python selection, release-activity permission, gateway listener addresses and ports, TLS certificates, ACME and mutual TLS moved from the Designer to **Admin Console → Server**.
+- **Clear operational grouping**: **Runtime** holds shared variables and execution permissions; **Gateway & TLS** holds listener and certificate settings; **Database** remains beside them.
+- **Designer stays focused**: its renamed **Services** page is read-only and shows published REST, SOAP and MCP addresses, listener health and run counts. Workflow authors can inspect endpoints without being presented with server mutation controls.
+- **Permissions unchanged and explicit**: the relocated pages require the existing Server permission, and the server continues to enforce every API operation. There is no database schema change and no workflow, engine or gateway protocol behavior change.
+- **Documentation aligned**: the README, user guide, architecture map and screenshot workflow point to the Admin Console location, including the Python setup instructions.
+
+## 1.9.1 release gate
+
+The complete regression suite passed: 348 tests, 330 passed, 18 skipped and 0 failed. The production build and the live Laragon copy were then checked at the Designer and Admin Console routes. This UI-only ownership release changes no engine, storage or gateway runtime behavior, so the one-hour PostgreSQL soak from 1.9.0 remains the runtime baseline described below.
+
+## In 1.9.0
 
 - **Engine internals separated without changing workflow behavior**: `engine.ts` is the public façade; activity execution, queue scheduling, atomic transition primitives, run storage and fencing, waits, operator actions, state helpers and shared types have focused modules under `server/src/engine/`.
 - **Gateway protocols separated**: REST decoding and responses and SOAP envelopes, faults and WSDL generation now have focused handlers while `gateway.ts` owns listener, routing and policy lifecycle.
@@ -21,7 +33,7 @@ Each comes with a `.sha256` file to check the download.
 - **Failure model documented**: the architecture page now maps every engine module and explains the durable queue bus, claim fencing, leader election, takeover, recovered leaders, and the at-least-once boundary for activity effects.
 - **Additive database upgrade**: 1.9.0 creates the two file-listener checkpoint tables above. Existing tables and data are unchanged; upgrade all engines together so every possible leader uses the same listener behavior.
 
-## 1.9.0 release gate
+### 1.9.0 release gate
 
 The complete regression suite passed: 348 tests, 330 passed, 18 skipped and 0 failed. The final PostgreSQL soak then ran for one hour with a studio and two engines and passed all 26 checks:
 
@@ -154,14 +166,14 @@ What went wrong before, and what happens now. Most were found by the soak test (
 1. Install Node.js 24 from nodejs.org (or with nvm-windows) and open a new PowerShell window.
 2. Check the download:
    ```powershell
-   (Get-FileHash .\sutraflow-1.9.0-windows.zip -Algorithm SHA256).Hash.ToLower()
-   Get-Content .\sutraflow-1.9.0-windows.zip.sha256
+   (Get-FileHash .\sutraflow-1.9.1-windows.zip -Algorithm SHA256).Hash.ToLower()
+   Get-Content .\sutraflow-1.9.1-windows.zip.sha256
    ```
    The two values must match.
 3. Unpack it, for example to `C:\SutraFlow`:
    ```powershell
-   Expand-Archive .\sutraflow-1.9.0-windows.zip -DestinationPath C:\SutraFlow
-   cd C:\SutraFlow\sutraflow-1.9.0
+   Expand-Archive .\sutraflow-1.9.1-windows.zip -DestinationPath C:\SutraFlow
+   cd C:\SutraFlow\sutraflow-1.9.1
    ```
 4. Install the runtime packages and make the settings file:
    ```powershell
@@ -181,13 +193,13 @@ What went wrong before, and what happens now. Most were found by the soak test (
 1. Install Node.js 24 (from your distribution, NodeSource or nvm).
 2. Check the download:
    ```sh
-   sha256sum -c sutraflow-1.9.0-linux.tar.gz.sha256
+   sha256sum -c sutraflow-1.9.1-linux.tar.gz.sha256
    ```
 3. Unpack it, for example to `/opt`:
    ```sh
    sudo mkdir -p /opt/sutraflow && sudo chown "$USER" /opt/sutraflow
-   tar -xzf sutraflow-1.9.0-linux.tar.gz -C /opt/sutraflow
-   cd /opt/sutraflow/sutraflow-1.9.0
+   tar -xzf sutraflow-1.9.1-linux.tar.gz -C /opt/sutraflow
+   cd /opt/sutraflow/sutraflow-1.9.1
    ```
 4. Install the runtime packages and make the settings file:
    ```sh
@@ -206,17 +218,17 @@ What went wrong before, and what happens now. Most were found by the soak test (
 
 1. Back up: the data folder with `master.key`, and for PostgreSQL a `pg_dump` of the database.
 2. Stop gracefully: `sutraflow stop all` (running steps finish first).
-3. Unpack 1.9.0 into a new folder beside the old one. Copy `sutraflow.env` from the old folder; keep `SUTRA_DATA_DIR` pointing at the same data folder (or copy the folder).
+3. Unpack 1.9.1 into a new folder beside the old one. Copy `sutraflow.env` from the old folder; keep `SUTRA_DATA_DIR` pointing at the same data folder (or copy the folder).
 4. Run `sutraflow setup`, then `sutraflow start`. The database is upgraded at start (from 1.8.x: the additive `file_listener_state` and `file_listener_files` tables; from 1.7.6: also `run_outputs`, `replay_guard`, `ws_connections`, `ws_outbox`, `users.idp_subject` and `engines.can_lead`; from 1.7.5 also `tasks.claim`; from 1.6 also the new indexes and memory-table tables); nothing is removed. Runs that were open go on.
 5. In a cluster, **upgrade every engine before starting any of them again**: 1.8.0 engines keep step outputs apart from the run state, which older engines do not read, so the two must not share a database.
 6. On PostgreSQL, check `max_connections`: each engine opens its pool (`SUTRA_PG_POOL`, at most 20 by default) plus one connection. Engines × (pool + 1) must fit, with room for other clients.
 7. Optional: *Admin Console → Engines → This machine → Apply recommended tuning*.
 
-To go back to 1.8.1, stop 1.9.0 and start 1.8.1 again (same database). To go back to 1.7.x, stop SutraFlow and restore the backup taken before the upgrade: runs that 1.8.0 or later ran keep their outputs in a table older versions do not read.
+To go back to 1.9.0, stop 1.9.1 and start 1.9.0 again; they use the same database schema. To go back to 1.7.x, stop SutraFlow and restore the backup taken before the upgrade: runs that 1.8.0 or later ran keep their outputs in a table older versions do not read.
 
 ## Docker
 
-The images are built from the source repository (`Dockerfile`, `docker-compose.yml`): `docker build -t sutraflow:1.9.0 .`. The release archives are for installs without Docker.
+The images are built from the source repository (`Dockerfile`, `docker-compose.yml`): `docker build -t sutraflow:1.9.1 .`. The release archives are for installs without Docker.
 
 ## Known limitations
 

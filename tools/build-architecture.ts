@@ -47,7 +47,7 @@ const FILES: Group[] = [
     files: [
       ['server/src/main.ts', 'Entry point of <code>npm start</code>. Boots the server, prints the studio and gateway addresses, and turns SIGTERM and Ctrl+C into a graceful stop (drain first).'],
       ['server/src/index.ts', '<code>boot()</code>: opens storage, registers every activity, loads deployment configs, deploys the packages in <code>SUTRA_DEPLOY_DIR</code> under a cluster-wide lock, starts the engine, the cluster beat, the gateway and the admin API, and wires change hooks (deploys rebuild routes, timers and listeners). Also the ordered <code>stop()</code>.'],
-      ['server/src/config.ts', 'Process settings from environment variables (mode, environment, ports, folders, database with the password apart as SUTRA_DB_PASSWORD, engine id, drain, heartbeat, retention, logs, tracing, tokens) and the product version from package.json. Everything else is stored in the database and edited in the studio.'],
+      ['server/src/config.ts', 'Process settings from environment variables (mode, environment, ports, folders, database with the password apart as SUTRA_DB_PASSWORD, engine id, drain, heartbeat, retention, logs, tracing, tokens) and the product version from package.json. Everything else is stored in the database and edited in the Designer or Admin Console according to ownership.'],
       ['server/src/lifecycle.ts', 'Liveness (<code>/health</code>, with the version, mode, environment and the database in use) and readiness (<code>/ready</code>): storage answers, packages are deployed, the gateway listens, and the server is not draining.'],
       ['server/src/cluster.ts', 'Heartbeat row per engine, the authoritative leader lease, recovery of a dead engine\'s steps, the deploy generation number that makes every engine reload its routes, leadership hand-over on stop, and the engine status list. A database interruption is contained and retried; after recovery the lease row decides whether this process still leads.'],
       ['server/src/housekeeping.ts', 'Deletes finished runs older than <code>SUTRA_RUN_RETENTION_DAYS</code>, with their steps, in batches. Run by the leader about once a minute; waiting runs are never deleted.'],
@@ -230,7 +230,7 @@ const FILES: Group[] = [
       ['web/src/vars.ts', 'Which project variables a step or connection reads that the project does not define (the same rule as the server).'],
       ['web/src/Resources.tsx', 'Shared resources and the secret vault.'],
       ['web/src/Runs.tsx', 'Run history with steps, input and output, approvals, cancel and resubmit, and the engine that ran each run.'],
-      ['web/src/Server.tsx', 'Server &amp; APIs: gateway ports, TLS, Sengine variables and their policy, scripts and release policies, the Python in use (found or chosen), MCP endpoints.'],
+      ['web/src/Server.tsx', 'Read-only Services page for workflow authors: published REST, SOAP and MCP addresses, listener health and current run counts.'],
       ['web/src/templates.ts', 'Starter Sutras offered by "New Sutra".'],
       ['web/src/styles.css', 'Studio styles.'],
       ['web/src/env.d.ts', 'Vite type declarations.'],
@@ -241,7 +241,8 @@ const FILES: Group[] = [
     files: [
       ['web/admin.html', 'Page shell of the Admin Console.'],
       ['web/admin/main.tsx', 'Mounts the console and applies the saved theme.'],
-      ['web/admin/Console.tsx', 'Sign-in (or, on a headless engine without users, how to add the first administrator), password change, navigation by permission, and the pages (Operate, Releases, Alerts, Gateway, Access, Records, Server &gt; Database).'],
+      ['web/admin/Console.tsx', 'Sign-in (or, on a headless engine without users, how to add the first administrator), password change, permission-based navigation, and the pages under Operate, Alerts, Gateway, Access, Records and Server.'],
+      ['web/admin/Server.tsx', 'Server-only controls: Sengine variables and their policy, script permission and Python interpreter, release-activity permission, gateway listeners, TLS certificates, ACME and mutual TLS. Kept out of the Designer so operational changes require the Server permission.'],
       ['web/admin/shared.tsx', 'What the signed-in account may do, loading and refresh helpers, state labels, in-page confirmation, password generator.'],
       ['web/admin/Overview.tsx', 'Tiles for engines, deployed Sutras, runs of the last day, approvals, work queue and gateway; recent failures with Resubmit.'],
       ['web/admin/Apps.tsx', 'Deployed projects and Sutras: start and stop, runs with step results, resubmit and cancel, deploy an earlier version, package history and roll back. Also the side panel used by other pages.'],
@@ -367,7 +368,7 @@ function apiRoutes() {
 const SETTINGS: [string, string, string][] = [
   ['SUTRA_ENVIRONMENT', 'development (studio), production (engine)', '<code>development</code>, <code>test</code> or <code>production</code>: shown on log lines and audit entries; production refuses designer deploys and limits who may clear logs.'],
   ['SUTRA_DB_PASSWORD', '(none)', 'The PostgreSQL password, kept apart from <code>SUTRA_DB</code> so the address can be shown and logged (written by the move to PostgreSQL).'],
-  ['SUTRA_PYTHON', '(found)', 'The Python that runs Python steps; else the setting in Server &amp; APIs, then <code>py</code>, <code>python3</code>, <code>python</code>.'],
+  ['SUTRA_PYTHON', '(found)', 'The Python that runs Python steps; else the setting in Admin Console &rarr; Server &rarr; Runtime, then <code>py</code>, <code>python3</code>, <code>python</code>.'],
   ['SUTRA_GIT', '(git if installed)', '<code>system</code> or <code>builtin</code>: the Git used by the Git tab.'],
   ['SUTRA_GIT_ALLOW_FILE', '(off)', '<code>1</code> allows <code>file://</code> repositories (tests, local mirrors).'],
   ['SUTRA_GIT_TOKEN, SUTRA_GIT_LOGIN', '(none)', 'CLI only: the token (and login) for <code>sutra package --from-git</code> of a private repository.'],
@@ -406,7 +407,7 @@ const SETTINGS: [string, string, string][] = [
   ['OTEL_EXPORTER_OTLP_ENDPOINT', '(none)', 'OpenTelemetry collector address (OTLP/HTTP).'],
   ['OTEL_SERVICE_NAME', 'sutraflow', 'Service name on traces.'],
   ['SUTRA_ADMIN_HOST, SUTRA_ADMIN_PORT', '127.0.0.1, 4800', 'Studio and admin API address. Containers use 0.0.0.0.'],
-  ['SUTRA_GATEWAY_HTTP_PORT, SUTRA_GATEWAY_HTTPS_PORT', '8080, 8443', 'Gateway ports until changed in Server & APIs.'],
+  ['SUTRA_GATEWAY_HTTP_PORT, SUTRA_GATEWAY_HTTPS_PORT', '8080, 8443', 'Gateway ports until changed in Admin Console → Server → Gateway & TLS.'],
   ['SUTRA_WEB_DIR', '(built in)', 'Folder of the built studio, when not next to the server.'],
   ['SUTRA_SERVER', '(none)', 'CLI only: the server address, instead of <code>--server</code>.'],
 ];
@@ -648,7 +649,7 @@ ${tw(['Command', 'Does'], [
 ].map(([a, b]) => `<tr><td><code>${a}</code></td><td>${b}</td></tr>`).join(''))}
 <p>With <code>--server</code> and <code>--token</code> (or <code>SUTRA_SERVER</code> and <code>SUTRA_ADMIN_TOKEN</code>) the CLI talks to a running studio or engine; without them it works on the local data folder, which is how container images are prepared.</p>
 <h3 id="release-sutras">Release Sutras</h3>
-<p>The Release palette makes a release itself a Sutra: Build package, Check package, Deploy package and Roll back, on this server or on a remote engine whose admin token comes from the vault. The <em>Release pipeline</em> sample builds, checks, deploys to a test copy, waits for approval and deploys to production. Release activities are off until an administrator allows them in Server &amp; APIs.</p>
+<p>The Release palette makes a release itself a Sutra: Build package, Check package, Deploy package and Roll back, on this server or on a remote engine whose admin token comes from the vault. The <em>Release pipeline</em> sample builds, checks, deploys to a test copy, waits for approval and deploys to production. Release activities are off until an administrator allows them in Admin Console &rarr; Server &rarr; Runtime.</p>
 <h3 id="strategies">Deployment strategies</h3>
 ${tw(['Strategy', 'How', 'When'], [
   ['One Sutra', 'Publish a version and deploy it in the studio', 'Development and quick fixes on one server'],
@@ -701,7 +702,7 @@ sec('security', 'Security', `
 <li><strong>Gateway</strong>: per-service API policies (API key, Basic with listed users or system accounts holding Call services on the project, JWT, mutual TLS, WS-Security); TLS with uploaded or Let\'s Encrypt certificates.</li>
 <li><strong>Outbound</strong>: security profiles, client certificates, OAuth tokens stored encrypted, circuit breakers on HTTP connections.</li>
 <li><strong>Data never becomes code</strong>: SQL parameters are bound; formulas and templates are parsed, not evaluated; scripts receive values as environment variables and a JSON file; programs get arguments without a shell; file activities stay inside their folder; custom JavaScript runs in a sandboxed worker with limits.</li>
-<li><strong>Policies off by default</strong>: scripts, release activities and Sutras changing Sengine variables each need an administrator\'s switch in Server &amp; APIs.</li>
+<li><strong>Policies off by default</strong>: scripts, release activities and Sutras changing Sengine variables each need an administrator\'s switch in Admin Console &rarr; Server &rarr; Runtime.</li>
 </ul>`);
 
 sec('ai', 'AI and MCP', `
@@ -720,7 +721,7 @@ ${tw(['Palette', 'Activities'], pals.map(p => `<tr id="pal-${p.id}"><td><strong>
 <li>Default outputs on every activity (file details, HTTP status, AI model and tokens) even when a schema is set.</li>
 <li>Resources with a + menu by kind, own names and icons, Test connection; AI model lists and Ollama management.</li>
 <li>${SAMPLES.length} samples that together use every activity.</li>
-<li>Runs with step data, approvals, cancel and resubmit; Releases with packages and history; Server &amp; APIs with gateway, TLS, policies and MCP endpoints.</li>
+<li>Runs with step data, approvals, cancel and resubmit; Releases with packages and history; the read-only Services page with endpoints; Admin Console &rarr; Server with runtime, gateway and TLS controls.</li>
 <li>New project: empty, with chosen samples, from chosen Sutras of a package file, or a copy of chosen Sutras of a project, as drafts.</li>
 </ul>
 <h3 id="console-features">Admin Console features</h3>
@@ -742,7 +743,7 @@ sec('api', 'Admin API routes', `
 ${tw(['Area', 'Routes'], api.html)}`);
 
 sec('settings', 'Environment settings', `
-<p>Process settings come from environment variables (<code>config.ts</code>). Everything else (gateway ports after the first start, TLS, policies, Sengine variables) is stored in the database and edited in Server &amp; APIs.</p>
+<p>Process settings come from environment variables (<code>config.ts</code>). Everything else (gateway ports after the first start, TLS, policies, Sengine variables) is stored in the database and edited in Admin Console &rarr; Server.</p>
 ${tw(['Variable', 'Default', 'Meaning'], SETTINGS.map(([a, b, c]) => `<tr id="env-${slug(a)}"><td><code>${esc(a)}</code></td><td>${esc(b)}</td><td>${c}</td></tr>`).join(''))}`);
 
 sec('testing', 'Tests', `
