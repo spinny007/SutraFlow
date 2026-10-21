@@ -1,0 +1,50 @@
+{"at":"2026-10-20T20:40:04.072Z","min":0,"kind":"start","message":"SutraFlow 1.9.0, 3 processes, 60 minutes, database sutra_soak_1792528803867, 16 threads, 24 GB"}
+{"at":"2026-10-20T20:40:10.466Z","min":0.1,"kind":"setup","message":"21 Sutras deployed"}
+{"at":"2026-10-20T20:40:18.476Z","min":0.2,"kind":"load","message":"17 scenarios running"}
+{"at":"2026-10-20T21:00:18.541Z","min":20.2,"kind":"file","message":"soak-23839-10mb.csv: 198000 rows to the watched folder"}
+{"at":"2026-10-20T21:00:18.542Z","min":20.2,"kind":"fault","message":"engine 2 killed on purpose"}
+{"at":"2026-10-20T21:01:20.879Z","min":21.3,"kind":"fault","message":"engine 2 started again"}
+{"at":"2026-10-20T21:10:18.608Z","min":30.2,"kind":"file","message":"soak-35802-20mb.csv: 390000 rows to the SFTP inbox"}
+{"at":"2026-10-20T21:10:18.771Z","min":30.2,"kind":"file","message":"soak-35803-30mb.csv: 582000 rows to the FTP inbox"}
+{"at":"2026-10-20T21:20:18.679Z","min":40.2,"kind":"file","message":"soak-47760-40mb.csv: 776000 rows to the watched folder"}
+{"at":"2026-10-20T21:20:18.680Z","min":40.2,"kind":"fault","message":"database cut for 20 seconds"}
+{"at":"2026-10-20T21:20:18.759Z","min":40.2,"kind":"engine stopped","message":"engine 0 stopped by itself (code 1, signal null)","engine":0,"log":"SutraFlow studio:  http://127.0.0.1:21500\nGateway:           http://0.0.0.0:21600 \nfile:///C:/Users/kunwa/Documents/LocalGitHub/SutraFlow/dist/server/db.js:125\r\n            throw Object.assign(new Error(m.error), { code: m.code });\r\n            ^\r\n\r\nError: Connection terminated unexpectedly\r\n    at call (file:///C:/Users/kunwa/Documents/LocalGitHub/SutraFlow/dist/server/db.js:125:33)\r\n    at Object.run (file:///C:/Users/kunwa/Documents/LocalGitHub/SutraFlow/dist/server/db.js:132:38)\r\n    at Object.run (file:///C:/Users/kunwa/Documents/LocalGitHub/SutraFlow/dist/server/db.js:449:24)\r\n    at Timeout.beat [as _onTimeout] (file:///C:/Users/kunwa/Documents/LocalGitHub/SutraFlow/dist/server/cluster.js:36:7)\r\n    at listOnTimeout (node:internal/timers:685:17)\r\n    at process.processTimers (node:internal/timers:618:7) {\r\n  code: undefined\r\n}\r\n\r\nNode.js v24.21.0\r\n"}
+{"at":"2026-10-20T21:20:21.772Z","min":40.3,"kind":"engine restarted","message":"engine 0 started again (1/10)","engine":0}
+{"at":"2026-10-20T21:20:38.705Z","min":40.6,"kind":"fault","message":"database back"}
+{"at":"2026-10-20T21:40:08.287Z","min":60.1,"kind":"load","message":"load stopped; waiting for open runs to end (at most 10 minutes)"}
+{"at":"2026-10-20T21:40:24.455Z","min":60.3,"kind":"check","message":"FAIL No engine stopped by itself: 1 unexpected stops (see events)"}
+{"at":"2026-10-20T21:40:24.457Z","min":60.3,"kind":"check","message":"PASS No run left running: 0 runs still running 10 minutes after the load stopped"}
+{"at":"2026-10-20T21:40:24.870Z","min":60.4,"kind":"check","message":"PASS No step ran twice: 0 steps of single-pass Sutras completed more than once"}
+{"at":"2026-10-20T21:40:24.871Z","min":60.4,"kind":"check","message":"PASS Requests that failed: 67 of 71087 (0.094%), fault windows included"}
+{"at":"2026-10-20T21:40:24.877Z","min":60.4,"kind":"check","message":"PASS Timer kept time: 358 runs of 360 expected (every 10 s)"}
+{"at":"2026-10-20T21:40:24.900Z","min":60.4,"kind":"check","message":"PASS Every channel message reached its subscriber: 712 subscriber runs for 712 published"}
+{"at":"2026-10-20T21:40:24.900Z","min":60.4,"kind":"check","message":"PASS Bus messages acknowledged: 1774 accepted, 0 released, 0 rejected of 1776 sent"}
+{"at":"2026-10-20T21:40:24.909Z","min":60.4,"kind":"check","message":"PASS WebSocket client trigger ran for the server's messages: 718 runs for 718 messages pushed"}
+{"at":"2026-10-20T21:40:24.909Z","min":60.4,"kind":"check","message":"PASS WebSocket broadcasts arrived: 592 received of 592 expected (119 broadcasts to the clients connected at the time)"}
+{"at":"2026-10-20T21:40:24.913Z","min":60.4,"kind":"check","message":"FAIL Every CSV in the folder was streamed whole: 1 of 2 files with every row counted (10 MB, 40 MB)"}
+{"at":"2026-10-20T21:40:24.915Z","min":60.4,"kind":"check","message":"PASS Every SFTP CSV was streamed whole: 1 of 1 files with every row counted (20 MB)"}
+{"at":"2026-10-20T21:40:24.919Z","min":60.4,"kind":"check","message":"PASS Every FTP CSV was streamed whole: 1 of 1 files with every row counted (30 MB)"}
+{"at":"2026-10-20T21:40:24.921Z","min":60.4,"kind":"retry","message":"soak database query (1/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-20T21:40:27.931Z","min":60.4,"kind":"retry","message":"soak database query (2/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-20T21:40:30.933Z","min":60.5,"kind":"retry","message":"soak database query (3/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-20T21:40:33.938Z","min":60.5,"kind":"retry","message":"soak database query (4/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-20T21:40:36.950Z","min":60.6,"kind":"retry","message":"soak database query (5/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-20T21:40:39.960Z","min":60.6,"kind":"retry","message":"soak database query (6/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-20T21:40:42.977Z","min":60.7,"kind":"retry","message":"soak database query (7/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-20T21:40:45.980Z","min":60.7,"kind":"retry","message":"soak database query (8/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-20T21:40:48.987Z","min":60.8,"kind":"retry","message":"soak database query (9/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-20T21:40:51.996Z","min":60.8,"kind":"check","message":"PASS RAG passages are in the pgvector table: 0 passages in soak_knowledge"}
+{"at":"2026-10-20T21:40:51.997Z","min":60.8,"kind":"check","message":"PASS RAG documents were learned: none"}
+{"at":"2026-10-20T21:40:51.999Z","min":60.8,"kind":"check","message":"PASS Engine 0 stays responsive: event loop delay: p99 per minute 35 ms typical, 35 ms in the worst 5% of minutes; longest single wait 701 ms"}
+{"at":"2026-10-20T21:40:52.002Z","min":60.8,"kind":"check","message":"PASS Engine 1 stays responsive: event loop delay: p99 per minute 35 ms typical, 35 ms in the worst 5% of minutes; longest single wait 22666 ms"}
+{"at":"2026-10-20T21:40:52.004Z","min":60.8,"kind":"check","message":"PASS Engine 2 stays responsive: event loop delay: p99 per minute 35 ms typical, 35 ms in the worst 5% of minutes; longest single wait 498 ms"}
+{"at":"2026-10-20T21:40:52.005Z","min":60.8,"kind":"check","message":"PASS REST orders stays as fast: p95 212 ms in the first period, 212 ms in the last"}
+{"at":"2026-10-20T21:40:52.005Z","min":60.8,"kind":"check","message":"PASS REST in memory stays as fast: p95 9 ms in the first period, 8 ms in the last"}
+{"at":"2026-10-20T21:40:52.006Z","min":60.8,"kind":"check","message":"PASS REST signed and validated stays as fast: p95 219 ms in the first period, 216 ms in the last"}
+{"at":"2026-10-20T21:40:52.006Z","min":60.8,"kind":"check","message":"PASS SOAP UsernameToken stays as fast: p95 218 ms in the first period, 215 ms in the last"}
+{"at":"2026-10-20T21:40:52.007Z","min":60.8,"kind":"check","message":"PASS SOAP X.509 signed and encrypted stays as fast: p95 231 ms in the first period, 228 ms in the last"}
+{"at":"2026-10-20T21:40:52.007Z","min":60.8,"kind":"check","message":"PASS WebSocket echo stays as fast: p95 214 ms in the first period, 212 ms in the last"}
+{"at":"2026-10-20T21:40:52.007Z","min":60.8,"kind":"check","message":"PASS Channel publish stays as fast: p95 535 ms in the first period, 531 ms in the last"}
+{"at":"2026-10-20T21:40:52.008Z","min":60.8,"kind":"check","message":"PASS Error handler stays as fast: p95 1037 ms in the first period, 1033 ms in the last"}
+{"at":"2026-10-20T21:40:52.008Z","min":60.8,"kind":"check","message":"PASS MCP tool stays as fast: p95 460 ms in the first period, 203 ms in the last"}
+{"at":"2026-10-20T21:40:52.016Z","min":60.8,"kind":"end","message":"report written to C:\\Users\\kunwa\\Documents\\LocalGitHub\\SutraFlow\\docs\\benchmarks\\soak-1.9.0-1h"}

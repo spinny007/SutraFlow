@@ -1,0 +1,40 @@
+{"at":"2026-10-21T04:20:45.374Z","min":0,"kind":"start","message":"SutraFlow 1.9.0, 3 processes, 15 minutes, database sutra_soak_1792556445087, 16 threads, 24 GB"}
+{"at":"2026-10-21T04:20:53.082Z","min":0.1,"kind":"setup","message":"21 Sutras deployed"}
+{"at":"2026-10-21T04:21:01.097Z","min":0.3,"kind":"load","message":"17 scenarios running"}
+{"at":"2026-10-21T04:26:01.169Z","min":5.3,"kind":"file","message":"soak-5949-10mb.csv: 198000 rows to the watched folder"}
+{"at":"2026-10-21T04:26:01.173Z","min":5.3,"kind":"fault","message":"engine 2 killed on purpose"}
+{"at":"2026-10-21T04:27:03.389Z","min":6.3,"kind":"fault","message":"engine 2 started again"}
+{"at":"2026-10-21T04:28:01.166Z","min":7.3,"kind":"file","message":"soak-8338-10mb.csv: 198000 rows to the SFTP inbox"}
+{"at":"2026-10-21T04:28:01.221Z","min":7.3,"kind":"file","message":"soak-8339-10mb.csv: 198000 rows to the FTP inbox"}
+{"at":"2026-10-21T04:29:13.046Z","min":8.5,"kind":"document","message":"soak-doc-9539-10mb.txt: done in 12 s"}
+{"at":"2026-10-21T04:31:01.159Z","min":10.3,"kind":"file","message":"soak-11928-10mb.csv: 198000 rows to the watched folder"}
+{"at":"2026-10-21T04:31:01.164Z","min":10.3,"kind":"fault","message":"database cut for 20 seconds"}
+{"at":"2026-10-21T04:31:21.174Z","min":10.6,"kind":"fault","message":"database back"}
+{"at":"2026-10-21T04:35:01.242Z","min":14.3,"kind":"file","message":"soak-16321-10mb.csv: 198000 rows to the SFTP inbox"}
+{"at":"2026-10-21T04:35:01.355Z","min":14.3,"kind":"file","message":"soak-16323-10mb.csv: 198000 rows to the FTP inbox"}
+{"at":"2026-10-21T04:35:53.793Z","min":15.1,"kind":"load","message":"load stopped and starters undeployed; waiting for open runs to end (at most 10 minutes)"}
+{"at":"2026-10-21T04:36:10.023Z","min":15.4,"kind":"check","message":"PASS No engine stopped by itself: 0 unexpected stops"}
+{"at":"2026-10-21T04:36:10.024Z","min":15.4,"kind":"check","message":"PASS No run left running: 0 runs still open after starters stopped"}
+{"at":"2026-10-21T04:36:10.130Z","min":15.4,"kind":"check","message":"PASS No step ran twice: 0 steps of single-pass Sutras completed more than once"}
+{"at":"2026-10-21T04:36:10.130Z","min":15.4,"kind":"check","message":"PASS Requests that failed: 25 of 17212 (0.145%), fault windows included"}
+{"at":"2026-10-21T04:36:10.132Z","min":15.4,"kind":"check","message":"PASS Timer kept time: 88 runs of 90 expected (every 10 s)"}
+{"at":"2026-10-21T04:36:10.134Z","min":15.4,"kind":"check","message":"PASS Every channel message reached its subscriber: 175 subscriber runs for 175 published"}
+{"at":"2026-10-21T04:36:10.135Z","min":15.4,"kind":"check","message":"PASS Bus messages acknowledged: 429 accepted, 0 released, 0 rejected of 431 sent"}
+{"at":"2026-10-21T04:36:10.137Z","min":15.4,"kind":"check","message":"PASS WebSocket client trigger ran for the server's messages: 180 runs for 180 messages pushed"}
+{"at":"2026-10-21T04:36:10.138Z","min":15.4,"kind":"check","message":"PASS WebSocket broadcasts arrived: 144 received of 144 expected (29 broadcasts to the clients connected at the time)"}
+{"at":"2026-10-21T04:36:10.142Z","min":15.4,"kind":"check","message":"PASS Every CSV in the folder was streamed whole: 2 of 2 files with every row counted (10 MB, 10 MB)"}
+{"at":"2026-10-21T04:36:10.144Z","min":15.4,"kind":"check","message":"PASS Every SFTP CSV was streamed whole: 2 of 2 files with every row counted (10 MB, 10 MB)"}
+{"at":"2026-10-21T04:36:10.146Z","min":15.4,"kind":"check","message":"PASS Every FTP CSV was streamed whole: 2 of 2 files with every row counted (10 MB, 10 MB)"}
+{"at":"2026-10-21T04:36:10.151Z","min":15.4,"kind":"check","message":"PASS RAG passages are in the pgvector table: 14294 passages in soak_knowledge"}
+{"at":"2026-10-21T04:36:10.152Z","min":15.4,"kind":"check","message":"PASS RAG documents were learned: 10 MB done in 12 s"}
+{"at":"2026-10-21T04:36:10.153Z","min":15.4,"kind":"check","message":"PASS Engine 0 stays responsive: event loop delay: p99 per minute 35 ms typical, 230 ms in the worst 5% of minutes; longest single wait 588 ms"}
+{"at":"2026-10-21T04:36:10.154Z","min":15.4,"kind":"check","message":"PASS Engine 1 stays responsive: event loop delay: p99 per minute 35 ms typical, 220 ms in the worst 5% of minutes; longest single wait 567 ms"}
+{"at":"2026-10-21T04:36:10.155Z","min":15.4,"kind":"check","message":"PASS Engine 2 stays responsive: event loop delay: p99 per minute 35 ms typical, 90 ms in the worst 5% of minutes; longest single wait 22616 ms"}
+{"at":"2026-10-21T04:36:10.156Z","min":15.4,"kind":"check","message":"PASS REST orders stays as fast: p95 214 ms in the first period, 223 ms in the last"}
+{"at":"2026-10-21T04:36:10.157Z","min":15.4,"kind":"check","message":"PASS REST in memory stays as fast: p95 15 ms in the first period, 13 ms in the last"}
+{"at":"2026-10-21T04:36:10.158Z","min":15.4,"kind":"check","message":"PASS REST signed and validated stays as fast: p95 227 ms in the first period, 223 ms in the last"}
+{"at":"2026-10-21T04:36:10.158Z","min":15.4,"kind":"check","message":"PASS SOAP UsernameToken stays as fast: p95 216 ms in the first period, 218 ms in the last"}
+{"at":"2026-10-21T04:36:10.158Z","min":15.4,"kind":"check","message":"PASS SOAP X.509 signed and encrypted stays as fast: p95 279 ms in the first period, 228 ms in the last"}
+{"at":"2026-10-21T04:36:10.159Z","min":15.4,"kind":"check","message":"PASS WebSocket echo stays as fast: p95 229 ms in the first period, 222 ms in the last"}
+{"at":"2026-10-21T04:36:10.159Z","min":15.4,"kind":"check","message":"PASS Bus message stays as fast: p95 1 ms in the first period, 1 ms in the last"}
+{"at":"2026-10-21T04:36:10.165Z","min":15.4,"kind":"end","message":"report written to C:\\Users\\kunwa\\Documents\\LocalGitHub\\SutraFlow\\docs\\benchmarks\\soak-1.9.0-drain-fix-pass"}

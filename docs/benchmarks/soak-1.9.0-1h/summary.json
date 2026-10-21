@@ -1,0 +1,943 @@
+{
+  "version": "1.9.0",
+  "started": "2026-10-20T20:40:03.773Z",
+  "ended": "2026-10-20T21:40:52.009Z",
+  "minutes": 60,
+  "engines": 3,
+  "machine": "AMD Ryzen 7 7435HS, 16 threads, 24 GB, win32",
+  "node": "v24.21.0",
+  "pausedMinutes": 0,
+  "database": "PostgreSQL (through a proxy)",
+  "model": null,
+  "sizes": [
+    10,
+    20,
+    30,
+    40,
+    50,
+    60
+  ],
+  "checks": [
+    {
+      "name": "No engine stopped by itself",
+      "ok": false,
+      "detail": "1 unexpected stops (see events)"
+    },
+    {
+      "name": "No run left running",
+      "ok": true,
+      "detail": "0 runs still running 10 minutes after the load stopped"
+    },
+    {
+      "name": "No step ran twice",
+      "ok": true,
+      "detail": "0 steps of single-pass Sutras completed more than once"
+    },
+    {
+      "name": "Requests that failed",
+      "ok": true,
+      "detail": "67 of 71087 (0.094%), fault windows included"
+    },
+    {
+      "name": "Timer kept time",
+      "ok": true,
+      "detail": "358 runs of 360 expected (every 10 s)"
+    },
+    {
+      "name": "Every channel message reached its subscriber",
+      "ok": true,
+      "detail": "712 subscriber runs for 712 published"
+    },
+    {
+      "name": "Bus messages acknowledged",
+      "ok": true,
+      "detail": "1774 accepted, 0 released, 0 rejected of 1776 sent"
+    },
+    {
+      "name": "WebSocket client trigger ran for the server's messages",
+      "ok": true,
+      "detail": "718 runs for 718 messages pushed"
+    },
+    {
+      "name": "WebSocket broadcasts arrived",
+      "ok": true,
+      "detail": "592 received of 592 expected (119 broadcasts to the clients connected at the time)"
+    },
+    {
+      "name": "Every CSV in the folder was streamed whole",
+      "ok": false,
+      "detail": "1 of 2 files with every row counted (10 MB, 40 MB)"
+    },
+    {
+      "name": "Every SFTP CSV was streamed whole",
+      "ok": true,
+      "detail": "1 of 1 files with every row counted (20 MB)"
+    },
+    {
+      "name": "Every FTP CSV was streamed whole",
+      "ok": true,
+      "detail": "1 of 1 files with every row counted (30 MB)"
+    },
+    {
+      "name": "RAG passages are in the pgvector table",
+      "ok": true,
+      "detail": "0 passages in soak_knowledge"
+    },
+    {
+      "name": "RAG documents were learned",
+      "ok": true,
+      "detail": "none"
+    },
+    {
+      "name": "Engine 0 stays responsive",
+      "ok": true,
+      "detail": "event loop delay: p99 per minute 35 ms typical, 35 ms in the worst 5% of minutes; longest single wait 701 ms"
+    },
+    {
+      "name": "Engine 1 stays responsive",
+      "ok": true,
+      "detail": "event loop delay: p99 per minute 35 ms typical, 35 ms in the worst 5% of minutes; longest single wait 22666 ms"
+    },
+    {
+      "name": "Engine 2 stays responsive",
+      "ok": true,
+      "detail": "event loop delay: p99 per minute 35 ms typical, 35 ms in the worst 5% of minutes; longest single wait 498 ms"
+    },
+    {
+      "name": "REST orders stays as fast",
+      "ok": true,
+      "detail": "p95 212 ms in the first period, 212 ms in the last"
+    },
+    {
+      "name": "REST in memory stays as fast",
+      "ok": true,
+      "detail": "p95 9 ms in the first period, 8 ms in the last"
+    },
+    {
+      "name": "REST signed and validated stays as fast",
+      "ok": true,
+      "detail": "p95 219 ms in the first period, 216 ms in the last"
+    },
+    {
+      "name": "SOAP UsernameToken stays as fast",
+      "ok": true,
+      "detail": "p95 218 ms in the first period, 215 ms in the last"
+    },
+    {
+      "name": "SOAP X.509 signed and encrypted stays as fast",
+      "ok": true,
+      "detail": "p95 231 ms in the first period, 228 ms in the last"
+    },
+    {
+      "name": "WebSocket echo stays as fast",
+      "ok": true,
+      "detail": "p95 214 ms in the first period, 212 ms in the last"
+    },
+    {
+      "name": "Channel publish stays as fast",
+      "ok": true,
+      "detail": "p95 535 ms in the first period, 531 ms in the last"
+    },
+    {
+      "name": "Error handler stays as fast",
+      "ok": true,
+      "detail": "p95 1037 ms in the first period, 1033 ms in the last"
+    },
+    {
+      "name": "MCP tool stays as fast",
+      "ok": true,
+      "detail": "p95 460 ms in the first period, 203 ms in the last"
+    }
+  ],
+  "faults": [
+    {
+      "kind": "engine killed",
+      "from": 1792530018542,
+      "to": 1792530110879
+    },
+    {
+      "kind": "database cut",
+      "from": 1792531218680,
+      "to": 1792531268705
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "REST orders",
+      "ok": 33205,
+      "fail": 5,
+      "errors": [
+        [
+          "fetch failed",
+          4
+        ],
+        [
+          "status 500: {\"error\":\"read ECONNRESET\"}",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 8365,
+          "p50": 78,
+          "p95": 212,
+          "p99": 224
+        },
+        {
+          "n": 8383,
+          "p50": 63,
+          "p95": 212,
+          "p99": 222
+        },
+        {
+          "n": 8205,
+          "p50": 63,
+          "p95": 212,
+          "p99": 228
+        },
+        {
+          "n": 8252,
+          "p50": 72,
+          "p95": 212,
+          "p99": 223
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "REST in memory",
+      "ok": 17122,
+      "fail": 1,
+      "errors": [
+        [
+          "fetch failed",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 4307,
+          "p50": 6,
+          "p95": 9,
+          "p99": 14
+        },
+        {
+          "n": 4331,
+          "p50": 6,
+          "p95": 9,
+          "p99": 14
+        },
+        {
+          "n": 4233,
+          "p50": 6,
+          "p95": 9,
+          "p99": 23
+        },
+        {
+          "n": 4251,
+          "p50": 6,
+          "p95": 8,
+          "p99": 12
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "REST signed and validated",
+      "ok": 3538,
+      "fail": 1,
+      "errors": [
+        [
+          "fetch failed",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 892,
+          "p50": 53,
+          "p95": 219,
+          "p99": 580
+        },
+        {
+          "n": 892,
+          "p50": 55,
+          "p95": 216,
+          "p99": 577
+        },
+        {
+          "n": 876,
+          "p50": 57,
+          "p95": 218,
+          "p99": 575
+        },
+        {
+          "n": 878,
+          "p50": 64,
+          "p95": 216,
+          "p99": 558
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "SOAP UsernameToken",
+      "ok": 3539,
+      "fail": 1,
+      "errors": [
+        [
+          "fetch failed",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 892,
+          "p50": 66,
+          "p95": 218,
+          "p99": 442
+        },
+        {
+          "n": 893,
+          "p50": 64,
+          "p95": 214,
+          "p99": 602
+        },
+        {
+          "n": 876,
+          "p50": 69,
+          "p95": 214,
+          "p99": 718
+        },
+        {
+          "n": 878,
+          "p50": 71,
+          "p95": 215,
+          "p99": 572
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "SOAP X.509 signed and encrypted",
+      "ok": 892,
+      "fail": 2,
+      "errors": [
+        [
+          "fetch failed",
+          2
+        ]
+      ],
+      "hours": [
+        {
+          "n": 224,
+          "p50": 85,
+          "p95": 231,
+          "p99": 246
+        },
+        {
+          "n": 225,
+          "p50": 51,
+          "p95": 224,
+          "p99": 233
+        },
+        {
+          "n": 222,
+          "p50": 87,
+          "p95": 228,
+          "p99": 7812
+        },
+        {
+          "n": 221,
+          "p50": 75,
+          "p95": 228,
+          "p99": 747
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "WebSocket echo",
+      "ok": 8869,
+      "fail": 36,
+      "errors": [
+        [
+          "not connected",
+          36
+        ]
+      ],
+      "hours": [
+        {
+          "n": 2240,
+          "p50": 72,
+          "p95": 214,
+          "p99": 271
+        },
+        {
+          "n": 2239,
+          "p50": 70,
+          "p95": 213,
+          "p99": 398
+        },
+        {
+          "n": 2190,
+          "p50": 77,
+          "p95": 214,
+          "p99": 438
+        },
+        {
+          "n": 2200,
+          "p50": 73,
+          "p95": 212,
+          "p99": 402
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "WebSocket broadcast",
+      "ok": 118,
+      "fail": 1,
+      "errors": [
+        [
+          "fetch failed",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 29,
+          "p50": 112,
+          "p95": 941,
+          "p99": 1024
+        },
+        {
+          "n": 29,
+          "p50": 60,
+          "p95": 212,
+          "p99": 227
+        },
+        {
+          "n": 30,
+          "p50": 69,
+          "p95": 220,
+          "p99": 21703
+        },
+        {
+          "n": 30,
+          "p50": 105,
+          "p95": 220,
+          "p99": 226
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Channel publish",
+      "ok": 712,
+      "fail": 4,
+      "errors": [
+        [
+          "POST /api/flows/7c58be28-a146-4e55-8fbb-4d4b58dc7e2a/run?wait=30000: gave up after 1 tries: fetch failed",
+          4
+        ]
+      ],
+      "hours": [
+        {
+          "n": 179,
+          "p50": 520,
+          "p95": 535,
+          "p99": 968
+        },
+        {
+          "n": 180,
+          "p50": 517,
+          "p95": 530,
+          "p99": 536
+        },
+        {
+          "n": 176,
+          "p50": 519,
+          "p95": 531,
+          "p99": 546
+        },
+        {
+          "n": 177,
+          "p50": 517,
+          "p95": 531,
+          "p99": 538
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Error handler",
+      "ok": 712,
+      "fail": 4,
+      "errors": [
+        [
+          "POST /api/flows/30d5ba2d-e005-4d29-be86-349e1d50b595/run?wait=30000: gave up after 1 tries: fetch failed",
+          4
+        ]
+      ],
+      "hours": [
+        {
+          "n": 179,
+          "p50": 533,
+          "p95": 1037,
+          "p99": 1863
+        },
+        {
+          "n": 180,
+          "p50": 534,
+          "p95": 1031,
+          "p99": 1039
+        },
+        {
+          "n": 176,
+          "p50": 535,
+          "p95": 1033,
+          "p99": 1040
+        },
+        {
+          "n": 177,
+          "p50": 533,
+          "p95": 1033,
+          "p99": 1042
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Called Sutra and approval",
+      "ok": 118,
+      "fail": 1,
+      "errors": [
+        [
+          "POST /api/flows/cf22bbd5-48e5-4f70-8519-873926a65fa8/run: gave up after 1 tries: fetch failed",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 29,
+          "p50": 10076,
+          "p95": 10854,
+          "p99": 10874
+        },
+        {
+          "n": 30,
+          "p50": 10064,
+          "p95": 10162,
+          "p99": 10175
+        },
+        {
+          "n": 29,
+          "p50": 10064,
+          "p95": 10121,
+          "p99": 10220
+        },
+        {
+          "n": 30,
+          "p50": 10058,
+          "p95": 10074,
+          "p99": 10086
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "MCP tool",
+      "ok": 357,
+      "fail": 1,
+      "errors": [
+        [
+          "fetch failed",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 89,
+          "p50": 40,
+          "p95": 460,
+          "p99": 1004
+        },
+        {
+          "n": 89,
+          "p50": 40,
+          "p95": 205,
+          "p99": 215
+        },
+        {
+          "n": 90,
+          "p50": 54,
+          "p95": 222,
+          "p99": 21530
+        },
+        {
+          "n": 89,
+          "p50": 35,
+          "p95": 203,
+          "p99": 218
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Bus message",
+      "ok": 1776,
+      "fail": 9,
+      "errors": [
+        [
+          "the subscriber is not connected",
+          9
+        ]
+      ],
+      "hours": [
+        {
+          "n": 448,
+          "p50": 0,
+          "p95": 0,
+          "p99": 1
+        },
+        {
+          "n": 448,
+          "p50": 0,
+          "p95": 0,
+          "p99": 1
+        },
+        {
+          "n": 440,
+          "p50": 0,
+          "p95": 0,
+          "p99": 1
+        },
+        {
+          "n": 440,
+          "p50": 0,
+          "p95": 0,
+          "p99": 1
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "RAG search",
+      "ok": 58,
+      "fail": 1,
+      "errors": [
+        [
+          "POST /api/flows/c677f00e-d7db-4487-b99b-4c3799996ab0/run?wait=60000: gave up after 1 tries: fetch failed",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 14,
+          "p50": 1633,
+          "p95": 1676,
+          "p99": 1676
+        },
+        {
+          "n": 15,
+          "p50": 1611,
+          "p95": 1702,
+          "p99": 1702
+        },
+        {
+          "n": 14,
+          "p50": 1590,
+          "p95": 1673,
+          "p99": 1673
+        },
+        {
+          "n": 15,
+          "p50": 1305,
+          "p95": 1768,
+          "p99": 1768
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Folder CSV (streamed)",
+      "ok": 2,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 1,
+          "p50": 66,
+          "p95": 66,
+          "p99": 66
+        },
+        {
+          "n": 1,
+          "p50": 204,
+          "p95": 204,
+          "p99": 204
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "SFTP CSV",
+      "ok": 1,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 1,
+          "p50": 121,
+          "p95": 121,
+          "p99": 121
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "FTP CSV (streamed)",
+      "ok": 1,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 1,
+          "p50": 161,
+          "p95": 161,
+          "p99": 161
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "RAG document ingest",
+      "ok": 0,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    }
+  ],
+  "files": {
+    "csv": [
+      {
+        "name": "soak-23839-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1792530018541
+      },
+      {
+        "name": "soak-47760-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1792531218679
+      }
+    ],
+    "sftp": [
+      {
+        "name": "soak-35802-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1792530618608
+      }
+    ],
+    "ftp": [
+      {
+        "name": "soak-35803-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1792530618771
+      }
+    ],
+    "docs": [],
+    "drive": []
+  },
+  "ws": {
+    "connects": 9,
+    "drops": 4,
+    "broadcastsSent": 119,
+    "broadcastsExpected": 592,
+    "broadcastsGot": 592
+  },
+  "bus": {
+    "sent": 1776,
+    "accepted": 1774,
+    "released": 0,
+    "rejected": 0
+  },
+  "feed": 723,
+  "restarts": [
+    {
+      "engine": 0,
+      "restarts": 1
+    },
+    {
+      "engine": 1,
+      "restarts": 0
+    },
+    {
+      "engine": 2,
+      "restarts": 0
+    }
+  ]
+}

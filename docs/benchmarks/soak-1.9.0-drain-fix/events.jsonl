@@ -1,0 +1,15 @@
+{"at":"2026-10-21T04:03:50.725Z","min":0,"kind":"start","message":"SutraFlow 1.9.0, 3 processes, 15 minutes, database sutra_soak_1792555430331, 16 threads, 24 GB"}
+{"at":"2026-10-21T04:03:56.428Z","min":0.1,"kind":"setup","message":"21 Sutras deployed"}
+{"at":"2026-10-21T04:04:04.441Z","min":0.2,"kind":"load","message":"17 scenarios running"}
+{"at":"2026-10-21T04:09:04.525Z","min":5.2,"kind":"file","message":"soak-5984-10mb.csv: 198000 rows to the watched folder"}
+{"at":"2026-10-21T04:09:04.526Z","min":5.2,"kind":"fault","message":"engine 2 killed on purpose"}
+{"at":"2026-10-21T04:10:06.778Z","min":6.3,"kind":"fault","message":"engine 2 started again"}
+{"at":"2026-10-21T04:11:04.565Z","min":7.2,"kind":"file","message":"soak-8375-10mb.csv: 198000 rows to the SFTP inbox"}
+{"at":"2026-10-21T04:11:04.654Z","min":7.2,"kind":"file","message":"soak-8376-10mb.csv: 198000 rows to the FTP inbox"}
+{"at":"2026-10-21T04:12:19.817Z","min":8.5,"kind":"document","message":"soak-doc-9572-10mb.txt: done in 15 s"}
+{"at":"2026-10-21T04:14:04.442Z","min":10.2,"kind":"fault","message":"database cut for 20 seconds"}
+{"at":"2026-10-21T04:14:04.588Z","min":10.2,"kind":"file","message":"soak-11951-10mb.csv: 198000 rows to the watched folder"}
+{"at":"2026-10-21T04:14:24.456Z","min":10.6,"kind":"fault","message":"database back"}
+{"at":"2026-10-21T04:18:04.573Z","min":14.2,"kind":"file","message":"soak-16321-10mb.csv: 198000 rows to the SFTP inbox"}
+{"at":"2026-10-21T04:18:04.662Z","min":14.2,"kind":"file","message":"soak-16323-10mb.csv: 198000 rows to the FTP inbox"}
+{"at":"2026-10-21T04:18:56.495Z","min":15.1,"kind":"tool error","message":"Error: DELETE /api/flows/a3cb1a25-f6ac-490f-94e8-ec1923b24ef0/deploy: gave up after 10 tries: 400 Body cannot be empty when content-type is set to 'application/json'\n    at retry (file:///C:/Users/kunwa/Documents/LocalGitHub/SutraFlow/tools/soak.mjs:144:40)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async file:///C:/Users/kunwa/Documents/LocalGitHub/SutraFlow/tools/soak.mjs:715:42"}
