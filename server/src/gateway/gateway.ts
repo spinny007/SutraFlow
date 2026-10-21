@@ -2,18 +2,17 @@
  * SutraFlow
  * Copyright (c) 2026-27 Surya Partap Singh
  * Developer: Surya Partap Singh | Website: MixAgile.com
- * File version: 1.7.5
+ * File version: 1.9.0
  * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
  * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { lifecycle, closeServer } from '../lifecycle.js';
-import { XMLBuilder } from 'fast-xml-parser';
 import { config } from '../config.js';
 import { getSetting, setSetting } from '../db.js';
 import { engine } from '../engine/engine.js';
-import type { FlowDoc, FlowNode, ReplyPayload } from '../engine/types.js';
+import type { FlowDoc, FlowNode } from '../engine/types.js';
 import { deployedFlows } from '../flows.js';
 import { effectiveResource, getResource, kvToObject } from '../resources.js';
 import { authorize, corsHeaders, PolicyError, type Caller } from '../security/inbound.js';
@@ -31,6 +30,9 @@ import { version as sutraVersion } from '../config.js';
 import { firewallAllows, getFirewall, getGatewayOptions, issueToken, logRequest, openApi } from './apps.js';
 import { agentMcpEndpoints, agentMcpTools, callAgentTool, handleAgents, listAgents, rebuildAgents } from './agents.js';
 import { attachWebSockets, closeWebSockets, forgetStaleConnections, setWsRoutes, type WsRoute } from './websocket.js';
+import { parseRestBody, sendRest } from './rest.js';
+import { buildWsdl, renderXml, soapEnvelope, soapFault, xmlEsc } from './soap.js';
+export { buildWsdl } from './soap.js';
 
 /**
  * The gateway serves deployed REST and SOAP services on its own HTTP and HTTPS
@@ -123,55 +125,6 @@ export function listRoutes() {
   }));
 }
 
-const xmlBuilder = new XMLBuilder({ ignoreAttributes: false, attributeNamePrefix: '@_', suppressEmptyNode: true });
-const xmlEsc = (s: string) => s.replace(/[<>&'"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[c]!);
-
-// ---------- WSDL ----------
-
-export function buildWsdl(n: FlowNode, baseUrl: string) {
-  const name = String(n.config.serviceName || 'Service').replace(/[^\w]/g, '') || 'Service';
-  const tns = String(n.config.namespace || 'urn:sutra');
-  const ops = listOf(n.config.operations).map(o => o.replace(/[^\w]/g, '')).filter(Boolean);
-  const v12 = n.config.soapVersion === '1.2';
-  const sp = v12 ? 'soap12' : 'soap';
-  const anyType = (el: string) => `<xsd:element name="${el}"><xsd:complexType><xsd:sequence><xsd:any minOccurs="0" maxOccurs="unbounded" processContents="lax"/></xsd:sequence></xsd:complexType></xsd:element>`;
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<definitions name="${name}" targetNamespace="${xmlEsc(tns)}" xmlns="http://schemas.xmlsoap.org/wsdl/" xmlns:tns="${xmlEsc(tns)}"
-  xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:soap12="http://schemas.xmlsoap.org/wsdl/soap12/" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-  <types>
-    <xsd:schema targetNamespace="${xmlEsc(tns)}" elementFormDefault="qualified">
-      ${ops.map(o => anyType(o) + anyType(o + 'Response')).join('\n      ')}
-    </xsd:schema>
-  </types>
-  ${ops.map(o => `<message name="${o}Request"><part name="parameters" element="tns:${o}"/></message>
-  <message name="${o}Response"><part name="parameters" element="tns:${o}Response"/></message>`).join('\n  ')}
-  <portType name="${name}PortType">
-    ${ops.map(o => `<operation name="${o}"><input message="tns:${o}Request"/><output message="tns:${o}Response"/></operation>`).join('\n    ')}
-  </portType>
-  <binding name="${name}Binding" type="tns:${name}PortType">
-    <${sp}:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
-    ${ops.map(o => `<operation name="${o}"><${sp}:operation soapAction="${xmlEsc(tns)}/${o}"/><input><${sp}:body use="literal"/></input><output><${sp}:body use="literal"/></output></operation>`).join('\n    ')}
-  </binding>
-  <service name="${name}">
-    <port name="${name}Port" binding="tns:${name}Binding"><${sp}:address location="${xmlEsc(baseUrl)}"/></port>
-  </service>
-</definitions>`;
-}
-
-function soapEnvelope(v12: boolean, body: string) {
-  return `<?xml version="1.0" encoding="UTF-8"?><soap:Envelope xmlns:soap="${v12 ? NS.soap12 : NS.soap11}"><soap:Body>${body}</soap:Body></soap:Envelope>`;
-}
-
-function soapFault(v12: boolean, code: string, message: string) {
-  const local = code.replace(/^\w+:/, '');
-  if (v12) {
-    const v = /client|sender/i.test(local) ? 'soap:Sender' : 'soap:Receiver';
-    return soapEnvelope(true, `<soap:Fault><soap:Code><soap:Value>${v}</soap:Value></soap:Code><soap:Reason><soap:Text xml:lang="en">${xmlEsc(message)}</soap:Text></soap:Reason></soap:Fault>`);
-  }
-  const c = /client|sender/i.test(local) ? 'soap:Client' : /server|receiver/i.test(local) ? 'soap:Server' : code.includes(':') ? code : `soap:${code}`;
-  return soapEnvelope(false, `<soap:Fault><faultcode>${xmlEsc(c)}</faultcode><faultstring>${xmlEsc(message)}</faultstring></soap:Fault>`);
-}
-
 // ---------- request handling ----------
 
 const HIDDEN = new Set(['authorization', 'cookie', 'proxy-authorization', 'x-api-key']);
@@ -184,29 +137,6 @@ function waitReply(start: (onReply: (r: any) => void) => Promise<string>, timeou
     const done = () => { if (replied && runId) { clearTimeout(to); res({ runId, reply }); } };
     start(r => { reply = r; replied = true; done(); }).then(id => { runId = id; done(); }, e => { clearTimeout(to); rej(e); });
   });
-}
-
-function parseRestBody(raw: string, ct: string) {
-  if (!raw) return null;
-  if (ct.includes('json')) {
-    try { return JSON.parse(raw); } catch { throw new PolicyError(400, 'Request body is not valid JSON'); }
-  }
-  if (ct.includes('xml')) {
-    try { return xmlParser.parse(raw); } catch { throw new PolicyError(400, 'Request body is not valid XML'); }
-  }
-  if (ct.includes('x-www-form-urlencoded')) return Object.fromEntries(new URLSearchParams(raw));
-  return raw;
-}
-
-function sendRest(reply: FastifyReply, r: ReplyPayload & { failed?: boolean; error?: string; runId?: string }) {
-  if (r.runId) reply.header('x-sutra-run', r.runId);
-  for (const [k, v] of Object.entries(r.headers || {})) reply.header(k, v);
-  const ct = r.contentType || (typeof r.body === 'string' ? 'text/plain; charset=utf-8' : 'application/json');
-  reply.code(r.status || 200).type(ct);
-  if (r.body == null) return reply.send(r.status === 204 ? undefined : '');
-  if (typeof r.body === 'string') return reply.send(r.body);
-  if (ct.includes('xml')) return reply.send(xmlBuilder.build(r.body));
-  return reply.send(JSON.stringify(r.body));
 }
 
 async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean) {
@@ -322,7 +252,7 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
         return fault(500, f.code, f.message, v12);
       }
       const opResp = `${r.soap?.operation || input.operation}Response`;
-      const bodyXml = r.body == null ? '' : typeof r.body === 'object' ? xmlBuilder.build(r.body) : xmlEsc(String(r.body));
+      const bodyXml = r.body == null ? '' : typeof r.body === 'object' ? renderXml(r.body) : xmlEsc(String(r.body));
       return reply.code(200).type(v12 ? 'application/soap+xml; charset=utf-8' : 'text/xml; charset=utf-8')
         .send(soapEnvelope(v12, `<${opResp} xmlns="${xmlEsc(ns)}">${bodyXml}</${opResp}>`));
     } catch (e: any) {

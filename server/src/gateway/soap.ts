@@ -1,0 +1,61 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.9.0
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import type { FlowNode } from '../engine/types.js';
+import { XMLBuilder } from 'fast-xml-parser';
+import { listOf } from '../palettes/common.js';
+import { NS } from '../security/wss.js';
+
+export const xmlEsc = (text: string) => text.replace(/[<>&'"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[c]!);
+const xmlBuilder = new XMLBuilder({ ignoreAttributes: false, attributeNamePrefix: '@_', suppressEmptyNode: true });
+export const renderXml = (value: unknown) => xmlBuilder.build(value);
+
+export function buildWsdl(node: FlowNode, baseUrl: string) {
+  const name = String(node.config.serviceName || 'Service').replace(/[^\w]/g, '') || 'Service';
+  const namespace = String(node.config.namespace || 'urn:sutra');
+  const operations = listOf(node.config.operations).map(o => o.replace(/[^\w]/g, '')).filter(Boolean);
+  const soap12 = node.config.soapVersion === '1.2';
+  const prefix = soap12 ? 'soap12' : 'soap';
+  const element = (name: string) => `<xsd:element name="${name}"><xsd:complexType><xsd:sequence><xsd:any minOccurs="0" maxOccurs="unbounded" processContents="lax"/></xsd:sequence></xsd:complexType></xsd:element>`;
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<definitions name="${name}" targetNamespace="${xmlEsc(namespace)}" xmlns="http://schemas.xmlsoap.org/wsdl/" xmlns:tns="${xmlEsc(namespace)}"
+  xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:soap12="http://schemas.xmlsoap.org/wsdl/soap12/" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <types>
+    <xsd:schema targetNamespace="${xmlEsc(namespace)}" elementFormDefault="qualified">
+      ${operations.map(o => element(o) + element(o + 'Response')).join('\n      ')}
+    </xsd:schema>
+  </types>
+  ${operations.map(o => `<message name="${o}Request"><part name="parameters" element="tns:${o}"/></message>
+  <message name="${o}Response"><part name="parameters" element="tns:${o}Response"/></message>`).join('\n  ')}
+  <portType name="${name}PortType">
+    ${operations.map(o => `<operation name="${o}"><input message="tns:${o}Request"/><output message="tns:${o}Response"/></operation>`).join('\n    ')}
+  </portType>
+  <binding name="${name}Binding" type="tns:${name}PortType">
+    <${prefix}:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    ${operations.map(o => `<operation name="${o}"><${prefix}:operation soapAction="${xmlEsc(namespace)}/${o}"/><input><${prefix}:body use="literal"/></input><output><${prefix}:body use="literal"/></output></operation>`).join('\n    ')}
+  </binding>
+  <service name="${name}">
+    <port name="${name}Port" binding="tns:${name}Binding"><${prefix}:address location="${xmlEsc(baseUrl)}"/></port>
+  </service>
+</definitions>`;
+}
+
+export function soapEnvelope(soap12: boolean, body: string) {
+  return `<?xml version="1.0" encoding="UTF-8"?><soap:Envelope xmlns:soap="${soap12 ? NS.soap12 : NS.soap11}"><soap:Body>${body}</soap:Body></soap:Envelope>`;
+}
+
+export function soapFault(soap12: boolean, code: string, message: string) {
+  const local = code.replace(/^\w+:/, '');
+  if (soap12) {
+    const value = /client|sender/i.test(local) ? 'soap:Sender' : 'soap:Receiver';
+    return soapEnvelope(true, `<soap:Fault><soap:Code><soap:Value>${value}</soap:Value></soap:Code><soap:Reason><soap:Text xml:lang="en">${xmlEsc(message)}</soap:Text></soap:Reason></soap:Fault>`);
+  }
+  const value = /client|sender/i.test(local) ? 'soap:Client' : /server|receiver/i.test(local) ? 'soap:Server' : code.includes(':') ? code : `soap:${code}`;
+  return soapEnvelope(false, `<soap:Fault><faultcode>${xmlEsc(value)}</faultcode><faultstring>${xmlEsc(message)}</faultstring></soap:Fault>`);
+}

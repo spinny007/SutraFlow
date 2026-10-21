@@ -194,6 +194,12 @@ function poolStore(url: string): AsyncStore & { end(): Promise<void> } {
       for (let attempt = 0; ; attempt++) {
         const a0 = performance.now();
         const client = await pool.connect();
+        // pg's pool owns an error listener while a client is idle, but removes it while the client is
+        // checked out. A network cut can emit Client "error" between two transaction queries; without
+        // a temporary listener Node treats that as an uncaught event and terminates the engine.
+        let clientError: Error | undefined;
+        const onClientError = (e: Error) => { clientError ||= e; };
+        client.on('error', onClientError);
         note(poolFigures.acquireMs, performance.now() - a0);
         figures();
         const t0 = performance.now();
@@ -227,7 +233,8 @@ function poolStore(url: string): AsyncStore & { end(): Promise<void> } {
           if (RETRY.has(e?.code) && attempt < 2 && !committed) { poolFigures.retries++; continue; }
           throw e;
         } finally {
-          client.release(broken);
+          client.release(broken || clientError);
+          client.off('error', onClientError);
           note(poolFigures.txMs, performance.now() - t0);
           figures();
         }

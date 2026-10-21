@@ -3,7 +3,7 @@
  * SutraFlow
  * Copyright (c) 2026-27 Surya Partap Singh
  * Developer: Surya Partap Singh | Website: MixAgile.com
- * File version: 1.8.0
+ * File version: 1.9.0
  * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
  * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
  * SPDX-License-Identifier: AGPL-3.0-only
@@ -25,7 +25,7 @@
  * from them even if the tool is stopped), and at the end report.md and report.html are written.
  *
  *   node tools/soak.mjs --pg postgres://postgres@127.0.0.1:5432/postgres --hours 8
- *   node tools/soak.mjs --report-only docs/benchmarks/soak-1.8.0
+ *   node tools/soak.mjs --report-only docs/benchmarks/soak-1.9.0
  *
  * Options
  *   --hours 8 | --minutes 15    how long the load runs (then up to 10 minutes for open runs to end)
@@ -84,7 +84,13 @@ if (flag('google-sign-in')) {
       const t = await (await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ code: q.get('code'), client_id: id, client_secret: secretValue, redirect_uri: redirect, grant_type: 'authorization_code' }) })).json();
       if (!t.refresh_token) { res.end(`Not signed in: ${t.error_description || t.error || 'no refresh token'}`); return; }
       fs.mkdirSync(path.dirname(GOOGLE_FILE), { recursive: true });
-      fs.writeFileSync(GOOGLE_FILE, JSON.stringify({ refreshToken: t.refresh_token, at: new Date().toISOString() }), { mode: 0o600 });
+      fs.writeFileSync(GOOGLE_FILE, JSON.stringify({
+        clientId: id,
+        clientSecret: secretValue,
+        folder: process.env.SOAK_DRIVE_FOLDER || '',
+        refreshToken: t.refresh_token,
+        at: new Date().toISOString(),
+      }), { mode: 0o600 });
       res.end('Signed in. You can close this tab.');
       console.log(`Saved to ${GOOGLE_FILE}.`);
       srv.close(); done();
@@ -701,7 +707,13 @@ await sample();
 // ---------- wait, then end ----------
 while (Date.now() < END) await sleep(5000);
 for (const t of timers) clearInterval(t);
-event('load', 'load stopped; waiting for open runs to end (at most 10 minutes)');
+// Timers and listeners live in the server, not in the producer timers above. Undeploy every soak
+// Sutra before waiting for zero open runs; otherwise the timer keeps creating a fresh run every ten
+// seconds and makes the drain assertion race whichever tick happens to be open at the final sample.
+// Runs already in flight keep the document snapshot they started with and are allowed to finish.
+await sleep(5000);
+for (const id of Object.values(flowIds)) await api('DELETE', `/api/flows/${id}/deploy`, {}, 10);
+event('load', 'load stopped and starters undeployed; waiting for open runs to end (at most 10 minutes)');
 hourly();
 const drainEnd = Date.now() + 600000;
 for (;;) {
@@ -720,8 +732,10 @@ const flowRuns = async name => Object.fromEntries((await dbq('select status, cou
 const inFault = t => faults.some(f => t >= f.from - 5000 && t <= f.to);
 const unexpected = procs.reduce((a, e) => a + e.restarts, 0);
 check('No engine stopped by itself', unexpected === 0, `${unexpected} unexpected stops${unexpected ? ' (see events)' : ''}`);
-const [stuck] = await dbq("select count(*)::int n from runs where status = 'running' and started_at < $1", [new Date(Date.now() - 600000).toISOString()]);
-check('No run left running', stuck.n === 0, `${stuck.n} runs still running 10 minutes after the load stopped`);
+const stuckRuns = await dbq("select id, flow_name, source, status, started_at, error from runs where status in ('running', 'queued') order by started_at");
+const stuckTasks = stuckRuns.length ? await dbq("select run_id, node_id, status, owner, attempt, started_at, error from tasks where run_id = any($1) and status not in ('done', 'failed', 'cancelled') order by run_id, id", [stuckRuns.map(r => r.id)]) : [];
+const stuckDetail = stuckRuns.map(r => `${r.flow_name} (${r.source}, ${r.status}, ${stuckTasks.filter(t => t.run_id === r.id).map(t => `${t.node_id}:${t.status}${t.owner ? `@${t.owner}` : ''}`).join(', ') || 'no open task'})`).join('; ');
+check('No run left running', stuckRuns.length === 0, `${stuckRuns.length} runs still open after starters stopped${stuckDetail ? `: ${stuckDetail}` : ''}`);
 const [repeated] = await dbq(`select count(*)::int n from (select run_id, node_id from tasks t join runs r on r.id = t.run_id
   where t.status = 'done' and r.flow_id = any($1) group by run_id, node_id having count(*) > 1) x`, [[flowIds['Soak REST orders'], flowIds['Soak SOAP UsernameToken'], flowIds['Soak channel publisher'], flowIds['Soak WebSocket service']]]);
 check('No step ran twice', repeated.n === 0, `${repeated.n} steps of single-pass Sutras completed more than once`);
@@ -779,6 +793,7 @@ const summary = {
   version: VERSION, started: new Date(T0).toISOString(), ended: new Date().toISOString(), minutes: MINUTES, engines: ENGINES, machine: `${os.cpus()[0].model.trim()}, ${os.cpus().length} threads, ${Math.round(os.totalmem() / 1073741824)} GB, ${os.platform()}`,
   node: process.version, pausedMinutes: Math.round(pausedMs / 60000), database: 'PostgreSQL (through a proxy)', model: AI ? `${MODEL} on Ollama` : null, sizes: SIZES, checks, faults,
   scenarios: Object.values(stats).map(s => ({ name: s.name, ok: s.ok, fail: s.fail, errors: Object.entries(s.errors).sort((a, b) => b[1] - a[1]).slice(0, 5), hours: s.hours })),
+  stuckRuns, stuckTasks,
   files, ws: wsState, bus: { ...bus, sender: undefined }, feed: feed.sent,
   restarts: procs.map(e => ({ engine: e.i, restarts: e.restarts })),
 };

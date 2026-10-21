@@ -16,6 +16,7 @@ import { parseContent } from './palettes/fileformat.js';
 import { schemaTree } from './schemas.js';
 import { effectiveVariables, engineVariableValues } from './projects.js';
 import { resolveSettings } from './settings.js';
+import { q } from './db.js';
 
 /**
  * Long-running triggers of deployed flows: file watchers, mailbox polling,
@@ -91,12 +92,15 @@ registerListener('fileTrigger', c => {
   const events = new Set<string>(Array.isArray(cfg.events) && cfg.events.length ? cfg.events : ['added', 'modified', 'removed']);
   const every = Math.max(1, Number(cfg.pollSeconds) || 10) * 1000;
   const stableMs = Math.max(0, Number(cfg.stableSeconds) || 0) * 1000;
-  type Seen = { size: number; mtime: string; changedAt: number; reported: boolean };
+  type Seen = { size: number; mtime: string; changedAt: number; reported: boolean; inFlight?: boolean };
   let known: Map<string, Seen> | null = null;
   let busy = false;
   // Content as text, CSV rows, lines, JSON, XML or base64 (older steps: readContent text/base64).
   const fmt = cfg.format || (cfg.readContent === 'base64' ? 'base64 (binary)' : cfg.readContent === 'text' ? 'text' : 'do not read');
   const rowSchema = cfg.schema ? schemaTree(cfg.schema) : null;
+  const save = (p: string, k: Seen) => q.run(`insert into file_listener_files(flow_id, node_id, path, size, mtime) values(?, ?, ?, ?, ?)
+    on conflict(flow_id, node_id, path) do update set size = excluded.size, mtime = excluded.mtime`, c.flowId, c.node.id, p, k.size, k.mtime);
+  const forget = (p: string) => q.run('delete from file_listener_files where flow_id = ? and node_id = ? and path = ?', c.flowId, c.node.id, p);
   const read = async (p: string): Promise<Record<string, any>> => {
     if (fmt === 'do not read') return {};
     try { return parseContent(await fsp.readFile(p), { ...cfg, format: fmt }, rowSchema); }
@@ -109,9 +113,20 @@ registerListener('fileTrigger', c => {
       const files = await listFiles(folder, String(cfg.pattern || '*'), !!cfg.recursive);
       const now = Date.now();
       if (!known) {
-        // First scan: existing files are the baseline, not events.
-        known = new Map(files.map(f => [f.path, { size: f.size, mtime: f.modifiedAt, changedAt: 0, reported: true }]));
-        c.status('ok', `Watching ${folder} (${files.length} existing files)`);
+        // The first deployment baselines existing files. Later leaders load the shared checkpoint,
+        // so a file that arrived or failed on another leader is not lost when leadership changes.
+        const initialized = !!q.get('select 1 as x from file_listener_state where flow_id = ? and node_id = ?', c.flowId, c.node.id);
+        const saved = initialized ? q.all<{ path: string; size: number; mtime: string }>('select path, size, mtime from file_listener_files where flow_id = ? and node_id = ?', c.flowId, c.node.id) : [];
+        known = new Map(saved.map(f => [f.path, { size: Number(f.size), mtime: f.mtime, changedAt: 0, reported: true }]));
+        for (const f of files) {
+          const old = known.get(f.path);
+          known.set(f.path, { size: f.size, mtime: f.modifiedAt, changedAt: initialized && (!old || old.size !== f.size || old.mtime !== f.modifiedAt) ? now : 0, reported: !initialized || !!old && old.size === f.size && old.mtime === f.modifiedAt });
+        }
+        if (!initialized) {
+          q.run('insert into file_listener_state(flow_id, node_id) values(?, ?) on conflict(flow_id, node_id) do nothing', c.flowId, c.node.id);
+          for (const [p, k] of known) save(p, k);
+        }
+        c.status('ok', `Watching ${folder} (${files.length} existing files${initialized ? ', checkpoint restored' : ''})`);
         return;
       }
       const seen = new Set<string>();
@@ -119,20 +134,44 @@ registerListener('fileTrigger', c => {
         seen.add(f.path);
         const k = known.get(f.path);
         if (!k) { known.set(f.path, { size: f.size, mtime: f.modifiedAt, changedAt: now, reported: false }); continue; }
-        if (k.size !== f.size || k.mtime !== f.modifiedAt) { Object.assign(k, { size: f.size, mtime: f.modifiedAt, changedAt: now, reported: false, modified: k.reported }); continue; }
-        if (!k.reported && now - k.changedAt >= stableMs) {
-          k.reported = true;
+        if (k.size !== f.size || k.mtime !== f.modifiedAt) { Object.assign(k, { size: f.size, mtime: f.modifiedAt, changedAt: now, reported: false, inFlight: false, modified: k.reported }); continue; }
+        if (!k.reported && !k.inFlight && now - k.changedAt >= stableMs) {
           const event = (k as any).modified ? 'modified' : 'added';
           if (events.has(event)) {
             const ext = f.name.includes('.') ? f.name.split('.').pop() : '';
-            c.fire({ event, path: f.path, name: f.name, relativePath: f.name, folder, extension: ext, size: f.size, modifiedAt: f.modifiedAt, ...(await read(f.path)) });
+            // A file is handled only after its run succeeds. Failed durable creation, a failed run,
+            // or cancellation leaves the unchanged file eligible for another attempt next poll.
+            k.inFlight = true;
+            const runId = await c.fire(
+              { event, path: f.path, name: f.name, relativePath: f.name, folder, extension: ext, size: f.size, modifiedAt: f.modifiedAt, ...(await read(f.path)) },
+              status => {
+                k.inFlight = false;
+                if (status === 'done') {
+                  try { save(f.path, k); k.reported = true; }
+                  catch { k.reported = false; k.changedAt = Date.now(); }
+                }
+                else { k.reported = false; k.changedAt = Date.now(); }
+              },
+            );
+            if (!runId) { k.inFlight = false; continue; }
+            continue;
           }
+          try { save(f.path, k); k.reported = true; } catch { k.reported = false; }
         }
       }
       for (const [p, k] of known) {
         if (seen.has(p)) continue;
-        known.delete(p);
-        if (k.reported && events.has('removed')) c.fire({ event: 'removed', path: p, name: p.slice(folder.length).replace(/^[\\/]/, '').split('\\').join('/'), folder });
+        if (k.inFlight) continue;
+        if (k.reported && events.has('removed')) {
+          k.inFlight = true;
+          const runId = await c.fire({ event: 'removed', path: p, name: p.slice(folder.length).replace(/^[\\/]/, '').split('\\').join('/'), folder }, status => {
+            k.inFlight = false;
+            if (status === 'done') { try { forget(p); known?.delete(p); } catch { /* retry next poll */ } }
+          });
+          if (!runId) k.inFlight = false;
+        } else {
+          try { forget(p); known.delete(p); } catch { /* retry next poll */ }
+        }
       }
       c.status('ok', `Watching ${folder}`);
     } catch (e: any) {

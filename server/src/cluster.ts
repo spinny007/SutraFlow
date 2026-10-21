@@ -31,6 +31,7 @@ export const cluster = { leader: false, started: false, draining: false, gen: -1
 let timer: NodeJS.Timeout | null = null;
 let hooks: ClusterHooks | null = null;
 let beats = 0;
+let heartbeatError = false;
 
 const deadAfter = () => config.heartbeatMs * 3;
 const FORGET_MS = 10 * 60 * 1000;
@@ -44,8 +45,25 @@ export function startCluster(h: ClusterHooks) {
     on conflict(id) do update set host = excluded.host, pid = excluded.pid, mode = excluded.mode, version = excluded.version, started_at = excluded.started_at, heartbeat_at = excluded.heartbeat_at, workers = excluded.workers, active = 0, draining = 0, drain_requested = 0, can_lead = excluded.can_lead`,
     config.engineId, os.hostname(), process.pid, config.mode, version, now(), Date.now(), engine.concurrency, config.canLead ? 1 : 0);
   beat();
-  timer = setInterval(beat, config.heartbeatMs);
+  timer = setInterval(beatSafely, config.heartbeatMs);
   timer.unref?.();
+}
+
+/** A database interruption must make this engine temporarily stand down, never terminate it. */
+export function beatSafely() {
+  try {
+    beat();
+    if (heartbeatError) console.log('Cluster heartbeat recovered');
+    heartbeatError = false;
+  } catch (e: any) {
+    // Keep the last-known local leadership state while the database answer is unknown. Stopping
+    // and rebuilding a folder listener here would baseline files that arrived during the outage and
+    // lose their events. A disconnected listener cannot durably start a run; after reconnection the
+    // database lease remains authoritative and beat() calls lostLeader if another engine took it.
+    // Log once per interruption rather than once per heartbeat while PostgreSQL is unavailable.
+    if (!heartbeatError) console.error('Cluster heartbeat failed; retrying:', e?.message || e);
+    heartbeatError = true;
+  }
 }
 
 /** One heartbeat: liveness, the leader lease, recovery, deploys, cancelled steps. */

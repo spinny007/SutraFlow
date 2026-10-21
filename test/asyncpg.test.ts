@@ -80,6 +80,29 @@ test('the engine uses the pool on PostgreSQL, and its transactions run at the sa
   assert.ok(poolFigures.txMs.count > 0 && poolFigures.acquireMs.count > 0);
 });
 
+test('PostgreSQL NOTIFY wakes an idle engine while durable polling remains the fallback', { skip }, async () => {
+  engine.setPollMs(10000);
+  const before = engine.concurrency;
+  engine.concurrency = 0;
+  const s = node('start', 'Start'), n = node('log', 'Woken', { message: 'now' });
+  const id = deployed('Notify wake', [s, n], [edge(s, n)]);
+  const runId = await start(id);
+  await sleep(100);
+  assert.equal(q.get('select status from runs where id = ?', runId).status, 'running');
+  engine.concurrency = 1;
+  const u = new URL(ADMIN!); u.pathname = `/${dbName}`;
+  const { default: pg } = await import('pg');
+  const external = new pg.Client({ connectionString: u.toString() });
+  await external.connect();
+  const at = Date.now();
+  await external.query('update tasks set not_before = not_before where run_id = $1 and status = \'pending\'', [runId]);
+  assert.equal(await engine.waitFor(runId, 3000), 'done');
+  assert.ok(Date.now() - at < 3000, 'completed before the 10-second poll');
+  await external.end();
+  engine.concurrency = before;
+  engine.setPollMs(200);
+});
+
 test('fencing on PostgreSQL: a step recovered by another engine meanwhile is left to it', { skip }, async () => {
   const s = node('start', 'Start'), w = node('wait', 'Slow', { ms: 1200 }), n = node('log', 'Next', { message: 'next' });
   const id = deployed('Pool fenced', [s, w, n], [edge(s, w), edge(w, n)]);

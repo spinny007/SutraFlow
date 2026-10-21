@@ -87,6 +87,27 @@ export const DIAGRAMS = {
     + arrow([[720, 80], [778, 80]]) + arrow([[720, 140], [750, 140], [750, 210], [778, 210]]) + arrow([[720, 316], [750, 316], [750, 280], [778, 280]])
     + arrow([[720, 475], [778, 475]])),
 
+  engine: figure('engine', 1080, 520, 'Inside the engine. The facade composes focused services; PostgreSQL is both the durable queue and the source of wake-up hints.',
+    group(20, 20, 760, 470, 'server/src/engine')
+    + box(45, 58, 210, 78, 'engine.ts', ['public facade and lifecycle', 'start, drain, compose services'], 'acc')
+    + box(300, 58, 200, 78, 'scheduler.ts', ['poll, claim, dispatch', 'bounded worker slots'])
+    + box(545, 58, 200, 78, 'executor.ts', ['map and run activity', 'limits, loops, cancellation'])
+    + box(45, 190, 210, 82, 'operator.ts', ['cancel, approve, debug', 'resubmit, promote, timeout'])
+    + box(300, 190, 200, 82, 'waits.ts', ['reply and finish waiters', 'cross-engine completion'])
+    + box(545, 190, 200, 82, 'transitions.ts', ['fenced transition helpers', 'state, logs, cancel open'])
+    + box(45, 330, 210, 82, 'types.ts', ['Sutra, activity, context', 'result and shared contracts'])
+    + box(300, 330, 200, 82, 'state.ts', ['pure state/output helpers', 'initial and compact values'])
+    + box(545, 330, 200, 82, 'run-store.ts', ['runs, outputs, fencing', 'stale owner changes nothing'])
+    + box(820, 45, 230, 104, 'PostgreSQL', ['runs and tasks: truth', 'pg.Pool transactions', 'advisory per-run locks'], 'ext')
+    + box(820, 202, 230, 88, 'queue-notify.ts', ['LISTEN sutraflow_queue', 'reconnect and coalesce'], 'acc')
+    + box(820, 350, 230, 92, 'Periodic poll', ['always remains enabled', 'SQLite uses this path'])
+    + arrow([[255, 96], [298, 96]]) + arrow([[500, 96], [543, 96]])
+    + arrow([[150, 136], [150, 188]]) + arrow([[400, 136], [400, 188]]) + arrow([[645, 136], [645, 188]])
+    + arrow([[150, 272], [150, 328]]) + arrow([[400, 272], [400, 328]]) + arrow([[645, 272], [645, 328]])
+    + arrow([[745, 230], [785, 230], [785, 97], [818, 97]], 'async queries', '', [780, 155])
+    + arrow([[818, 246], [780, 246], [780, 116], [502, 116]], 'wake hint', 'dash', [674, 110])
+    + arrow([[818, 396], [770, 396], [770, 126], [502, 126]], 'correctness fallback', 'dash', [665, 420])),
+
   lifecycle: figure('lifecycle', 1010, 300, 'A run from trigger to finish. Every step is a task row; the checkpoint stores its output and the next tasks together.',
     row(20, 40, 140, 74, 26, [
       ['Trigger', ['request, timer, file,', 'queue, MCP, channel'], 'ext'],
@@ -127,16 +148,20 @@ export const DIAGRAMS = {
     + arrow([[550, 45], [620, 45], [620, 125], [698, 125]])
     + arrow([[550, 140], [698, 140]], 'skip token', 'dash', [624, 156])),
 
-  storage: figure('storage', 940, 260, 'One storage layer, two backends. PostgreSQL drivers are asynchronous, so a worker thread holds the connection while the caller waits.',
-    box(20, 95, 170, 70, 'Engine, API,', ['packages, cluster'])
-    + box(240, 95, 170, 70, 'q and tx', ['db.ts'], 'acc')
+  storage: figure('storage', 940, 260, 'Two storage entry points share one schema: asynchronous engine transactions and the synchronous compatibility path.',
+    box(20, 45, 170, 70, 'Engine hot path', ['claim, transition, settle'])
+    + box(240, 45, 170, 70, 'asyncdb.ts', ['pg.Pool or local store'], 'acc')
+    + box(20, 155, 170, 70, 'Admin and control', ['API, packages, cluster'])
+    + box(240, 155, 170, 70, 'q and tx', ['db.ts'])
     + box(470, 20, 200, 64, 'SQLite backend', ['node:sqlite, WAL file'])
     + box(470, 150, 200, 80, 'Caller waits', ['Atomics.wait on a', 'SharedArrayBuffer'])
     + box(720, 150, 200, 80, 'pgworker.ts', ['worker thread', 'pg or PGlite'])
-    + box(720, 20, 200, 64, 'PostgreSQL', ['advisory lock per write'], 'ext')
-    + arrow([[190, 130], [238, 130]])
-    + arrow([[410, 115], [440, 115], [440, 52], [468, 52]], 'default', '', [440, 104])
-    + arrow([[410, 145], [440, 145], [440, 190], [468, 190]], 'SUTRA_DB=postgres://', '', [365, 184])
+    + box(720, 20, 200, 64, 'PostgreSQL', ['pool + advisory locks'], 'ext')
+    + arrow([[190, 80], [238, 80]]) + arrow([[190, 190], [238, 190]])
+    + arrow([[410, 70], [468, 52]], 'SQLite / PGlite', '', [445, 50])
+    + arrow([[410, 80], [718, 52]], 'PostgreSQL pool', '', [565, 58])
+    + arrow([[410, 175], [440, 175], [440, 190], [468, 190]], 'PostgreSQL compatibility', '', [380, 150])
+    + arrow([[410, 205], [440, 205], [440, 70], [468, 70]], 'SQLite', '', [432, 122])
     + arrow([[670, 180], [718, 180]], 'statement', '', [694, 173])
     + arrow([[718, 205], [672, 205]], 'answer', 'dash', [694, 220])
     + arrow([[820, 150], [820, 86]])),
@@ -151,7 +176,19 @@ export const DIAGRAMS = {
     + arrow([[470, 70], [470, 100], [180, 100], [180, 128]]) + arrow([[470, 70], [470, 128]]) + arrow([[470, 100], [760, 100], [760, 128]])
     + arrow([[180, 230], [180, 270], [420, 270], [420, 298]]) + arrow([[470, 230], [470, 298]]) + arrow([[760, 230], [760, 270], [520, 270], [520, 298]])
     + arrow([[240, 342], [368, 342]])
-    + note(610, 320, ['Each step runs once: claimed by one', 'atomic update with an owner.', 'Dead engine (3 missed beats): the', 'leader puts its steps back to pending.'])),
+    + note(610, 320, ['One live claim owns a task.', 'Its claim number fences the commit.', 'Dead engine (3 missed beats): the', 'leader puts its steps back to pending.'])),
+
+  failover: figure('failover', 1080, 290, 'Leader failover and recovery. The database lease, not a process memory flag, decides who leads.',
+    row(20, 45, 176, 96, 30, [
+      ['Leader healthy', ['renews lease each beat', 'owns timers/listeners']],
+      ['Leader disappears', ['no heartbeat or lease', 'renewal reaches database']],
+      ['Lease expires', ['after three beats', 'another engine may take it']],
+      ['New leader', ['recovers running tasks', 'rebuilds one-only work'], 'acc'],
+      ['Old leader returns', ['reads authoritative lease', 'stops leader-only work']],
+    ])
+    + box(326, 205, 430, 58, 'Durable state survives the switch', ['tasks, fencing claims and file-listener checkpoints are shared in PostgreSQL'], 'acc')
+    + arrow([[540, 141], [540, 203]])
+    + note(20, 184, ['During a database outage, engines cannot durably claim or checkpoint new work.', 'Heartbeat and LISTEN reconnect; polling resumes from the stored rows when PostgreSQL returns.'])),
 
   release: figure('release', 1090, 290, 'A release. One package travels unchanged from test to production; each environment brings its own deployment config.',
     row(20, 40, 150, 76, 30, [

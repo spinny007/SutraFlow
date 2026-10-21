@@ -49,7 +49,7 @@ const FILES: Group[] = [
       ['server/src/index.ts', '<code>boot()</code>: opens storage, registers every activity, loads deployment configs, deploys the packages in <code>SUTRA_DEPLOY_DIR</code> under a cluster-wide lock, starts the engine, the cluster beat, the gateway and the admin API, and wires change hooks (deploys rebuild routes, timers and listeners). Also the ordered <code>stop()</code>.'],
       ['server/src/config.ts', 'Process settings from environment variables (mode, environment, ports, folders, database with the password apart as SUTRA_DB_PASSWORD, engine id, drain, heartbeat, retention, logs, tracing, tokens) and the product version from package.json. Everything else is stored in the database and edited in the studio.'],
       ['server/src/lifecycle.ts', 'Liveness (<code>/health</code>, with the version, mode, environment and the database in use) and readiness (<code>/ready</code>): storage answers, packages are deployed, the gateway listens, and the server is not draining.'],
-      ['server/src/cluster.ts', 'Heartbeat row per engine, the leader lease, recovery of a dead engine\'s steps, the deploy generation number that makes every engine reload its routes, leadership hand-over on stop, and the engine status list.'],
+      ['server/src/cluster.ts', 'Heartbeat row per engine, the authoritative leader lease, recovery of a dead engine\'s steps, the deploy generation number that makes every engine reload its routes, leadership hand-over on stop, and the engine status list. A database interruption is contained and retried; after recovery the lease row decides whether this process still leads.'],
       ['server/src/housekeeping.ts', 'Deletes finished runs older than <code>SUTRA_RUN_RETENTION_DAYS</code>, with their steps, in batches. Run by the leader about once a minute; waiting runs are never deleted.'],
       ['server/src/db.ts', 'The synchronous storage layer: <code>q</code> (get, all, run) and <code>tx</code> (transaction) on SQLite or PostgreSQL, used by everything but the engine\'s hot path. Holds the table definitions, converts them for PostgreSQL (bigint, double precision, bigserial) and <code>?</code> placeholders to <code>$n</code>, and takes an advisory lock for each PostgreSQL write transaction (per run or Sutra queue with a key, one shared lock without). Refuses a synchronous write while an asynchronous transaction is open (asyncTxScope), so a transaction is never split over two connections. <code>memoryStore</code> gives the private in-memory database of runs that run in memory.'],
       ['server/src/asyncdb.ts', 'Asynchronous storage for the engine: on PostgreSQL a connection pool on the main thread (SUTRA_PG_POOL, metrics of waits and transaction times), on SQLite, PGlite and the in-memory engine one connection whose transactions take turns. Transactions are explicit objects (transaction(key, async tx => ...)); a first query travels with begin and the lock, and commitWith() sends the last statement with the commit, so a step completes in three round trips. Deadlocks and serialization failures are tried again.'],
@@ -59,7 +59,15 @@ const FILES: Group[] = [
   {
     id: 'engine', title: 'Engine', intro: 'The durable step runner and the types every activity follows.',
     files: [
-      ['server/src/engine/engine.ts', 'The durable engine on asynchronous storage: start a run, claim tasks with an owner and a claim number (on PostgreSQL with the run in the same statement), run activities with settings (retries, time limit, loop), checkpoint output and next tasks in one transaction, route connections (ports, conditions, skip tokens, merges), outputs sent while a step goes on (streamed batches), waits (approvals, timers, sub-Sutras, replies from other engines), Error handler, stop options, debug pause, cancel, resubmit, drain, metrics and spans. Every change to a claimed step is fenced on its owner and claim number, so a step recovered elsewhere or cancelled is never completed twice; a run is ended by one conditional update only. Its in-memory twin runs Sutras tuned to run in memory and saves each run when it ends.'],
+      ['server/src/engine/engine.ts', 'The public durable-engine façade: activity registration, start and drain, starting runs, composition of the focused engine services, and the in-memory twin. It keeps the API stable; the remaining complete, fail, route and settle orchestration calls the fenced helpers below.'],
+      ['server/src/engine/executor.ts', 'Executes one claimed activity: mapping context, variables and secrets, time limits and cancellation, loops, streamed emits, logs, and the complete-or-fail handoff. It does not own durable transition SQL.'],
+      ['server/src/engine/scheduler.ts', 'Queue polling, batched claims, priority order, concurrency slots and coalesced wake calls. PostgreSQL claims include the run and its outputs in the same round trip.'],
+      ['server/src/engine/queue-notify.ts', 'PostgreSQL LISTEN/NOTIFY wake hints with reconnect; durable polling remains authoritative and can be used alone with SUTRA_PG_NOTIFY=0.'],
+      ['server/src/engine/transitions.ts', 'Atomic primitives shared by complete, fail, route and settle: fenced updates, output plus run commits, state and logs, cancellation of open tasks, and routing scope.'],
+      ['server/src/engine/run-store.ts', 'The storage boundary for run loading, separately stored step outputs and claimed-task fencing. A stale owner gets StaleStep and changes nothing.'],
+      ['server/src/engine/waits.ts', 'Request/reply and finish callbacks, live run listeners, cross-engine completion checks and waitFor. Polling remains the correctness fallback when another engine finishes a run.'],
+      ['server/src/engine/operator.ts', 'Stable boundary for operator actions: approval decisions, cancel, resubmit, debug, queued-run promotion, time limits and cancellation observed from another engine.'],
+      ['server/src/engine/state.ts', 'Run-state types and pure helpers: separately stored outputs, initial process variables, compact streamed output and full state for API/history views.'],
       ['server/src/engine/types.ts', 'Types shared by the engine, palettes and studio: Sutra document (nodes with descriptions, edges with label and condition), activity definition (fields, ports, output hint, design checks, execute), step settings, execution context and step result (port, output, wait, reply, call, result, stop).'],
     ],
   },
@@ -121,6 +129,8 @@ const FILES: Group[] = [
       ['server/src/sso.ts', 'Single sign-on for people with OpenID Connect: authorization code with PKCE, state and nonce; the ID token checked against the provider keys (JWKS), issuer and audience; accounts found by the provider subject, created or linked only when allowed; roles from groups.'],
       ['server/src/auth.ts', 'Studio sign-in: the first visit creates the administrator, sessions are signed cookies, and changing requests need the X-Sutra header (a cross-site form cannot send it).'],
       ['server/src/gateway/gateway.ts', 'The gateway: HTTP and HTTPS listeners for deployed REST and SOAP services and MCP endpoints, WSDL publishing, policy checks, run start with the caller\'s traceparent, and waiting for the reply step (also when another engine runs it).'],
+      ['server/src/gateway/rest.ts', 'REST body decoding and response serialization, kept apart from listener and routing lifecycle.'],
+      ['server/src/gateway/soap.ts', 'SOAP envelopes, faults, XML rendering and WSDL generation, kept apart from listener and routing lifecycle.'],
       ['server/src/gateway/agents.ts', 'Published agents on the gateway: chat page, chat API, jobs and the chat button script; OpenAI-compatible models and chat completions (plain and streamed); the ask_<name> MCP tool; A2A agent card, message/send and tasks/get. Answers within the agent time, else a job id.'],
       ['server/src/gateway/apps.ts', 'Gateway management: apps with scopes and plans, API keys (stored as hashes), OAuth2 client credentials tokens, plan limits counted in the database for the whole cluster, the firewall, the request log, traffic statistics and OpenAPI for the deployed services.'],
       ['server/src/gateway/websocket.ts', 'WebSocket services on the gateway: upgrades through the firewall and the API security policy (token or key in the query for browsers, CORS origins), a run per message in order per connection, size and schema checks, pings, and an outbox table so a step on any engine reaches a connection held by another.'],
@@ -372,6 +382,7 @@ const SETTINGS: [string, string, string][] = [
   ['SUTRA_CAN_LEAD', '1', '0: this engine never becomes the cluster leader (timers, listeners, recovery); for machines that cannot reach the folders that folder triggers watch.'],
   ['SUTRA_PUBLIC_URL', '(none)', 'The studio address as people reach it behind a proxy, for the single sign-on redirect address. Empty: taken from each request.'],
   ['SUTRA_PG_ASYNC', '1', '0 runs the engine through the synchronous PostgreSQL connection as before 1.7.6 (a fallback; slower).'],
+  ['SUTRA_PG_NOTIFY', '1', 'PostgreSQL LISTEN/NOTIFY wakes idle engines for committed queue work. 0 disables the hint; durable polling always remains enabled.'],
   ['SUTRA_MASTER_KEY', 'key file', 'Vault key, base64 of 32 bytes. Must be the same on every engine of a cluster.'],
   ['SUTRA_ADMIN_TOKEN', '(none)', 'Bearer token for the CLI, CI and release activities on remote engines. Acts as an administrator.'],
   ['SUTRA_DEPLOY_DIR', '(none)', 'Folder of .sutra packages deployed at start (containers, headless engines).'],
@@ -460,6 +471,31 @@ ${tw(['Address', 'What answers'], [
   ['<code>:8080</code>, <code>:8443</code>', 'Gateway: deployed REST and SOAP services, <code>/mcp</code> and MCP server paths, ACME challenges'],
 ].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join(''))}`);
 
+sec('engine-inside', 'Inside the engine', `
+${DIAGRAMS.engine}
+<p>The 1.9 engine is split by responsibility so a change to queueing, an activity, an operator command or a database transition can be reviewed without reading the whole runner. <code>engine.ts</code> is the public façade and composition root; it does not expose the internal services to callers.</p>
+${tw(['File', 'Responsibility', 'Does not decide'], [
+  ['<code>engine.ts</code>', 'Registers activities, starts and drains the durable and in-memory engines, starts runs, composes the services, and orchestrates complete, fail, route and settle.', 'How a task is claimed or how an activity implementation runs.'],
+  ['<code>scheduler.ts</code>', 'Polls and wakes the queue, atomically claims due tasks by priority in batches, observes the worker limit, and dispatches each claim.', 'Business routing or step results.'],
+  ['<code>executor.ts</code>', 'Builds the mapping context, resolves variables and secrets, enforces abort and time limits, executes loops and streamed emits, and hands the result to complete or fail.', 'Durable transition SQL.'],
+  ['<code>transitions.ts</code>', 'Shared atomic helpers for fenced updates, state and log changes, run/output commits, cancellation of open tasks, and routing scope.', 'Which activity to execute.'],
+  ['<code>run-store.ts</code>', 'Loads runs and separately stored outputs and owns the claim fence. An old owner receives <code>StaleStep</code> and cannot change the row.', 'Scheduling policy.'],
+  ['<code>waits.ts</code>', 'Keeps process-local reply and finish callbacks, notifies live views, and checks the durable run row when another engine completes it.', 'The durable status itself.'],
+  ['<code>operator.ts</code>', 'Implements cancel, approval decisions, resubmit, debug controls, queued-run promotion and run-time limits.', 'Normal activity execution.'],
+  ['<code>state.ts</code>', 'Pure run-state and output helpers: initial variables, output parsing, compact streamed output and API/history views.', 'I/O or database ownership.'],
+  ['<code>types.ts</code>', 'Contracts shared by the engine, palettes and studio: Sutras, nodes, edges, activity fields, execution context and step results.', 'Runtime behavior.'],
+  ['<code>queue-notify.ts</code>', 'Owns the PostgreSQL listener connection, reconnects after failure and turns notifications into coalesced scheduler wakes.', 'Queue correctness; notifications are hints only.'],
+].map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join(''))}
+<h3 id="engine-bus">The internal queue bus</h3>
+<p>The engine bus is deliberately a <strong>durable database queue with a fast wake-up signal</strong>, not a second message broker. The <code>tasks</code> table is the source of truth. Starting or routing a run inserts a pending task in the same transaction as the run checkpoint. PostgreSQL transactions use the main-thread <code>pg.Pool</code>; each transaction keeps one checked-out connection and takes the appropriate advisory per-run lock. The claim counter is increased every time a task is claimed and is included in every completion fence.</p>
+<ol>
+<li>A transaction commits a new pending task. A database trigger calls <code>pg_notify('sutraflow_queue', '')</code> only after that transaction commits.</li>
+<li>Every worker engine has one dedicated <code>LISTEN sutraflow_queue</code> connection. A notification coalesces into <code>scheduler.wake()</code>; it does not carry the task or assign it to an engine.</li>
+<li>Free slots race through the atomic claim statement. PostgreSQL <code>SKIP LOCKED</code> lets engines take different rows instead of waiting behind one claim.</li>
+<li>Periodic polling always continues. It covers a lost notification, listener reconnect, work that becomes due after a retry delay, and SQLite, which has no <code>LISTEN/NOTIFY</code>.</li>
+</ol>
+<p>This design keeps one recovery model: after a restart or network interruption the engine reads durable rows and needs no replay log held by another service. Notifications reduce idle latency and database polling traffic without being trusted for delivery. Set <code>SUTRA_PG_NOTIFY=0</code> to test or operate with polling alone.</p>`);
+
 sec('lifecycle', 'How a run works', `
 ${DIAGRAMS.lifecycle}
 <ol>
@@ -467,7 +503,7 @@ ${DIAGRAMS.lifecycle}
 <li><strong>Queue.</strong> A deployed Sutra tuned with <em>Runs at once</em> starts extra runs as <code>queued</code>; they move to running, oldest first, when one of its runs ends (and the leader checks on each beat).</li>
 <li><strong>Claim.</strong> A free worker slot claims the next due task, highest Sutra priority first, with one atomic statement: <code>update tasks set status='running', owner=? where id = (select ... where status='pending' and not_before &lt;= now order by priority desc, id limit 1) and status='pending' returning *</code>. Two engines can never claim the same task.</li>
 <li><strong>Run the activity.</strong> The engine resolves the step\'s settings (templates, formulas, Project and Sengine variables, secrets) and its Input mapping, then calls the activity\'s <code>execute</code> with a context (logging, secrets, abort signal, time limit). Loop settings run it once per item of a list, or again while a condition holds, and collect the results.</li>
-<li><strong>Checkpoint.</strong> In one transaction the engine stores the step\'s output, marks the task done, and inserts tasks for the next steps. A crash before the commit leaves the task as it was; after the commit the next steps exist. Nothing is kept in memory between steps.</li>
+<li><strong>Checkpoint.</strong> In one transaction the engine stores the step\'s output, marks the task done, and inserts tasks for the next steps. A crash before the commit leaves the durable task unfinished; the activity may therefore run again after recovery. A crash after the commit finds the completed transition and its next tasks. The claim fence makes the durable transition apply once even if an old worker returns late. Nothing required for continuation is kept only in memory between steps.</li>
 <li><strong>Route.</strong> The step\'s result names a port (out, error, ok, problems, approved, rejected...). Each connection from that port carries a live token or a skip token according to its condition. A merge waits for a token on every incoming connection.</li>
 <li><strong>Finish.</strong> When no tasks remain the run is done; a failure with no error path fails the run; End and stop options (this branch, Sutra success, Sutra error) finish early. The run\'s status, duration and steps go to metrics, traces and logs.</li>
 </ol>
@@ -553,7 +589,8 @@ sec('triggers', 'Timers, listeners and channels', `
 
 sec('storage', 'Storage', `
 ${DIAGRAMS.storage}
-<p>All code reads and writes through <code>q</code> and <code>tx</code> in <code>db.ts</code>. The default backend is SQLite built into Node (<code>node:sqlite</code>), in <code>data/sutra.db</code>, with WAL and a busy timeout so several engines on one host can share the file. With <code>SUTRA_DB=postgres://...</code> the same calls go to PostgreSQL: a worker thread (<code>pgworker.ts</code>) holds the connection, and the caller waits on a SharedArrayBuffer with <code>Atomics.wait</code>, so the storage API stays synchronous like SQLite\'s. Each write transaction takes a PostgreSQL advisory lock, giving the same one-writer guarantee as SQLite. The tests run the whole suite again on PGlite (PostgreSQL compiled to WebAssembly) to keep both backends equal.</p>
+<p>The default backend is SQLite built into Node (<code>node:sqlite</code>), in <code>data/sutra.db</code>, with WAL and a busy timeout. The administrative and low-frequency paths use <code>q</code> and <code>tx</code> in <code>db.ts</code>. With PostgreSQL those compatibility calls go through <code>pgworker.ts</code>, whose worker thread owns a connection while the caller waits on a SharedArrayBuffer.</p>
+<p>The engine hot path is different: <code>asyncdb.ts</code> gives claim, complete, fail and settle truly asynchronous calls. On PostgreSQL it uses a main-thread <code>pg.Pool</code>, lets many independent runs have database work in flight, carries one pooled connection through each transaction, and discards a broken checked-out connection. SQLite and PGlite implement the same asynchronous interface over their existing connection. Advisory locks are keyed by run or queue operation, so transitions of one run are ordered while different runs proceed concurrently. The tests run the suite on SQLite and again on PGlite, with focused tests against a real PostgreSQL server.</p>
 <h3 id="tables">Tables</h3>
 ${tw(['Table', 'Holds', 'Columns'], tables.map(t => `<tr id="tbl-${t.name}"><td><code>${t.name}</code></td><td>${TABLE_TEXT[t.name] || ''}</td><td class="cols">${t.cols.map(c => esc(c)).join(', ')}</td></tr>`).join(''))}`);
 
@@ -561,15 +598,31 @@ sec('cluster', 'Clusters: several engines', `
 ${DIAGRAMS.cluster}
 <p>Engines that share one database form a cluster. No engine talks to another directly; the database is the only meeting point.</p>
 <ul>
-<li><strong>Work sharing.</strong> Every engine claims tasks with the atomic update above, so each step runs exactly once, on whichever engine has a free slot.</li>
+<li><strong>Work sharing.</strong> Every engine claims tasks with the atomic update above, so only one live claim owns a task at a time. A crash can make the activity execute again, so activities that call outside systems should use an idempotency key when the system supports one; the fenced database checkpoint itself applies once.</li>
 <li><strong>Heartbeat.</strong> Each engine updates its <code>engines</code> row every <code>SUTRA_HEARTBEAT_MS</code> with its active steps and draining flag. An engine silent for three beats is dead.</li>
 <li><strong>Leader.</strong> One engine holds the <code>leader</code> lease (renewed each beat, valid for three). It runs timers, listeners, recovery and housekeeping. If it stops renewing, another engine takes the lease.</li>
-<li><strong>Recovery.</strong> The leader puts tasks owned by dead engines back to pending; they run again elsewhere.</li>
+<li><strong>Recovery.</strong> The leader puts tasks owned by dead engines back to pending. A new claim increases the task\'s claim number; a late completion from the former owner fails its fence and changes nothing.</li>
 <li><strong>Deploy propagation.</strong> A deploy, connection or project change raises a generation number in settings; every engine compares it on each beat and reloads its routes (and the leader its timers and listeners).</li>
 <li><strong>Locks.</strong> The <code>leases</code> table also gives short cluster-wide locks, such as the deploy-folder lock so replicas starting together deploy a package once.</li>
 <li><strong>Studio in a cluster.</strong> A studio with <code>SUTRA_WORKERS=0</code> edits and deploys; the engines run.</li>
 </ul>
-<p>Limits: PostgreSQL writes are serialised by the advisory lock, which favours safety over write throughput; bus listeners run on the leader only.</p>`);
+<h3 id="leader-failover">Leader failure, switch and return</h3>
+${DIAGRAMS.failover}
+<ol>
+<li><strong>Normal operation.</strong> The leader renews the database lease on every beat. Only it owns timers, folder/mailbox/Drive/broker listeners, orphan recovery, run promotion, alerts and housekeeping. All engines can serve gateway requests and execute claimed tasks.</li>
+<li><strong>Failure detection.</strong> If the process, host or network path disappears, it cannot renew the lease or heartbeat. Existing database rows do not disappear. After three heartbeat intervals the lease is eligible for takeover and the engine is considered dead.</li>
+<li><strong>Takeover.</strong> Exactly one eligible engine updates the lease. Its <code>becameLeader</code> hook rebuilds timers and listeners and begins one-only maintenance. It resets running tasks owned by dead engines to pending; the next owner gets a higher claim number. Folder-trigger checkpoints in <code>file_listener_state</code> and <code>file_listener_files</code> let the new leader distinguish the first baseline from files that arrived, changed or failed under the old leader.</li>
+<li><strong>Former leader returns.</strong> On its next successful heartbeat it reads and tries to renew the authoritative lease. If another engine owns a valid lease, its <code>lostLeader</code> hook stops timers and listeners. It remains a normal engine: its gateway can serve requests and its worker slots can claim ordinary tasks, but it does not run leader-only work. It may lead again only after the current lease is released or expires and it wins a later database update.</li>
+</ol>
+<h3 id="failure-modes">What happens during other failures</h3>
+<ul>
+<li><strong>Activity error or timeout.</strong> The executor aborts at the limit. The task retries after its configured delay, routes through its connected error output, invokes the Sutra Error handler, or fails the run in that order.</li>
+<li><strong>Engine dies while an activity runs.</strong> Its uncommitted transition is absent. The leader requeues the task after the heartbeat threshold; the activity can run again, while fencing prevents the old claim from committing later.</li>
+<li><strong>PostgreSQL is unavailable.</strong> No engine can safely claim, start or checkpoint durable work. Heartbeat errors are contained rather than terminating the process; broken pool clients are discarded, the notification listener reconnects, and periodic polling resumes from the durable queue after the database returns. A process keeps its last local leader state while the answer is unknown, but it cannot acquire or prove a new lease without PostgreSQL.</li>
+<li><strong>Notification is lost.</strong> Nothing is lost from the queue. The next periodic poll sees the pending row.</li>
+<li><strong>Graceful drain.</strong> Readiness turns off and leadership is released immediately. Current steps get the drain window; unfinished claims return to pending for another engine.</li>
+</ul>
+<p>The guarantee is <strong>durable at-least-once activity execution with exactly-once fenced state transitions</strong>, not exactly-once effects in an outside system. This is why request IDs, object keys or other idempotency controls should be passed to external APIs for non-repeatable operations.</p>`);
 
 sec('deploy', 'Releases and deployment', `
 ${DIAGRAMS.release}
@@ -606,7 +659,7 @@ ${tw(['Strategy', 'How', 'When'], [
 ].map(([a, b, c]) => `<tr><td><strong>${a}</strong></td><td>${b}</td><td>${c}</td></tr>`).join(''))}
 <h3 id="headless">Headless engines</h3>
 <p>With <code>SUTRA_MODE=engine</code> the designer is not served and its API is closed. The engine keeps the Admin Console at <code>/admin</code> for its users, and the API the console and automation need: packages, deployed Sutras and their versions, runs, approvals, secrets, engines, access and audit, for signed-in users and API tokens. There is no first-start page; the first administrator is added on the server with <code>sutra user add</code>. Health, readiness and metrics stay available.</p>
-<h3 id="console">Admin Console</h3>
+<h3 id="console">Admin Console on headless engines</h3>
 <p>The console (<code>web/admin</code>, <code>server/src/console.ts</code>) is for what is deployed. Operators see the overview, start and stop deployed Sutras (their triggers stop starting runs while they stay deployed), look into runs and resubmit them, decide approvals, deploy an earlier version or roll a project back to an earlier package, and drain any engine: the request is stored on the engine\'s row and that engine drains on its next heartbeat. Administrators manage users, system accounts with their API tokens, roles, and read the audit log. Every page shows only the projects the signed-in account may see, and every action is checked again by the server.</p>
 <h3 id="docker">Docker</h3>
 <p>The Dockerfile builds in one stage and runs in a slim Node 24 image as the <code>node</code> user under tini, with a health check on <code>/ready</code>. Defaults: headless mode, data in <code>/data</code>, packages from <code>/deploy</code>, admin on 0.0.0.0, JSON logs. <code>docker-compose.yml</code> runs one server; <code>docker-compose.cluster.yml</code> runs PostgreSQL, a studio and two engines with a shared <code>SUTRA_MASTER_KEY</code> and a 45-second stop grace period.</p>`);
@@ -670,7 +723,7 @@ ${tw(['Palette', 'Activities'], pals.map(p => `<tr id="pal-${p.id}"><td><strong>
 <li>Runs with step data, approvals, cancel and resubmit; Releases with packages and history; Server &amp; APIs with gateway, TLS, policies and MCP endpoints.</li>
 <li>New project: empty, with chosen samples, from chosen Sutras of a package file, or a copy of chosen Sutras of a project, as drafts.</li>
 </ul>
-<h3 id="console-features">Admin Console</h3>
+<h3 id="console-features">Admin Console features</h3>
 <ul>
 <li>Overview of engines, deployed Sutras, runs of the last day, failures, approvals, work queue and gateway certificate.</li>
 <li>Applications: start, stop and restart deployed Sutras; runs with step results, resubmit and cancel; earlier versions; package history and roll back; per-Sutra tuning.</li>
@@ -682,7 +735,7 @@ ${tw(['Palette', 'Activities'], pals.map(p => `<tr id="pal-${p.id}"><td><strong>
 
 sec('files', 'What each file does', `
 <p>Line counts are from this build. Use the search box to find a file by name or by what it does.</p>
-${FILES.map(g => `<h3 id="files-${g.id}">${esc(g.title)}</h3><p>${g.intro}</p>${tw(['File', 'Lines', 'What it does'], g.files.map(([f, d]) => `<tr id="f-${slug(f)}" class="frow"><td><code>${esc(f)}</code></td><td class="num">${fs.existsSync(path.join(root, f)) ? lines(f) : ''}</td><td>${d}</td></tr>`).join(''))}`).join('')}`);
+${FILES.map(g => `<h3 id="files-${g.id}">Files: ${esc(g.title)}</h3><p>${g.intro}</p>${tw(['File', 'Lines', 'What it does'], g.files.map(([f, d]) => `<tr id="f-${slug(f)}" class="frow"><td><code>${esc(f)}</code></td><td class="num">${fs.existsSync(path.join(root, f)) ? lines(f) : ''}</td><td>${d}</td></tr>`).join(''))}`).join('')}`);
 
 sec('api', 'Admin API routes', `
 <p>${api.count} routes in <code>server/src/api.ts</code>. People use them through the studio with a session; automation sends the admin token. Headless engines allow only packages, the projects list, rollback, runs, secrets, meta and engine routes.</p>

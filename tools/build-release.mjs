@@ -3,7 +3,7 @@
  * SutraFlow
  * Copyright (c) 2026-27 Surya Partap Singh
  * Developer: Surya Partap Singh | Website: MixAgile.com
- * File version: 1.7.5
+ * File version: 1.9.0
  * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
  * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
  * SPDX-License-Identifier: AGPL-3.0-only
@@ -13,8 +13,9 @@
  *   release/sutraflow-<version>-windows.zip
  *   release/sutraflow-<version>-linux.tar.gz   (the launcher and shell scripts executable)
  * each with a .sha256 file. They hold the built server and web pages, the launcher, the
- * documentation, samples, deployment templates, the runtime tools and the licences; not the source
- * and not node_modules. On the server, `sutraflow setup` installs the runtime packages
+ * user and operations guides, runtime samples, deployment templates, the database migration tool
+ * and the licences; not source, tests, benchmarks, development tools or node_modules. On the
+ * server, `sutraflow setup` installs the runtime packages
  * (npm ci --omit=dev).
  *
  *   npm run build && npm run guide && npm run architecture && node tools/build-release.mjs
@@ -41,14 +42,15 @@ if (!fs.existsSync(path.join(HOME, 'dist', 'server', 'main.js'))) fail('Build fi
 for (const f of ['RELEASE-NOTES.md', 'LICENSE', 'docs/sutraflow-user-guide.html', 'docs/sutraflow-architecture.html']) if (!fs.existsSync(path.join(HOME, f))) fail(`Missing ${f}`);
 if (!fs.readFileSync(path.join(HOME, 'RELEASE-NOTES.md'), 'utf8').includes(VERSION)) fail(`RELEASE-NOTES.md does not describe ${VERSION}`);
 
-/** What the release holds: folders (all files below) and single files. */
-const FOLDERS = ['dist', 'bin', 'samples', 'deploy', 'docs'];
+/** What the release holds: compiled/runtime folders and explicitly selected guides. */
+const FOLDERS = ['dist', 'bin', 'samples', 'deploy', 'docs/guide-images'];
 const FILES = [
-  'package.json', 'package-lock.json', 'LICENSE', 'COMMERCIAL-LICENSE.md', 'CLA.md', 'CONTRIBUTING.md', 'SECURITY.md', 'README.md', 'RELEASE-NOTES.md',
+  'package.json', 'package-lock.json', 'LICENSE', 'COMMERCIAL-LICENSE.md', 'SECURITY.md', 'README.md', 'RELEASE-NOTES.md',
   'sutraflow.env.example',
-  'tools/migrate-to-postgres.mjs', 'tools/migrate-to-postgres.cmd', 'tools/migrate-to-postgres.sh', 'tools/loadtest.mjs', 'tools/bigfiletest.mjs',
+  'docs/sutraflow-user-guide.html', 'docs/sutraflow-architecture.html', 'docs/deployment.md', 'docs/architecture.md',
+  'tools/migrate-to-postgres.mjs', 'tools/migrate-to-postgres.cmd', 'tools/migrate-to-postgres.sh',
 ];
-const skip = rel => /(^|\/)(node_modules|\.git)(\/|$)/.test(rel) || /\.(log|map)$/.test(rel) || rel.startsWith('docs/benchmarks/profiles');
+const skip = rel => /(^|\/)(node_modules|\.git)(\/|$)/.test(rel) || /\.(log|map)$/.test(rel);
 
 const files = [];
 const walk = rel => {
@@ -59,10 +61,17 @@ const walk = rel => {
 };
 FOLDERS.forEach(walk);
 for (const f of FILES) if (fs.existsSync(path.join(HOME, f))) files.push(f); else fail(`Missing ${f}`);
+const forbidden = files.filter(rel => /^(test|server\/src|web\/src|web\/admin|web\/approvals|docs\/benchmarks)(\/|$)/.test(rel)
+  || /^tools\/(?!migrate-to-postgres\.(mjs|cmd|sh)$)/.test(rel));
+if (forbidden.length) fail(`Non-runtime files in the release: ${forbidden.join(', ')}`);
 
 // package.json for a release: no build or test scripts that need the source, no development packages.
 const { devDependencies: _dev, ...relPkg } = { ...pkg, scripts: { start: 'node --disable-warning=ExperimentalWarning dist/server/main.js' } };
 const entries = files.map(rel => [`${top}/${rel}`, rel === 'package.json' ? Buffer.from(JSON.stringify(relPkg, null, 2) + '\n') : fs.readFileSync(path.join(HOME, rel))]);
+if (process.argv.includes('--check')) {
+  console.log(`Release manifest is valid: ${files.length} runtime and guide files`);
+  process.exit(0);
+}
 
 /** Files that run as programs on Linux and macOS. */
 const executable = name => name.endsWith('/bin/sutraflow') || name.endsWith('.sh');

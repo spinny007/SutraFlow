@@ -1,15 +1,39 @@
-# SutraFlow 1.8.1 release notes
+# SutraFlow 1.9.0 release notes
 
-Released 2026-10-20. Copyright (c) 2026-27 Surya Partap Singh, [MixAgile.com](https://mixagile.com). Licensed under the GNU Affero General Public License v3.0 only (AGPL-3.0-only); a commercial licence is available, see `COMMERCIAL-LICENSE.md`.
+Released 2026-10-21. Copyright (c) 2026-27 Surya Partap Singh, [MixAgile.com](https://mixagile.com). Licensed under the GNU Affero General Public License v3.0 only (AGPL-3.0-only); a commercial licence is available, see `COMMERCIAL-LICENSE.md`.
 
 | Download | For |
 |---|---|
-| `sutraflow-1.8.1-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
-| `sutraflow-1.8.1-linux.tar.gz` | Linux (x64 or arm64); also macOS |
+| `sutraflow-1.9.0-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
+| `sutraflow-1.9.0-linux.tar.gz` | Linux (x64 or arm64); also macOS |
 
 Each comes with a `.sha256` file to check the download.
 
-## What is new in 1.8.1
+## What is new in 1.9.0
+
+- **Engine internals separated without changing workflow behavior**: `engine.ts` is the public façade; activity execution, queue scheduling, atomic transition primitives, run storage and fencing, waits, operator actions, state helpers and shared types have focused modules under `server/src/engine/`.
+- **Gateway protocols separated**: REST decoding and responses and SOAP envelopes, faults and WSDL generation now have focused handlers while `gateway.ts` owns listener, routing and policy lifecycle.
+- **Regression-gated extraction**: each boundary was typechecked and exercised by its focused engine, storage, streaming, process, approval, gateway, WebSocket, observability and tuning suites before the complete suite and soak rehearsal.
+- **Scheduler correction found by the refactor**: a deliberate Steps at once value of zero continues to pause claiming, preserving deterministic priority and tuning behavior.
+- **PostgreSQL queue wake-ups**: engines use `LISTEN/NOTIFY` by default for committed queue work while retaining durable polling as the correctness fallback; `SUTRA_PG_NOTIFY=0` disables the hint.
+- **Database-outage recovery**: a heartbeat database error no longer terminates the engine, broken checked-out pool connections are discarded, and the notification listener reconnects. After the database returns, the authoritative lease decides whether a former leader still leads.
+- **Leader-safe file triggers**: handled file size and modification time are checkpointed in `file_listener_state` and `file_listener_files`, so a new leader does not baseline away a file that arrived or failed under the former leader.
+- **Failure model documented**: the architecture page now maps every engine module and explains the durable queue bus, claim fencing, leader election, takeover, recovered leaders, and the at-least-once boundary for activity effects.
+- **Additive database upgrade**: 1.9.0 creates the two file-listener checkpoint tables above. Existing tables and data are unchanged; upgrade all engines together so every possible leader uses the same listener behavior.
+
+## 1.9.0 release gate
+
+The complete regression suite passed: 348 tests, 330 passed, 18 skipped and 0 failed. The final PostgreSQL soak then ran for one hour with a studio and two engines and passed all 26 checks:
+
+- 72,434 runs completed; no run remained open and no single-pass step ran twice.
+- The planned engine kill and 20-second database outage both recovered. Including those fault windows, 26 of 70,885 requests failed (0.037%). PostgreSQL reported no deadlock, crash or panic.
+- Folder CSV files of 10 MB and 50 MB, a 20 MB SFTP CSV and a 30 MB FTP CSV were streamed with every row counted. A 40 MB RAG document completed in 67 seconds and stored 57,125 passages.
+- Final-period p95 latency was 217 ms for REST orders, 16 ms for in-memory REST, 230 ms for signed REST and SOAP UsernameToken, 249 ms for encrypted X.509 SOAP, 222 ms for WebSocket echo and 221 ms for MCP tools.
+- Typical per-minute event-loop p99 was 35 ms on all three processes. Peak memory during the large-file phase was 536 MB, 528 MB and 441 MB; final memory was 284 MB, 279 MB and 287 MB.
+
+The detailed report is in `docs/benchmarks/soak-1.9.0-1h-pass` in the source repository. Test and benchmark material is not included in the Windows or Linux runtime packages.
+
+## In 1.8.1
 
 - **Delete with a typed confirmation**: Sutras, connections, schemas and service descriptors, one by one or a folder with everything in it. The dialog lists what still uses the item, and Delete stays off until `delete` is typed. A deployed Sutra (or a folder holding one) is refused until it is undeployed. The project's configuration cannot be deleted.
 - **Rename and the item menu**: the ⋯ button or a right-click on an item renames, moves or deletes it; on a folder it also deletes the folder with its contents (removing a folder still keeps them).
@@ -130,14 +154,14 @@ What went wrong before, and what happens now. Most were found by the soak test (
 1. Install Node.js 24 from nodejs.org (or with nvm-windows) and open a new PowerShell window.
 2. Check the download:
    ```powershell
-   (Get-FileHash .\sutraflow-1.8.0-windows.zip -Algorithm SHA256).Hash.ToLower()
-   Get-Content .\sutraflow-1.8.0-windows.zip.sha256
+   (Get-FileHash .\sutraflow-1.9.0-windows.zip -Algorithm SHA256).Hash.ToLower()
+   Get-Content .\sutraflow-1.9.0-windows.zip.sha256
    ```
    The two values must match.
 3. Unpack it, for example to `C:\SutraFlow`:
    ```powershell
-   Expand-Archive .\sutraflow-1.8.0-windows.zip -DestinationPath C:\SutraFlow
-   cd C:\SutraFlow\sutraflow-1.8.0
+   Expand-Archive .\sutraflow-1.9.0-windows.zip -DestinationPath C:\SutraFlow
+   cd C:\SutraFlow\sutraflow-1.9.0
    ```
 4. Install the runtime packages and make the settings file:
    ```powershell
@@ -157,13 +181,13 @@ What went wrong before, and what happens now. Most were found by the soak test (
 1. Install Node.js 24 (from your distribution, NodeSource or nvm).
 2. Check the download:
    ```sh
-   sha256sum -c sutraflow-1.8.0-linux.tar.gz.sha256
+   sha256sum -c sutraflow-1.9.0-linux.tar.gz.sha256
    ```
 3. Unpack it, for example to `/opt`:
    ```sh
    sudo mkdir -p /opt/sutraflow && sudo chown "$USER" /opt/sutraflow
-   tar -xzf sutraflow-1.8.0-linux.tar.gz -C /opt/sutraflow
-   cd /opt/sutraflow/sutraflow-1.8.0
+   tar -xzf sutraflow-1.9.0-linux.tar.gz -C /opt/sutraflow
+   cd /opt/sutraflow/sutraflow-1.9.0
    ```
 4. Install the runtime packages and make the settings file:
    ```sh
@@ -182,22 +206,22 @@ What went wrong before, and what happens now. Most were found by the soak test (
 
 1. Back up: the data folder with `master.key`, and for PostgreSQL a `pg_dump` of the database.
 2. Stop gracefully: `sutraflow stop all` (running steps finish first).
-3. Unpack 1.8.1 into a new folder beside the old one. Copy `sutraflow.env` from the old folder; keep `SUTRA_DATA_DIR` pointing at the same data folder (or copy the folder).
-4. Run `sutraflow setup`, then `sutraflow start`. The database is upgraded at start (from 1.8.0: nothing changes; from 1.7.6: the tables `run_outputs`, `replay_guard`, `ws_connections` and `ws_outbox`, and the columns `users.idp_subject` and `engines.can_lead`; from 1.7.5 also `tasks.claim`; from 1.6 also the new indexes and the memory table tables); nothing is removed. Runs that were open go on.
+3. Unpack 1.9.0 into a new folder beside the old one. Copy `sutraflow.env` from the old folder; keep `SUTRA_DATA_DIR` pointing at the same data folder (or copy the folder).
+4. Run `sutraflow setup`, then `sutraflow start`. The database is upgraded at start (from 1.8.x: the additive `file_listener_state` and `file_listener_files` tables; from 1.7.6: also `run_outputs`, `replay_guard`, `ws_connections`, `ws_outbox`, `users.idp_subject` and `engines.can_lead`; from 1.7.5 also `tasks.claim`; from 1.6 also the new indexes and memory-table tables); nothing is removed. Runs that were open go on.
 5. In a cluster, **upgrade every engine before starting any of them again**: 1.8.0 engines keep step outputs apart from the run state, which older engines do not read, so the two must not share a database.
 6. On PostgreSQL, check `max_connections`: each engine opens its pool (`SUTRA_PG_POOL`, at most 20 by default) plus one connection. Engines × (pool + 1) must fit, with room for other clients.
 7. Optional: *Admin Console → Engines → This machine → Apply recommended tuning*.
 
-To go back to 1.8.0, stop 1.8.1 and start 1.8.0 again (same database). To go back to 1.7.x, stop SutraFlow and restore the backup taken before the upgrade: runs that 1.8.0 ran keep their outputs in a table older versions do not read.
+To go back to 1.8.1, stop 1.9.0 and start 1.8.1 again (same database). To go back to 1.7.x, stop SutraFlow and restore the backup taken before the upgrade: runs that 1.8.0 or later ran keep their outputs in a table older versions do not read.
 
 ## Docker
 
-The images are built from the source repository (`Dockerfile`, `docker-compose.yml`): `docker build -t sutraflow:1.8.0 .`. The release archives are for installs without Docker.
+The images are built from the source repository (`Dockerfile`, `docker-compose.yml`): `docker build -t sutraflow:1.9.0 .`. The release archives are for installs without Docker.
 
 ## Known limitations
 
 - MySQL and the other single-connection stores run one transaction at a time per engine; use PostgreSQL for the highest throughput.
-- Engines poll the work queue (waking them through LISTEN/NOTIFY is on the roadmap).
+- Engines retain periodic queue polling even with PostgreSQL notifications enabled; polling is the durable fallback for lost notifications, reconnects and delayed retries.
 - The soak test ran with PostgreSQL on the same machine; a run with the database on its own machine is on the roadmap.
 - SOAP replies are not encrypted for the caller; SAML sign-on for people is not offered (OpenID Connect is).
 - A Sutra that runs in memory loses the runs open at a restart, and cannot wait (approvals, Call Sutra with wait).

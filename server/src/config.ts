@@ -2,7 +2,7 @@
  * SutraFlow
  * Copyright (c) 2026-27 Surya Partap Singh
  * Developer: Surya Partap Singh | Website: MixAgile.com
- * File version: 1.7.5
+ * File version: 1.9.0
  * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
  * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
  * SPDX-License-Identifier: AGPL-3.0-only
@@ -42,6 +42,8 @@ export const config = {
   keepAliveMs: Math.max(1000, Number(process.env.SUTRA_KEEPALIVE_MS || 65000)),
   /** How often an idle engine looks for due steps in the queue, in ms. */
   pollMs: Math.max(20, Number(process.env.SUTRA_POLL_MS || profileFor().pollMs)),
+  /** PostgreSQL LISTEN/NOTIFY wakes idle engines; polling always remains the durable fallback. */
+  pgNotify: process.env.SUTRA_PG_NOTIFY !== '0',
   /** Safety cap on steps per run (protects against accidental loops). */
   maxStepsPerRun: Number(process.env.SUTRA_MAX_STEPS || 10000),
   /** Default time a REST/SOAP caller waits for the flow to reply. */

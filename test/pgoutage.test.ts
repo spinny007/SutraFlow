@@ -19,6 +19,9 @@ import { testEnv, node, edge } from './helpers.js';
  */
 const ADMIN = process.env.SUTRA_TEST_PG_URL;
 testEnv(20890);
+// Make the cluster heartbeat cross the outage several times. This regresses an uncaught timer
+// exception that used to terminate the whole engine when PostgreSQL disappeared between beats.
+process.env.SUTRA_HEARTBEAT_MS = '400';
 let dbName = '', adminClient: any, cut: (ms: number) => Promise<void> = async () => {}, stopProxy = () => {};
 if (ADMIN) {
   const { default: pg } = await import('pg');
@@ -68,6 +71,7 @@ test('after PostgreSQL was cut for a few seconds, the engine reads, writes and f
   const run = async () => { const id = await engine.startRun({ doc: { name: 'Outage', nodes: [s, m], edges: [edge(s, m)] } }); return [id, await engine.waitFor(id, 30000)]; };
   assert.equal((await run())[1], 'done');
   await cut(3000);
+  assert.equal((await srv.admin.inject({ method: 'GET', url: '/health' })).statusCode, 200, 'the server survives heartbeat failures during the cut');
   // The first statements after the cut may fail (their connection is gone); then the engine is back.
   let ok = false;
   for (let i = 0; i < 60 && !ok; i++) { try { q.get('select 1 as x'); ok = true; } catch { await new Promise(r => setTimeout(r, 500)); } }

@@ -2,14 +2,14 @@
 
 **A visual integration designer and engine.** Drag activities onto a canvas, map data between steps, test and debug, and deploy *Sutras* (integration processes) that run as REST, SOAP and MCP services, on schedules, or on events: files, queues, mail, cloud drives, chat messages and more.
 
-![Version](https://img.shields.io/badge/version-1.8.1-2f6fd8)
+![Version](https://img.shields.io/badge/version-1.9.0-2f6fd8)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Commercial licence available](https://img.shields.io/badge/commercial%20licence-available-orange)](COMMERCIAL-LICENSE.md)
 ![Node.js](https://img.shields.io/badge/node-%E2%89%A5%2022.13-339933?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-7-3178c6?logo=typescript&logoColor=white)
 ![Database](https://img.shields.io/badge/database-SQLite%20%7C%20PostgreSQL-4169e1?logo=postgresql&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Docker-555)
-![Tests](https://img.shields.io/badge/tests-340-success)
+![Tests](https://img.shields.io/badge/tests-342-success)
 
 ![The SutraFlow designer: palettes, canvas and the step inspector](docs/guide-images/designer.jpg)
 
@@ -78,7 +78,7 @@ The `sutraflow` launcher is the one place for every command on Windows and Linux
 
 | Document | What it covers |
 |---|---|
-| [User guide](docs/sutraflow-user-guide.html) (also at `/guide`) | 44 chapters: every screen, every activity with its settings, connection types, functions; designing Sutras, how the engine runs them, AI, RAG step by step, the API gateway, releases and CI/CD, PostgreSQL, the data tables, production. |
+| [User guide](docs/sutraflow-user-guide.html) (also at `/guide`) | 50 chapters: every screen, every activity with its settings, connection types, functions; designing Sutras, how the engine runs them, AI, RAG step by step, the API gateway, releases and CI/CD, PostgreSQL, the data tables, production. |
 | [Architecture](docs/sutraflow-architecture.html) (also at `/architecture`) | How SutraFlow works inside: every source file, every table, every API route, the settings, with diagrams. |
 | [Deployment](docs/deployment.md) | Packages, the `sutra` command, headless engines, Docker, clusters, monitoring. |
 | [Engine design](docs/architecture.md) | Runs, tasks, checkpoints and the cluster in short. |
@@ -129,7 +129,7 @@ Full pipelines for GitHub Actions, GitLab CI, Azure DevOps and Jenkins are in th
 ## Running in production
 
 - **Headless engines**: `SUTRA_MODE=engine`, with the Admin Console and the gateway, packages from `SUTRA_DEPLOY_DIR` at start.
-- **PostgreSQL and clusters**: move from SQLite with one button (Admin Console → Database → Migrate now) or `tools/migrate-to-postgres`; then add engines on the same database. Work is shared, each step runs once, a leader runs timers and listeners with failover, and a stopped engine's steps are finished by another.
+- **PostgreSQL and clusters**: move from SQLite with one button (Admin Console → Database → Migrate now) or `tools/migrate-to-postgres`; then add engines on the same database. Work is shared, one live claim owns a task, claim fencing rejects stale completions, a leader runs timers and listeners with failover, and a stopped engine's unfinished work is recovered by another.
 - **Docker**: `Dockerfile`, `docker-compose.yml` (studio and engine) and `docker-compose.cluster.yml` (PostgreSQL, a studio and two engines).
 - **Monitoring**: `/health`, `/ready`, Prometheus `/metrics`, OpenTelemetry traces, JSON logs, alert rules (failed runs, slow runs, waiting approvals, gateway errors, engines, certificates) to email, webhooks or Sutras.
 - **Sign-in on production servers**: secrets per server vault; Azure managed identities or service principals; OAuth accounts connected with `sutra connect` or a refresh token secret.
@@ -192,7 +192,7 @@ test/                   the test suites
 
 ## Testing
 
-`npm test` discovers 275 tests. A normal local run executes 262 and skips 13 that need external infrastructure. The suite uses real child processes and network calls for HTTP, SOAP with WS-Security, TLS, SMTP, AMQP 1.0, SFTP and FTP servers, SQLite, Python, multi-process clusters, the launcher and the command-line tool. It also runs every in-process suite again through PostgreSQL compatibility using PGlite.
+The suite has 342 declared tests; parameterized database coverage makes a fully configured run report 348 cases. It uses real child processes and network calls for HTTP, SOAP with WS-Security, TLS, SMTP, AMQP 1.0, SFTP and FTP servers, SQLite, Python, multi-process clusters, the launcher and the command-line tool. It also runs every in-process suite again through PostgreSQL compatibility using PGlite.
 
 The process-level tests exercise the central durability claims directly: engines share work without duplicating completed steps, elect and replace a leader, recover work from an engine killed mid-step, hand work back during drain, persist approvals and long waits without holding a worker, and deploy and call packages through both local and remote CLI paths.
 
@@ -212,9 +212,10 @@ Tested against stand-in services that answer like the real ones, but not yet aga
 
 ## Roadmap
 
-- **Waking engines on new work**: PostgreSQL can notify engines when work arrives (LISTEN/NOTIFY), instead of them polling the queue.
 - **A 24-hour soak with PostgreSQL on its own machine**: the soak tool (`tools/soak.mjs`) runs unattended for any length and writes its own report; the next run moves the database to a separate machine.
 - **Encrypted SOAP replies** for callers who send their certificate, and SAML sign-on for people.
+
+Done in 1.9.0: the durable engine was separated into a public façade, activity executor, queue scheduler, atomic transition primitives, run store, waiter registry, operator boundary, state helpers and shared types; REST and SOAP handlers were separated from the gateway lifecycle. PostgreSQL notifications wake the durable queue while polling remains the fallback. Two additive tables checkpoint file listeners across leader changes. Every increment was regression-tested before the full suite and soak rehearsal.
 
 Done in 1.8.1: deleting with a typed confirmation (one item or a folder with its contents; deployed Sutras refused; Git follows at once), renaming from the item menu or a right-click, a name in the New Sutra dialog, and Approval Center links in the designer and the Admin Console.
 

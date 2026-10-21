@@ -1,0 +1,58 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.9.0
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import type { AsyncStore, TxBody, TxQ } from '../asyncdb.js';
+import { now } from '../db.js';
+import { effectiveVariables, engineVariableValues } from '../projects.js';
+import { OUTPUT_UPSERT_SQL, type LoadedRun, type RunState } from './state.js';
+import type { RunStore, TaskRow } from './run-store.js';
+
+export interface TransitionTurn { queued: number }
+
+/** Atomic persistence primitives shared by complete, fail, route and settle transitions. */
+export class Transitions {
+  constructor(private readonly store: () => AsyncStore, private readonly runs: () => RunStore, private readonly abort: (taskId: number) => void) {}
+
+  async commitRun<T = any>(tx: TxBody, runId: string, sql: string, args: any[], output?: [string, any]): Promise<T | undefined> {
+    if (!output) return tx.commitWith<T>(sql, ...args);
+    const values = [runId, output[0], output[1] === undefined ? null : JSON.stringify(output[1])];
+    if (this.store().backend === 'postgres') return tx.commitWith<T>(`with o as (${OUTPUT_UPSERT_SQL}) ${sql}`, ...values, ...args);
+    await tx.run(OUTPUT_UPSERT_SQL, ...values);
+    return tx.commitWith<T>(sql, ...args);
+  }
+
+  fenced(tx: TxQ, task: TaskRow, set: string, ...args: any[]) { return this.runs().fenced(tx, task, set, ...args); }
+  async saveState(tx: TxQ, runId: string, state: RunState) { await tx.run('update runs set state = ? where id = ?', JSON.stringify(state), runId); }
+
+  async appendLogs(tx: TxQ, runId: string, logs: RunState['logs']) {
+    const row = await tx.get<{ state: string }>('select state from runs where id = ?', runId);
+    if (!row) return;
+    const state = JSON.parse(row.state) as RunState;
+    state.logs.push(...logs);
+    await this.saveState(tx, runId, state);
+  }
+
+  async cancelOpen(tx: TxQ, runId: string) {
+    await tx.run(`update tasks set status = 'cancelled', finished_at = ? where run_id = ? and status in ('pending', 'waiting', 'paused', 'queued')`, now(), runId);
+    for (const row of await tx.all<{ id: number }>(`select id from tasks where run_id = ? and status = 'running'`, runId)) {
+      await tx.run(`update tasks set status = 'cancelled', finished_at = ? where id = ?`, now(), row.id);
+      this.abort(Number(row.id));
+    }
+  }
+
+  conditionScope(run: LoadedRun, outputs: Record<string, any>, state: RunState, output: any) {
+    const triggerName = run.doc.nodes.find(node => node.id === run.row.trigger_node)?.name;
+    return { input: output, output, nodes: outputs, vars: state.vars, gv: effectiveVariables(run.row.project_id ?? null).values, ev: engineVariableValues(), trigger: triggerName ? outputs[triggerName] : undefined, now: new Date().toISOString() };
+  }
+}
+
+export function capOutput(value: unknown) {
+  const json = JSON.stringify(value === undefined ? null : value);
+  return json.length > 1_000_000 ? JSON.stringify({ truncated: true, preview: json.slice(0, 20000) }) : json;
+}

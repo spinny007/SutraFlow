@@ -1,0 +1,101 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.9.0
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import type { AsyncStore } from '../asyncdb.js';
+import type { ReplyPayload } from './types.js';
+import type { RunState } from './state.js';
+
+interface ReplyHandle {
+  resolve(result: ReplyPayload & { runId: string; failed?: boolean; error?: string }): void;
+  done: boolean;
+}
+
+/** Process-local callers waiting for durable runs that any engine in the cluster may finish. */
+export class Waits {
+  readonly listeners = new Set<(runId: string) => void>();
+  private readonly replies = new Map<string, ReplyHandle>();
+  private readonly finishers = new Map<string, (status: string, runId: string) => void>();
+  private checking = false;
+
+  constructor(private readonly store: () => AsyncStore) {}
+  registerReply(runId: string, resolve: ReplyHandle['resolve']) { this.replies.set(runId, { resolve, done: false }); }
+  registerFinish(runId: string, finish: (status: string, runId: string) => void) { this.finishers.set(runId, finish); }
+  forget(runId: string) { this.replies.delete(runId); this.finishers.delete(runId); }
+
+  resolveReply(runId: string, state: RunState, error?: string | null) {
+    const handle = this.replies.get(runId);
+    if (handle && !handle.done) {
+      handle.done = true;
+      if (state.reply) handle.resolve({ ...state.reply, runId });
+      else handle.resolve(state.failed
+        ? { runId, failed: true, error: error || 'Sutra failed', status: 500, body: { error: error || 'Sutra failed' } }
+        : { runId, status: 200, body: state.last ?? null });
+    }
+    this.replies.delete(runId);
+  }
+
+  sendReply(runId: string, reply: ReplyPayload) {
+    const handle = this.replies.get(runId);
+    if (handle && !handle.done) { handle.done = true; handle.resolve({ ...reply, runId }); }
+  }
+
+  cancelReply(runId: string) {
+    const handle = this.replies.get(runId);
+    if (handle && !handle.done) handle.resolve({ runId, failed: true, error: 'Run cancelled', status: 503, body: { error: 'Run cancelled' } });
+    this.replies.delete(runId);
+  }
+
+  finish(runId: string, status: string) {
+    const finish = this.finishers.get(runId);
+    this.finishers.delete(runId);
+    if (finish) { try { finish(status, runId); } catch { /* listener owns acknowledgement errors */ } }
+  }
+
+  notify(runId: string) {
+    for (const listener of this.listeners) { try { listener(runId); } catch { /* listeners never break runs */ } }
+  }
+
+  async checkRemote() {
+    const ids = [...new Set([...this.replies.keys(), ...this.finishers.keys()])];
+    if (!ids.length || this.checking) return;
+    this.checking = true;
+    try {
+      for (const runId of ids) {
+        const row = await this.store().get<{ status: string; state: string; error: string | null }>('select status, state, error from runs where id = ?', runId);
+        if (!row) continue;
+        const state = JSON.parse(row.state) as RunState;
+        const handle = this.replies.get(runId);
+        if (handle && !handle.done && state.reply) { handle.done = true; handle.resolve({ ...state.reply, runId }); this.replies.delete(runId); }
+        if (['done', 'failed', 'cancelled'].includes(row.status)) {
+          if (this.replies.has(runId)) this.resolveReply(runId, state, row.error);
+          if (this.finishers.has(runId)) this.finish(runId, row.status);
+        }
+      }
+    } catch (error: any) {
+      console.error('Checking waiting callers failed:', error?.message || error);
+    } finally { this.checking = false; }
+  }
+
+  waitFor(runId: string, timeoutMs = 30000, untilWaiting = false): Promise<string> {
+    return new Promise((resolve, reject) => {
+      let over = false;
+      const check = async () => {
+        if (over) return;
+        const row = await this.store().get<{ status: string }>('select status from runs where id = ?', runId).catch(() => undefined);
+        if (!over && row && (!['running', 'waiting', 'paused', 'queued'].includes(row.status) || (untilWaiting && (row.status === 'waiting' || row.status === 'paused')))) {
+          over = true; this.listeners.delete(listener); clearTimeout(timeout); clearInterval(poll); resolve(row.status);
+        }
+      };
+      const listener = (id: string) => { if (id === runId) void check(); };
+      const timeout = setTimeout(() => { over = true; this.listeners.delete(listener); clearInterval(poll); reject(new Error('Timed out waiting for run')); }, timeoutMs);
+      const poll = setInterval(() => void check(), 500);
+      poll.unref?.(); this.listeners.add(listener); void check();
+    });
+  }
+}

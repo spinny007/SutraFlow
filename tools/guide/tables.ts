@@ -33,6 +33,8 @@ export const TABLE_TEXT: Record<string, string> = {
   package_deployments: 'Package history per project: version, checksum, who deployed it, the report and the package itself (for rollback).',
   engines: 'Engines of the cluster: host, process, mode, version, heartbeat, workers, active steps, draining.',
   leases: 'Cluster-wide locks with an expiry: the leader lease and the deploy-folder lock.',
+  file_listener_state: 'One row per deployed file trigger after its first folder baseline, shared by leaders so a takeover does not baseline the folder again.',
+  file_listener_files: 'The last durably handled size and modification time of each path for a file trigger, shared across leader changes.',
   alert_channels: 'Where alerts go: email (an SMTP connection and addresses), webhook (address and signing secret name), or a Sutra.',
   alert_rules: 'What to watch: kind, settings, severity, channels, on or off, tell when resolved, reminder minutes.',
   alerts: 'Alerts: rule, severity, state (firing, acknowledged, resolved), message and details, times, who acknowledged, what was sent where.',
@@ -66,7 +68,7 @@ export const TABLE_TEXT: Record<string, string> = {
 export const TABLE_GROUPS: [string, string[]][] = [
   ['Projects and Sutras', ['projects', 'flows', 'flow_versions', 'deployments', 'resources', 'schemas', 'folders', 'counters', 'mem_rows', 'mem_meta']],
   ['Runs and the work queue', ['runs', 'tasks', 'run_outputs', 'approval_votes']],
-  ['Releases and the cluster', ['package_deployments', 'engines', 'leases']],
+  ['Releases and the cluster', ['package_deployments', 'engines', 'leases', 'file_listener_state', 'file_listener_files']],
   ['People, access and audit', ['users', 'roles', 'grants', 'api_tokens', 'audit']],
   ['Vault and server settings', ['secrets', 'settings']],
   ['API gateway', ['gw_apps', 'gw_keys', 'gw_plans', 'gw_usage', 'gw_requests', 'replay_guard', 'ws_connections', 'ws_outbox']],
@@ -92,6 +94,7 @@ export const TABLE_NOTES: Record<string, { encrypted?: string; grows?: string }>
   alerts: { grows: 'one row per alert; resolved alerts follow the run retention' },
   flow_versions: { grows: 'one row per published version; kept for rollback' },
   package_deployments: { grows: 'one row per package deployment, with the package; kept for rollback' },
+  file_listener_files: { grows: 'one row per path currently known by each file trigger; removed when the path is removed' },
   ai_knowledge: { grows: 'one row per passage of built-in knowledge bases' },
 };
 

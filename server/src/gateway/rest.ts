@@ -1,0 +1,39 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 1.9.0
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import type { FastifyReply } from 'fastify';
+import { XMLBuilder } from 'fast-xml-parser';
+import type { ReplyPayload } from '../engine/types.js';
+import { PolicyError } from '../security/inbound.js';
+import { xmlParser } from '../security/outbound.js';
+
+const xmlBuilder = new XMLBuilder({ ignoreAttributes: false, attributeNamePrefix: '@_', suppressEmptyNode: true });
+
+export function parseRestBody(raw: string, contentType: string) {
+  if (!raw) return null;
+  if (contentType.includes('json')) {
+    try { return JSON.parse(raw); } catch { throw new PolicyError(400, 'Request body is not valid JSON'); }
+  }
+  if (contentType.includes('xml')) {
+    try { return xmlParser.parse(raw); } catch { throw new PolicyError(400, 'Request body is not valid XML'); }
+  }
+  if (contentType.includes('x-www-form-urlencoded')) return Object.fromEntries(new URLSearchParams(raw));
+  return raw;
+}
+
+export function sendRest(reply: FastifyReply, result: ReplyPayload & { failed?: boolean; error?: string; runId?: string }) {
+  if (result.runId) reply.header('x-sutra-run', result.runId);
+  for (const [key, value] of Object.entries(result.headers || {})) reply.header(key, value);
+  const contentType = result.contentType || (typeof result.body === 'string' ? 'text/plain; charset=utf-8' : 'application/json');
+  reply.code(result.status || 200).type(contentType);
+  if (result.body == null) return reply.send(result.status === 204 ? undefined : '');
+  if (typeof result.body === 'string') return reply.send(result.body);
+  if (contentType.includes('xml')) return reply.send(xmlBuilder.build(result.body));
+  return reply.send(JSON.stringify(result.body));
+}

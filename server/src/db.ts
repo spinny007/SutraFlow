@@ -2,7 +2,7 @@
  * SutraFlow
  * Copyright (c) 2026-27 Surya Partap Singh
  * Developer: Surya Partap Singh | Website: MixAgile.com
- * File version: 1.7.5
+ * File version: 1.9.0
  * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
  * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
  * SPDX-License-Identifier: AGPL-3.0-only
@@ -181,6 +181,8 @@ create table if not exists resources(
 create table if not exists secrets(
   name text primary key, iv text not null, tag text not null, data text not null, updated_at text not null);
 create table if not exists settings(key text primary key, value text not null);
+create table if not exists file_listener_state(flow_id text not null, node_id text not null, primary key(flow_id, node_id));
+create table if not exists file_listener_files(flow_id text not null, node_id text not null, path text not null, size integer not null, mtime text not null, primary key(flow_id, node_id, path));
 create table if not exists projects(
   id text primary key, name text not null, description text, config text not null, updated_at text not null);
 create table if not exists schemas(
@@ -357,6 +359,19 @@ function migrate(d = getDb()) {
   d.exec('create index if not exists tasks_run_status on tasks(run_id, status)');
   d.exec('create index if not exists tasks_claim on tasks(status, priority desc, id, not_before)');
   d.exec('create index if not exists tasks_status on tasks(id, status)');
+  // A committed pending task wakes every PostgreSQL engine. This is only a latency hint: schedulers
+  // still poll the durable tasks table, so disconnects and lost notifications cannot lose work.
+  if (d.kind === 'postgres' && /^postgres(ql)?:/.test(config.dbUrl)) {
+    const hasWake = d.get("select 1 as x from pg_trigger where tgname = 'sutraflow_tasks_wake' and not tgisinternal", []);
+    if (!hasWake) d.exec(`
+      create function sutraflow_notify_queue() returns trigger language plpgsql as $$
+      begin
+        if new.status = 'pending' then perform pg_notify('sutraflow_queue', ''); end if;
+        return new;
+      end $$;
+      create trigger sutraflow_tasks_wake after insert or update of status, not_before on tasks
+      for each row execute function sutraflow_notify_queue()`);
+  }
   // Everything created before projects existed goes into a default project.
   const hasOrphans = d.get('select 1 as x from flows where project_id is null union select 1 as x from resources where project_id is null limit 1', []);
   let def = d.get(`select id from projects order by updated_at limit 1`, []) as any;

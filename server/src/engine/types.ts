@@ -31,6 +31,7 @@ export interface StepSettings {
   loopDelayMs?: number;
   loopMax?: number;
 }
+export interface DebugState { stepping: boolean; breakpoints: string[] }
 export interface FlowEdge {
   id: string;
   from: string;

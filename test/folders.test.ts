@@ -29,6 +29,7 @@ const { addSamples, SAMPLES, SAMPLE_SUTRAS, fileSamples } = await import('../ser
 const { buildPackage, importPackage } = await import('../server/src/packages.js');
 const folders = await import('../server/src/folders.js');
 const schemas = await import('../server/src/schemas.js');
+const listeners = await import('../server/src/listeners.js');
 const require = createRequire(import.meta.url);
 
 let srv: Awaited<ReturnType<typeof boot>>;
@@ -125,6 +126,46 @@ const run = async (doc: any, projectId: string, input?: any) => {
   const st = runState(r.id)!;
   return { status: r.status, error: r.error, out: st.outputs, logs: (st.logs || []).map((l: any) => `${l.level} ${l.msg}`).join('\n') };
 };
+
+test('a watched file is retried when its run cannot be saved on the first poll', async () => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-watch-retry-'));
+  const pid = projects.saveProject({ name: 'File retry', config: { variables: [] } }).id;
+  const trigger = { id: 'watch', type: 'fileTrigger', name: 'Watch', x: 0, y: 0, config: { folder, pattern: '*.csv', events: ['added'], pollSeconds: 1, stableSeconds: 0, format: 'do not read' } };
+  const log = { id: 'log', type: 'log', name: 'Log', x: 200, y: 0, config: { message: '{{input.name}}', level: 'info' } };
+  const f = flows.saveFlow(undefined, { name: 'Retry watched file', nodes: [trigger, log], edges: [{ id: 'e', source: 'watch', sourceHandle: 'out', target: 'log' }] }, pid);
+  const original = engine.startRun.bind(engine);
+  let attempts = 0;
+  try {
+    flows.deploy(f.id);
+    const key = `${f.id}:watch`;
+    for (let i = 0; i < 30 && !listeners.listenerStatus.has(key); i++) await new Promise(r => setTimeout(r, 100));
+    // First the database rejects durable creation; then a durable run fails; the third try succeeds.
+    (engine as any).startRun = async (args: any) => {
+      if (args.source === 'fileTrigger' && attempts++ === 0) throw new Error('database temporarily unavailable');
+      if (args.source === 'fileTrigger' && attempts === 2) {
+        queueMicrotask(() => args.onFinish?.('failed', 'simulated-failed-run'));
+        return 'simulated-failed-run';
+      }
+      return original(args);
+    };
+    fs.writeFileSync(path.join(folder, 'orders.csv'), 'id\n1\n');
+    for (let i = 0; i < 40 && attempts < 1; i++) await new Promise(r => setTimeout(r, 100));
+    assert.equal(attempts, 1, 'the first leader tried the new file');
+    await listeners.rebuildListeners(); // a different leader restores the durable checkpoint
+    let count = 0;
+    for (let i = 0; i < 60; i++) {
+      count = Number(q.get<any>('select count(*) n from runs where flow_id = ?', f.id)?.n || 0);
+      if (count) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    assert.equal(attempts >= 3, true, 'the unchanged file was offered again after failed creation and a failed run');
+    assert.equal(count, 1, 'the retry created one durable run');
+  } finally {
+    (engine as any).startRun = original;
+    flows.undeploy(f.id);
+    fs.rmSync(folder, { recursive: true, force: true });
+  }
+});
 
 test('folders: make, move Sutras, rename, remove (nothing deleted), and travel in packages', () => {
   const pid = projects.saveProject({ name: 'Folders', config: { variables: [] } }).id;

@@ -36,8 +36,8 @@ export const CHAPTERS: Chapter[] = [
 <p class="h">From a release (servers)</p>
 <p>Each release comes as <code>sutraflow-&lt;version&gt;-windows.zip</code> and <code>sutraflow-&lt;version&gt;-linux.tar.gz</code>, already built, each with a <code>.sha256</code> file; offline archives with the packages inside are there for servers without access to the npm registry. <code>RELEASE-NOTES.md</code> in the archive has the steps for each system and for upgrades.</p>
 <ol>
-<li>Check the download: <code>sha256sum -c sutraflow-1.8.1-linux.tar.gz.sha256</code>, or on Windows <code>Get-FileHash sutraflow-1.8.1-windows.zip -Algorithm SHA256</code> against the <code>.sha256</code> file.</li>
-<li>Unpack it: <code>tar -xzf sutraflow-1.8.1-linux.tar.gz -C /opt/sutraflow</code>, or <code>Expand-Archive sutraflow-1.8.1-windows.zip C:\\SutraFlow</code>.</li>
+<li>Check the download: <code>sha256sum -c sutraflow-1.9.0-linux.tar.gz.sha256</code>, or on Windows <code>Get-FileHash sutraflow-1.9.0-windows.zip -Algorithm SHA256</code> against the <code>.sha256</code> file.</li>
+<li>Unpack it: <code>tar -xzf sutraflow-1.9.0-linux.tar.gz -C /opt/sutraflow</code>, or <code>Expand-Archive sutraflow-1.9.0-windows.zip C:\\SutraFlow</code>.</li>
 <li>In the unpacked folder: <code>bin/sutraflow setup</code> (Windows: <code>bin\\sutraflow.cmd setup</code>) installs the runtime packages and makes <code>sutraflow.env</code>.</li>
 <li><code>bin/sutraflow start</code>, then open <code>http://127.0.0.1:4800</code> and create the administrator account.</li>
 </ol>
@@ -1596,7 +1596,7 @@ stages:
   post { success { archiveArtifacts 'release.zip' } }
 }</pre>
 <p class="h">Container images</p>
-<p>For immutable production, bake the release into an engine image: <code>FROM sutraflow:1.8.1</code>, <code>COPY release.zip /deploy/</code>, and start it with <code>SUTRA_MODE=engine SUTRA_DEPLOY_DIR=/deploy</code>; the engine deploys every package in the folder at start. A new release is a new image.</p>
+<p>For immutable production, bake the release into an engine image: <code>FROM sutraflow:1.9.0</code>, <code>COPY release.zip /deploy/</code>, and start it with <code>SUTRA_MODE=engine SUTRA_DEPLOY_DIR=/deploy</code>; the engine deploys every package in the folder at start. A new release is a new image.</p>
 [[tip:Good practice|One zip, many environments: build once, deploy the same artifact to UAT and production.<br>Give each environment its own system account and token, with Deploy on the project only.<br>Let the pipeline fail on <code>sutra check</code> before anything changes; keep rollback one command away.<br>Store the zip with the pipeline run: it is the record of exactly what went live.]]`,
   },
   {
@@ -1852,9 +1852,9 @@ tools/migrate-to-postgres.sh --url "postgres://sutra:password@db.example.com:543
 <p class="h">Headless engines</p>
 <p>The same program started with <code>SUTRA_MODE=engine</code> runs Sutras without the studio: no designer pages and no editing. It keeps <code>/health</code>, <code>/ready</code> and <code>/metrics</code>, the Admin Console at <code>/admin</code> for its users, and an automation API for API tokens (the admin token or system account tokens). Packages in <code>SUTRA_DEPLOY_DIR</code> are deployed when it starts; a package that cannot be deployed stops the start.</p>
 <p class="h">Docker</p>
-<pre>docker build -t sutraflow:1.8.1 .
+<pre>docker build -t sutraflow:1.9.0 .
 docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=... \\
-           -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:1.8.1</pre>
+           -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:1.9.0</pre>
 <p>The image runs as a non-root user, checks its own health, and writes JSON logs. <code>docker-compose.yml</code> has a studio and an engine; <code>docker-compose.cluster.yml</code> has PostgreSQL, a studio and two engines.</p>
 <p class="h">Clusters</p>
 <p>Several engines share one database (<code>SUTRA_DB=postgres://...</code>), each with its own <code>SUTRA_ENGINE_ID</code> and all with the same <code>SUTRA_MASTER_KEY</code>.</p>
@@ -1870,6 +1870,7 @@ docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=...
 <li>Keep <em>engines &times; (pool + 1)</em>, plus the studio and your own tools, under PostgreSQL's <code>max_connections</code> (100 by default). Four engines with a pool of 8 use 36.</li>
 <li><code>/metrics</code> shows the pool: <code>sutra_db_pool_connections</code>, <code>sutra_db_pool_waiting</code> (transactions waiting for a connection), <code>sutra_db_pool_acquire_ms</code> and <code>sutra_db_transaction_ms</code>. Waiting that grows means the pool is too small for the work; transactions that grow mean the database is the limit.</li>
 <li><code>SUTRA_PG_ASYNC=0</code> runs the engine through one synchronous connection as before 1.7.6: a fallback, several times slower.</li>
+<li>PostgreSQL <code>LISTEN/NOTIFY</code> wakes engines when committed work enters the durable queue. Polling remains active as the correctness fallback. Set <code>SUTRA_PG_NOTIFY=0</code> only to disable the wake hint.</li>
 </ul>
 <p><strong>Engine names.</strong> <code>SUTRA_ENGINE_ID</code> is an engine's identity in the cluster: the steps it runs record it as their owner, and the leader uses it to hand a stopped engine's steps to the others. Without it, the launcher uses the computer name (<code>vm-west-01-studio</code>, <code>vm-west-01-engine</code>); the Laragon set-up names its engines <code>laragon</code> and <code>laragon-engine</code>. Set it once per engine (in <code>sutraflow.env</code>: <code>STUDIO_ENGINE_ID</code>, <code>ENGINE_ENGINE_ID</code>) and keep it. For the name people see, use <strong>Rename</strong> in <em>Admin Console &rarr; Engines</em> or <code>sutra engines name &lt;id&gt; "Azure West Europe 1"</code>: a display name that can change at any time.</p>
 <ul>
@@ -1934,6 +1935,7 @@ docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=...
 <tr><td><code>SUTRA_ADMIN_TOKEN</code></td><td>Optional; the same long token lets one release pipeline talk to every engine.</td></tr>
 <tr><td><code>SUTRA_CAN_LEAD</code></td><td><code>0</code> on engines that must never lead, for example machines that cannot reach the folders the folder triggers watch. At least one process must be able to lead.</td></tr>
 <tr><td><code>SUTRA_PG_POOL</code></td><td>Optional: connections per engine. Keep <em>processes &times; (pool + 1)</em> under PostgreSQL's <code>max_connections</code>.</td></tr>
+<tr><td><code>SUTRA_PG_NOTIFY</code></td><td>PostgreSQL queue wake hint (default on). Set to <code>0</code> to use polling alone; polling always remains enabled.</td></tr>
 </tbody></table>
 <p class="h">Before you start: PostgreSQL</p>
 <ol>
