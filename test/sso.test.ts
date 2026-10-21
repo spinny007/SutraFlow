@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { generateKeyPair, exportJWK, SignJWT } from 'jose';
-import { testEnv, port } from './helpers.js';
+import { testEnv } from './helpers.js';
 
 /**
  * Single sign-on with OpenID Connect (sso.ts) against a stand-in identity provider: discovery, keys
@@ -24,8 +24,7 @@ const { setSecret } = await import('../server/src/secrets.js');
 const { q } = await import('../server/src/db.js');
 const projects = await import('../server/src/projects.js');
 
-const idpPort = port(20710);
-const issuer = `http://127.0.0.1:${idpPort}`;
+let issuer = '';
 const { publicKey, privateKey } = await generateKeyPair('RS256');
 const other = await generateKeyPair('RS256');
 const jwk = { ...(await exportJWK(publicKey)), kid: 'k1', alg: 'RS256', use: 'sig' };
@@ -57,7 +56,17 @@ const idp = http.createServer(async (req, res) => {
 let srv: Awaited<ReturnType<typeof boot>>;
 let admin = '';
 before(async () => {
-  await new Promise<void>(r => idp.listen(idpPort, '127.0.0.1', r));
+  await new Promise<void>((resolve, reject) => {
+    const failed = (error: Error) => reject(error);
+    idp.once('error', failed);
+    idp.listen(0, '127.0.0.1', () => {
+      idp.off('error', failed);
+      const address = idp.address();
+      if (!address || typeof address === 'string') return reject(new Error('The test identity provider did not get a TCP port'));
+      issuer = `http://127.0.0.1:${address.port}`;
+      resolve();
+    });
+  });
   srv = await boot({ listenAdmin: false });
   const r = await srv.admin.inject({ method: 'POST', url: '/api/auth/setup', payload: { username: 'root', password: 'Sso-admin-pass-1' }, headers: { 'x-sutra': '1' } });
   admin = String(r.headers['set-cookie']).split(';')[0];
