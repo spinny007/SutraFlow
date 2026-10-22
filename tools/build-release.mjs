@@ -3,7 +3,7 @@
  * SutraFlow
  * Copyright (c) 2026-27 Surya Partap Singh
  * Developer: Surya Partap Singh | Website: MixAgile.com
- * File version: 1.9.1
+ * File version: 2.0.0
  * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
  * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
  * SPDX-License-Identifier: AGPL-3.0-only
@@ -29,21 +29,24 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import os from 'node:os';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HOME = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(HOME, 'package.json'), 'utf8'));
+const vendorPolicy = JSON.parse(fs.readFileSync(path.join(HOME, 'vendor', 'vendor-lock.json'), 'utf8'));
 const VERSION = pkg.version;
 const top = `sutraflow-${VERSION}`;
 const fail = m => { console.error(m); process.exit(1); };
 
 if (!fs.existsSync(path.join(HOME, 'dist', 'server', 'main.js'))) fail('Build first: npm run build');
+execFileSync(process.execPath, [path.join(HOME, 'tools', 'check-vendor.mjs')], { cwd: HOME, stdio: 'inherit' });
 for (const f of ['RELEASE-NOTES.md', 'LICENSE', 'docs/sutraflow-user-guide.html', 'docs/sutraflow-architecture.html']) if (!fs.existsSync(path.join(HOME, f))) fail(`Missing ${f}`);
 if (!fs.readFileSync(path.join(HOME, 'RELEASE-NOTES.md'), 'utf8').includes(VERSION)) fail(`RELEASE-NOTES.md does not describe ${VERSION}`);
 
 /** What the release holds: compiled/runtime folders and explicitly selected guides. */
-const FOLDERS = ['dist', 'bin', 'samples', 'deploy', 'docs/guide-images'];
+const shippedVendors = Object.entries(vendorPolicy.packages).filter(([, rule]) => rule.ship).map(([name]) => `vendor/${name}`);
+const FOLDERS = ['dist', 'bin', 'samples', 'deploy', 'docs/guide-images', ...shippedVendors];
 const FILES = [
   'package.json', 'package-lock.json', 'LICENSE', 'COMMERCIAL-LICENSE.md', 'SECURITY.md', 'README.md', 'RELEASE-NOTES.md',
   'sutraflow.env.example',
@@ -131,6 +134,7 @@ if (process.argv.includes('--offline')) {
   try {
     fs.writeFileSync(path.join(stage, 'package.json'), JSON.stringify(relPkg, null, 2));
     fs.copyFileSync(path.join(HOME, 'package-lock.json'), path.join(stage, 'package-lock.json'));
+    fs.cpSync(path.join(HOME, 'vendor'), path.join(stage, 'vendor'), { recursive: true });
     execSync('npm ci --omit=dev --no-audit --no-fund', { cwd: stage, stdio: 'inherit' });
     const mods = [];
     const walkMods = rel => {

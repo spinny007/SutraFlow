@@ -10,8 +10,8 @@
 import crypto from 'node:crypto';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { asyncDatabase, poolFigures } from './asyncdb.js';
-import { setEngineName } from './cluster.js';
-import { allMemTables, memTable, reload, memClear, memStats, memRows, memPut, memDelete } from './memtables.js';
+import { setEngineName, bumpGatewayGen, bumpTlsGen, bumpDeployGen } from './cluster.js';
+import { allMemTables, memTable, reload, memClear, memStats, memRows, memPut, memDelete, memoryQuotas, saveMemoryQuotas, memoryUsage } from './memtables.js';
 import * as gitAccounts from './git/accounts.js';
 import * as gitWs from './git/workspaces.js';
 import { GIT_PROVIDERS } from './git/accounts.js';
@@ -45,7 +45,7 @@ import { apiRoutes as gatewayRoutes, refreshFirewall } from './gateway/gateway.j
 import { ENGINE_FIELDS, SUTRA_FIELDS, engineTuning, setEngineTuning, setSutraTuning, sutraTuning } from './tuning.js';
 import { machineInfo } from './sizing.js';
 import { gatewayStatus, getGatewaySettings, setGatewaySettings, listRoutes, startGateway, reloadTls } from './gateway/gateway.js';
-import { acmeStatus, certInfo, getTls, setTls, makeSelfSigned, storeCert, requestAcme } from './gateway/tls.js';
+import { getAcmeStatus, certInfo, getTls, setTls, makeSelfSigned, storeCert, requestAcme } from './gateway/tls.js';
 import { schedulerErrors } from './scheduler.js';
 import { config, version, rootDir } from './config.js';
 import * as projects from './projects.js';
@@ -126,6 +126,10 @@ loopDelay.enable();
 
 export async function buildAdmin(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, bodyLimit: 20 * 1024 * 1024, forceCloseConnections: 'idle', keepAliveTimeout: config.keepAliveMs });
+  // SAML identity providers deliver their response with the HTTP-POST binding.
+  app.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_req, body, done) => {
+    try { done(null, Object.fromEntries(new URLSearchParams(body as string))); } catch (e: any) { done(e); }
+  });
 
   // Stopping: the client closes this connection after the answer (see the gateway).
   app.addHook('onSend', async (_req, reply, payload) => { if (lifecycle.draining) reply.header('connection', 'close'); return payload; });
@@ -241,15 +245,16 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.get('/api/auth/sso/start', async (req: any, reply) => {
     try {
       const r = await startSignIn(ssoRedirect(req), req.query?.return);
-      // Lax: the provider sends the browser back from its own site, and the cookie must come along.
-      reply.header('set-cookie', `${SSO_COOKIE}=${r.cookie}; HttpOnly; SameSite=Lax; Path=/api/auth/sso; Max-Age=600${req.protocol === 'https' ? '; Secure' : ''}`);
+      // OIDC returns by GET and uses this signed, Lax cookie. SAML POST state is one-time server state,
+      // because browsers intentionally omit Lax cookies on cross-site POST callbacks.
+      if (r.cookie) reply.header('set-cookie', `${SSO_COOKIE}=${r.cookie}; HttpOnly; SameSite=Lax; Path=/api/auth/sso; Max-Age=600${req.protocol === 'https' ? '; Secure' : ''}`);
       return reply.redirect(r.url, 302);
     } catch (e: any) { reply.code(503); return ssoPage(reply, 'Single sign-on is not available', e.message); }
   });
-  app.get('/api/auth/sso/callback', async (req: any, reply) => {
+  const finishSso = async (req: any, reply: FastifyReply) => {
     reply.header('set-cookie', `${SSO_COOKIE}=; HttpOnly; SameSite=Lax; Path=/api/auth/sso; Max-Age=0`);
     try {
-      const r = await finishSignIn(req.query || {}, cookie(req, SSO_COOKIE));
+      const r = await finishSignIn(req.method === 'POST' ? (req.body || {}) : (req.query || {}), cookie(req, SSO_COOKIE));
       signInAudit(req, r.username, r.created ? 'Sign in with single sign-on (account created)' : 'Sign in with single sign-on', 'ok', 200);
       reply.header('set-cookie', `${COOKIE}=${auth.issue(r.username)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${12 * 3600}${req.protocol === 'https' ? '; Secure' : ''}`);
       // A page of this site moves on, so the Strict session cookie is sent from here on.
@@ -259,7 +264,9 @@ export async function buildAdmin(): Promise<FastifyInstance> {
       reply.code(e instanceof SsoError ? 401 : 502);
       return ssoPage(reply, 'Not signed in', e.message);
     }
-  });
+  };
+  app.get('/api/auth/sso/callback', finishSso);
+  app.post('/api/auth/sso/callback', finishSso);
   app.get('/api/access/sso', async (req: any) => ({ ...ssoSettings(), redirectUri: ssoRedirect(req) }));
   app.put('/api/access/sso', async (req: any) => { try { return saveSsoSettings(req.body || {}); } catch (e: any) { throw bad(e.message); } });
   app.post('/api/auth/setup', async (req: any, reply) => {
@@ -394,12 +401,34 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     const qs = req.query || {};
     return allMemTables().filter(t => (!qs.project || t.project === qs.project) && (!qs.find || t.name.toLowerCase().includes(String(qs.find).toLowerCase())) && (!qs.keep || (qs.keep === 'memory only') === !t.failsafe));
   });
+  app.get('/api/console/memory-quotas', async () => ({ quotas: memoryQuotas(), usage: memoryUsage() }));
+  app.put('/api/console/memory-quotas', async (req: any) => {
+    try { return { quotas: saveMemoryQuotas(req.body || {}), usage: memoryUsage() }; }
+    catch (e: any) { throw bad(e.message); }
+  });
+  // Tune a deployed table without reopening the designer. Its project and kind cannot be changed.
+  app.put('/api/console/memory/:id/config', async (req: any) => {
+    try {
+      const r = getResource(req.params.id);
+      if (!r || r.kind !== 'memoryTable') throw new Error('Memory table not found');
+      const allowed = ['key', 'source', 'database', 'loadSql', 'lookupSql', 'refresh', 'refreshMinutes', 'refreshCron', 'refreshTimezone', 'ttlSeconds', 'maxRows', 'maxMb', 'keep'];
+      const config = { ...r.config };
+      for (const k of allowed) if (Object.prototype.hasOwnProperty.call(req.body || {}, k)) config[k] = req.body[k];
+      if (config.source === 'database query') {
+        const db = getResource(String(config.database || ''));
+        if (!db || db.kind !== 'database' || db.project_id !== r.project_id) throw new Error('Choose a database connection from the same project');
+        if (!String(config.loadSql || '').trim()) throw new Error('A database-backed Memory table needs a load query');
+      }
+      if (config.refresh === 'cron') new (await import('croner')).Cron(String(config.refreshCron || ''), { timezone: String(config.refreshTimezone || 'UTC'), paused: true }).stop();
+      return saveResource({ ...r, config });
+    } catch (e: any) { throw bad(e.message); }
+  });
   // Hot reload: this engine loads again now, every other engine within the sync time.
   app.post('/api/console/memory/:id/reload', async (req: any) => { try { const t = await memTable(req.params.id); await reload(t, true); return memStats(t); } catch (e: any) { throw bad(e.message); } });
   app.get('/api/console/memory/:id/rows', async (req: any) => {
     try { const qs = req.query || {}; return memRows(await memTable(req.params.id), { find: qs.find, field: qs.field, value: qs.value, offset: Number(qs.offset) || 0, limit: Number(qs.limit) || 50 }); } catch (e: any) { throw bad(e.message); }
   });
-  // Change one value by hand (a rate, a code): saved like Memory put, so failsafe tables reach every engine.
+  // Change one cached value by hand: saved like Set Memory, so failsafe tables reach every engine.
   app.put('/api/console/memory/:id/rows', async (req: any) => {
     try {
       const t = await memTable(req.params.id);
@@ -494,8 +523,6 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     return f;
   });
   app.post('/api/projects/:id/ops/file', async (req: any) => projects.importOpsFile(req.params.id, req.body));
-  app.get('/api/projects/:id/runtime-variables', async (req: any) => projects.runtimeVariables(req.params.id));
-  app.delete('/api/projects/:id/runtime-variables', async (req: any) => { projects.clearRuntimeVariables(req.params.id); return { ok: true }; });
   app.get('/api/engine-variables', async () => projects.listEngineVariables());
   /** Adds the sample Sutras (For-Each mapping, loops, sub-Sutra, try / catch) to a project. */
   app.get('/api/samples', async () => SAMPLES);
@@ -627,13 +654,10 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     projects.setScriptsAllowed(!!req.body?.allowed);
     return { allowed: projects.scriptsAllowed() };
   });
-  app.get('/api/engine-variables/policy', async () => ({ sutrasMayChange: projects.sutrasMayChangeSengine() }));
-  app.put('/api/engine-variables/policy', async (req: any) => {
-    projects.setSutrasMayChangeSengine(!!req.body?.sutrasMayChange);
-    return { sutrasMayChange: projects.sutrasMayChangeSengine() };
-  });
   app.put('/api/engine-variables', async (req: any) => {
-    return projects.saveEngineVariables(Array.isArray(req.body) ? req.body : []);
+    const saved = projects.saveEngineVariables(Array.isArray(req.body) ? req.body : []);
+    bumpDeployGen();
+    return saved;
   });
   app.get('/api/projects/:id/log', async (req: any) => ({ ...tailLog(req.params.id, Math.min(2000, Number(req.query?.lines) || 200), { level: req.query?.level, q: req.query?.q, origin: req.query?.origin }), environment: config.environment }));
   /** Developers clear project logs and test runs on development and test servers; on production, only administrators. */
@@ -852,7 +876,7 @@ export async function buildAdmin(): Promise<FastifyInstance> {
 
   // ---------- server settings ----------
   app.get('/api/server', async () => ({
-    gateway: getGatewaySettings(), status: gatewayStatus, tls: getTls(), cert: certInfo(), acme: acmeStatus,
+    gateway: getGatewaySettings(), status: gatewayStatus, tls: getTls(), cert: certInfo(), acme: getAcmeStatus(),
     routes: listRoutes(), schedulerErrors, listeners: [...listenerStatus.values()],
     engine: {
       workers: engine.concurrency,
@@ -865,6 +889,7 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     const port = (v: any, name: string) => { const n = Number(v); if (!Number.isInteger(n) || n < 1 || n > 65535) throw bad(`${name} must be 1 to 65535`); return n; };
     setGatewaySettings({ host: String(b.host || '0.0.0.0'), httpPort: port(b.httpPort, 'HTTP port'), httpsPort: port(b.httpsPort, 'HTTPS port') });
     await startGateway();
+    bumpGatewayGen();
     return { status: gatewayStatus };
   });
   app.put('/api/server/tls', async (req: any) => {
@@ -875,12 +900,14 @@ export async function buildAdmin(): Promise<FastifyInstance> {
       domains: Array.isArray(b.domains) ? b.domains.map((d: string) => d.trim()).filter(Boolean) : undefined,
     } as any);
     await startGateway();
+    bumpTlsGen();
     return { status: gatewayStatus, cert: certInfo() };
   });
   app.post('/api/server/tls/self-signed', async () => {
     await makeSelfSigned(getTls().domains);
     setTls({ mode: 'selfSigned' });
     await startGateway();
+    bumpTlsGen();
     return { cert: certInfo(), status: gatewayStatus };
   });
   app.post('/api/server/tls/upload', async (req: any) => {
@@ -888,12 +915,13 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     storeCert(String(req.body.certPem), String(req.body.keyPem), 'uploaded');
     setTls({ mode: 'uploaded' });
     await startGateway();
+    bumpTlsGen();
     return { cert: certInfo(), status: gatewayStatus };
   });
   app.post('/api/server/tls/acme', async () => {
     setTls({ mode: 'acme' });
-    requestAcme(reloadTls).catch(() => {});
-    return { acme: acmeStatus };
+    requestAcme(() => { reloadTls(); bumpTlsGen(); }).catch(() => {});
+    return { acme: getAcmeStatus() };
   });
 
   // ---------- user guide (docs/sutraflow-user-guide.html, built by npm run guide) ----------

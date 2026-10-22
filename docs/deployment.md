@@ -246,7 +246,7 @@ Give the orchestrator more grace time than `SUTRA_DRAIN_MS` (compose: `stop_grac
 | `SUTRA_WORKERS` | by machine | Steps run at once (4 on 1 vCPU / 1 GB up to 32 on 8 cores); 0 = serve only |
 | `SUTRA_MEMORY_WORKERS` | 0 | Steps at once for Sutras that run in memory; 0 = as `SUTRA_WORKERS` |
 | `SUTRA_POLL_MS` | by machine | How often an idle engine looks for due steps (200 to 500 ms) |
-| `SUTRA_SETTINGS_REFRESH_MS` | by machine | How long an engine keeps project and Sengine variables; 0 = every step |
+| `SUTRA_SETTINGS_REFRESH_MS` | by machine | How long an engine keeps Project and Engine properties; 0 = every step |
 | `SUTRA_PG_POOL` | half of `SUTRA_WORKERS` (4 to 20) | Connections of the engine's PostgreSQL pool; keep engines x (pool + 1) under `max_connections` |
 | `SUTRA_CAN_LEAD` | 1 | `0` = this engine never becomes the leader (timers, listeners, recovery), for machines that cannot reach watched folders |
 | `SUTRA_PUBLIC_URL` | (none) | The studio address as people reach it behind a proxy; used for the single sign-on redirect address |

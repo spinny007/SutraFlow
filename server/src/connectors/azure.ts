@@ -492,7 +492,7 @@ export const azureActivities: Activity[] = [
     fields: [
       dbxConn,
       F('warehouseId', 'SQL warehouse id', 'text', '', { tpl: true, help: 'Empty = the default warehouse of the workspace connection.' }),
-      F('statement', 'SQL', 'code', 'SELECT pickup_zip, count(*) AS trips, round(avg(fare_amount), 2) AS avg_fare\nFROM samples.nyctaxi.trips\nWHERE pickup_zip = :zip\nGROUP BY pickup_zip'),
+      F('statement', 'SQL', 'code', 'SELECT pickup_zip, count(*) AS trips, round(avg(fare_amount), 2) AS avg_fare\nFROM samples.nyctaxi.trips\nWHERE pickup_zip = :zip\nGROUP BY pickup_zip', { vars: true, help: 'Project properties may supply administrator-controlled catalog, schema or table names. Keep request data in bound :name parameters.' }),
       F('params', 'Parameters', 'kv', [{ k: 'zip', v: '{{input.zip}}' }], { tpl: true, help: 'Named parameters used as :name in the SQL.' }),
       F('catalog', 'Catalog', 'text', ''), F('schema', 'Schema', 'text', ''),
       F('maxRows', 'Maximum rows', 'number', 10000),

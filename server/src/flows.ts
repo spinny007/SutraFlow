@@ -80,7 +80,7 @@ export function variablesUsed(v: unknown): string[] {
   return [...out];
 }
 
-/** Steps that read project variables the project does not define, themselves or through their connections. */
+/** Steps or transition connections that read project variables the project does not define. */
 export function missingVariables(doc: FlowDoc, projectId: string) {
   const p = getProject(projectId);
   if (!p) return [];
@@ -91,6 +91,12 @@ export function missingVariables(doc: FlowDoc, projectId: string) {
     const text = JSON.stringify(n.config);
     for (const name of variablesUsed(n.config)) if (!defined.has(name)) out.push({ step: n.name, name, via: '' });
     for (const r of conns) if (text.includes(r.id)) for (const name of variablesUsed(JSON.parse(r.config))) if (!defined.has(name)) out.push({ step: n.name, name, via: r.name });
+  }
+  for (const e of doc.edges) {
+    const from = doc.nodes.find(n => n.id === e.from)?.name || e.from;
+    const to = doc.nodes.find(n => n.id === e.to)?.name || e.to;
+    const connection = e.label ? `\"${e.label}\"` : `${from} to ${to}`;
+    for (const name of variablesUsed(e.condition)) if (!defined.has(name)) out.push({ step: `Connection ${connection}`, name, via: '' });
   }
   return out;
 }

@@ -1,0 +1,18 @@
+{
+  "name": "acme-client",
+  "version": "5.4.0-sutra.1",
+  "description": "Vendored acme-client 5.4.0 without its deprecated node-forge compatibility export",
+  "main": "src/index.js",
+  "types": "types/index.d.ts",
+  "license": "MIT",
+  "homepage": "https://github.com/publishlab/node-acme-client",
+  "engines": {
+    "node": ">=16"
+  },
+  "dependencies": {
+    "@peculiar/x509": "^1.11.0",
+    "asn1js": "^3.0.5",
+    "axios": "^1.7.2",
+    "debug": "^4.3.5"
+  }
+}

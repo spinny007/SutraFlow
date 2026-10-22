@@ -79,6 +79,7 @@ function Palette({ meta, onAdd }: { meta: Meta; onAdd(type: string): void }) {
                 onDragStart={e => { e.dataTransfer.setData(ACT_MIME, a.type); e.dataTransfer.effectAllowed = 'move'; }}
                 onClick={() => onAdd(a.type)}>
                 <span className="glyph">{a.glyph}</span><span>{a.name}</span>
+                {a.trigger && <span className="starter-mark" title="Starts a Sutra" aria-label="Starts a Sutra">▶</span>}
               </button>
             ))}
           </div>

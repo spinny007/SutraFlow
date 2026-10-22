@@ -11,14 +11,12 @@ import crypto from 'node:crypto';
 import { now, dbKind, memoryStore, q } from '../db.js';
 import { asyncDatabase, localStore, type AsyncStore, type TxBody, type TxQ } from '../asyncdb.js';
 import { config } from '../config.js';
-import { resolve } from '../template.js';
 import { maskSecrets } from '../secrets.js';
 import { projectLog, wantsStepData, runOrigin } from '../logger.js';
-import { truthy } from '../expr.js';
 import { metrics } from '../metrics.js';
 import { recordSpan, parseTraceparent, traceIdFor, runSpanId, stepSpanId, traceparent as tp } from '../tracing.js';
 import { sutraTuning } from '../tuning.js';
-import type { Activity, DebugState, FlowDoc, FlowEdge, FlowNode, ReplyPayload, StepResult } from './types.js';
+import type { Activity, DebugState, FlowDoc, FlowNode, ReplyPayload, StepResult } from './types.js';
 import { initialVariables, OUTPUT_UPSERT_SQL, runState, type LoadedRun, type RunState } from './state.js';
 import { RunStore, StaleStep, type TaskRow } from './run-store.js';
 import { Scheduler, type ClaimedTask } from './scheduler.js';
@@ -27,6 +25,7 @@ import { Waits } from './waits.js';
 import { capOutput, Transitions, type TransitionTurn } from './transitions.js';
 import { Operator, type DebugAction } from './operator.js';
 import { QueueNotifications } from './queue-notify.js';
+import { Router } from './router.js';
 export { runState, outputsFrom } from './state.js';
 export type { RunState } from './state.js';
 
@@ -96,6 +95,7 @@ export class Engine {
   private transitionsService?: Transitions;
   private operatorService?: Operator;
   private queueNotifications?: QueueNotifications;
+  private routerService?: Router;
 
   /**
    * The engine of this server keeps runs in the database (durable). Sutras tuned to run in memory go
@@ -109,7 +109,22 @@ export class Engine {
   }
   /** The store: the in-memory one, or the database's (opened after this engine is made). */
   private get a(): AsyncStore { return this.own ?? asyncDatabase(); }
-  private get runs(): RunStore { return this.runStore ??= new RunStore(this.a, this.id, this.skipLocked); }
+  private get runs(): RunStore {
+    const store = this.a;
+    // Tests and the migration command can close one database and open another in the same process.
+    // Never keep a RunStore bound to the closed backend; production restarts normally follow the
+    // same rule through asyncDatabase(), and the in-memory engine's private store never changes.
+    if (!this.runStore || this.runStore.db !== store) this.runStore = new RunStore(store, this.id, this.skipLocked);
+    return this.runStore;
+  }
+  private get router(): Router {
+    return this.routerService ??= new Router({
+      activity: type => this.activities.get(type),
+      outputs: (tx, run) => this.outputsOf(tx, run),
+      scope: (run, outputs, state, output) => this.transitions.conditionScope(run, outputs, state, output),
+      insert: (tx, turn, runId, nodeId, input, attempt, status, priority) => this.insertTask(tx, turn, runId, nodeId, input, attempt, status, priority),
+    });
+  }
   private get scheduler(): Scheduler {
     return this.schedulerService ??= new Scheduler({
       store: () => this.a,
@@ -416,7 +431,7 @@ export class Engine {
             await tx.run(`update runs set error = ? where id = ?`, `${node.name}: ${res.stop.message || 'Sutra stopped with an error'}`, t.run_id);
           }
           st.logs.push({ t: now(), level: res.stop.status === 'failed' ? 'error' : 'info', msg: `${node.name}: Sutra stopped (${res.stop.status === 'failed' ? 'error' : 'success'})${res.stop.message ? `: ${res.stop.message}` : ''}`, step: node.name });
-        } else await this.route(tx, turn, run, st, node, emits.map(e => ({ port: e.port, out: maskSecrets(e.out, extra.revealed) })));
+        } else await this.router.route(tx, turn, run, st, node, emits.map(e => ({ port: e.port, out: maskSecrets(e.out, extra.revealed) })));
         // State, step count and the count back in one statement, sent with the commit.
         const steps = Number((await this.commitRun<{ steps: number }>(tx, t.run_id, 'update runs set state = ?, steps = steps + 1 where id = ? returning steps', [JSON.stringify(st), t.run_id], [node.name, stored]))!.steps);
         runStatus = run.row.status;
@@ -496,7 +511,7 @@ export class Engine {
         const summary = out && typeof out === 'object' && !Array.isArray(out)
           ? Object.fromEntries(Object.entries(out).filter(([, v]) => !Array.isArray(v))) : out;
         run.fresh = { [node.name]: summary };
-        await this.route(tx, null, run, run.state, node, [{ port, out }], true);
+        await this.router.route(tx, null, run, run.state, node, [{ port, out }], true);
         await tx.run(OUTPUT_UPSERT_SQL, t.run_id, node.name, summary === undefined ? null : JSON.stringify(summary));
         await this.saveState(tx, t.run_id, run.state);
       });
@@ -520,74 +535,6 @@ export class Engine {
    * "otherwise" connections when no "when" connection of the same output was taken.
    * partial: other ports are not passed over (the step goes on).
    */
-  private async route(tx: TxQ, turn: Turn | null, run: LoadedRun, st: RunState, node: FlowNode, emits: { port: string; out: any }[], partial = false) {
-    const doc = run.doc;
-    const runId = run.row.id as string;
-    const outgoing = doc.edges.filter(e => e.from === node.id);
-    const emitted = new Set(emits.map(e => e.port));
-    for (const em of emits) {
-      const onPort = outgoing.filter(x => x.port === em.port);
-      const conditional = onPort.filter(x => x.when === 'when');
-      const taken = new Set<string>();
-      if (conditional.length) {
-        const scope = this.conditionScope(run, await this.outputsOf(tx, run), st, em.out);
-        for (const e of conditional) {
-          let ok = false;
-          try { ok = truthy(resolve(e.condition || 'false', scope)); } catch (err: any) {
-            st.logs.push({ t: now(), level: 'warn', msg: `${node.name}: condition on connection ${e.label ? `"${e.label}"` : ''} could not be checked (${err.message}); not taken`, step: node.name });
-          }
-          if (ok) taken.add(e.id);
-        }
-      }
-      for (const e of onPort) {
-        const live = e.when === 'when' ? taken.has(e.id) : e.when === 'otherwise' ? taken.size === 0 : true;
-        await this.deliver(tx, turn, runId, doc, st, e, live, live ? em.out : undefined, run.row.priority);
-      }
-    }
-    if (!partial) for (const e of outgoing.filter(x => !emitted.has(x.port))) await this.deliver(tx, turn, runId, doc, st, e, false, undefined, run.row.priority);
-  }
-
-  /** What a connection condition can read: the output as {input}, earlier activities, variables. */
-  private conditionScope(run: LoadedRun, outputs: Record<string, any>, st: RunState, out: any) {
-    return this.transitions.conditionScope(run, outputs, st, out);
-  }
-
-  private async deliver(tx: TxQ, turn: Turn | null, runId: string, doc: FlowDoc, st: RunState, edge: FlowEdge, live: boolean, out: any, priority?: number) {
-    const target = doc.nodes.find(n => n.id === edge.to);
-    if (!target) return;
-    const act = this.activities.get(target.type);
-    const inbound = doc.edges.filter(e => e.to === target.id);
-    const from = doc.nodes.find(n => n.id === edge.from)?.name || edge.from;
-    const prio = priority === undefined || priority === null ? undefined : Number(priority);
-    if (act?.join) {
-      const j = (st.joins[target.id] ||= {});
-      j[edge.id] = { live, from, out };
-      if (inbound.every(e => j[e.id])) {
-        const lives = Object.values(j).filter(x => x.live);
-        delete st.joins[target.id];
-        if (lives.length) {
-          st.live[target.id] = true;
-          await this.insertTask(tx, turn, runId, target.id, Object.fromEntries(lives.map(x => [x.from, x.out])), 0, 'pending', prio);
-        } else await this.skipNode(tx, turn, runId, doc, st, target, prio);
-      }
-      return;
-    }
-    if (live) {
-      st.live[target.id] = true;
-      await this.insertTask(tx, turn, runId, target.id, out, 0, 'pending', prio);
-      return;
-    }
-    const s = (st.skips[target.id] ||= []);
-    if (!s.includes(edge.id)) s.push(edge.id);
-    if (!st.live[target.id] && inbound.every(e => s.includes(e.id))) await this.skipNode(tx, turn, runId, doc, st, target, prio);
-  }
-
-  private async skipNode(tx: TxQ, turn: Turn | null, runId: string, doc: FlowDoc, st: RunState, node: FlowNode, priority?: number) {
-    if (st.skipped[node.id]) return;
-    st.skipped[node.id] = true;
-    for (const e of doc.edges.filter(x => x.from === node.id)) await this.deliver(tx, turn, runId, doc, st, e, false, undefined, priority);
-  }
-
   private async fail(t: TaskRow, doc: FlowDoc, node: FlowNode | undefined, err: Error, extra: { ms?: number; logs?: RunState['logs'] } = {}): Promise<void> {
     const s = node?.settings || {};
     // A step's own retry settings win; otherwise the Sutra's tuning, if any.
@@ -617,7 +564,7 @@ export class Engine {
         if (node && errorEdges.length) {
           run.fresh = { [node.name]: errOut };
           await this.fenced(tx, t, `status = 'error', port = 'error', error = ?, output = ?, ms = ?, finished_at = ?`, err.message, capOutput(errOut), extra.ms ?? null, now());
-          await this.route(tx, null, run, st, node, [{ port: 'error', out: errOut }]);
+          await this.router.route(tx, null, run, st, node, [{ port: 'error', out: errOut }]);
         } else {
           await this.fenced(tx, t, `status = 'failed', error = ?, ms = ?, finished_at = ?`, err.message, extra.ms ?? null, now());
           await this.cancelOpen(tx, t.run_id);
@@ -707,20 +654,7 @@ export class Engine {
    * of two engines settling the same run at once, one ends it (and answers its caller), never both.
    */
   private async settle(runId: string) {
-    const out = await this.a.transaction(`run:${runId}`, async (tx, row) => {
-      const run = this.loaded(row);
-      if (!run || ['done', 'failed', 'cancelled'].includes(run.row.status)) return null;
-      const counts = Object.fromEntries((await tx.all<{ status: string; n: number }>('select status, count(*) n from tasks where run_id = ? group by status', runId)).map(r => [r.status, Number(r.n)]));
-      let status: string;
-      if (counts.pending || counts.running) status = 'running';
-      else if (counts.paused) status = 'paused';
-      else if (counts.waiting) status = 'waiting';
-      else status = run.state.failed ? 'failed' : 'done';
-      if (status === run.row.status) return null;
-      const finished = status === 'done' || status === 'failed';
-      const r = await tx.commitWith<{ id: string }>(`update runs set status = ?, finished_at = ? where id = ? and status not in ('done', 'failed', 'cancelled') returning id`, status, finished ? now() : null, runId);
-      return r ? { run, status, finished } : null;
-    }, { sql: Engine.RUN, args: [runId] });
+    const out = await this.runs.settle(runId, now());
     if (out?.finished) {
       const { run, status } = out;
       this.docs.delete(runId);
@@ -755,32 +689,18 @@ export class Engine {
    * memory. When the database cannot be written, the run stays in memory and is tried again.
    */
   private async persist(runId: string, attempt = 0): Promise<void> {
-    const run = await this.a.get<any>('select * from runs where id = ?', runId);
-    if (!run) return;
-    const tasks = (await this.a.all<any>('select * from tasks where run_id = ? order by id', runId)).map(({ id: _id, ...t }) => t);
-    const outs = await this.a.all<any>('select * from run_outputs where run_id = ?', runId);
-    const insert = async (tx: TxQ, table: string, rows: any[]) => {
-      if (!rows.length) return;
-      const cols = Object.keys(rows[0]);
-      // Several rows per statement, within PostgreSQL's limit of parameters per statement.
-      const per = Math.max(1, Math.floor(30000 / cols.length));
-      for (let i = 0; i < rows.length; i += per) {
-        const part = rows.slice(i, i + per);
-        await tx.run(`insert into ${table}(${cols.join(', ')}) values ${part.map(() => `(${cols.map(() => '?').join(', ')})`).join(', ')}`, ...part.flatMap(r => cols.map(c => r[c])));
-      }
-    };
+    let run: any;
     try {
-      await this.parent!.a.transaction(`run:${runId}`, async tx => { await insert(tx, 'runs', [run]); await insert(tx, 'tasks', tasks); await insert(tx, 'run_outputs', outs); });
+      run = await this.runs.persistTo(runId, this.parent!.a);
     } catch (e: any) {
-      if (attempt === 0) projectLog(run.project_id, { level: 'error', msg: `Run in memory could not be written to the database, trying again: ${e?.message || e}`, flow: run.flow_name, run: runId, origin: runOrigin(run.source, run.version) });
+      run ||= await this.a.get<any>('select * from runs where id = ?', runId);
+      if (attempt === 0) {
+        if (run) projectLog(run.project_id, { level: 'error', msg: `Run in memory could not be written to the database, trying again: ${e?.message || e}`, flow: run.flow_name, run: runId, origin: runOrigin(run.source, run.version) });
+        else console.error(`Run ${runId} in memory could not be written to the database, trying again:`, e?.message || e);
+      }
       setTimeout(() => { void this.persist(runId, attempt + 1); }, Math.min(60000, 1000 * 2 ** attempt)).unref?.();
       return;
     }
-    await this.a.transaction(undefined, async tx => {
-      await tx.run('delete from tasks where run_id = ?', runId);
-      await tx.run('delete from run_outputs where run_id = ?', runId);
-      await tx.run('delete from runs where id = ?', runId);
-    });
   }
 
   /** Starts queued runs while their Sutra is under its "Runs at once" limit (all Sutras when flowId is empty). */

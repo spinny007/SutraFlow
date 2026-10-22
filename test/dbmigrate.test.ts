@@ -153,6 +153,20 @@ test('a failed copy changes nothing: sutraflow.env stays on SQLite and SutraFlow
  */
 const pgBin = process.env.SUTRA_TEST_PG_BIN;
 const exe = (n: string) => path.join(pgBin || '', process.platform === 'win32' ? `${n}.exe` : n);
+// Keep the release gate independent of the shell PATH on Windows. Git for Windows and
+// Laragon both carry OpenSSL; SUTRA_TEST_OPENSSL remains the explicit override.
+const testOpenSsl = () => {
+  if (process.env.SUTRA_TEST_OPENSSL) return process.env.SUTRA_TEST_OPENSSL;
+  if (process.platform === 'win32') {
+    const candidates = [
+      path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'mingw64', 'bin', 'openssl.exe'),
+      'C:\\laragon\\bin\\git\\mingw64\\bin\\openssl.exe',
+    ];
+    const found = candidates.find(x => fs.existsSync(x));
+    if (found) return found;
+  }
+  return 'openssl';
+};
 test('a password-protected PostgreSQL that requires SSL: wrong password, no SSL, unchecked certificate, then the whole move', { skip: !pgBin && 'set SUTRA_TEST_PG_BIN to the PostgreSQL bin folder (initdb, pg_ctl)', timeout: 300000 }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-pgsec-'));
   const data = path.join(dir, 'pgdata');
@@ -161,7 +175,7 @@ test('a password-protected PostgreSQL that requires SSL: wrong password, no SSL,
   fs.writeFileSync(path.join(dir, 'pw.txt'), password);
   const run = (cmd: string, args: string[]) => { const r = spawnSync(cmd, args, { encoding: 'utf8' }); assert.equal(r.status, 0, `${cmd} ${args.join(' ')}\n${r.stdout}${r.stderr}`); return r; };
   run(exe('initdb'), ['-D', data, '-U', 'sutra_owner', '--auth=scram-sha-256', `--pwfile=${path.join(dir, 'pw.txt')}`, '-E', 'UTF8', '--locale=C']);
-  run(process.env.SUTRA_TEST_OPENSSL || 'openssl', ['req', '-new', '-x509', '-days', '2', '-nodes', '-subj', '/CN=localhost', '-keyout', path.join(data, 'server.key'), '-out', path.join(data, 'server.crt')]);
+  run(testOpenSsl(), ['req', '-new', '-x509', '-days', '2', '-nodes', '-subj', '/CN=localhost', '-keyout', path.join(data, 'server.key'), '-out', path.join(data, 'server.crt')]);
   fs.appendFileSync(path.join(data, 'postgresql.conf'), `\nport = ${pgPort}\nlisten_addresses = '127.0.0.1'\nssl = on\n`);
   fs.writeFileSync(path.join(data, 'pg_hba.conf'), 'hostssl all all 127.0.0.1/32 scram-sha-256\n');
   // pg_ctl leaves the server running with the handles it was given: no pipes, or this would wait for ever.

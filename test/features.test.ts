@@ -71,27 +71,25 @@ test('For-Each with Where, Group by and Sort by (bare column names)', () => {
   assert.deepEqual(out.cities, [{ city: 'Delhi', total: 30, orders: 1, rank: '1 of 2' }, { city: 'Pune', total: 15, orders: 2, rank: '2 of 2' }]);
 });
 
-test('project and Sengine variables: General-tab settings, connections, get/set functions', async () => {
+test('project and Engine properties are readable in settings, connections and formulas', async () => {
   projects.saveEngineVariables([{ name: 'REGION', value: 'ap-south-1' }]);
   const s = node('start', 'Start', { payload: '{"lines":[{"sku":"A","qty":2}]}' });
   // Folder comes from a project variable; no mapping needed in the General tab.
   const w = node('fileWrite', 'Write', { folder: '{{gv.OUT}}', path: 'v.txt', format: 'text', content: "=concat(get-engine-variable('REGION'), '/', {ev.REGION}, '/', get-project-variable('QUEUE'))", overwrite: true });
-  const setv = node('mapper', 'Bump', { mapping: { rules: { next: { expr: "set-project-variable('BATCH', {gv.BATCH} + 1)" } } } });
-  const r = await run([s, w, setv], [edge(s, w), edge(w, setv)]);
+  const r = await run([s, w], [edge(s, w)]);
   assert.equal(r.status, 'done', r.error);
   assert.equal(fs.readFileSync(path.join(dir, 'v.txt'), 'utf8'), 'ap-south-1/ap-south-1/orders.in');
-  assert.equal(projects.effectiveVariables(pid).values.BATCH, 2, 'set-project-variable changes later runs');
-  projects.setOps(pid, {});
-  assert.equal(projects.effectiveVariables(pid).values.BATCH, 1, 'a new deployment config resets runtime values');
+  assert.equal(projects.effectiveVariables(pid).values.BATCH, 1, 'a Sutra cannot mutate administrator-managed properties');
 
   const cap = await captureServer(() => ({ body: '{"ok":true}' }));
   try {
     projects.setOps(pid, { variables: { API: cap.url } });
-    const conn = saveResource({ kind: 'httpConnection', name: 'Var API', project_id: pid, config: { baseUrl: '{{gv.API}}', timeoutMs: 5000 } });
+    const conn = saveResource({ kind: 'httpConnection', name: 'Var API', project_id: pid, config: { baseUrl: '{{gv.API}}', timeoutMs: 5000, headers: [{ k: 'X-Queue', v: '{{gv.QUEUE}}' }] } });
     const h = node('httpRequest', 'Call', { connection: conn.id, method: 'GET', url: '/ping', parse: 'auto', failOn: '4xx or 5xx' });
     const r2 = await run([s, h], [edge(s, h)]);
     assert.equal(r2.status, 'done', r2.error);
     assert.equal(cap.seen[0].url, '/ping');
+    assert.equal(cap.seen[0].headers['x-queue'], 'orders.in', 'variables resolve inside nested connection settings');
   } finally { await cap.close(); projects.setOps(pid, {}); }
 });
 
@@ -127,6 +125,15 @@ test('Transform (JSONata) reshapes repeating rows', async () => {
   const r = await run([s, j], [edge(s, j)]);
   assert.equal(r.status, 'done', r.error);
   assert.deepEqual(r.state.outputs.Shape, { orders: [{ id: 1, total: 20 }, { id: 3, total: 3 }], byCity: { Pune: 23, NYC: 5 }, region: 'orders.in' });
+});
+
+test('SQL text may use administrator-managed project variables while values stay bound parameters', async () => {
+  const db = saveResource({ kind: 'database', name: `SQL variables ${Date.now()}`, project_id: pid, config: { driver: 'sqlite', file: path.join(dir, 'sql-vars.sqlite') } });
+  const s = node('start', 'Start', { payload: '{"id":"A-1"}' });
+  const qn = node('dbQuery', 'Query', { connection: db.id, sql: "select '{{gv.QUEUE}}' as queue_name, :id as item_id", params: [{ k: 'id', v: '{{input.id}}' }] });
+  const r = await run([s, qn], [edge(s, qn)]);
+  assert.equal(r.status, 'done', r.error);
+  assert.deepEqual(r.state.outputs.Query.first, { queue_name: 'orders.in', item_id: 'A-1' });
 });
 
 test('Service Bus: JMS headers and properties; explicit acknowledgement with Confirm message', async () => {
@@ -167,6 +174,11 @@ test('Service Bus: JMS headers and properties; explicit acknowledgement with Con
     assert.ok(subSource.filter, 'selector sent to the broker');
     toSub.send({ body: JSON.stringify({ confirm: true }), subject: 'order', message_id: 'm-1', priority: 5 });
     await until(() => outcomes.includes('accepted'));
+    const afterFirst = Number((q.get('select count(*) n from runs where flow_id = ?', f.id) as any).n);
+    const accepted = outcomes.filter(x => x === 'accepted').length;
+    toSub.send({ body: JSON.stringify({ confirm: true }), subject: 'order', message_id: 'm-1', priority: 5 });
+    await until(() => outcomes.filter(x => x === 'accepted').length > accepted);
+    assert.equal(Number((q.get('select count(*) n from runs where flow_id = ?', f.id) as any).n), afterFirst, 'a redelivered message id is acknowledged without a duplicate run');
     toSub.send({ body: JSON.stringify({ confirm: false }), subject: 'order', message_id: 'm-2' });
     await until(() => outcomes.includes('released'));
     const runs = q.all<any>('select id, state from runs where flow_id = ? order by started_at', f.id).map(x => runState(x.id)!.outputs.In);

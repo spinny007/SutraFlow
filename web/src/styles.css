@@ -73,6 +73,7 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .pitem { display: flex; align-items: center; gap: 10px; width: 100%; border: 1px solid transparent; background: none; padding: 6px 6px; border-radius: 8px; text-align: left; cursor: grab; font-size: 14px; }
 .pitem:hover { background: var(--card); border-color: var(--line); }
 .glyph { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; background: color-mix(in srgb, var(--fam) 16%, transparent); color: var(--fam); font-weight: 700; font-size: 13px; }
+.starter-mark { margin-left: auto; color: var(--good); font-size: 10px; line-height: 1; opacity: .9; }
 
 .canvas { position: relative; min-height: 0; background: var(--paper); }
 .canvas .react-flow { --xy-background-color: var(--paper); --xy-edge-stroke: var(--edge); --xy-edge-stroke-selected: var(--focus); --xy-controls-button-background-color: var(--card); --xy-controls-button-color: var(--ink); --xy-controls-button-border-color: var(--line); --xy-minimap-background-color: var(--card); --xy-attribution-background-color: transparent; }
@@ -131,6 +132,8 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .kv { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 6px; align-items: center; margin-bottom: 6px; }
 .kv .x { border: 0; background: none; color: var(--muted); padding: 2px 6px; }
+.kv-var { display: flex; min-width: 0; align-items: center; gap: 3px; }
+.kv-var > .inp { min-width: 0; flex: 1; }
 .check { display: flex; gap: 8px; align-items: center; font-size: 13px; }
 
 .tree { font-family: var(--mono); font-size: 12px; border: 1px dashed var(--line); border-radius: 8px; padding: 8px; max-height: 280px; overflow: auto; background: var(--card); }
@@ -282,6 +285,11 @@ table.t tr.click:hover td { background: var(--paper); }
 .flist button:hover { background: var(--paper); }
 .flist .muted { font-size: 11px; }
 .otree { border: 1px solid var(--line); border-radius: 8px; background: var(--card); padding: 4px 0; font-size: 12.5px; margin-bottom: 10px; }
+.condition-data { margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); overflow: hidden; font-size: 12px; }
+.condition-data .mhead { position: static; }
+.condition-data .mhead .inp { width: 105px; }
+.condition-tree { max-height: 290px; overflow: auto; padding-bottom: 4px; }
+.condition-data > .hint { padding: 6px 8px; border-top: 1px solid var(--line); }
 .orow { display: flex; gap: 8px; align-items: baseline; padding: 2px 8px; }
 .orow .nm { font-weight: 500; }
 .orow .val { margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%; }

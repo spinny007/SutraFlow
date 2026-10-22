@@ -151,7 +151,7 @@ export function verifyX509(xml: string, o: { trustedPem: string; allowedSubjects
   const ts = child(security, 'Timestamp', NS.wsu);
   if (ts && (!idOf(ts) || !signed.includes(idOf(ts)))) throw new WssError('The Timestamp is not covered by the signature');
   if (!ts && o.requireTimestamp) throw new WssError('A signed WS-Security Timestamp is required');
-  return { subject: cn, claims: { fingerprint256: cert.fingerprint256, issuer: cert.issuer, serial: cert.serialNumber } };
+  return { subject: cn, claims: { fingerprint256: cert.fingerprint256, issuer: cert.issuer, serial: cert.serialNumber, certificatePem: cert.toString() } };
 }
 
 /** A SAML 1.1 or 2.0 assertion in wsse:Security, signed by the identity provider. */

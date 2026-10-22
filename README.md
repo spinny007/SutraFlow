@@ -2,14 +2,14 @@
 
 **A visual integration designer and engine.** Drag activities onto a canvas, map data between steps, test and debug, and deploy *Sutras* (integration processes) that run as REST, SOAP and MCP services, on schedules, or on events: files, queues, mail, cloud drives, chat messages and more.
 
-![Version](https://img.shields.io/badge/version-1.9.1-2f6fd8)
+![Version](https://img.shields.io/badge/version-2.0.0-2f6fd8)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Commercial licence available](https://img.shields.io/badge/commercial%20licence-available-orange)](COMMERCIAL-LICENSE.md)
 ![Node.js](https://img.shields.io/badge/node-%E2%89%A5%2022.13-339933?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-7-3178c6?logo=typescript&logoColor=white)
 ![Database](https://img.shields.io/badge/database-SQLite%20%7C%20PostgreSQL-4169e1?logo=postgresql&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Docker-555)
-![Tests](https://img.shields.io/badge/tests-342-success)
+![Tests](https://img.shields.io/badge/tests-362-success)
 
 ![The SutraFlow designer: palettes, canvas and the step inspector](docs/guide-images/designer.jpg)
 
@@ -29,7 +29,6 @@
 - [Project layout](#project-layout)
 - [Testing](#testing)
 - [Known limitations](#known-limitations)
-- [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [Security](#security)
 - [License](#license)
@@ -43,7 +42,7 @@
 - **APIs and gateway**: REST, SOAP and WebSocket services with generated WSDL and OpenAPI; security policies (API keys, Basic, JWT, OAuth token introspection, HMAC-signed requests, mutual TLS, WS-Security UsernameToken, X.509 signatures and SAML assertions, encrypted SOAP, IP allow lists, rate limits, CORS); scopes per service and operation; bodies validated against JSON Schema or XSD; threat protection (depth, fields, sizes, no DOCTYPE); gateway apps with keys, OAuth client-credentials tokens, plans and a firewall; TLS with your own certificate or Let's Encrypt.
 - **AI**: AI steps (prompt, classify, route, extract, summarize, translate, sentiment) on Claude, OpenAI, Gemini, Ollama and other providers; AI agents with tools, memory, guardrails, people in the loop and hand-offs; knowledge bases for RAG (built-in, pgvector, Qdrant, Chroma, Pinecone); Sutras published as MCP tools for Claude and other assistants; agents as chat pages, an OpenAI-compatible API and A2A.
 - **Connectors**: HTTP, SOAP with WS-Security, files, SFTP and FTP, PostgreSQL, MySQL, SQL Server, Oracle and SQLite, Kafka, RabbitMQ and ActiveMQ, email, Firebase, Google Drive, Sheets and Docs, SharePoint and OneDrive, Dropbox, YouTube, Twitch, Discord, Telegram, Facebook Pages, Azure Data Factory, Databricks, Python, PowerShell and shell scripts, and any OAuth REST API.
-- **Operations**: an Admin Console for deployed applications (start, stop, tuning, runs, approvals, engines, alerts, gateway traffic, users and roles, system accounts, audit log, releases, the database); clusters of engines on PostgreSQL with a leader, failover and graceful drain; Prometheus metrics, OpenTelemetry traces and JSON logs; single sign-on for people with OpenID Connect, roles from identity provider groups.
+- **Operations**: an Admin Console for deployed applications (start, stop, tuning, runs, approvals, engines, alerts, gateway traffic, users and roles, system accounts, audit log, releases, the database); clusters of engines on PostgreSQL with a leader, failover and graceful drain; Prometheus metrics, OpenTelemetry traces and JSON logs; single sign-on for people with OpenID Connect or SAML 2.0, with roles from identity-provider groups.
 - **Releases**: projects in Git from the designer; release zips with the deployment config, documentation and files; built by a CI/CD pipeline straight from Git with the `sutra` command; deployed by command line or the Admin Console, with history and rollback.
 - **Documentation from the design**: each Sutra and project produces its own documentation (HTML and Markdown) from its steps and their descriptions.
 
@@ -83,6 +82,7 @@ The `sutraflow` launcher is the one place for every command on Windows and Linux
 | [Architecture](docs/sutraflow-architecture.html) (also at `/architecture`) | How SutraFlow works inside: every source file, every table, every API route, the settings, with diagrams. |
 | [Deployment](docs/deployment.md) | Packages, the `sutra` command, headless engines, Docker, clusters, monitoring. |
 | [Engine design](docs/architecture.md) | Runs, tasks, checkpoints and the cluster in short. |
+| [Backlog](docs/backlog.md) | Release gates, planned capabilities, implementation guidance and completion criteria. |
 | [Laragon (Windows development)](deploy/laragon/README.txt) | Running SutraFlow in Laragon with PostgreSQL. |
 
 The guide and the architecture page are built from the code (`npm run guide`, `npm run architecture`), so they list exactly what the code does.
@@ -96,11 +96,12 @@ The guide and the architecture page are built from the code (`npm run guide`, `n
 | SOAP / Web services | Invoke SOAP service, SOAP reply |
 | WebSocket | WebSocket send (answer, push, broadcast, close), WebSocket client send |
 | Data & mapping | Map data, Parse / Render JSON, Parse / Render XML, Parse / Render CSV, Filter list, Sort list, Aggregate, Transform (JSONata) |
-| Flow control | If / else, Switch, Router, For each, Merge, Wait, Human approval, Set variables, Throw error, End, Call Sutra, Return, Error handler, No operation |
+| Flow control | If / else, Switch, Router, For each, Merge, Wait, Human approval, Set Local Variable, Get Local Variables, Get Properties, Throw error, End, Call Sutra, Return, Error handler, No operation |
 | Files | File trigger, Read file, List / read directory, Write file, Move / copy / delete file |
 | SFTP / FTP | Remote file trigger, List, Read, Write, Move / copy / delete remote file |
 | DB Ops | SQL query, SQL update, Call procedure, SQL script, SQL transaction |
-| Service Bus | Publish message, Message subscriber, Confirm message (Kafka, RabbitMQ, ActiveMQ / AMQP 1.0) |
+| Memory tables | Get Memory Record, Set Memory, Query Memory Records, Delete Memory Records, Refresh Memory Table |
+| Service Bus | Publish message, Queue / topic trigger, Confirm message (Kafka, RabbitMQ, ActiveMQ / AMQP 1.0) |
 | Email | Send email, Email trigger |
 | Firebase | Firestore, Realtime Database, Push notification (FCM) |
 | Apps and social | Connected API call, Google Sheets, Google Drive / Docs (and trigger), SharePoint / OneDrive (and trigger), Dropbox, YouTube, Facebook Page, Twitch (and live trigger), Discord (and trigger), Telegram (and trigger) |
@@ -112,6 +113,12 @@ The guide and the architecture page are built from the code (`npm run guide`, `n
 | AI | AI prompt, classify, router, extract, summarize, translate, sentiment, Ollama; AI agent, Ask a person, Hand off to agent, memory, knowledge (add, read document text, search, ask, remove, embed), Call MCP tool, Agent channel, Agent reply, AI guard, AI tool, Reply to AI |
 
 Every activity except triggers has an **error** output, retries with backoff, a time limit, a breakpoint, a loop setting, and a description. Connections (24 kinds) are shared per project with secrets kept in an encrypted vault and named, never copied.
+
+Every process starter is marked **▶** in the palette row. Starters stay with the activities they relate to: File trigger is under Files, Email trigger under Email, Queue / topic trigger under Service Bus, and the cloud, chat, ADF, agent and MCP starters under their own palettes. REST service is also the inbound webhook/API starter. All palettes and transition-line conditions accept Project variables: use the **{x}** picker in General settings, connection resources and a selected transition, or `{gv.NAME}` in mapped Input formulas. A selected conditional transition also has a browsable Condition data tree for the previous activity, earlier activities, trigger data, Local variables, Project properties and Engine properties. Gateway paths and limits, schedules, listener settings, nested connection headers and administrator-controlled SQL text resolve them at runtime; SQL request data should remain bound `:name` parameters.
+
+The Queue / topic trigger is owned only by the elected leader. In client mode it acknowledges after the Sutra succeeds; explicit mode waits for Confirm message. Its durable duplicate guard survives leader changes, using Kafka topic/partition/offset or a RabbitMQ/AMQP message id. External RabbitMQ and AMQP publishers should therefore assign a unique message id; outside side effects should still use an idempotency key.
+
+FTP and SFTP remain connection-driven: every remote-file activity and trigger selects an **FTP server** or **SFTP server** resource. Connection fields—including host, port, user, base folder and the vault-secret name—may use Project variables such as `{{gv.FTP_HOST}}`; deployment configuration can override them before deployment, while the actual password or private key remains in that server's vault. See [Files, streaming, SFTP and FTP](docs/sutraflow-user-guide.html#ch-files).
 
 ## Running Python
 
@@ -195,6 +202,7 @@ npm run dev            # studio with hot reload on http://localhost:5173 (API pr
 npm test               # the whole test suite (builds first)
 npm run typecheck      # server and web
 npm run build          # production build into dist/
+npm run vendor:check:online # verify reviewed vendor trees and check npm for newer upstream releases
 npm run guide          # rebuild the user guide from the code
 npm run guide:shots    # retake the guide's screenshots from a running server (headless Edge or Chrome)
 npm run architecture   # rebuild the architecture page
@@ -202,6 +210,8 @@ npm run samples        # rebuild the sample project zips in samples/
 ```
 
 Stack: Node.js and TypeScript, Fastify, React with React Flow, Vite; SQLite (`node:sqlite`) or PostgreSQL.
+
+Local dependency forks are controlled by [`vendor/vendor-lock.json`](vendor/vendor-lock.json). Every build verifies their normalized source hashes, package-lock links, licences, consumers, focused tests and runtime/test-only packaging policy. Connected CI and release jobs additionally compare the reviewed versions and tarball integrity with npm; a weekly workflow detects new upstream versions even when no code is pushed. An update is never copied automatically: it must be reviewed for API and behavior changes, the documented patches must be reapplied, and focused plus complete regression tests must pass. See [`vendor/README.md`](vendor/README.md).
 
 ## Project layout
 
@@ -219,36 +229,26 @@ test/                   the test suites
 
 ## Testing
 
-The suite has 342 declared tests; parameterized database coverage makes a fully configured run report 348 cases. It uses real child processes and network calls for HTTP, SOAP with WS-Security, TLS, SMTP, AMQP 1.0, SFTP and FTP servers, SQLite, Python, multi-process clusters, the launcher and the command-line tool. It also runs every in-process suite again through PostgreSQL compatibility using PGlite.
+The suite has 362 declared tests. It uses real child processes and network calls for HTTP, SOAP with WS-Security, TLS, SMTP, AMQP 1.0, SFTP and FTP servers, SQLite, Python, multi-process clusters, the launcher and the command-line tool. Real PostgreSQL and MySQL integration tests are the database release gate. PGlite also runs the in-process suite through PostgreSQL compatibility as fast secondary regression coverage; it does not replace testing against PostgreSQL.
 
 The process-level tests exercise the central durability claims directly: engines share work without duplicating completed steps, elect and replace a leader, recover work from an engine killed mid-step, hand work back during drain, persist approvals and long waits without holding a worker, and deploy and call packages through both local and remote CLI paths.
 
-Optional tests use a real PostgreSQL server for DB Ops steps (queries, bound parameters, transactions, plpgsql install scripts, procedures with output parameters), database migration and cluster behavior (`SUTRA_TEST_PG_URL`), PostgreSQL tools for password- and SSL-protected migration (`SUTRA_TEST_PG_BIN`), and a real MySQL server for DB Ops steps and install scripts (`SUTRA_TEST_MYSQL_URL`). With Laragon's MySQL and PostgreSQL:
+The release gate uses a real PostgreSQL server for DB Ops steps (queries, bound parameters, transactions, plpgsql install scripts, procedures with output parameters), database migration and cluster behavior (`SUTRA_TEST_PG_URL`), PostgreSQL tools for password- and SSL-protected migration (`SUTRA_TEST_PG_BIN`), OpenSSL for the temporary TLS test server, and a real MySQL server for Sutra-driven INSERT, UPDATE and SELECT operations, bound-parameter injection safety, transaction rollback, install scripts and stored procedures (`SUTRA_TEST_MYSQL_URL`). On Windows the TLS test automatically checks Git for Windows and Laragon's Git copy when `openssl` is not on `PATH`; `SUTRA_TEST_OPENSSL` is the explicit override. This OpenSSL executable is a test prerequisite only: SutraFlow's runtime TLS and ACME implementation use Node cryptography and do not shell out to OpenSSL. The database-specific cases are skipped only for a developer's reduced local run when these variables are absent; release and Linux CI runs must supply both databases. With Laragon's MySQL, PostgreSQL and Git OpenSSL in PowerShell:
 
-```bash
-SUTRA_TEST_PG_URL=postgres://postgres@127.0.0.1:5432/postgres SUTRA_TEST_MYSQL_URL=mysql://root@127.0.0.1:3306/sutraflow_test SUTRA_TEST_PG_BIN=C:/laragon/bin/postgresql/postgresql/bin npm test
+```powershell
+$env:SUTRA_TEST_PG_URL = 'postgres://postgres@127.0.0.1:5432/postgres'
+$env:SUTRA_TEST_MYSQL_URL = 'mysql://root@127.0.0.1:3306/sutraflow_test'
+$env:SUTRA_TEST_PG_BIN = 'C:/laragon/bin/postgresql/postgresql/bin'
+$env:SUTRA_TEST_OPENSSL = 'C:/laragon/bin/git/mingw64/bin/openssl.exe'
+npm test
 ``` The pgvector storage path is covered with a protocol-compatible test server; run an additional deployment test against the intended PostgreSQL/pgvector version before relying on it in production.
 
 Tested against stand-in services that answer like the real ones, but not yet against the real services: SQL Server, Oracle, Kafka, RabbitMQ, IMAP, Let's Encrypt, Qdrant, Chroma, Pinecone, and the Google, Microsoft, Dropbox, YouTube, Twitch, Discord, Telegram, Facebook, Azure Data Factory and Databricks APIs.
 
 ## Known limitations
 
-- **WS-Security**: replies of SOAP services are not encrypted for the caller (requests are decrypted, and outgoing calls can encrypt). Single sign-on for people uses OpenID Connect; SAML sign-on is not offered.
 - **Twitch and Discord triggers** poll (every minute and every few seconds) rather than receive pushed events.
 - **The soak test** covers the starters that run on one machine; Email (IMAP), Kafka, RabbitMQ and the cloud triggers are tested against stand-ins in the test suite only.
-
-## Roadmap
-
-- **A 24-hour soak with PostgreSQL on its own machine**: the soak tool (`tools/soak.mjs`) runs unattended for any length and writes its own report; the next run moves the database to a separate machine.
-- **Encrypted SOAP replies** for callers who send their certificate, and SAML sign-on for people.
-
-Done in 1.9.0: the durable engine was separated into a public façade, activity executor, queue scheduler, atomic transition primitives, run store, waiter registry, operator boundary, state helpers and shared types; REST and SOAP handlers were separated from the gateway lifecycle. PostgreSQL notifications wake the durable queue while polling remains the fallback. Two additive tables checkpoint file listeners across leader changes. Every increment was regression-tested before the full suite and soak rehearsal.
-
-Done in 1.8.1: deleting with a typed confirmation (one item or a folder with its contents; deployed Sutras refused; Git follows at once), renaming from the item menu or a right-click, a name in the New Sutra dialog, and Approval Center links in the designer and the Admin Console.
-
-Done in 1.8.0: leaner run state (each step writes only its own output: 1 MB outputs three times faster), message validation (JSON Schema, XSD) and threat protection, single sign-on with OpenID Connect, WS-Security completed (X.509 and SAML on incoming requests, timestamps, XML encryption both ways), HMAC request signing, OAuth token introspection and scopes per operation, WebSocket services and clients, `SUTRA_CAN_LEAD`, and an unattended soak test with a Markdown and HTML report.
-
-Done in 1.7.6: asynchronous PostgreSQL storage (a connection pool, explicit transactions, fencing of claimed steps, three round trips per step).
 
 ## Contributing
 

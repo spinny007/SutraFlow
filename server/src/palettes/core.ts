@@ -15,6 +15,7 @@ import { inferTree, type SNode } from '../schemas.js';
 import { adhocTree, type MappingValue } from '../mapping.js';
 import { F, when, isObj, listOf, parseJsonText, needList, OPS, compare } from './common.js';
 import { truthy } from '../expr.js';
+import { engineVariableValues, publicProjectVariableValues } from '../projects.js';
 
 const safeJson = (t: unknown): any => { if (typeof t !== 'string') return t; try { return JSON.parse(t); } catch { return undefined; } };
 /** Route names from a kv field ([{k, v}]) or a comma list. */
@@ -205,13 +206,49 @@ const flow: Activity[] = [
     execute: c => ({ wait: approvalWait(c, { kind: 'approval', message: String(c.v('message') ?? '') }) }),
   },
   {
-    type: 'setVar', palette: 'flow', name: 'Set variables', glyph: '𝑥', ports: ['out'],
-    desc: 'Stores values for later steps as {{vars.name}}. Passes its input through.',
+    type: 'setVar', palette: 'flow', name: 'Set Local Variable', glyph: '𝑥', ports: ['out'],
+    desc: 'Sets one or more variables local to this Sutra run. Later steps read their latest values; they survive a durable restart but are not shared with other runs. Passes its input through.',
     fields: [F('vars', 'Variables', 'kv', [{ k: 'total', v: '{{input.amount}}' }], { tpl: true })],
     passThrough: true,
     execute: c => {
       for (const r of (c.raw('vars') as any[]) || []) if (r?.k) c.setVar(r.k, c.resolve(r.v));
       return { out: c.input };
+    },
+  },
+  {
+    type: 'getVar', palette: 'flow', name: 'Get Local Variables', glyph: '𝑥', ports: ['out', 'missing'],
+    desc: 'Returns a snapshot of every local variable with its latest value, or one named variable. Local variables belong only to this Sutra run.',
+    fields: [
+      F('what', 'Get', 'select', 'all variables', { options: ['all variables', 'one variable'] }),
+      F('name', 'Variable name', 'text', '', { showIf: { k: 'what', in: ['one variable'] }, tpl: true }),
+    ],
+    outputHint: { variables: {}, count: 0, name: '', value: null, found: true },
+    execute: c => {
+      const vars = structuredClone(c.scope.vars || {});
+      if (c.raw('what') !== 'one variable') return { out: { variables: vars, count: Object.keys(vars).length } };
+      const name = String(c.v('name') ?? '').trim();
+      if (!name) throw new Error('Variable name is empty');
+      const found = Object.prototype.hasOwnProperty.call(vars, name);
+      return found ? { out: { name, value: vars[name], found: true } } : { port: 'missing', out: { name, value: null, found: false } };
+    },
+  },
+  {
+    type: 'getProperties', palette: 'flow', name: 'Get Properties', glyph: '⚙', ports: ['out', 'missing'],
+    desc: 'Reads administrator-managed Project or Engine properties. Project secret properties are never returned. Sutras cannot change either scope.',
+    fields: [
+      F('scope', 'Property scope', 'select', 'Project', { options: ['Project', 'Engine'] }),
+      F('what', 'Get', 'select', 'all properties', { options: ['all properties', 'one property'] }),
+      F('name', 'Property name', 'text', '', { showIf: { k: 'what', in: ['one property'] }, tpl: true }),
+    ],
+    outputHint: { scope: 'Project', properties: {}, count: 0, name: '', value: null, found: true },
+    execute: c => {
+      const scope = c.raw('scope') === 'Engine' ? 'Engine' : 'Project';
+      const values = scope === 'Engine' ? engineVariableValues() : publicProjectVariableValues(c.projectId);
+      if (c.raw('what') !== 'one property') return { out: { scope, properties: structuredClone(values), count: Object.keys(values).length } };
+      const name = String(c.v('name') ?? '').trim();
+      if (!name) throw new Error('Property name is empty');
+      const found = Object.prototype.hasOwnProperty.call(values, name);
+      return found ? { out: { scope, name, value: values[name], found: true } } : { port: 'missing', out: { scope, name, value: null, found: false } };
     },
   },
   {

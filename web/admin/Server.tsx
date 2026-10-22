@@ -122,37 +122,31 @@ export function GatewayTls() {
   );
 }
 
-/** Sengine variables: server settings by the administrator, shared by all projects; {{ev.NAME}} or get-sengine-variable('NAME'). */
+/** Engine properties: administrator-managed settings shared by all projects. */
 function EngineVariables() {
   const toast = useToast();
   const [vars, setVars] = useState<{ name: string; value: string; description?: string }[] | null>(null);
-  const [writable, setWritable] = useState(false);
   useEffect(() => { get('/api/engine-variables').then(setVars).catch(e => toast(e.message, true)); }, [toast]);
-  useEffect(() => { get<{ sutrasMayChange: boolean }>('/api/engine-variables/policy').then(p => setWritable(p.sutrasMayChange)).catch(() => {}); }, []);
   if (!vars) return null;
   const set = (i: number, k: 'name' | 'value' | 'description', v: string) => setVars(vs => vs!.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
   return (
     <div className="card">
-      <h2>Sengine variables</h2>
-      <p className="muted" style={{ fontSize: 13 }}>Server settings made by the administrator and shared by every project. Sutras read them: <code>{'{{ev.NAME}}'}</code> in settings, <code>{'{ev.NAME}'}</code> or <code>{"get-sengine-variable('NAME')"}</code> in formulas. Values may read environment variables with <code>{'${env:NAME}'}</code>. Change them here, not from Sutras.</p>
+      <h2>Engine properties</h2>
+      <p className="muted" style={{ fontSize: 13 }}>Administrator-managed settings shared by every project. Sutras read them with <code>{'{{ev.NAME}}'}</code>, <code>{'{ev.NAME}'}</code>, <code>{"get-engine-variable('NAME')"}</code>, or Get Properties. Values may read environment variables with <code>{'${env:NAME}'}</code>. Sutras cannot change them.</p>
       <table className="t"><tbody>
         {vars.map((v, i) => (
           <tr key={i}>
-            <td><input className="inp code" aria-label={`Sengine variable ${i + 1} name`} placeholder="NAME" value={v.name} onChange={e => set(i, 'name', e.target.value)} /></td>
-            <td><input className="inp code" aria-label={`Sengine variable ${i + 1} value`} placeholder="value" value={v.value} onChange={e => set(i, 'value', e.target.value)} /></td>
-            <td><input className="inp" aria-label={`Sengine variable ${i + 1} description`} placeholder="Description" value={v.description || ''} onChange={e => set(i, 'description', e.target.value)} /></td>
-            <td><button className="x" aria-label="Remove Sengine variable" onClick={() => setVars(vs => vs!.filter((_, j) => j !== i))}>✕</button></td>
+            <td><input className="inp code" aria-label={`Engine property ${i + 1} name`} placeholder="NAME" value={v.name} onChange={e => set(i, 'name', e.target.value)} /></td>
+            <td><input className="inp code" aria-label={`Engine property ${i + 1} value`} placeholder="value" value={v.value} onChange={e => set(i, 'value', e.target.value)} /></td>
+            <td><input className="inp" aria-label={`Engine property ${i + 1} description`} placeholder="Description" value={v.description || ''} onChange={e => set(i, 'description', e.target.value)} /></td>
+            <td><button className="x" aria-label="Remove Engine property" onClick={() => setVars(vs => vs!.filter((_, j) => j !== i))}>✕</button></td>
           </tr>
         ))}
       </tbody></table>
       <div className="row" style={{ marginTop: 8 }}>
         <button className="btn small" onClick={() => setVars(vs => [...vs!, { name: '', value: '' }])}>+ Variable</button>
-        <button className="btn primary" onClick={() => put('/api/engine-variables', vars).then(v => { setVars(v); toast('Sengine variables saved'); }).catch(e => toast(e.message, true))}>Save</button>
+        <button className="btn primary" onClick={() => put('/api/engine-variables', vars).then(v => { setVars(v); toast('Engine properties saved'); }).catch(e => toast(e.message, true))}>Save</button>
       </div>
-      <label className="check" style={{ marginTop: 12 }}>
-        <input type="checkbox" checked={writable} onChange={e => put<{ sutrasMayChange: boolean }>('/api/engine-variables/policy', { sutrasMayChange: e.target.checked }).then(p => { setWritable(p.sutrasMayChange); toast(p.sutrasMayChange ? 'Sutras may now change Sengine variables' : 'Sengine variables are read-only for Sutras'); }).catch(err => toast(err.message, true))} />
-        Allow Sutras to change Sengine variables (set-sengine-variable). Not advised: one Sutra could change the behaviour of every project.
-      </label>
     </div>
   );
 }

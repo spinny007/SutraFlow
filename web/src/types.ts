@@ -15,6 +15,8 @@ export interface Field {
   options?: string[];
   resourceKind?: string;
   tpl?: boolean;
+  /** General-tab code/text area supports project and engine variable references. */
+  vars?: boolean;
   help?: string;
   showIf?: { k: string; in: any[] };
   /** Show when any of these conditions holds. */

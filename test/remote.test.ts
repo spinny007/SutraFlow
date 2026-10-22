@@ -47,11 +47,21 @@ before(async () => {
   setSecret('SFTP_PW', 'Sftp-pass-123');
   setSecret('SFTP_KEY', userKey.private);
   setSecret('FTP_PW', 'Ftp-pass-123');
-  shop = projects.saveProject({ name: 'Remote files', config: { variables: [] } }).id;
+  shop = projects.saveProject({ name: 'Remote files', config: { variables: [
+    { name: 'REMOTE_HOST', type: 'string', value: '127.0.0.1' },
+    { name: 'SFTP_PORT', type: 'number', value: String(sftp.port) },
+    { name: 'FTP_PORT', type: 'number', value: String(port(19836)) },
+    { name: 'SFTP_USER', type: 'string', value: 'partner' },
+    { name: 'FTP_USER', type: 'string', value: 'ftpuser' },
+    { name: 'SFTP_SECRET', type: 'string', value: 'SFTP_PW' },
+    { name: 'FTP_SECRET', type: 'string', value: 'FTP_PW' },
+    { name: 'SFTP_BASE', type: 'string', value: '/partner' },
+    { name: 'FTP_BASE', type: 'string', value: '/files' },
+  ] } }).id;
   fs.mkdirSync(path.join(sftpRoot, 'partner'), { recursive: true });
-  sftpConn = saveResource({ kind: 'sftp', name: 'Partner SFTP', project_id: shop, config: { host: '127.0.0.1', port: sftp.port, user: 'partner', auth: 'password', passwordSecret: 'SFTP_PW', baseFolder: '/partner' } }).id;
+  sftpConn = saveResource({ kind: 'sftp', name: 'Partner SFTP', project_id: shop, config: { host: '{{gv.REMOTE_HOST}}', port: '{{gv.SFTP_PORT}}', user: '{{gv.SFTP_USER}}', auth: 'password', passwordSecret: '{{gv.SFTP_SECRET}}', baseFolder: '{{gv.SFTP_BASE}}' } }).id;
   sftpKeyConn = saveResource({ kind: 'sftp', name: 'Partner SFTP key', project_id: shop, config: { host: '127.0.0.1', port: sftp.port, user: 'partner', auth: 'private key', keySecret: 'SFTP_KEY', hostFingerprint: fingerprintOf(sftp.hostKeyRaw), baseFolder: '/partner' } }).id;
-  ftpConn = saveResource({ kind: 'ftp', name: 'Old FTP', project_id: shop, config: { host: '127.0.0.1', port: port(19836), user: 'ftpuser', passwordSecret: 'FTP_PW', security: 'none', baseFolder: '/files' } }).id;
+  ftpConn = saveResource({ kind: 'ftp', name: 'Old FTP', project_id: shop, config: { host: '{{gv.REMOTE_HOST}}', port: '{{gv.FTP_PORT}}', user: '{{gv.FTP_USER}}', passwordSecret: '{{gv.FTP_SECRET}}', security: 'none', baseFolder: '{{gv.FTP_BASE}}' } }).id;
   fs.mkdirSync(path.join(ftpRoot, 'files'), { recursive: true });
 });
 after(async () => { await srv.stop(); await sftp.close(); await ftp.close().catch(() => {}); });

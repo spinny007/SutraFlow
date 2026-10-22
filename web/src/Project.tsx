@@ -541,7 +541,6 @@ function OpsEditor() {
             }} /></td></tr>
         ))}</tbody></table>
       ) : <p className="muted">No project variables yet.</p>}
-      <RuntimeValues projectId={project.id} />
       <div className="group">Resource overrides</div>
       <div className="fld"><textarea className="code inp" rows={8} spellCheck={false} aria-label="Resource overrides JSON" value={resText} onChange={e => setResText(e.target.value)} />
         <div className="hint">By resource name, only the settings that differ, e.g. {`{ "${resources[0]?.name || 'Billing API'}": { "baseUrl": "\${env:BILLING_URL}" } }`}</div></div>
@@ -655,21 +654,6 @@ function ProjectLog() {
         ? <pre className="json loglines" style={{ maxHeight: '60vh', overflow: 'auto' }}>{data.lines.map((l, i) => <LogLine key={i} line={l} />)}</pre>
         : <p className="muted">{f.level || f.q || f.origin ? 'No lines match.' : 'Empty.'}</p>)}
     </>
-  );
-}
-
-/** Values changed by set-project-variable() while flows ran; cleared by saving the deployment config. */
-function RuntimeValues({ projectId }: { projectId: string }) {
-  const [vals, setVals] = useState<Record<string, string>>({});
-  const load = () => get(`/api/projects/${projectId}/runtime-variables`).then(setVals).catch(() => {});
-  useEffect(() => { load(); }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
-  const keys = Object.keys(vals);
-  if (!keys.length) return null;
-  return (
-    <div className="warnbox" style={{ marginTop: 8 }}>
-      <b>Set while running</b> (set-project-variable): {keys.map(k => <span key={k}><code>{k}</code> = {vals[k]} </span>)}
-      <div><button className="btn small" style={{ marginTop: 6 }} onClick={() => del(`/api/projects/${projectId}/runtime-variables`).then(load)}>Clear</button></div>
-    </div>
   );
 }
 

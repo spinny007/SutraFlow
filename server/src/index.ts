@@ -8,7 +8,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 import { openDb, q } from './db.js';
-import { memTableByName, memPeek, stopMemTables } from './memtables.js';
+import { memTableByName, memPeek, startMemTables, stopMemTables, memoryScheduling } from './memtables.js';
 import { fileSamplesOnce } from './samples.js';
 import { engine } from './engine/engine.js';
 import { allActivities } from './palettes/index.js';
@@ -18,14 +18,14 @@ import { rebuildSchedules, stopSchedules } from './scheduler.js';
 import { rebuildRoutes, startGateway, stopGateway, reloadTls } from './gateway/gateway.js';
 import { startRenewal } from './gateway/tls.js';
 import { buildAdmin } from './api.js';
-import { loadOpsFiles, onProjectChange, effectiveVariables, setRuntimeVariable, engineVariableValues, setEngineVariable, forgetCachedSettings } from './projects.js';
+import { loadOpsFiles, onProjectChange, effectiveVariables, engineVariableValues, forgetCachedSettings } from './projects.js';
 import { setVariableHooks } from './expr.js';
 import { rebuildListeners, stopListeners } from './listeners.js';
 import { closeBusPublishers } from './connectors/bus.js';
 import { closeDbPools } from './connectors/db.js';
 import { config } from './config.js';
 import { lifecycle, closeServer } from './lifecycle.js';
-import { startCluster, stopCluster, bumpDeployGen, leaveLeadership, cluster } from './cluster.js';
+import { startCluster, stopCluster, bumpDeployGen, bumpTlsGen, leaveLeadership, cluster } from './cluster.js';
 import { housekeeping } from './housekeeping.js';
 import { ensureBuiltins } from './access.js';
 import { evaluate as evaluateAlerts } from './alerts.js';
@@ -91,9 +91,7 @@ export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gatew
   lifecycle.draining = false;
   setVariableHooks({
     getProject: (pid, name) => effectiveVariables(pid).values[name],
-    setProject: (pid, name, value) => setRuntimeVariable(pid, name, value),
     getEngine: name => engineVariableValues()[name],
-    setEngine: (name, value) => setEngineVariable(name, value),
     memoryLookup: (pid, table, key, field) => {
       const t = memTableByName(pid, table);
       const row = t ? memPeek(t, key) : undefined;
@@ -121,14 +119,19 @@ export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gatew
     becameLeader: () => { rebuildSchedules(); rebuildListeners().catch(e => console.error('Listeners:', e)); },
     lostLeader: () => { stopSchedules(); stopListeners().catch(() => {}); },
     deploymentsChanged: () => { forgetCachedSettings(); applyTuning(); rebuildRoutes(); reschedule(); relisten(); },
+    gatewayChanged: () => { forgetCachedSettings(); startGateway().catch(e => console.error('Gateway settings:', e)); },
+    tlsChanged: () => { forgetCachedSettings(); reloadTls(); },
     housekeeping: () => { try { housekeeping(); } catch (e) { console.error('Housekeeping:', e); } },
     alerts: () => { evaluateAlerts().catch(e => console.error('Alerts:', e)); approvalTick().catch(e => console.error('Approvals:', e)); },
     drainRequested: () => { console.log('Drain requested from the Admin Console'); lifecycle.shutdown?.().finally(() => { if (opts.exitOnDrain) process.exit(0); }); },
   });
+  memoryScheduling.mayRefreshShared = () => cluster.leader;
+  // Do not delay the server while an external source is unavailable; status/errors remain visible.
+  void startMemTables();
   rebuildRoutes();
   if (opts.gateway !== false) {
     await startGateway();
-    startRenewal(reloadTls);
+    startRenewal(() => { reloadTls(); bumpTlsGen(); });
   }
   const admin = await buildAdmin();
   if (opts.listenAdmin !== false) await admin.listen({ host: config.adminHost, port: config.adminPort });

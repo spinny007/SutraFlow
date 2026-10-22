@@ -89,6 +89,21 @@ test('Memory put, query and delete; memory-lookup() reads memory in a mapping', 
   assert.equal((await mem.memTable(rates.id)).rows.has('INR'), false);
 });
 
+test('Delete Memory Records removes a list of keys or records matching fields and a condition', async () => {
+  const t = await mem.memTable(rates.id);
+  mem.memPut(t, { code: 'A1', group: 'old', rate: 1 });
+  mem.memPut(t, { code: 'A2', group: 'old', rate: 2 });
+  mem.memPut(t, { code: 'A3', group: 'old', rate: 3 });
+  const s = node('start', 'Start');
+  const list = node('memDelete', 'Delete list', { table: rates.id, what: 'list of keys', keys: ['A1', 'A2'] });
+  const match = node('memDelete', 'Delete match', { table: rates.id, what: 'matching records', match: [{ k: 'group', v: 'old' }], condition: '={row.rate} >= 3', limit: 10 });
+  const r = await run(deployed('Delete cached records', [s, list, match], [edge(s, list), edge(list, match)]));
+  assert.equal(r.status, 'done', r.error);
+  assert.deepEqual(r.out['Delete list'].keys.sort(), ['A1', 'A2']);
+  assert.deepEqual(r.out['Delete match'].keys, ['A3']);
+  assert.equal(t.rows.has('A1') || t.rows.has('A2') || t.rows.has('A3'), false);
+});
+
 test('failsafe: every change is in the database copy; a restarted engine (or another one) has the rows without asking the source', async () => {
   const t = await mem.memTable(rates.id);
   const copy = q.all<any>('select k from mem_rows where store_id = ? and value is not null order by k', rates.id).map(r => r.k);
@@ -133,6 +148,36 @@ test('Admin Console: tables with their settings and figures, rows, reload and cl
   const re = (await call('POST', `/api/console/memory/${rates.id}/reload`)).json();
   assert.equal(re.rows, 3, 'reloaded from the source: the rows Sutras added are gone');
   assert.equal((await call('POST', `/api/console/memory/${rates.id}/clear`)).json().rows, 0);
+});
+
+test('Admin configures refresh schedules and cluster/project quotas', async () => {
+  const saved = (await call('PUT', `/api/console/memory/${rates.id}/config`, {
+    source: 'database query', database: db.id, loadSql: rates.config.loadSql, lookupSql: rates.config.lookupSql,
+    key: 'code', refresh: 'cron', refreshCron: '0 */10 * * * *', refreshTimezone: 'Asia/Kolkata', maxRows: 10000, maxMb: 16, keep: 'copy in the database',
+  })).json();
+  assert.equal(saved.config.refresh, 'cron');
+  await call('GET', `/api/console/memory/${rates.id}/rows`);
+  const stat = (await call('GET', '/api/console/memory')).json().find((x: any) => x.id === rates.id);
+  assert.equal(stat.settings.databaseDriver, 'sqlite');
+  assert.ok(stat.nextRefresh, JSON.stringify(stat));
+  const before = (await call('GET', '/api/console/memory-quotas')).json();
+  assert.ok(before.usage.engine.tables >= 1);
+  const changed = (await call('PUT', '/api/console/memory-quotas', { engine: { maxRows: 900000, maxMb: 1900 }, projects: { [shop]: { maxRows: 200000, maxMb: 400 } } })).json();
+  assert.deepEqual(changed.quotas.projects[shop], { maxRows: 200000, maxMb: 400 });
+  const tooLow = await call('PUT', '/api/console/memory-quotas', { engine: { maxRows: 1, maxMb: 1 }, projects: {} });
+  assert.equal(tooLow.statusCode, 400); assert.match(tooLow.body, /already uses/);
+  await call('PUT', '/api/console/memory-quotas', before.quotas);
+});
+
+test('a scheduled table recovers when its external source becomes available after startup', async () => {
+  const late = saveResource({ kind: 'memoryTable', name: 'Late source', project_id: shop, config: { key: 'id', source: 'database query', database: db.id, loadSql: 'SELECT id, label FROM later_rows', refresh: 'interval', refreshMinutes: 0.001, keep: 'memory only' } });
+  await assert.rejects(mem.memTable(late.id), /later_rows/);
+  const external = new DatabaseSync(path.join(env.dir, 'ref.sqlite'));
+  external.exec("create table later_rows(id text primary key, label text); insert into later_rows values ('ready', 'Recovered')"); external.close();
+  await new Promise(resolve => setTimeout(resolve, 180));
+  const t = await mem.memTable(late.id);
+  assert.equal((await mem.memGet(t, 'ready')).label, 'Recovered');
+  assert.equal(t.lastError, null);
 });
 
 test('connection details are cached for the settings refresh time and a change clears them at once', () => {

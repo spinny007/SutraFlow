@@ -309,7 +309,7 @@ export const agentActivities: Activity[] = [
     fields: [
       F('agentName', 'Agent name', 'text', 'order-desk', { help: 'Letters, digits and -. The chat page is /chat/<name>, the OpenAI model name <name>, the MCP tool ask_<name>, the A2A agent /a2a/<name>.' }),
       F('title', 'Title', 'text', 'Order desk'),
-      F('description', 'What it does (for people and other AIs)', 'textarea', 'Answers questions about orders and stock, and hands refund requests to a person.'),
+      F('description', 'What it does (for people and other AIs)', 'textarea', 'Answers questions about orders and stock, and hands refund requests to a person.', { vars: true }),
       F('chat', 'Chat page and chat API', 'bool', true, { group: 'Entry points' }),
       F('chatPolicy', 'Who may chat', 'resource', '', { resourceKind: 'inboundPolicy', group: 'Entry points', ...when('chat', true), help: 'Empty = anyone who reaches the gateway; set a policy with a rate limit for a public page.' }),
       F('openai', 'OpenAI-compatible API', 'bool', false, { group: 'Entry points' }),
@@ -352,7 +352,7 @@ export const agentActivities: Activity[] = [
     fields: [
       F('text', 'Text', 'text', '{{input.message}}', { tpl: true }),
       F('checks', 'Checks', 'list', ['hide personal data', 'hidden instructions', 'blocked topics'], { options: [...GUARD_CHECKS], help: 'Hidden personal data is replaced by [EMAIL], [PHONE], [CARD] and so on; the text goes on hidden.' }),
-      F('topics', 'Blocked topics', 'textarea', 'medical advice\nlegal advice\nweapons', { help: 'One per line: words or phrases.' }),
+      F('topics', 'Blocked topics', 'textarea', 'medical advice\nlegal advice\nweapons', { vars: true, help: 'One per line: words or phrases. Project properties may supply the list for each environment.' }),
       F('maxChars', 'Maximum length (characters)', 'number', 8000),
       F('jsonSchema', 'Must match schema', 'schema', '', { schemaKinds: ['json'], help: 'For model answers that must be JSON of this shape.' }),
       F('aiCheck', 'Also ask a model', 'resource', '', { resourceKind: 'aiProvider', help: 'A second opinion on hidden instructions and topics. Empty = rules only.' }),

@@ -25,9 +25,9 @@ import { engine } from './engine/engine.js';
  *  Drain      the Admin Console marks an engine; that engine drains and stops on its next beat.
  *  Alerts     the leader checks the alert rules every six beats (30 seconds by default).
  */
-export interface ClusterHooks { becameLeader(): void; lostLeader(): void; deploymentsChanged(): void; housekeeping?(): void; drainRequested?(): void; alerts?(): void }
+export interface ClusterHooks { becameLeader(): void; lostLeader(): void; deploymentsChanged(): void; gatewayChanged?(): void; tlsChanged?(): void; housekeeping?(): void; drainRequested?(): void; alerts?(): void }
 
-export const cluster = { leader: false, started: false, draining: false, gen: -1 };
+export const cluster = { leader: false, started: false, draining: false, gen: -1, gatewayGen: -1, tlsGen: -1 };
 let timer: NodeJS.Timeout | null = null;
 let hooks: ClusterHooks | null = null;
 let beats = 0;
@@ -41,6 +41,8 @@ export function startCluster(h: ClusterHooks) {
   cluster.started = true;
   cluster.draining = false;
   cluster.gen = getSetting<number>('deployGen', 0);
+  cluster.gatewayGen = getSetting<number>('gatewayGen', 0);
+  cluster.tlsGen = getSetting<number>('tlsGen', 0);
   q.run(`insert into engines(id, host, pid, mode, version, started_at, heartbeat_at, workers, active, draining, can_lead) values(?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
     on conflict(id) do update set host = excluded.host, pid = excluded.pid, mode = excluded.mode, version = excluded.version, started_at = excluded.started_at, heartbeat_at = excluded.heartbeat_at, workers = excluded.workers, active = 0, draining = 0, drain_requested = 0, can_lead = excluded.can_lead`,
     config.engineId, os.hostname(), process.pid, config.mode, version, now(), Date.now(), engine.concurrency, config.canLead ? 1 : 0);
@@ -89,6 +91,10 @@ export function beat() {
   }
   const gen = getSetting<number>('deployGen', 0);
   if (gen !== cluster.gen) { cluster.gen = gen; hooks.deploymentsChanged(); }
+  const gatewayGen = getSetting<number>('gatewayGen', 0);
+  if (gatewayGen !== cluster.gatewayGen) { cluster.gatewayGen = gatewayGen; hooks.gatewayChanged?.(); }
+  const tlsGen = getSetting<number>('tlsGen', 0);
+  if (tlsGen !== cluster.tlsGen) { cluster.tlsGen = tlsGen; hooks.tlsChanged?.(); }
   engine.abortCancelledHere().catch(() => {});
   // The Admin Console asked this engine to drain and stop.
   if (!cluster.draining && Number(q.get<any>('select drain_requested from engines where id = ?', config.engineId)?.drain_requested)) hooks.drainRequested?.();
@@ -112,6 +118,20 @@ export function bumpDeployGen() {
   const g = getSetting<number>('deployGen', 0) + 1;
   setSetting('deployGen', g);
   cluster.gen = g; // this engine already applied it
+}
+
+/** Tells every other engine to restart its gateway listeners after listener settings change. */
+export function bumpGatewayGen() {
+  const g = getSetting<number>('gatewayGen', 0) + 1;
+  setSetting('gatewayGen', g);
+  cluster.gatewayGen = g;
+}
+
+/** Tells every other engine to reload the shared TLS certificate and options without dropping connections. */
+export function bumpTlsGen() {
+  const g = getSetting<number>('tlsGen', 0) + 1;
+  setSetting('tlsGen', g);
+  cluster.tlsGen = g;
 }
 
 /** Marks this engine as draining (status shows it) and gives up leadership at once. */

@@ -15,13 +15,14 @@ import { Drawer } from './Apps';
 
 interface GroupRole { group: string; role: string; project?: string }
 interface Settings {
-  enabled: boolean; name: string; issuer: string; clientId: string; clientSecret: string; scopes: string;
+  enabled: boolean; protocol: 'oidc' | 'saml'; name: string; issuer: string; clientId: string; clientSecret: string; scopes: string;
   usernameClaim: string; groupsClaim: string; groupRoles: GroupRole[]; createAccounts: boolean; linkExisting: boolean; redirectUri: string;
+  samlEntryPoint: string; samlEntityId: string; samlIdpIssuer: string; samlIdpCertPem: string;
 }
 interface Role { id: string; name: string }
 interface Project { id: string; name: string }
 
-/** Single sign-on with an OpenID Connect identity provider: the settings, and groups to roles. */
+/** Single sign-on with OpenID Connect or SAML 2.0: provider settings and groups to roles. */
 export function SsoDrawer({ onClose }: { onClose(): void }) {
   const toast = useToast();
   const s = useLoad<Settings>('/api/access/sso');
@@ -50,18 +51,27 @@ export function SsoDrawer({ onClose }: { onClose(): void }) {
   );
 
   return (
-    <Drawer title="Single sign-on" sub="OpenID Connect: people sign in at your identity provider. Password sign-in stays available." onClose={onClose}>
+    <Drawer title="Single sign-on" sub="OpenID Connect or SAML 2.0: people sign in at your identity provider. Password sign-in stays available." onClose={onClose}>
       <Err text={err} />
       <div className="c-form">
         {check('enabled', 'Offer single sign-on', 'Shows a sign-in button on the designer and Admin Console sign-in pages.')}
         {text('name', 'Button name', 'Sign in with this name, such as Contoso or Okta.')}
-        {text('issuer', 'Issuer', 'The provider\'s address; its /.well-known/openid-configuration is read.', 'https://login.example.com/realms/company')}
-        {text('clientId', 'Client id')}
-        {text('clientSecret', 'Client secret', 'Name of the vault secret holding it. Empty for a public client (PKCE only).')}
-        <div className="fld"><label>Redirect address</label><code className="c-code">{f.redirectUri}</code><div className="hint">Register it at the provider. Behind a proxy, set SUTRA_PUBLIC_URL so it shows the address people use.</div></div>
-        {text('scopes', 'Scopes')}
-        {text('usernameClaim', 'Username from claim', 'preferred_username, email, upn or sub.')}
-        {text('groupsClaim', 'Groups claim', 'The claim with the person\'s groups; ask the provider to include it in the ID token.')}
+        <div className="fld"><label htmlFor="sso-protocol">Protocol</label><select id="sso-protocol" value={f.protocol || 'oidc'} onChange={e => set({ protocol: e.target.value as Settings['protocol'] })}><option value="oidc">OpenID Connect</option><option value="saml">SAML 2.0</option></select></div>
+        {f.protocol !== 'saml' && <>
+          {text('issuer', 'Issuer', 'The provider\'s address; its /.well-known/openid-configuration is read.', 'https://login.example.com/realms/company')}
+          {text('clientId', 'Client id')}
+          {text('clientSecret', 'Client secret', 'Name of the vault secret holding it. Empty for a public client (PKCE only).')}
+          {text('scopes', 'Scopes')}
+        </>}
+        {f.protocol === 'saml' && <>
+          {text('samlEntryPoint', 'Identity-provider sign-in URL', 'The SAML HTTP-Redirect SSO endpoint.', 'https://idp.example.com/saml/sso')}
+          {text('samlEntityId', 'Service-provider entity id', 'The audience configured for SutraFlow at the identity provider.', 'https://sutra.example.com')}
+          {text('samlIdpIssuer', 'Identity-provider issuer', 'Optional but recommended: the IdP entity id expected in the signed assertion.')}
+          <div className="fld"><label htmlFor="sso-saml-cert">Identity-provider signing certificate (PEM)</label><textarea id="sso-saml-cert" className="code" rows={7} value={f.samlIdpCertPem || ''} onChange={e => set({ samlIdpCertPem: e.target.value })} spellCheck={false} /></div>
+        </>}
+        <div className="fld"><label>{f.protocol === 'saml' ? 'Assertion consumer address' : 'Redirect address'}</label><code className="c-code">{f.redirectUri}</code><div className="hint">Register it at the provider. SAML uses the HTTP-POST binding. Behind a proxy, set SUTRA_PUBLIC_URL so it shows the address people use.</div></div>
+        {text('usernameClaim', f.protocol === 'saml' ? 'Username from attribute' : 'Username from claim', f.protocol === 'saml' ? 'An attribute name, or NameID.' : 'preferred_username, email, upn or sub.')}
+        {text('groupsClaim', f.protocol === 'saml' ? 'Groups attribute' : 'Groups claim', f.protocol === 'saml' ? 'The assertion attribute containing the person\'s groups.' : 'The claim with the person\'s groups; ask the provider to include it in the ID token.')}
         <div className="fld">
           <label>Groups to roles</label>
           <div className="hint">At every sign-in the person's roles become those of their groups. Without rows, roles are given here in Users.</div>

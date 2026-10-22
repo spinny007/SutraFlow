@@ -42,6 +42,7 @@ const H = { authorization: `Bearer ${process.env.SUTRA_ADMIN_TOKEN}` };
 const call = (method: string, url: string, payload?: any) => srv.admin.inject({ method: method as any, url, payload, headers: H });
 let pid = '';
 let flowId = '';
+let memoryName = '';
 
 before(async () => {
   srv = await boot({ listenAdmin: false });
@@ -49,6 +50,9 @@ before(async () => {
   pid = projects.saveProject({ name: 'Orders', description: 'Order services', config: { variables: [{ name: 'REGION', type: 'string', value: 'dev-1' }, { name: 'DB_PASS', type: 'secret', value: 'ORDERS_DB' }] } }).id;
   setSecret('ORDERS_DB', 'dev-secret-value');
   saveResource({ kind: 'httpConnection', name: 'Shop API', project_id: pid, config: { baseUrl: 'http://dev-shop.local', timeoutMs: 5000 } });
+  const source = saveResource({ kind: 'database', name: 'Orders SQLite', project_id: pid, config: { driver: 'sqlite', file: 'orders.sqlite' } });
+  memoryName = 'Active orders cache';
+  saveResource({ kind: 'memoryTable', name: memoryName, project_id: pid, config: { key: 'order_id', source: 'database query', database: source.id, loadSql: 'SELECT order_id, status FROM sales.orders WHERE active = 1', lookupSql: 'SELECT order_id, status FROM sales.orders WHERE order_id = :key', refresh: 'cron', refreshCron: '0 */15 * * * *', refreshTimezone: 'UTC', maxRows: 5000, maxMb: 32, keep: 'copy in the database' } });
   const s = node('restService', 'GET /status', { method: 'GET', path: '/rel-status' });
   const rp = node('httpResponse', 'Reply', { status: '200', contentType: 'application/json', body: '{"region": "{{gv.REGION}}"}' });
   flowId = flows.saveFlow(undefined, { name: 'Status', nodes: [s, rp], edges: [edge(s, rp)] }, pid).id;
@@ -83,6 +87,11 @@ test('a release zip holds the package, a deployment config to fill in and a READ
   assert.deepEqual(back.config, cfg);
   assert.equal(readBundle(JSON.stringify(p)).config, undefined, 'a package file has no config');
   assert.deepEqual(configTemplate(p).variables, cfg.variables);
+  const mt = p.manifest.memoryTables.find(x => x.name === memoryName)!;
+  assert.deepEqual(mt.database, { name: 'Orders SQLite', driver: 'sqlite' });
+  assert.deepEqual(mt.sourceObjects, ['sales.orders']);
+  assert.deepEqual(mt.key, ['order_id']);
+  assert.equal(mt.refresh.mode, 'cron');
 });
 
 test('a config written for the package project fits the project it is deployed under', () => {

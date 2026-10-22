@@ -383,6 +383,53 @@ function buildScope(roots: { path: string; value: any }[], run: RunDetail | null
   };
 }
 
+/** Browsable routing scope for a selected transition condition. */
+export function ConditionDataBrowser({ from, doc, design, run, outputs, localVars, onPick }: {
+  from: FlowNode; doc: FlowDoc; design: Record<string, NodeDesign>; run: RunDetail | null; outputs: Record<string, any>; localVars?: Record<string, any>; onPick(path: string): void;
+}) {
+  const { meta, project } = useCatalog();
+  const [filter, setFilter] = useState('');
+  const [engineVars, setEngineVars] = useState<{ name: string; value: string; description?: string }[]>([]);
+  useEffect(() => { get('/api/engine-variables').then(setEngineVars).catch(() => {}); }, []);
+  const roots = useMemo(() => {
+    const ancestorIds = new Set<string>();
+    const stack = doc.edges.filter(e => e.to === from.id).map(e => e.from);
+    while (stack.length) {
+      const id = stack.pop()!;
+      if (ancestorIds.has(id)) continue;
+      ancestorIds.add(id);
+      doc.edges.filter(e => e.to === id).forEach(e => stack.push(e.from));
+    }
+    const projectVars = project?.config.variables || [];
+    const vars: SNode = { name: 'vars', type: 'object', children: [
+      ...(doc.variables || []).map(v => ({ name: v.name, type: (v.type === 'number' ? 'number' : v.type === 'boolean' ? 'boolean' : 'string') as SNode['type'] })),
+      ...doc.nodes.filter(n => n.type === 'setVar').flatMap(n => ((n.config.vars as any[]) || []).filter(row => row?.k).map(row => ({ name: String(row.k), type: 'any' as const }))),
+    ] };
+    const trigger = (run?.triggerNode ? doc.nodes.find(n => n.id === run.triggerNode) : undefined)
+      || doc.nodes.find(n => meta.activities.find(a => a.type === n.type)?.trigger);
+    const inputValue = outputs[from.name];
+    const list: { label: string; path: string; shape: SNode | null; value: any }[] = [
+      { label: `Previous activity: ${from.name}`, path: 'input', shape: design[from.id]?.out ?? (inputValue !== undefined ? inferShape(inputValue, 'input') : null), value: inputValue },
+      { label: 'Local variables', path: 'vars', shape: vars, value: run?.vars || localVars },
+      { label: 'Project properties', path: 'gv', shape: { name: 'gv', type: 'object', children: projectVars.map(v => ({ name: v.name, type: v.type === 'number' ? 'number' : v.type === 'boolean' ? 'boolean' : 'string', doc: v.description })) }, value: Object.fromEntries(projectVars.map(v => [v.name, v.type === 'secret' ? '••••••' : v.value])) },
+    ];
+    if (engineVars.length) list.push({ label: 'Engine properties (read only)', path: 'ev', shape: { name: 'ev', type: 'object', children: engineVars.map(v => ({ name: v.name, type: 'string' as const, doc: v.description })) }, value: Object.fromEntries(engineVars.map(v => [v.name, v.value])) });
+    if (trigger) list.push({ label: 'Trigger data', path: 'trigger', shape: design[trigger.id]?.out ?? (outputs[trigger.name] !== undefined ? inferShape(outputs[trigger.name], 'trigger') : null), value: outputs[trigger.name] });
+    for (const n of doc.nodes.filter(n => ancestorIds.has(n.id))) list.push({ label: n.name, path: `nodes${seg(n.name)}`, shape: design[n.id]?.out ?? (outputs[n.name] !== undefined ? inferShape(outputs[n.name], n.name) : null), value: outputs[n.name] });
+    list.push({ label: 'Current time', path: 'now', shape: { name: 'now', type: 'string' }, value: new Date().toISOString() });
+    return list;
+  }, [design, doc, engineVars, from, localVars, meta.activities, outputs, project?.config.variables, run?.vars]);
+  return (
+    <div className="condition-data">
+      <div className="mhead"><b>Condition data</b><input className="inp" placeholder="Filter" aria-label="Filter condition data" value={filter} onChange={e => setFilter(e.target.value)} /></div>
+      <div className="condition-tree">
+        {roots.map(root => <SourceNode key={root.path} {...root} state="none" depth={0} filter={filter.toLowerCase()} onToggle={() => {}} onPick={onPick} />)}
+      </div>
+      <div className="hint">Click a field to insert its reference into Condition.</div>
+    </div>
+  );
+}
+
 // ---------- left tree ----------
 function SourceNode({ label, path, shape, value, state, depth, filter, onToggle, onPick }: {
   label: string; path: string; shape: SNode | null; value: any; state?: 'ran' | 'skipped' | 'none'; depth: number; filter: string; onToggle(): void; onPick(path: string): void;
@@ -405,7 +452,7 @@ function SourceNode({ label, path, shape, value, state, depth, filter, onToggle,
   return (
     <div className="snode">
       <div className={`srow${depth === 0 ? ' root' : ''}${state === 'skipped' ? ' skipped' : ''}`} data-ref={path} draggable onDragStart={drag} onClick={() => onPick(path)} title={`{${path}}${s?.doc ? '\n' + s.doc : ''}`}>
-        {kids.length ? <button className="tw" aria-label={open ? 'Collapse' : 'Expand'} onClick={() => { setOpen(o => !o); requestAnimationFrame(onToggle); }}>{open ? '▾' : '▸'}</button> : <span className="tw" />}
+        {kids.length ? <button className="tw" aria-label={open ? 'Collapse' : 'Expand'} onClick={e => { e.stopPropagation(); setOpen(o => !o); requestAnimationFrame(onToggle); }}>{open ? '▾' : '▸'}</button> : <span className="tw" />}
         <span className={`ty t-${s?.type || 'any'}`}>{TYPE_ICON[s?.type || 'any']}</span>
         <span className="nm">{label}{s?.repeats ? <span className="rep" title="Repeating (list)">*</span> : null}{s?.required ? <span className="req">*</span> : null}</span>
         {state === 'skipped' && depth === 0 ? <span className="badge">not run</span> : leafValue ? <span className="val">{leafValue.length > 40 ? leafValue.slice(0, 40) + '…' : leafValue}</span> : null}

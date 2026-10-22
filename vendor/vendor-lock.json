@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "packages": {
+    "acme-client": {
+      "scope": "runtime",
+      "ship": true,
+      "localVersion": "5.4.0-sutra.1",
+      "treeSha256": "1a529f735fa85ea3939bea1eb7f6f1649c6ed670b2c90771e86224461956db2b",
+      "upstream": {
+        "version": "5.4.0",
+        "integrity": "sha512-mORqg60S8iML6XSmVjqjGHJkINrCGLMj2QvDmFzI9vIlv1RGlyjmw3nrzaINJjkNsYXC41XhhD5pfy7CtuGcbA=="
+      },
+      "patches": [
+        "Remove the deprecated node-forge dependency and compatibility export.",
+        "Use the maintained native/WebCrypto certificate implementation required by SutraFlow."
+      ],
+      "consumers": [
+        "server/src/gateway/tls.ts"
+      ],
+      "tests": [
+        "test/vendor.test.ts",
+        "test/gateway.test.ts",
+        "test/wss.test.ts"
+      ]
+    },
+    "ftp-srv": {
+      "scope": "test",
+      "ship": false,
+      "localVersion": "4.6.3-sutra.1",
+      "treeSha256": "b0aafe46440e2c002a43884d5502e65928a89171a5360300ffaab04312af1d6c",
+      "upstream": {
+        "version": "4.6.3",
+        "integrity": "sha512-k9q06Ab04CwY7n9HL5H5Zn+/ccohUUH8K2UjQ6dnAlE3NIFdqFI8Paanq+WFbfawZXeK29vP0zgZWfr28N33dw=="
+      },
+      "patches": [
+        "Replace the vulnerable ip dependency with Node.js address handling.",
+        "Replace the legacy uuid dependency with crypto.randomUUID().",
+        "Remove the unused command-line entry point and upstream development-only metadata."
+      ],
+      "consumers": [
+        "test/remote.test.ts",
+        "tools/soak.mjs"
+      ],
+      "tests": [
+        "test/remote.test.ts"
+      ]
+    }
+  }
+}

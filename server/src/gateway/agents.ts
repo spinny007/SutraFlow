@@ -9,7 +9,7 @@
  */
 import crypto from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { q } from '../db.js';
+import { asyncDatabase } from '../asyncdb.js';
 import { engine } from '../engine/engine.js';
 import type { FlowDoc, FlowNode } from '../engine/types.js';
 import { deployedFlows } from '../flows.js';
@@ -58,11 +58,16 @@ function ask(a: AgentEntry, input: { message: string; sessionId: string; channel
     const done = (o: Out) => { if (!settled) { settled = true; clearInterval(watch); resolve(o); } };
     const timer = setTimeout(() => done({ status: 'working', answer: null, sessionId: input.sessionId, job: runId }), a.waitMs);
     // Waiting for a person takes minutes or days: answer "working" with the job at once.
+    let checking = false;
     const watch = setInterval(() => {
-      if (runId && q.get(`select 1 from tasks where run_id = ? and status = 'waiting' and wait like '%"approval"%'`, runId)) {
-        clearTimeout(timer);
-        done({ status: 'working', answer: 'A person will answer this; ask again with the job id.', sessionId: input.sessionId, job: runId, waitingFor: 'a person' });
-      }
+      if (!runId || checking) return;
+      checking = true;
+      void asyncDatabase().get(`select 1 from tasks where run_id = ? and status = 'waiting' and wait like '%"approval"%'`, runId).then(waiting => {
+        if (waiting) {
+          clearTimeout(timer);
+          done({ status: 'working', answer: 'A person will answer this; ask again with the job id.', sessionId: input.sessionId, job: runId, waitingFor: 'a person' });
+        }
+      }).catch(() => {}).finally(() => { checking = false; });
     }, 300);
     engine.startRun({
       doc: a.doc, flowId: a.flowId, projectId: a.projectId, version: a.version, triggerNodeId: a.node.id, source: 'agent',
@@ -82,11 +87,12 @@ function fromReply(r: any, sessionId: string): Out {
 }
 
 /** The answer of a job (a run of this agent) when it has one. */
-function job(a: AgentEntry, id: string): Out | null {
-  const r = q.get<any>('select status, error, state, flow_id from runs where id = ?', id);
+async function job(a: AgentEntry, id: string): Promise<Out | null> {
+  const db = asyncDatabase();
+  const r = await db.get<any>('select status, error, state, flow_id from runs where id = ?', id);
   if (!r || r.flow_id !== a.flowId) return null;
   const st = JSON.parse(r.state || '{}');
-  const input = q.get<any>('select input from tasks where run_id = ? order by id limit 1', id);
+  const input = await db.get<any>('select input from tasks where run_id = ? order by id limit 1', id);
   const sessionId = (() => { try { return JSON.parse(input?.input || '{}').sessionId || ''; } catch { return ''; } })();
   if (st.reply) return fromReply(st.reply, sessionId);
   if (r.status === 'failed' || r.status === 'cancelled') return { status: 'error', answer: null, sessionId, error: r.error || `The run was ${r.status}` };
@@ -122,7 +128,7 @@ export async function handleAgents(req: FastifyRequest, reply: FastifyReply, sec
     try {
       const who = await caller(req, secure, a.node.config.chatPolicy);
       note(req, a, 'agent', who);
-      if (m[3] && method === 'GET') { const j = job(a, m[3]); return j ? reply.send(j) : reply.code(404).send({ error: 'No such job' }); }
+      if (m[3] && method === 'GET') { const j = await job(a, m[3]); return j ? reply.send(j) : reply.code(404).send({ error: 'No such job' }); }
       if (m[2] !== '/api' || method !== 'POST') return reply.code(405).send({ error: 'Use POST /chat/<name>/api with {"message", "sessionId"}' });
       const b = body(req);
       const message = text(b.message).trim();
@@ -158,7 +164,7 @@ export async function handleAgents(req: FastifyRequest, reply: FastifyReply, sec
     const first = content(msgs.find(x => x.role === 'user'));
     const sessionId = given || `oa-${crypto.createHash('sha256').update(`${who.subject}|${a.name}|${first}`).digest('hex').slice(0, 24)}`;
     const jobAsk = JOB_ASK.exec(message);
-    const out = jobAsk ? job(a, jobAsk[1]) || { status: 'error' as const, answer: null, sessionId, error: 'No such job' } : await ask(a, { message, sessionId, channel: 'openai', caller: who, history: msgs.slice(0, msgs.lastIndexOf(lastUser)).map(x => ({ role: x.role, content: content(x) })) });
+    const out = jobAsk ? await job(a, jobAsk[1]) || { status: 'error' as const, answer: null, sessionId, error: 'No such job' } : await ask(a, { message, sessionId, channel: 'openai', caller: who, history: msgs.slice(0, msgs.lastIndexOf(lastUser)).map(x => ({ role: x.role, content: content(x) })) });
     if (out.status === 'error') return reply.code(502).send({ error: { message: out.error || 'The agent failed', type: 'server_error' } });
     const answer = out.status === 'working' ? `I am still working on this. Send "status ${out.job}" to get the answer.` : out.status === 'needs a person' ? `${text(out.answer)}\n\n(A person will follow up.)` : text(out.answer);
     const id = `chatcmpl-${crypto.randomUUID()}`, created = Math.floor(Date.now() / 1000);
@@ -206,7 +212,7 @@ export async function handleAgents(req: FastifyRequest, reply: FastifyReply, sec
       return reply.send({ jsonrpc: '2.0', id: rid, result: out.status === 'answer' ? msgOut(out) : task(out.job || crypto.randomUUID(), out) });
     }
     if (rpc?.method === 'tasks/get') {
-      const j = job(a, String(rpc.params?.id || ''));
+      const j = await job(a, String(rpc.params?.id || ''));
       return reply.send(j ? { jsonrpc: '2.0', id: rid, result: task(String(rpc.params.id), j) } : { jsonrpc: '2.0', id: rid, error: { code: -32001, message: 'Task not found' } });
     }
     return reply.send({ jsonrpc: '2.0', id: rid, error: { code: -32601, message: `Method not found: ${rpc?.method}` } });
@@ -228,7 +234,7 @@ export function agentMcpTools(endpoint: string) {
   }));
 }
 export async function callAgentTool(a: AgentEntry, args: any, who: Caller) {
-  const out = args?.job ? job(a, String(args.job)) || { status: 'error' as const, answer: null, sessionId: '', error: 'No such job' } : await ask(a, { message: text(args?.message).trim(), sessionId: String(args?.session || '') || newSession(), channel: 'mcp', caller: who });
+  const out = args?.job ? await job(a, String(args.job)) || { status: 'error' as const, answer: null, sessionId: '', error: 'No such job' } : await ask(a, { message: text(args?.message).trim(), sessionId: String(args?.session || '') || newSession(), channel: 'mcp', caller: who });
   const say = out.status === 'working' ? `Still working on it. Call ${mcpToolName(a)} again with job "${out.job}" for the answer.` : out.status === 'error' ? `The agent failed: ${out.error}` : out.status === 'needs a person' ? `${text(out.answer)}\n(A person will follow up.)` : text(out.answer);
   return { content: [{ type: 'text', text: say }], structuredContent: { answer: out.answer, status: out.status, session: out.sessionId, ...(out.job ? { job: out.job } : {}) }, ...(out.status === 'error' ? { isError: true } : {}) };
 }

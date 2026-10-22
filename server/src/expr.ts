@@ -422,9 +422,7 @@ export function formatNumber(n: unknown, pattern = '#,##0.##') {
 /** Engine-provided access to project and engine (administrator) variables. */
 export interface VariableHooks {
   getProject(projectId: string | null, name: string): any;
-  setProject(projectId: string | null, name: string, value: unknown): void;
   getEngine(name: string): any;
-  setEngine(name: string, value: unknown): void;
   /** A row (or one field of it) of a project's memory table, from memory only. */
   memoryLookup?(projectId: string | null, table: string, key: string, field?: string): any;
 }
@@ -512,19 +510,10 @@ export const FUNCTIONS: Record<string, FnDef> = Object.fromEntries([
   // Variables
   ['get-project-variable', { group: 'Variables', sig: "get-project-variable('NAME')", help: 'Current value of a project variable (same as {gv.NAME}, but the name can be computed).', min: 1, max: 1,
     lazy: (a, ctx) => needHooks().getProject(ctx.process?.project ?? null, s(evaluate(a[0], ctx))) }],
-  ['set-project-variable', { group: 'Variables', sig: "set-project-variable('NAME', value)", help: 'Changes a project variable for every later run (kept until the next deployment config change). Returns the value.', min: 2, max: 2,
-    lazy: (a, ctx) => { const v = evaluate(a[1], ctx); needHooks().setProject(ctx.process?.project ?? null, s(evaluate(a[0], ctx)), v); return v; } }],
-  ['get-sengine-variable', { group: 'Variables', sig: "get-sengine-variable('NAME')", help: 'Sengine variable: a server setting made by the administrator in Admin Console > Server > Runtime, shared by all projects. Read it; do not change it from Sutras.', min: 1, max: 1,
-    lazy: (a, ctx) => needHooks().getEngine(s(evaluate(a[0], ctx))) }],
-  ['set-sengine-variable', { group: 'Variables', sig: "set-sengine-variable('NAME', value)", help: 'Changes a Sengine variable for every project. Not advised: works only when the administrator allows it in Admin Console > Server > Runtime.', min: 2, max: 2,
-    lazy: (a, ctx) => { const v = evaluate(a[1], ctx); needHooks().setEngine(s(evaluate(a[0], ctx)), v); return v; } }],
-  ['memory-lookup', { group: 'Variables', sig: "memory-lookup('Table', key, 'field'?)", help: 'A row of a memory table of the project, by key, or one field of it; empty when the row is not in memory. Reads memory only, so it never waits: use it in mappings for fast lookups (Memory get also fetches missing rows).', min: 2, max: 3,
+  ['memory-lookup', { group: 'Variables', sig: "memory-lookup('Table', key, 'field'?)", help: 'A record of a Memory table in the project, by key, or one field of it; empty when it is not cached. Reads memory only, so it never waits: use Get Memory Record when a missing record should be fetched from the source.', min: 2, max: 3,
     lazy: (a, ctx) => { const h = needHooks(); if (!h.memoryLookup) throw new ExprError('Memory tables are not available here'); return h.memoryLookup(ctx.process?.project ?? null, s(evaluate(a[0], ctx)), s(evaluate(a[1], ctx)), a[2] ? s(evaluate(a[2], ctx)) : undefined); } }],
-  // Earlier names, still accepted; not listed in the function library.
-  ['get-engine-variable', { group: 'Variables', hidden: true, sig: "get-engine-variable('NAME')", help: 'Same as get-sengine-variable.', min: 1, max: 1,
+  ['get-engine-variable', { group: 'Variables', sig: "get-engine-variable('NAME')", help: 'Current value of an administrator-managed Engine property, shared by all projects and read-only to Sutras.', min: 1, max: 1,
     lazy: (a, ctx) => needHooks().getEngine(s(evaluate(a[0], ctx))) }],
-  ['set-engine-variable', { group: 'Variables', hidden: true, sig: "set-engine-variable('NAME', value)", help: 'Same as set-sengine-variable.', min: 2, max: 2,
-    lazy: (a, ctx) => { const v = evaluate(a[1], ctx); needHooks().setEngine(s(evaluate(a[0], ctx)), v); return v; } }],
   // Utility
   def('Utility', 'newline', 'newline()', 'A line break, for concat().', 0, 0, () => '\n'),
   def('Utility', 'tab', 'tab()', 'A tab character.', 0, 0, () => '\t'),

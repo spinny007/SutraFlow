@@ -111,32 +111,37 @@ export function createKey(appId: string, name: string, expiresDays = 0) {
 export const deleteKey = (appId: string, id: string) => q.run('delete from gw_keys where app_id = ? and id = ?', appId, id);
 
 /** The app an API key belongs to (active, key not expired), or null. */
-export function appOfKey(key: string): App | null {
+export async function appOfKey(key: string): Promise<App | null> {
   const m = /^sfk_([0-9a-f]{12})_[\w-]+$/.exec(key || '');
   if (!m) return null;
-  const k = q.get<any>('select app_id, hash, expires_at from gw_keys where id = ?', m[1]);
+  const db = asyncDatabase();
+  const k = await db.get<any>(`select k.app_id, k.hash, k.expires_at, a.name, a.description, a.contact, a.plan_id, a.scopes, a.disabled, a.created_at
+    from gw_keys k join gw_apps a on a.id = k.app_id where k.id = ?`, m[1]);
   if (!k) return null;
   const a = Buffer.from(sha(key)), b = Buffer.from(String(k.hash));
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
   if (Number(k.expires_at) && Number(k.expires_at) < Date.now()) return null;
-  const app = getApp(k.app_id);
+  const app = appRow({ ...k, id: k.app_id });
   if (!app || app.disabled) return null;
-  q.run('update gw_keys set last_used = ? where id = ?', now(), m[1]);
+  await db.run('update gw_keys set last_used = ? where id = ?', now(), m[1]);
   return app;
 }
 
 // ---------- OAuth2 client credentials ----------
 
+let cachedTokenKey: Buffer | null = null;
 const tokenKey = () => {
+  if (cachedTokenKey) return cachedTokenKey;
   let k = getSetting<string>('gateway.tokenKey', '');
   if (!k) { k = crypto.randomBytes(32).toString('base64'); setSetting('gateway.tokenKey', k); }
-  return Buffer.from(k, 'base64');
+  cachedTokenKey = Buffer.from(k, 'base64');
+  return cachedTokenKey;
 };
 export const TOKEN_SECONDS = 3600;
 
 /** client_credentials: the app id and one of its keys give a short access token for the requested scopes. */
 export async function issueToken(clientId: string, clientSecret: string, scope?: string) {
-  const app = appOfKey(clientSecret);
+  const app = await appOfKey(clientSecret);
   if (!app || app.id !== clientId) throw Object.assign(new Error('invalid_client'), { status: 401 });
   const asked = String(scope || '').split(/\s+/).filter(Boolean);
   const notAllowed = asked.filter(s => !app.scopes.includes(s));
@@ -151,7 +156,8 @@ export async function issueToken(clientId: string, clientSecret: string, scope?:
 export async function appOfToken(token: string): Promise<{ app: App; scopes: string[] } | null> {
   try {
     const { payload } = await jwtVerify(token, tokenKey(), { issuer: 'sutraflow-gateway', algorithms: ['HS256'] });
-    const app = getApp(String(payload.sub));
+    const r = await asyncDatabase().get<any>('select * from gw_apps where id = ?', String(payload.sub));
+    const app = r ? appRow(r) : null;
     if (!app || app.disabled) return null;
     // Scopes taken away from the app since the token was made no longer count.
     return { app, scopes: String(payload.scope || '').split(/\s+/).filter(s => s && app.scopes.includes(s)) };
@@ -171,16 +177,19 @@ const WINDOWS: { k: keyof Plan; tag: string; ms: number; key(d: Date): string; e
  * Counts one request against the app's plan. Returns rate-limit headers, or throws when a limit is
  * reached (the request is not counted then). Windows are calendar windows in UTC.
  */
-export function consume(app: App, at = new Date()): { ok: true; headers: Record<string, string> } | { ok: false; window: string; limit: number; retryAfter: number } {
-  const plan = getPlan(app.planId);
+export async function consume(app: App, at = new Date()): Promise<{ ok: true; headers: Record<string, string> } | { ok: false; window: string; limit: number; retryAfter: number }> {
+  const db = asyncDatabase();
+  const row = app.planId ? await db.get<any>('select * from gw_plans where id = ?', app.planId) : undefined;
+  const plan = row ? planRow(row) : null;
   const active = plan ? WINDOWS.filter(w => Number(plan[w.k]) > 0) : [];
   if (!active.length) return { ok: true, headers: {} };
-  return tx(() => {
-    const counts = active.map(w => ({ w, limit: Number(plan![w.k]), n: Number(q.get<any>('select n from gw_usage where app_id = ? and win = ?', app.id, w.key(at))?.n || 0) }));
+  return db.transaction(`gateway-app:${app.id}`, async t => {
+    const counts = [] as Array<{ w: typeof WINDOWS[number]; limit: number; n: number }>;
+    for (const w of active) counts.push({ w, limit: Number(plan![w.k]), n: Number((await t.get<any>('select n from gw_usage where app_id = ? and win = ?', app.id, w.key(at)))?.n || 0) });
     const full = counts.find(c => c.n >= c.limit);
     if (full) return { ok: false as const, window: full.w.tag, limit: full.limit, retryAfter: Math.max(1, Math.ceil((full.w.ends(at) - at.getTime()) / 1000)) };
     for (const c of counts) {
-      q.run(`insert into gw_usage(app_id, win, n, expires) values(?, ?, 1, ?) on conflict(app_id, win) do update set n = gw_usage.n + 1`, app.id, c.w.key(at), c.w.ends(at));
+      await t.run(`insert into gw_usage(app_id, win, n, expires) values(?, ?, 1, ?) on conflict(app_id, win) do update set n = gw_usage.n + 1`, app.id, c.w.key(at), c.w.ends(at));
     }
     // The tightest window (fewest left) is reported in the headers.
     const tight = counts.map(c => ({ ...c, left: c.limit - c.n - 1 })).sort((a, b) => a.left - b.left)[0];
@@ -201,6 +210,16 @@ let firewallCache: { at: number; f: Firewall } | null = null;
 export const getFirewall = (): Firewall => {
   if (firewallCache && Date.now() - firewallCache.at < 2000) return firewallCache.f;
   const f = { allow: [], deny: [], ...getSetting<Partial<Firewall>>('gateway.firewall', {}) } as Firewall;
+  firewallCache = { at: Date.now(), f };
+  return f;
+};
+/** Request-path firewall lookup through the async PostgreSQL pool; cached for two seconds per engine. */
+export const getFirewallAsync = async (): Promise<Firewall> => {
+  if (firewallCache && Date.now() - firewallCache.at < 2000) return firewallCache.f;
+  const row = await asyncDatabase().get<{ value: string }>('select value from settings where key = ?', 'gateway.firewall');
+  let saved: Partial<Firewall> = {};
+  try { saved = row ? JSON.parse(row.value) : {}; } catch { saved = {}; }
+  const f = { allow: [], deny: [], ...saved } as Firewall;
   firewallCache = { at: Date.now(), f };
   return f;
 };

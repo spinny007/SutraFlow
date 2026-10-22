@@ -191,11 +191,25 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     guide: ['A waiting run costs nothing; it can wait for days.'],
   },
   setVar: {
-    scope: ['Sutra variables for later steps, read as <code>{vars.name}</code>.'],
-    outScope: ['Values kept between runs: use the <code>set-project-variable</code> function.'],
+    scope: ['Local variables for later steps in this run, read as <code>{vars.name}</code>. They survive durable waits and engine recovery with the run state.'],
+    outScope: ['Values kept between runs: use an administrator-managed Project property, a Memory table or a database.'],
     use: ['Counters, a running total, a value chosen in one branch and used in another.'],
     steps: ['Add a row per variable: name and value.'],
     output: ['The input, unchanged.'],
+  },
+  getVar: {
+    scope: ['A snapshot of every Local variable and its latest value, or one named Local variable.'],
+    outScope: ['Project or Engine configuration: use [[getProperties]].'],
+    use: ['Passing all calculated run values to a later mapping, child Sutra or response; checking whether one Local variable exists.'],
+    steps: ['Choose every variable or one variable.', 'For one variable, give its name and connect <em>missing</em> when absence is expected.'],
+    output: ['All: <code>variables</code> and <code>count</code>. One: <code>name</code>, <code>value</code> and <code>found</code>.'],
+  },
+  getProperties: {
+    scope: ['Administrator-managed Project properties for this project, or Engine properties shared by every project.', 'Every property or one named property. Project secret properties are never returned.'],
+    outScope: ['Changing properties: only an administrator changes Project configuration/deployment config or Admin Console → Server → Runtime.', 'Run calculations: use [[setVar]] and [[getVar]].'],
+    use: ['Reading environment configuration as data, such as region, feature switches or public limits.'],
+    steps: ['Choose Project or Engine.', 'Choose every property or one named property.', 'Connect <em>missing</em> when a named property is optional.'],
+    output: ['All: <code>scope</code>, <code>properties</code> and <code>count</code>. One: <code>scope</code>, <code>name</code>, <code>value</code> and <code>found</code>.'],
   },
   throw: {
     scope: ['Failing a branch with your own message.'],
@@ -379,18 +393,18 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     guide: ['In a mapping or a setting, <code>=memory-lookup(\'Rates\', {input.currency}, \'rate\')</code> reads the same row from memory without a step.'],
   },
   memPut: {
-    scope: ['Adds or replaces one row, or a list of rows, in a memory table.', 'With a copy in the database (failsafe), the change is saved there too and reaches every engine within a second.'],
+    scope: ['Adds or replaces one cached record, or a list of records, in a memory table.', 'With a copy in the database (failsafe), the cache change is saved there too and reaches every engine within a second. It never updates the external source table.'],
     outScope: ['Saving business data: write it to your database with [[dbUpdate]]; a memory table is a fast copy of reference values.'],
     use: ['Keeping the latest rate received from an API; caching a token or a looked-up value for a while (Keep for).'],
     steps: ['Pick the memory table.', 'Map the row (it must have the key fields), or a list of rows.', 'Optionally a key, and how long to keep the row.'],
     output: ['<code>count</code>, <code>keys</code>, <code>added</code>, <code>updated</code>.'],
   },
   memDelete: {
-    scope: ['Removes one row by key, or every row of a memory table.'],
+    scope: ['Removes one cached record, a list of keys, records matching fields and a condition, or every record of a memory table.'],
     outScope: ['Loading the table again from its source: [[memReload]].'],
     use: ['Dropping a value that is no longer valid, such as a withdrawn product code.'],
-    steps: ['Pick the memory table.', 'Choose one row (and map its key) or every row.'],
-    output: ['<code>deleted</code> and the key, or the number of rows removed.'],
+    steps: ['Pick the memory table.', 'Choose one key, a list of keys, matching records or every record; matching mode accepts equal fields, a condition and a safety limit.'],
+    output: ['<code>deleted</code>, <code>count</code> and the keys removed.'],
   },
   memQuery: {
     scope: ['Finds rows of a memory table: fields equal to values, and an optional condition per row such as <code>={row.rate} &gt; 1</code>.', 'Reads memory only.'],
@@ -451,10 +465,10 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     output: ['<code>destination</code>, <code>messageId</code> and the broker\'s confirmation.'],
   },
   busSubscribe: {
-    scope: ['Queues and topics, selectors, durable subscriptions, Kafka consumer groups.', 'Acknowledgement: auto (on receipt), client (after the run succeeds) or explicit ([[busConfirm]]).', 'On failure: requeue, or dead-letter after a number of redeliveries; concurrency.'],
-    outScope: ['Exactly-once processing: design steps so a message processed twice does no harm.'],
+    scope: ['A queue/topic process starter for Kafka, RabbitMQ and ActiveMQ / AMQP 1.0; selectors, durable subscriptions and Kafka consumer groups.', 'Acknowledgement: auto (on receipt), client (after the run succeeds) or explicit ([[busConfirm]]).', 'Only the elected leader owns the subscription. Client and explicit modes retain a durable message identity across leader changes.', 'On failure: requeue, or dead-letter after a number of redeliveries; concurrency.'],
+    outScope: ['Exactly-once external side effects: keep them idempotent. Kafka has a durable offset identity; RabbitMQ and AMQP publishers must supply a unique message id for duplicate-run protection.'],
     use: ['Processing work from a queue, reacting to events.'],
-    steps: ['Choose the broker, connection and destination.', 'Choose the acknowledgement mode; <em>client</em> suits most Sutras.', 'Choose what happens on failure and how many messages run at once.', 'Write a test message so you can test without a broker.', 'Deploy; the subscriber runs while the deployed version is active.'],
+    steps: ['Choose the broker, connection and destination.', 'Choose the acknowledgement mode; <em>client</em> suits most Sutras.', 'Leave <em>Avoid duplicate runs</em> on; for RabbitMQ or AMQP, make the publisher assign a unique message id.', 'Choose what happens on failure and how many messages run at once.', 'Write a test message so you can test without a broker.', 'Deploy; the elected leader subscribes while the deployed version is active.'],
     output: ['<code>body</code>, <code>headers</code> (JMS headers), <code>properties</code>, <code>destination</code>, <code>redelivered</code>.'],
   },
   busConfirm: {
@@ -749,7 +763,7 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
   },
   counter: {
     scope: ['A named number per project: increment, decrement, get, set, reset.', 'Kept across restarts; safe when many runs change it at once.'],
-    outScope: ['Counters shared between projects: use a Sengine variable or a database.'],
+    outScope: ['Counters shared between projects: use a database; Engine properties are administrator-managed and read-only to Sutras.'],
     use: ['Sequence numbers for file names, daily totals, limits such as "at most 100 orders per hour".'],
     steps: ['Set the counter name; a formula gives one counter per value, for example per day.', 'Choose the operation and the amount.'],
     output: ['<code>name</code>, <code>value</code> (after the change) and <code>previous</code>.'],

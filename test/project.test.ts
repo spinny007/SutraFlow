@@ -17,12 +17,14 @@ const { boot } = await import('../server/src/index.js');
 const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const projects = await import('../server/src/projects.js');
+const flows = await import('../server/src/flows.js');
 const schemas = await import('../server/src/schemas.js');
 const { saveResource, requireResource } = await import('../server/src/resources.js');
 const { setSecret } = await import('../server/src/secrets.js');
 const { evaluateMapping } = await import('../server/src/mapping.js');
 const { designSchemas } = await import('../server/src/design.js');
 const { tailLog } = await import('../server/src/logger.js');
+const { config } = await import('../server/src/config.js');
 
 let srv: Awaited<ReturnType<typeof boot>>;
 let pid = '';
@@ -34,6 +36,7 @@ before(async () => {
         { name: 'REGION', type: 'string', value: 'south' },
         { name: 'LIMIT', type: 'number', value: '1000' },
         { name: 'API_TOKEN', type: 'secret', value: 'ORDERS_TOKEN' },
+        { name: 'EVERY_SECOND', type: 'string', value: '* * * * * *' },
       ],
       logging: { enabled: true, file: 'logs/{project}.log', level: 'debug', format: 'text', maxSizeMb: 1, maxFiles: 2, stepData: true },
     },
@@ -62,6 +65,63 @@ test('project variables, Sutra variables and ops overrides with ${env:}', async 
   assert.equal(r.state.outputs.Map.token, '••••••', 'secret project variables are masked in history');
   delete process.env.SUTRA_TEST_REGION;
   projects.setOps(pid, {});
+});
+
+test('Get Properties reads Project and Engine scopes without exposing project secrets', async () => {
+  projects.saveEngineVariables([{ name: 'REGION', value: 'ap-south-1' }]);
+  const s = node('start', 'Start', { payload: '{}' });
+  const project = node('getProperties', 'Project properties', { scope: 'Project', what: 'all properties' });
+  const engineProps = node('getProperties', 'Engine property', { scope: 'Engine', what: 'one property', name: 'REGION' });
+  const r = await run([s, project, engineProps], [edge(s, project), edge(project, engineProps)]);
+  assert.equal(r.status, 'done', r.error);
+  assert.equal(r.state.outputs['Project properties'].properties.REGION, 'south');
+  assert.equal(r.state.outputs['Project properties'].properties.API_TOKEN, undefined);
+  assert.deepEqual(r.state.outputs['Engine property'], { scope: 'Engine', name: 'REGION', value: 'ap-south-1', found: true });
+});
+
+test('connection-line conditions resolve Project properties and validate missing ones', async () => {
+  const s = node('start', 'Start', { payload: '{"amount":1200}' });
+  const matched = node('log', 'Matched', { message: 'project condition matched' });
+  const other = node('log', 'Other', { message: 'otherwise' });
+  const yes = { ...edge(s, matched), label: 'Within region limit', when: 'when' as const, condition: "={gv.REGION} = 'south' and {input.amount} > {gv.LIMIT}" };
+  const no = { ...edge(s, other), when: 'otherwise' as const };
+  assert.deepEqual(flows.missingVariables({ name: 'Conditional route', nodes: [s, matched, other], edges: [yes, no] }, pid), []);
+  const missing = flows.missingVariables({ name: 'Missing condition property', nodes: [s, matched], edges: [{ ...yes, condition: '={input.amount} > {gv.MISSING_LIMIT}' }] }, pid);
+  assert.deepEqual(missing, [{ step: 'Connection "Within region limit"', name: 'MISSING_LIMIT', via: '' }]);
+  const r = await run([s, matched, other], [yes, no]);
+  assert.equal(r.status, 'done', r.error);
+  assert.deepEqual(r.state.outputs.Matched, { amount: 1200 });
+  assert.equal(r.state.outputs.Other, undefined);
+});
+
+test('Timer schedules resolve project variables before the leader starts them', async () => {
+  const t = node('timer', 'Variable timer', { mode: 'cron', cron: '{{gv.EVERY_SECOND}}', timezone: 'UTC', payload: '{}' });
+  const l = node('log', 'Tick', { message: 'tick' });
+  const f = flows.saveFlow(undefined, { name: `Variable timer ${Date.now()}`, nodes: [t, l], edges: [edge(t, l)] }, pid);
+  flows.deploy(f.id);
+  try {
+    const end = Date.now() + 3500;
+    let count = 0;
+    while (Date.now() < end) {
+      count = Number((q.get('select count(*) n from runs where flow_id = ?', f.id) as any)?.n || 0);
+      if (count) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    assert.ok(count > 0, 'the variable-based schedule fired');
+  } finally { flows.undeploy(f.id); }
+});
+
+test('renaming a project moves its files and deployment configuration', () => {
+  const oldName = `Rename old ${Date.now()}`, newName = `${oldName} new`;
+  const p = projects.saveProject({ name: oldName, config: { variables: [] } });
+  const oldFiles = projects.projectFilesDir(oldName), newFiles = projects.projectFilesDir(newName);
+  fs.mkdirSync(oldFiles, { recursive: true }); fs.writeFileSync(`${oldFiles}/keep.txt`, 'kept');
+  const cfgDir = process.env.SUTRA_CONFIG_DIR || `${config.dataDir}/config`;
+  fs.mkdirSync(cfgDir, { recursive: true }); fs.writeFileSync(`${cfgDir}/${oldName}.json`, JSON.stringify({ project: oldName, variables: {} }));
+  projects.saveProject({ ...p, name: newName });
+  assert.equal(fs.readFileSync(`${newFiles}/keep.txt`, 'utf8'), 'kept');
+  assert.equal(JSON.parse(fs.readFileSync(`${cfgDir}/${newName}.json`, 'utf8')).project, newName);
+  assert.equal(fs.existsSync(oldFiles), false);
 });
 
 test('ops config file export / import overrides a resource for this environment', () => {

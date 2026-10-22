@@ -20,6 +20,7 @@
  */
 import crypto from 'node:crypto';
 import { q } from '../db.js';
+import { asyncDatabase } from '../asyncdb.js';
 
 export type SignedParts = 'timestamp and body' | 'method, path, timestamp and body' | 'body only';
 export interface HmacOptions {
@@ -62,7 +63,7 @@ function timeOf(v: string) {
  * Checks an incoming signature. Returns the name of the secret that matched. Throws with a reason a
  * caller may see (never which part was wrong beyond that).
  */
-export function verifyRequest(secrets: { name: string; value: string }[], o: HmacOptions & { maxAgeSec: number }, p: { method: string; path: string; timestamp?: string; signature?: string; body: string }) {
+export async function verifyRequest(secrets: { name: string; value: string }[], o: HmacOptions & { maxAgeSec: number }, p: { method: string; path: string; timestamp?: string; signature?: string; body: string }) {
   if (!p.signature) throw new Error('The request is not signed');
   const needsTime = o.signed !== 'body only';
   const maxAge = Math.max(1, o.maxAgeSec) * 1000;
@@ -77,13 +78,13 @@ export function verifyRequest(secrets: { name: string; value: string }[], o: Hma
     return want.length === given.length && crypto.timingSafeEqual(want, given);
   });
   if (!match) throw new Error('The signature does not match');
-  if (!remember(`hmac:${crypto.createHash('sha256').update(p.signature).digest('base64url')}`, Date.now() + 2 * maxAge)) throw new Error('This signed request was already received (replay)');
+  if (!await remember(`hmac:${crypto.createHash('sha256').update(p.signature).digest('base64url')}`, Date.now() + 2 * maxAge)) throw new Error('This signed request was already received (replay)');
   return match.name;
 }
 
 /** Remembers a key until it expires; false when it is already remembered (the database decides, for every engine). */
-export function remember(key: string, expiresAt: number) {
-  return q.run('insert into replay_guard(k, expires_at) values(?, ?) on conflict(k) do nothing', key, expiresAt).changes === 1;
+export async function remember(key: string, expiresAt: number) {
+  return (await asyncDatabase().run('insert into replay_guard(k, expires_at) values(?, ?) on conflict(k) do nothing', key, expiresAt)).changes === 1;
 }
 export function pruneReplayGuard(now = Date.now()) {
   return q.run('delete from replay_guard where expires_at < ?', now).changes;

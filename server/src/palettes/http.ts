@@ -58,7 +58,7 @@ export const httpActivities: Activity[] = [
       for (const [k, v] of Object.entries({ ...kvToObject(c.raw('query'), v => String(c.resolve(v) ?? '')), ...auth.query })) url.searchParams.set(k, v);
       const headers: Record<string, string> = {};
       const put = (o: Record<string, string>) => { for (const [k, v] of Object.entries(o)) headers[k.toLowerCase()] = v; };
-      put(kvToObject(conn?.config.headers));
+      put(kvToObject(conn?.config.headers, v => String(c.resolve(v) ?? '')));
       put(kvToObject(c.raw('headers'), v => String(c.resolve(v) ?? '')));
       put(auth.headers);
 

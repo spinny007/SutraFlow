@@ -51,20 +51,21 @@ const FILES: Group[] = [
       ['server/src/lifecycle.ts', 'Liveness (<code>/health</code>, with the version, mode, environment and the database in use) and readiness (<code>/ready</code>): storage answers, packages are deployed, the gateway listens, and the server is not draining.'],
       ['server/src/cluster.ts', 'Heartbeat row per engine, the authoritative leader lease, recovery of a dead engine\'s steps, the deploy generation number that makes every engine reload its routes, leadership hand-over on stop, and the engine status list. A database interruption is contained and retried; after recovery the lease row decides whether this process still leads.'],
       ['server/src/housekeeping.ts', 'Deletes finished runs older than <code>SUTRA_RUN_RETENTION_DAYS</code>, with their steps, in batches. Run by the leader about once a minute; waiting runs are never deleted.'],
-      ['server/src/db.ts', 'The synchronous storage layer: <code>q</code> (get, all, run) and <code>tx</code> (transaction) on SQLite or PostgreSQL, used by everything but the engine\'s hot path. Holds the table definitions, converts them for PostgreSQL (bigint, double precision, bigserial) and <code>?</code> placeholders to <code>$n</code>, and takes an advisory lock for each PostgreSQL write transaction (per run or Sutra queue with a key, one shared lock without). Refuses a synchronous write while an asynchronous transaction is open (asyncTxScope), so a transaction is never split over two connections. <code>memoryStore</code> gives the private in-memory database of runs that run in memory.'],
-      ['server/src/asyncdb.ts', 'Asynchronous storage for the engine: on PostgreSQL a connection pool on the main thread (SUTRA_PG_POOL, metrics of waits and transaction times), on SQLite, PGlite and the in-memory engine one connection whose transactions take turns. Transactions are explicit objects (transaction(key, async tx => ...)); a first query travels with begin and the lock, and commitWith() sends the last statement with the commit, so a step completes in three round trips. Deadlocks and serialization failures are tried again.'],
+      ['server/src/db.ts', 'The synchronous compatibility storage layer: <code>q</code> (get, all, run) and <code>tx</code> (transaction) on SQLite or PostgreSQL, used by administrative and low-frequency paths. Holds the table definitions, converts them for PostgreSQL (bigint, double precision, bigserial) and <code>?</code> placeholders to <code>$n</code>, and takes an advisory lock for each PostgreSQL write transaction (per run or Sutra queue with a key, one shared lock without). Refuses a synchronous write while an asynchronous transaction is open (asyncTxScope), so a transaction is never split over two connections. <code>memoryStore</code> gives the private in-memory database of runs that run in memory.'],
+      ['server/src/asyncdb.ts', 'Asynchronous storage for engine and gateway hot paths: on PostgreSQL a connection pool on the main thread (SUTRA_PG_POOL, metrics of waits and transaction times), on SQLite, PGlite and the in-memory engine one connection whose transactions take turns. Transactions are explicit objects (transaction(key, async tx => ...)); a first query travels with begin and the lock, and commitWith() sends the last statement with the commit, so a step completes in three round trips. Deadlocks and serialization failures are tried again.'],
       ['server/src/pgworker.ts', 'Worker thread that owns the synchronous PostgreSQL connection of db.ts (<code>pg</code>, or PGlite for <code>pglite:</code> addresses). The main thread posts a numbered statement and waits on a shared flag for the answer with the same number. A lost connection is opened again on the next statement (10 tries); a statement already sent is never repeated, and a transaction the connection was lost in fails until it is rolled back. The engine uses the pool of asyncdb.ts instead.'],
     ],
   },
   {
     id: 'engine', title: 'Engine', intro: 'The durable step runner and the types every activity follows.',
     files: [
-      ['server/src/engine/engine.ts', 'The public durable-engine façade: activity registration, start and drain, starting runs, composition of the focused engine services, and the in-memory twin. It keeps the API stable; the remaining complete, fail, route and settle orchestration calls the fenced helpers below.'],
+      ['server/src/engine/engine.ts', 'The public durable-engine façade and composition root: activity registration, start and drain, starting runs, complete/fail orchestration, and the in-memory twin. It keeps the API stable while delegating claims, execution, routing, storage, waits and operator actions.'],
       ['server/src/engine/executor.ts', 'Executes one claimed activity: mapping context, variables and secrets, time limits and cancellation, loops, streamed emits, logs, and the complete-or-fail handoff. It does not own durable transition SQL.'],
       ['server/src/engine/scheduler.ts', 'Queue polling, batched claims, priority order, concurrency slots and coalesced wake calls. PostgreSQL claims include the run and its outputs in the same round trip.'],
       ['server/src/engine/queue-notify.ts', 'PostgreSQL LISTEN/NOTIFY wake hints with reconnect; durable polling remains authoritative and can be used alone with SUTRA_PG_NOTIFY=0.'],
       ['server/src/engine/transitions.ts', 'Atomic primitives shared by complete, fail, route and settle: fenced updates, output plus run commits, state and logs, cancellation of open tasks, and routing scope.'],
-      ['server/src/engine/run-store.ts', 'The storage boundary for run loading, separately stored step outputs and claimed-task fencing. A stale owner gets StaleStep and changes nothing.'],
+      ['server/src/engine/run-store.ts', 'The storage boundary for run loading, separately stored step outputs, claimed-task fencing, final settlement and copying ended in-memory runs into durable storage. A stale owner gets StaleStep and changes nothing.'],
+      ['server/src/engine/router.ts', 'Conditional routing, joins and dead-path elimination. It sends live or skip tokens and schedules the next activity without putting graph traversal back into the façade.'],
       ['server/src/engine/waits.ts', 'Request/reply and finish callbacks, live run listeners, cross-engine completion checks and waitFor. Polling remains the correctness fallback when another engine finishes a run.'],
       ['server/src/engine/operator.ts', 'Stable boundary for operator actions: approval decisions, cancel, resubmit, debug, queued-run promotion, time limits and cancellation observed from another engine.'],
       ['server/src/engine/state.ts', 'Run-state types and pure helpers: separately stored outputs, initial process variables, compact streamed output and full state for API/history views.'],
@@ -75,18 +76,18 @@ const FILES: Group[] = [
     id: 'data', title: 'Data, mapping and expressions', intro: 'How values move between steps: templates, formulas, structured mapping and design-time shapes.',
     files: [
       ['server/src/template.ts', '<code>{{ }}</code> templates: input, nodes, trigger, vars, gv, secret, run, item, index; pipes such as upper, default, number, length. Parsed, never evaluated as code.'],
-      ['server/src/expr.ts', 'Formulas starting with <code>=</code>: functions (string, number, date, list, encoding), operators and predicates, plus hooks to read and write Project and Sengine variables. Also the function catalog shown in the mapper.'],
+      ['server/src/expr.ts', 'Formulas starting with <code>=</code>: functions (string, number, date, list, encoding), operators and predicates, plus read-only hooks for Project and Engine properties. Also the function catalog shown in the mapper.'],
       ['server/src/values.ts', 'Path and value helpers shared by templates and formulas.'],
       ['server/src/mapping.ts', 'Structured Activity Input mapping: a target tree from a schema or ad-hoc paths, with For-Each, where, group by, sort, conditions and Choose.'],
       ['server/src/design.ts', 'Design-time data shapes: what each step receives and returns before anything has run, and the warnings of each step (unmapped required fields, schema problems, and the activity\'s own design checks). Feeds the Process Data tree, the Output tab and the canvas warnings.'],
       ['server/src/schemas.ts', 'Shared schemas of a project: JSON Schema, sample JSON, XSD and WSDL, all converted to one tree format for the mapper.'],
-      ['server/src/settings.ts', 'Resolves Project and Sengine variables in plain settings (folders, URLs, queue names) and in connection settings.'],
+      ['server/src/settings.ts', 'The common Project and Engine property resolver for every palette: plain General settings (folders, URLs, paths, schedules, queue names, numbers and choices), explicitly enabled code such as SQL, and recursively nested connection settings. Mappable Input fields resolve through the execution context.'],
     ],
   },
   {
     id: 'projects', title: 'Projects, Sutras, connections and releases', intro: 'What a team edits and ships.',
     files: [
-      ['server/src/projects.ts', 'Projects: Project variables, logging, deployment (ops) configs with <code>${env:...}</code> values, the project files folder (<code>${files}</code> = <code>&lt;data&gt;/files/&lt;project&gt;</code>), runtime variable values, Sengine variables and the server policies (Sengine variables writable, scripts allowed, release activities allowed).'],
+      ['server/src/projects.ts', 'Projects: administrator-managed Project properties, logging, deployment (ops) configs with <code>${env:...}</code> values, the project files folder (<code>${files}</code> = <code>&lt;data&gt;/files/&lt;project&gt;</code>), Engine properties and server policies. Renaming a project keeps its id and moves its name-based files folder and deployment config.'],
       ['server/src/flows.ts', 'Sutras: draft, published versions, deploy and undeploy, step descriptions kept, validation (names, ports, connection conditions, Error handler, API paths, MCP skill names, and the design checks of each activity, such as a missing Python, file or connection), the change hooks, and missing project variables per step (also through its connections).'],
       ['server/src/git/files.ts', 'A project as Git files and back: sutraflow.json, sutras, connections (secret names only), schemas, in folders; stable JSON; repository ids mapped to each workspace\'s own ids, references translated both ways.'],
       ['server/src/git/engine.ts', 'Git for workspaces: the git command (tokens through one-command environment settings, never on the command line) or isomorphic-git built in (content-compared status); init, clone, status, commit, push, fetch, pull with conflicts, branches, history, files at a commit.'],
@@ -119,25 +120,28 @@ const FILES: Group[] = [
       ['server/src/guard.ts', 'The permission of every admin API route and the project it applies to. The server refuses to start when a route has no rule. Also writes each change and each refusal to the audit log, without passwords or secret values.'],
       ['server/src/console.ts', 'Data for the Admin Console: the overview (engines, deployed Sutras, runs of the last day, failures, approvals, gateway), deployed applications with their triggers and run counts, starting and stopping a deployed Sutra, and drain requests for any engine. Always limited to the projects the caller may see.'],
       ['server/src/tuning.ts', 'Tuning parameters: engine values for the cluster or one engine (steps at once, in memory too, steps per run, reply wait, retention, trace sampling, queue check, settings refresh) and per deployed Sutra (execution durable or in memory, runs at once, priority, run time limit, default retries, step data in history, retention). Stored in settings and deployments, applied by every engine on the next beat. Refuses in memory for Sutras with steps that wait.'],
-      ['server/src/memtables.ts', 'Memory tables: small reference data each engine keeps in a JavaScript Map (in order of use, for dropping the least recently used), loaded by a query, filled by Sutras or fetched on a miss (lookup query), with row and MB limits. Failsafe: every change also written to mem_rows with a version per table (mem_meta); engines read the changes since their version at most every SUTRA_MEMORY_SYNC_MS and reload when a reload was asked for anywhere (hot reload).'],
-      ['server/src/palettes/memory.ts', 'Memory tables palette: Memory get (read-through), put, delete, query and reload.'],
+      ['server/src/memtables.ts', 'Memory tables: small reference data each engine keeps in an LRU JavaScript Map; loaded from Oracle, SQL Server, MySQL, PostgreSQL or SQLite, filled by Sutras or fetched on a miss. Refresh builds a replacement and validates keys plus table/project/engine row and byte quotas before an atomic swap. Cron/interval schedules use the leader for failsafe tables and each engine for memory-only tables. Failsafe changes use mem_rows and mem_meta versioning; engines read deltas and hot-reload requests.'],
+      ['server/src/palettes/memory.ts', 'Memory tables palette: Get Memory Record (read-through), Set Memory, Delete Memory Records, Query Memory Records and Refresh Memory Table. Cache mutation never writes to the external source database.'],
       ['server/src/sizing.ts', 'Machine profiles from 1 vCPU / 1 GB up, measured with tools/loadtest.mjs: steps at once, queue check, settings refresh, engines per machine, Node memory, files read whole, rows per streamed batch, database. Engine defaults and the Admin Console panel This machine come from here.'],
       ['server/src/alerts.ts', 'Alerts: channels (email, signed webhook, a Sutra), rules of nine kinds checked by the cluster leader every 30 seconds, alerts that open, remind, are acknowledged and resolve, delivery records, and the runs timeline of the Overview.'],
       ['server/src/audit.ts', 'The audit log: record, search, CSV export, and deletion after <code>SUTRA_AUDIT_RETENTION_DAYS</code>.'],
       ['server/src/approvals.ts', 'The Approval Center: who may decide an approval (roles and accounts the step names, from the data too; Approve permission when it names nobody; administrators on behalf), the rule (any, all, a number), votes, history, reassigning, and the leader\'s 30-second tick for email notices, reminders, escalation and expiry.'],
       ['server/src/deletes.ts', 'Deleting and renaming project items: one Sutra, connection, schema or service descriptor, or a folder with everything in it (confirm=delete, refused while a Sutra in it is deployed, in one transaction); what uses an item; the Git working copy written again at once. Configuration is never deleted here.'],
-      ['server/src/sso.ts', 'Single sign-on for people with OpenID Connect: authorization code with PKCE, state and nonce; the ID token checked against the provider keys (JWKS), issuer and audience; accounts found by the provider subject, created or linked only when allowed; roles from groups.'],
+      ['server/src/sso.ts', 'Single sign-on for people with OpenID Connect or SAML 2.0. OIDC uses authorization code with PKCE, state and nonce. SAML uses a one-time shared-database state and delegates signed assertion validation to saml-sso.ts. Accounts are found by the provider subject/NameID, created or linked only when allowed; roles come from groups.'],
+      ['server/src/saml-sso.ts', 'SAML 2.0 browser sign-on: Redirect AuthnRequest generation and HTTP-POST Response verification. Requires one signed assertion or signed response and checks issuer, request, destination, bearer recipient, audience and time limits while refusing duplicate-ID wrapping.'],
       ['server/src/auth.ts', 'Studio sign-in: the first visit creates the administrator, sessions are signed cookies, and changing requests need the X-Sutra header (a cross-site form cannot send it).'],
-      ['server/src/gateway/gateway.ts', 'The gateway: HTTP and HTTPS listeners for deployed REST and SOAP services and MCP endpoints, WSDL publishing, policy checks, run start with the caller\'s traceparent, and waiting for the reply step (also when another engine runs it).'],
+      ['server/src/gateway/gateway.ts', 'The gateway façade and route dispatcher: HTTP and HTTPS listener lifecycle, deployed route tables, REST/SOAP service dispatch, policy checks, run start with the caller\'s traceparent, and waiting for replies. Protocol-specific MCP and OAuth handling is delegated.'],
       ['server/src/gateway/rest.ts', 'REST body decoding and response serialization, kept apart from listener and routing lifecycle.'],
       ['server/src/gateway/soap.ts', 'SOAP envelopes, faults, XML rendering and WSDL generation, kept apart from listener and routing lifecycle.'],
+      ['server/src/gateway/mcp-handler.ts', 'Streamable HTTP MCP endpoint handling: protocol negotiation, sessions, JSON-RPC validation, tool discovery and calls; starts runs through the gateway callback without owning listener lifecycle.'],
+      ['server/src/gateway/oauth-handler.ts', 'The OAuth 2.0 client-credentials token endpoint: form decoding, client authentication, scope checks and token response.'],
       ['server/src/gateway/agents.ts', 'Published agents on the gateway: chat page, chat API, jobs and the chat button script; OpenAI-compatible models and chat completions (plain and streamed); the ask_<name> MCP tool; A2A agent card, message/send and tasks/get. Answers within the agent time, else a job id.'],
-      ['server/src/gateway/apps.ts', 'Gateway management: apps with scopes and plans, API keys (stored as hashes), OAuth2 client credentials tokens, plan limits counted in the database for the whole cluster, the firewall, the request log, traffic statistics and OpenAPI for the deployed services.'],
+      ['server/src/gateway/apps.ts', 'Gateway management: apps with scopes and plans, API keys (stored as hashes), OAuth2 client credentials tokens, cluster-wide plan limits, the firewall, request log, traffic statistics and OpenAPI. Authentication, quotas, firewall reads and request logging use the asynchronous pool on the request path; admin screens retain the compatibility layer.'],
       ['server/src/gateway/websocket.ts', 'WebSocket services on the gateway: upgrades through the firewall and the API security policy (token or key in the query for browsers, CORS origins), a run per message in order per connection, size and schema checks, pings, and an outbox table so a step on any engine reaches a connection held by another.'],
       ['server/src/gateway/tls.ts', 'Gateway certificates: off, self-signed, uploaded, or Let\'s Encrypt (ACME HTTP-01) with renewal 30 days before expiry, and client CA for mutual TLS.'],
       ['server/src/mcp.ts', 'Model Context Protocol over Streamable HTTP: tools/list from deployed MCP skill triggers, tools/call starts the Sutra and returns what Reply to AI sends. JSON Schema from shared schemas or simple input rows.'],
       ['server/src/scheduler.ts', 'Timer triggers (cron or interval) of deployed Sutras, on the leader.'],
-      ['server/src/listeners.ts', 'Long-running triggers on the leader: folder watchers, mailbox polling, queue and topic subscriptions, Drive polling. Rebuilt one after another when deployments or connections change.'],
+      ['server/src/listeners.ts', 'Long-running process starters on the elected leader: folder watchers, mailbox polling, queue and topic subscriptions, Drive and chat polling. Rebuilt one after another when deployments, properties or connections change; General settings are resolved before a listener starts.'],
     ],
   },
   {
@@ -147,7 +151,7 @@ const FILES: Group[] = [
       ['server/src/security/outbound.ts', 'Outbound security profiles for HTTP and SOAP calls: Basic, bearer, API key, OAuth client credentials, client certificates and TLS options.'],
       ['server/src/security/hmac.ts', 'HMAC request signing for incoming and outgoing requests (timestamp and body, or method, path, timestamp and body, or the body only; several secrets while one is replaced; replays refused through a table every engine shares) and OAuth 2.0 token introspection with answers kept until the token expires.'],
       ['server/src/security/validate.ts', 'Checks on what callers send to REST and SOAP services before a run starts: threat protection from the API security policy (nesting depth on the raw text, fields, list items, text length, body size, no DOCTYPE) and validation against the service schema (JSON Schema with ajv; XSD elements and JSON samples as schema trees).'],
-      ['server/src/security/wssin.ts', 'WS-Security on the raw SOAP XML: incoming X.509 signatures (certificate trusted, Body and Timestamp signed, one Body only), signed SAML assertions (issuer, audience, validity), timestamps, and XML encryption both ways (AES-GCM or AES-CBC, keys by RSA-OAEP; RSA 1.5 refused).'],
+      ['server/src/security/wssin.ts', 'WS-Security on the raw SOAP XML: incoming X.509 signatures (certificate trusted, Body and Timestamp signed, one Body only), signed SAML assertions (issuer, audience, validity), timestamps, and XML decryption (AES-GCM or AES-CBC, keys by RSA-OAEP; RSA 1.5 refused). The verified caller certificate may become the recipient of an encrypted service reply.'],
       ['server/src/security/wss.ts', 'WS-Security headers for SOAP calls: UsernameToken, timestamps, X.509 signatures, SAML assertions and body encryption; UsernameToken checks on incoming requests. The X.509 signature is placed in wsse:Security by xml-crypto while signing (no deprecated calls).'],
       ['server/src/security/breaker.ts', 'Circuit breaker per HTTP connection: after a number of failures in a row, calls fail at once for a while, then one trial call decides.'],
     ],
@@ -184,9 +188,9 @@ const FILES: Group[] = [
     id: 'connectors', title: 'Connectors', intro: 'Activities for outside systems and their connection kinds.',
     files: [
       ['server/src/connectors/kinds.ts', 'Connection kinds for email, databases, service bus, Firebase, SFTP and FTP, and OAuth apps (with the scopes each service needs and an optional refresh token secret).'],
-      ['server/src/connectors/remote.ts', 'SFTP / FTP palette: Remote file trigger, list, read, write and move / copy / delete over SFTP (ssh2-sftp-client, host key fingerprint check) or FTP / FTPS (basic-ftp). Paths are fenced into the base folder; each connection has connect and response time limits, attempts with a wait between them (sign-in and host key errors are not retried) and SFTP keep-alive.'],
+      ['server/src/connectors/remote.ts', 'SFTP / FTP palette: Remote file trigger, list, read, write and move / copy / delete over SFTP (ssh2-sftp-client, host key fingerprint check) or FTP / FTPS (basic-ftp). Every activity selects a shared connector; host, port, user, base folder, limits and secret names resolve Project variables and deployment overrides at runtime. Paths are fenced into the base folder; connections have time limits, retry policy and SFTP keep-alive.'],
       ['server/src/connectors/db.ts', 'DB Ops for PostgreSQL, MySQL, SQL Server, Oracle and SQLite: query, update, stored procedure, SQL script and transaction, with <code>:name</code> parameters always bound (no SQL injection), and connection pools.'],
-      ['server/src/connectors/bus.ts', 'Service Bus for Kafka, RabbitMQ and AMQP 1.0 brokers: publish, subscribe and confirm, with message headers, acknowledge modes and reply queues.'],
+      ['server/src/connectors/bus.ts', 'Service Bus for Kafka, RabbitMQ and AMQP 1.0 brokers: publish, the Queue / topic trigger and explicit confirmation. Client acknowledgement waits for run success. A durable Kafka-offset or AMQP-message-id guard binds redelivery to its reserved run across leader changes; polling the authoritative run row prevents a second run while the first is active.'],
       ['server/src/connectors/email.ts', 'Send email (SMTP) and the mailbox trigger (IMAP).'],
       ['server/src/connectors/firebase.ts', 'Firestore, Realtime Database and Cloud Messaging with a service account.'],
       ['server/src/connectors/oauth.ts', 'OAuth 2.0 connections (Google, Microsoft, Dropbox, Facebook, Twitch, custom): authorization-code sign-in, tokens encrypted and refreshed, a refresh token secret for servers without the studio (set by a pipeline), Twitch client id on every call, and streamed requests for large uploads and downloads.'],
@@ -242,7 +246,7 @@ const FILES: Group[] = [
       ['web/admin.html', 'Page shell of the Admin Console.'],
       ['web/admin/main.tsx', 'Mounts the console and applies the saved theme.'],
       ['web/admin/Console.tsx', 'Sign-in (or, on a headless engine without users, how to add the first administrator), password change, permission-based navigation, and the pages under Operate, Alerts, Gateway, Access, Records and Server.'],
-      ['web/admin/Server.tsx', 'Server-only controls: Sengine variables and their policy, script permission and Python interpreter, release-activity permission, gateway listeners, TLS certificates, ACME and mutual TLS. Kept out of the Designer so operational changes require the Server permission.'],
+      ['web/admin/Server.tsx', 'Server-only controls: Engine properties, script permission and Python interpreter, release-activity permission, gateway listeners, TLS certificates, ACME and mutual TLS. Kept out of the Designer so operational changes require the Server permission.'],
       ['web/admin/shared.tsx', 'What the signed-in account may do, loading and refresh helpers, state labels, in-page confirmation, password generator.'],
       ['web/admin/Overview.tsx', 'Tiles for engines, deployed Sutras, runs of the last day, approvals, work queue and gateway; recent failures with Resubmit.'],
       ['web/admin/Apps.tsx', 'Deployed projects and Sutras: start and stop, runs with step results, resubmit and cancel, deploy an earlier version, package history and roll back. Also the side panel used by other pages.'],
@@ -257,7 +261,7 @@ const FILES: Group[] = [
       ['web/admin/People.tsx', 'Users and system accounts: add, roles per project, disable, unlock, passwords, sign out everywhere, delete; API tokens shown once.'],
       ['web/admin/Roles.tsx', 'Permission matrix of all roles; custom roles.'],
       ['web/admin/Database.tsx', 'Database page: the database in use, the PostgreSQL connection with Test connection, Migrate now, and the progress through the restart.'],
-      ['web/admin/Memory.tsx', 'Memory tables: every table with rows and memory against its limits, hit rate, failsafe, filtered by project, name and failsafe; the settings and rows of a table, a page at a time with filters; hot reload on every engine, clear, and values changed by hand.'],
+      ['web/admin/Memory.tsx', 'Memory tables: source/query and interval/cron configuration, cluster and per-project row/MB quotas, usage, next refresh, every table and its records with approximate size, hot reload, clear, and cached values changed by hand.'],
       ['web/admin/Releases.tsx', 'Releases: upload a release zip, see its check (Sutras, secrets, source, config), deploy it; the package history of each project with rollback.'],
       ['web/admin/Audit.tsx', 'Audit log with filters, plain-word actions, details and CSV export.'],
       ['web/admin/console.css', 'Console layout on the studio colour tokens, light and dark, one column on phones.'],
@@ -292,6 +296,7 @@ const FILES: Group[] = [
       ['tools/guide/benchmarks.ts', 'Guide tables made from measurements: the machine profiles of sizing.ts and the load test results in docs/benchmarks.'],
       ['tools/guide/logo.ts', 'The SutraFlow mark used by both pages.'],
       ['tools/capture-guide-shots.mjs', 'Takes the user guide screenshots with headless Edge while the server runs (<code>npm run guide:shots</code>).'],
+      ['tools/check-vendor.mjs', 'Vendor dependency gate: verifies the reviewed source-tree hashes, package and lockfile links, licences, consumers, focused tests and runtime packaging scope; in online mode it also fails when npm latest or tarball integrity differs.'],
       ['tools/build-architecture.ts', 'Builds this page (<code>npm run architecture</code>) and fails when a source file has no description.'],
       ['tools/architecture/diagrams.ts', 'The diagrams on this page, as inline SVG.'],
     ],
@@ -304,6 +309,9 @@ const FILES: Group[] = [
       ['web/tsconfig.json', 'TypeScript settings of the studio.'],
       ['Dockerfile', 'Multi-stage image on node:24-bookworm-slim: builds studio and server, runs as the node user under tini, health check on /ready, headless by default with /data and /deploy volumes and JSON logs.'],
       ['.dockerignore', 'Keeps data, node_modules and builds out of the image context.'],
+      ['.github/workflows/vendor.yml', 'Weekly and manual online check for newer upstream releases of maintained vendor dependencies.'],
+      ['vendor/vendor-lock.json', 'Reviewed vendor provenance: upstream npm version and integrity, patched local version and tree hash, patch reasons, consumers, focused tests and release scope.'],
+      ['vendor/README.md', 'The manual compatibility-review and update procedure for maintained vendor packages.'],
       ['docker-compose.yml', 'One container: studio, engine and gateway.'],
       ['docker-compose.cluster.yml', 'PostgreSQL, a studio without workers and two headless engines sharing the database.'],
       ['bin/sutraflow.mjs', 'The sutraflow launcher, the one place for every command on Windows and Linux: setup, start and stop (studio or engine, background or foreground, graceful drain), restart, status, logs, open, cli (the sutra command with the local admin token), db, service (systemd unit or Windows task), and docker and docker cluster (compose, with the token and master key made once into .env). Used by tools/migrate-to-postgres to stop and start SutraFlow.'],
@@ -392,7 +400,7 @@ const SETTINGS: [string, string, string][] = [
   ['SUTRA_WORKERS', 'by machine', 'Steps run at the same time (4 on 1 vCPU / 1 GB up to 32 on 8 cores, see sizing.ts). 0 = serve only (a studio in a cluster).'],
   ['SUTRA_MEMORY_WORKERS', '0', 'Steps at once for Sutras that run in memory; 0 = the same as SUTRA_WORKERS.'],
   ['SUTRA_POLL_MS', 'by machine', 'How often an idle engine looks for due steps (500 ms on the smallest machines, 200 to 250 ms otherwise).'],
-  ['SUTRA_SETTINGS_REFRESH_MS', 'by machine', 'How long an engine keeps project and Sengine variables before reading them again; 0 reads them on every step.'],
+  ['SUTRA_SETTINGS_REFRESH_MS', 'by machine', 'How long an engine keeps Project and Engine properties before reading them again; 0 reads them on every step.'],
   ['SUTRA_MAX_STEPS', '10000', 'Safety limit of steps per run.'],
   ['SUTRA_REPLY_TIMEOUT_MS', '60000', 'How long REST and SOAP callers wait for a reply step.'],
   ['SUTRA_MEMORY_SYNC_MS', '1000', 'How often an engine checks the database copy of memory tables for changes and reloads asked for elsewhere.'],
@@ -441,9 +449,9 @@ ${tw(['Term', 'Meaning'], [
   ['Run, task', 'One execution of a Sutra, and one execution of one step within it. Both are database rows.'],
   ['Project', 'A group of Sutras with shared connections, schemas, Project variables and logging. The unit of release.'],
   ['Connection (resource)', 'Reusable settings for an outside system: HTTP, SOAP, database, bus, email, AI provider, MCP server and more.'],
-  ['Project variables', '<code>{{gv.NAME}}</code>: values per project, overridable per environment by the deployment config.'],
+  ['Project properties', '<code>{{gv.NAME}}</code>: administrator-managed values per project, overridable per environment by the deployment config and read-only to Sutras.'],
   ['Sutra variables', '<code>{{vars.name}}</code>: values within one run.'],
-  ['Sengine variables', 'Server-level settings readable by every Sutra. Sutras should read them and not change them; changing them is blocked unless an administrator allows it.'],
+  ['Engine properties', 'Server-level settings readable by every Sutra and changeable only by administrators.'],
   ['Package', 'A .sutra file: a release of a whole project, with a checksum, deployed unchanged to test and production.'],
   ['Studio, engine, gateway', 'The browser application; the step runner; the listener for deployed services.'],
 ].map(([a, b]) => `<tr><td><strong>${a}</strong></td><td>${b}</td></tr>`).join(''))}
@@ -458,7 +466,7 @@ ${DIAGRAMS.runtime}
 <li><strong>Engine</strong> runs steps in worker slots (<code>SUTRA_WORKERS</code>, set by the machine size by default). Slots take tasks from the database. Sutras tuned to run <em>in memory</em> go to a second engine in the same process whose runs live in a private in-memory database and are written to the database in one transaction when they end.</li>
 <li><strong>Timers and listeners</strong> start runs from schedules, folders, mailboxes, queues and Drive. In a cluster they run on the leader only, so nothing starts twice.</li>
 <li><strong>Cluster beat</strong> writes this engine\'s heartbeat, holds or watches the leader lease, recovers dead engines' steps, and reloads routes after deploys elsewhere.</li>
-<li><strong>Memory tables</strong> keep small reference data (rates, codes, routing, reusable values) in each engine: a JavaScript <code>Map</code> per table inside the Node.js process, in order of use so the least recently used rows go first beyond the row and MB limits. No extra server: the failsafe copy is the <code>mem_rows</code> and <code>mem_meta</code> tables of the same database, with a version per change; engines read only the rows changed since their version, at most once a second, and reload when a reload is asked for anywhere. Connection details and variables are cached in memory the same way for the settings refresh time.</li>
+<li><strong>Memory tables</strong> keep small reference data (rates, codes, routing, reusable values) in each engine: an LRU JavaScript <code>Map</code> per table inside the Node.js process. Each table, project and engine has row and byte quotas. Refresh creates a replacement off to the side and swaps it only after its query, keys and quotas pass, preserving the last good copy on failure. Failsafe tables schedule on the leader and use <code>mem_rows</code>/<code>mem_meta</code> versioning; memory-only tables schedule on every engine.</li>
 <li><strong>Storage</strong> is SQLite in the data folder, or PostgreSQL for several machines. Sutras, runs, tasks, the vault, settings and cluster state all live there.</li>
 </ul>
 <h3 id="ports">Ports and addresses</h3>
@@ -474,13 +482,14 @@ ${tw(['Address', 'What answers'], [
 
 sec('engine-inside', 'Inside the engine', `
 ${DIAGRAMS.engine}
-<p>The 1.9 engine is split by responsibility so a change to queueing, an activity, an operator command or a database transition can be reviewed without reading the whole runner. <code>engine.ts</code> is the public façade and composition root; it does not expose the internal services to callers.</p>
+<p>The 2.0 engine is split by responsibility so a change to queueing, graph routing, an activity, an operator command or a database transition can be reviewed without reading the whole runner. <code>engine.ts</code> is the public façade and composition root; it does not expose the internal services to callers.</p>
 ${tw(['File', 'Responsibility', 'Does not decide'], [
-  ['<code>engine.ts</code>', 'Registers activities, starts and drains the durable and in-memory engines, starts runs, composes the services, and orchestrates complete, fail, route and settle.', 'How a task is claimed or how an activity implementation runs.'],
+  ['<code>engine.ts</code>', 'Registers activities, starts and drains the durable and in-memory engines, starts runs, composes the services, and orchestrates complete and fail.', 'How a task is claimed, how graph tokens move, or how an activity implementation runs.'],
   ['<code>scheduler.ts</code>', 'Polls and wakes the queue, atomically claims due tasks by priority in batches, observes the worker limit, and dispatches each claim.', 'Business routing or step results.'],
   ['<code>executor.ts</code>', 'Builds the mapping context, resolves variables and secrets, enforces abort and time limits, executes loops and streamed emits, and hands the result to complete or fail.', 'Durable transition SQL.'],
   ['<code>transitions.ts</code>', 'Shared atomic helpers for fenced updates, state and log changes, run/output commits, cancellation of open tasks, and routing scope.', 'Which activity to execute.'],
-  ['<code>run-store.ts</code>', 'Loads runs and separately stored outputs and owns the claim fence. An old owner receives <code>StaleStep</code> and cannot change the row.', 'Scheduling policy.'],
+  ['<code>run-store.ts</code>', 'Loads runs and separately stored outputs, owns the claim fence, derives final status atomically, and persists ended in-memory runs. An old owner receives <code>StaleStep</code> and cannot change the row.', 'Scheduling or graph-routing policy.'],
+  ['<code>router.ts</code>', 'Evaluates connection conditions, sends live and skip tokens, joins branches and eliminates dead paths before scheduling the next activity.', 'Activity execution or durable fencing primitives.'],
   ['<code>waits.ts</code>', 'Keeps process-local reply and finish callbacks, notifies live views, and checks the durable run row when another engine completes it.', 'The durable status itself.'],
   ['<code>operator.ts</code>', 'Implements cancel, approval decisions, resubmit, debug controls, queued-run promotion and run-time limits.', 'Normal activity execution.'],
   ['<code>state.ts</code>', 'Pure run-state and output helpers: initial variables, output parsing, compact streamed output and API/history views.', 'I/O or database ownership.'],
@@ -503,7 +512,7 @@ ${DIAGRAMS.lifecycle}
 <li><strong>Start.</strong> A trigger (or a test run, the Run API, a channel, Call Sutra, an MCP call) calls <code>startRun</code>. It inserts the run row, which keeps a copy of the Sutra document it started with, and one pending task for the trigger step. Redeploying never changes a run in flight.</li>
 <li><strong>Queue.</strong> A deployed Sutra tuned with <em>Runs at once</em> starts extra runs as <code>queued</code>; they move to running, oldest first, when one of its runs ends (and the leader checks on each beat).</li>
 <li><strong>Claim.</strong> A free worker slot claims the next due task, highest Sutra priority first, with one atomic statement: <code>update tasks set status='running', owner=? where id = (select ... where status='pending' and not_before &lt;= now order by priority desc, id limit 1) and status='pending' returning *</code>. Two engines can never claim the same task.</li>
-<li><strong>Run the activity.</strong> The engine resolves the step\'s settings (templates, formulas, Project and Sengine variables, secrets) and its Input mapping, then calls the activity\'s <code>execute</code> with a context (logging, secrets, abort signal, time limit). Loop settings run it once per item of a list, or again while a condition holds, and collect the results.</li>
+<li><strong>Run the activity.</strong> The engine resolves the step\'s settings (templates, formulas, Project and Engine properties, secrets) and its Input mapping, then calls the activity\'s <code>execute</code> with a context (logging, secrets, abort signal, time limit). Loop settings run it once per item of a list, or again while a condition holds, and collect the results.</li>
 <li><strong>Checkpoint.</strong> In one transaction the engine stores the step\'s output, marks the task done, and inserts tasks for the next steps. A crash before the commit leaves the durable task unfinished; the activity may therefore run again after recovery. A crash after the commit finds the completed transition and its next tasks. The claim fence makes the durable transition apply once even if an old worker returns late. Nothing required for continuation is kept only in memory between steps.</li>
 <li><strong>Route.</strong> The step\'s result names a port (out, error, ok, problems, approved, rejected...). Each connection from that port carries a live token or a skip token according to its condition. A merge waits for a token on every incoming connection.</li>
 <li><strong>Finish.</strong> When no tasks remain the run is done; a failure with no error path fails the run; End and stop options (this branch, Sutra success, Sutra error) finish early. The run\'s status, duration and steps go to metrics, traces and logs.</li>
@@ -512,7 +521,7 @@ ${DIAGRAMS.lifecycle}
 ${DIAGRAMS.states}
 <h3 id="conditions">Connections, conditions and merges</h3>
 ${DIAGRAMS.branches}
-<p>A connection can have a name (shown on the canvas) and a rule: <strong>always</strong> (the default), <strong>when</strong> a formula on the previous step\'s output is true (<code>{input.amount} &gt; 1000</code>), or <strong>otherwise</strong> (when no <em>when</em> connection from the same output was taken). Branches that are not taken send skip tokens downstream, so merges never wait forever (dead-path elimination).</p>
+<p>A connection can have a name (shown on the canvas) and a rule: <strong>always</strong> (the default), <strong>when</strong> a formula is true, or <strong>otherwise</strong> (when no <em>when</em> connection from the same output was taken). A condition uses the routing scope: <code>input</code>, earlier <code>nodes</code>, Local <code>vars</code>, Project <code>gv</code>, Engine <code>ev</code>, <code>trigger</code> and <code>now</code>. The transition inspector builds a browsable Condition data tree from that same scope; clicking a field inserts its path. Its <strong>{x}</strong> shortcut inserts a Project or Engine property and it warns when a referenced Project property is absent; for example <code>{input.amount} &gt; {gv.LIMIT}</code>. Branches that are not taken send skip tokens downstream, so merges never wait forever (dead-path elimination).</p>
 <h3 id="waits">Waiting without holding anything</h3>
 <p>A step can return a wait instead of an output. The task becomes <code>waiting</code> with its wait details and costs nothing while it waits:</p>
 <ul>
@@ -527,7 +536,7 @@ ${DIAGRAMS.branches}
 <p>A test run uses the draft, not the deployed version. A debug run pauses before each step (<code>paused</code> tasks) and continues one step at a time, so input and output can be checked in the studio.</p>`);
 
 sec('data', 'Data, mapping and expressions', `
-<p>Every step sees the same data: <code>trigger</code> (what started the run), <code>input</code> (the previous step\'s output), <code>nodes.&lt;Step name&gt;</code> (any earlier step), <code>vars</code> (Sutra variables), <code>gv</code> (Project variables), Sengine variables (read only), <code>secret</code> (vault, server side only, masked in history), <code>run</code>, and inside loops <code>item</code>, <code>index</code> and <code>iteration</code>.</p>
+<p>Every step sees the same data: <code>trigger</code> (what started the run), <code>input</code> (the previous step\'s output), <code>nodes.&lt;Step name&gt;</code> (any earlier step), <code>vars</code> (Local variables), <code>gv</code> (Project properties), <code>ev</code> (Engine properties), <code>secret</code> (vault, server side only, masked in history), <code>run</code>, and inside loops <code>item</code>, <code>index</code> and <code>iteration</code>.</p>
 <ul>
 <li><strong>Templates</strong> (<code>template.ts</code>): <code>{{input.name | upper}}</code> inside text; a field that is only one template keeps the typed value (object, list, number).</li>
 <li><strong>Formulas</strong> (<code>expr.ts</code>): a value starting with <code>=</code>, such as <code>=concat({input.first}, ' ', {input.last})</code>. Parsed into a tree and evaluated by the engine; there is no <code>eval</code>.</li>
@@ -537,13 +546,34 @@ sec('data', 'Data, mapping and expressions', `
 
 sec('gateway', 'Services: REST, SOAP and MCP', `
 ${DIAGRAMS.gateway}
-<p>When a Sutra with a REST service, SOAP service or MCP skill trigger is deployed, <code>rebuildRoutes</code> adds its path to the gateway\'s route table on every engine. A request is matched (method and path with parameters, SOAP action, MCP endpoint), checked against the service\'s API policy, and starts a run of the deployed version with the request as trigger input. The gateway then waits for the run\'s reply step (HTTP response, SOAP reply, Reply to AI) up to <code>SUTRA_REPLY_TIMEOUT_MS</code>.</p>
+<p>When a Sutra with a REST service, SOAP service or MCP skill trigger is deployed, <code>rebuildRoutes</code> resolves its General settings against the current Project and Engine properties, then adds its path to the gateway\'s route table on every engine. A request is matched (method and path with parameters, SOAP action, MCP endpoint), checked against the service\'s API policy, and starts a run of the deployed version with the request as trigger input. The gateway then waits for the run\'s reply step (HTTP response, SOAP reply, Reply to AI) up to <code>SUTRA_REPLY_TIMEOUT_MS</code>.</p>
+${tw(['File', 'Boundary'], [
+  ['<code>gateway.ts</code>', 'Listener lifecycle, deployed route tables and the small top-level dispatcher.'],
+  ['<code>rest.ts</code>', 'REST body decoding and response serialization.'],
+  ['<code>soap.ts</code>', 'SOAP envelopes, faults, XML rendering and WSDL generation.'],
+  ['<code>mcp-handler.ts</code>', 'Streamable HTTP sessions, JSON-RPC validation, tool listing and tool calls.'],
+  ['<code>oauth-handler.ts</code>', 'OAuth client-credentials token requests and responses.'],
+  ['<code>websocket.ts</code>', 'Upgrade policy, connection ownership, ordered messages and cross-engine delivery.'],
+  ['<code>agents.ts</code>', 'Chat, OpenAI-compatible, MCP-agent and A2A surfaces.'],
+  ['<code>apps.ts</code>', 'Apps, keys, tokens, distributed quotas, firewall, traffic log and OpenAPI.'],
+].map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join(''))}
+<p>The request hot path does not wait on the synchronous PostgreSQL bridge: app/key lookup, token validation, replay protection, distributed rate limits, firewall reads, WebSocket registration, agent job polling and request logging use <code>asyncdb.ts</code>. Independent requests can therefore have database work in flight together. Administrative lists and infrequent housekeeping retain <code>q</code>/<code>tx</code> until their migration is useful.</p>
 <ul>
 <li><strong>TLS</strong> (<code>tls.ts</code>): self-signed for testing, uploaded certificates, or Let\'s Encrypt with automatic renewal; a client CA turns on mutual TLS for services whose policy asks for it.</li>
-<li><strong>SOAP</strong>: the gateway publishes a WSDL for each SOAP service and wraps errors as SOAP faults; WS-Security headers are checked by policy.</li>
+<li><strong>SOAP</strong>: the gateway publishes a WSDL for each SOAP service and wraps errors as SOAP faults; WS-Security headers are checked by policy. A policy may encrypt authenticated replies and faults for the verified X.509 caller certificate or a configured recipient certificate.</li>
 <li><strong>MCP</strong> (<code>mcp.ts</code>): JSON-RPC over Streamable HTTP (protocol versions 2025-06-18, 2025-03-26 and 2024-11-05). <code>tools/list</code> returns every deployed MCP skill of that endpoint with its input schema; <code>tools/call</code> starts the Sutra and returns the Reply to AI content. An MCP server connection groups skills under their own path, such as <code>/mcp/orders</code>.</li>
 <li><strong>Tracing</strong>: a caller\'s W3C <code>traceparent</code> continues into the run\'s trace.</li>
 </ul>
+<h3 id="gateway-acme">Gateway TLS and the ACME lifecycle</h3>
+<p>ACME is used only for the gateway\'s <em>Let\'s Encrypt</em> certificate mode. Its purpose is to prove control of the configured public names, obtain a browser-trusted certificate and replace it before expiry without an administrator copying certificate files. Self-signed and uploaded-certificate modes do not call ACME. SutraFlow supports the HTTP-01 challenge; wildcard certificates, which require DNS-01, are outside this path.</p>
+<ol>
+<li><strong>Operator call.</strong> <code>web/admin/Server.tsx</code> first saves the TLS domains, contact email, staging choice and agreement through <code>PUT /api/server/tls</code>, then calls <code>POST /api/server/tls/acme</code>. The route requires the Server permission. <code>api.ts</code> switches the TLS mode to <code>acme</code> and starts <code>requestAcme(reloadTls)</code> without holding the HTTP request open for the whole issuance.</li>
+<li><strong>Account and order.</strong> <code>gateway/tls.ts</code> takes the <code>acme-certificate</code> database lease, renewed while the order runs, so only one engine issues or renews the shared certificate. It decrypts the saved <code>acmeAccountKey</code>, or generates and encrypts one on first use, chooses the Let\'s Encrypt staging or production directory, and creates a fresh certificate private key and CSR containing all configured names. The maintained ACME client uses Node\'s native cryptography and <code>@peculiar/x509</code>; the removed <code>node-forge</code> compatibility export is neither installed nor called.</li>
+<li><strong>HTTP-01 proof.</strong> For each authorisation the ACME client gives <code>tls.ts</code> a token and key authorisation. It is stored briefly in <code>acme_challenges</code> with the issuing engine and an expiry. Before normal gateway routing, every <code>gateway.ts</code> answers <code>/.well-known/acme-challenge/&lt;token&gt;</code> from that shared table. Public port 80 may therefore reach any healthy gateway node, but must reach the HTTP listener unchanged. The token is removed after validation and expired rows are cleaned before an order.</li>
+<li><strong>Install.</strong> After Let\'s Encrypt validates every name, <code>tls.ts</code> saves the returned chain and matching private key through the encrypted settings store, records success or the error for the Admin Console, reloads its HTTPS context and raises the cluster generation. Every other engine reloads the shared certificate on its next heartbeat. Replacing the secure context does not deliberately drop existing connections.</li>
+<li><strong>Renew.</strong> <code>index.ts</code> starts the renewal timer at boot. It checks after ten seconds and every twelve hours; in ACME mode, a missing certificate or one with fewer than 30 days left calls the same <code>requestAcme(reloadTls)</code> path. Failure leaves the current certificate in place and the next check retries.</li>
+</ol>
+<p>The ACME account key and installed private key are encrypted with the server master key in shared settings. Challenge rows contain public key authorisations, not private keys, and expire after 15 minutes. An issuance lease expires if its engine disappears; an in-flight ACME order itself is not transferable, so a later request or renewal check starts a new order after the lease expires. The certificate expiry alert remains the operational backstop for failed renewal.</p>
 <h3 id="gateway-apps">Apps, plans, firewall and the request log</h3>
 <p>Before routing, the gateway checks its firewall (deny wins; an allow list admits only its addresses). An API security policy with <em>Gateway apps</em> accepts an app\'s key (<code>X-API-Key</code>, or <code>Authorization: Bearer sfk_...</code>) or an access token from <code>POST /oauth/token</code> (OAuth2 client credentials, an hour, signed with a key kept in settings). The app must hold the scopes the policy requires; its plan is then counted in <code>gw_usage</code> in one transaction, so every engine of a cluster shares the count, and a full window answers 429 with <code>Retry-After</code>; answers carry <code>X-RateLimit-*</code> headers. Every request is written to <code>gw_requests</code> when it ends, for the Traffic page (timeline, p50/p95/p99, busiest and slowest services, apps) and the request log; housekeeping deletes entries after the chosen number of days. OpenAPI 3.1 is generated from the deployed REST services, their path parameters, body schemas and security, for the console and, when chosen, at <code>/openapi.json</code> on the gateway.</p>`);
 
@@ -555,7 +585,7 @@ ${tw(['Use', 'SutraFlow is', 'Where'], [
   ['Outbound security profile <em>OAuth client credentials</em>: calls to APIs as a machine', 'a client with its own ID and secret, no person', '<code>security/outbound.ts</code>'],
   ['Gateway apps: <code>POST /oauth/token</code> for the apps that call your services', 'the authorization server (it issues short tokens to apps)', '<code>gateway/apps.ts</code>'],
   ['API security policies: JWT and token introspection on incoming calls', 'a resource server (it checks tokens others issued)', '<code>security/inbound.ts</code>, <code>security/hmac.ts</code>'],
-  ['Single sign-on for people (OpenID Connect)', 'a client of the identity provider; people get a SutraFlow session', '<code>sso.ts</code>'],
+  ['Single sign-on for people (OpenID Connect or SAML 2.0)', 'a client/service provider of the identity provider; people get a SutraFlow session', '<code>sso.ts</code>, <code>saml-sso.ts</code>'],
 ].map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join(''))}
 <h3 id="oauth-connections">OAuth connections step by step</h3>
 <ol>
@@ -582,11 +612,12 @@ ${tw(['Service', 'Sign-in and token addresses', 'What SutraFlow adds', 'Scopes t
 sec('triggers', 'Timers, listeners and channels', `
 <p>Triggers that are not requests are started by the leader engine:</p>
 <ul>
-<li><strong>Timers</strong> (<code>scheduler.ts</code>): cron expressions or intervals, rebuilt on each deploy.</li>
-<li><strong>Listeners</strong> (<code>listeners.ts</code>): folder watchers (File trigger), mailbox polling (Email trigger), queue and topic subscriptions (Service Bus), Drive polling. Queue messages can be acknowledged only after the Sutra succeeded.</li>
+<li><strong>Timers</strong> (<code>scheduler.ts</code>): cron expressions or intervals, with Project and Engine properties resolved when schedules are rebuilt.</li>
+<li><strong>Listeners</strong> (<code>listeners.ts</code>): folder watchers (File trigger), mailbox polling (Email trigger), queue and topic subscriptions (Service Bus), Drive and chat polling. General settings use the same property resolver as normal activities.</li>
+<li><strong>Broker acknowledgement and deduplication</strong> (<code>connectors/bus.ts</code>): client mode acknowledges only after run success; explicit mode waits for Confirm message. Before starting a protected delivery it writes <code>bus_messages</code> with a reserved run id, keyed by Kafka topic/partition/offset or RabbitMQ/AMQP message id. A new leader that receives the same delivery consults that run and either waits, acknowledges its completed result, or removes a failed reservation for retry.</li>
 <li><strong>Channels</strong> (<code>channels.ts</code>): Send to channel starts every deployed Sutra of the project whose Channel trigger listens on that name. It reads deployments from the database, so it works the same on one engine or many.</li>
 </ul>
-<p>When the leader stops or dies, another engine takes the lease and starts the timers and listeners itself.</p>`);
+<p>When the leader stops or dies, another engine takes the lease and starts the timers and listeners itself. Kafka always supplies a stable offset identity; an external RabbitMQ or AMQP publisher must set a unique message id to receive the same duplicate-run protection. Broker delivery and outside activity effects remain at-least-once boundaries, so downstream idempotency keys are still required where an acknowledgement can be lost.</p>`);
 
 sec('storage', 'Storage', `
 ${DIAGRAMS.storage}
@@ -603,6 +634,7 @@ ${DIAGRAMS.cluster}
 <li><strong>Heartbeat.</strong> Each engine updates its <code>engines</code> row every <code>SUTRA_HEARTBEAT_MS</code> with its active steps and draining flag. An engine silent for three beats is dead.</li>
 <li><strong>Leader.</strong> One engine holds the <code>leader</code> lease (renewed each beat, valid for three). It runs timers, listeners, recovery and housekeeping. If it stops renewing, another engine takes the lease.</li>
 <li><strong>Recovery.</strong> The leader puts tasks owned by dead engines back to pending. A new claim increases the task\'s claim number; a late completion from the former owner fails its fence and changes nothing.</li>
+<li><strong>Queue/topic takeover.</strong> Only the leader owns broker consumers. <code>bus_messages</code> binds a protected broker identity to its reserved run before that run starts. A replacement leader therefore follows the existing durable run instead of starting a duplicate, then acknowledges only when the configured success/confirmation boundary has been reached.</li>
 <li><strong>Deploy propagation.</strong> A deploy, connection or project change raises a generation number in settings; every engine compares it on each beat and reloads its routes (and the leader its timers and listeners).</li>
 <li><strong>Locks.</strong> The <code>leases</code> table also gives short cluster-wide locks, such as the deploy-folder lock so replicas starting together deploy a package once.</li>
 <li><strong>Studio in a cluster.</strong> A studio with <code>SUTRA_WORKERS=0</code> edits and deploys; the engines run.</li>
@@ -628,7 +660,7 @@ ${DIAGRAMS.failover}
 sec('deploy', 'Releases and deployment', `
 ${DIAGRAMS.release}
 <h3 id="packages">Project packages</h3>
-<p>A release is a <strong>project package</strong> (<code>packages.ts</code>): a JSON file with format <code>sutraflow-package</code> v1 holding every deployed Sutra at its version, the project\'s connections (secret names, never values), shared schemas and WSDLs, Project variables and logging, a manifest (Sutras, secrets needed, activity types used) and a sha256 checksum over a canonical form. The same file goes to test and production; differences come from each server\'s <strong>deployment config</strong> (variables, connection settings, logging, with <code>${'${env:NAME}'}</code> values).</p>
+<p>A release is a <strong>project package</strong> (<code>packages.ts</code>): a JSON file with format <code>sutraflow-package</code> v1 holding every deployed Sutra at its version, the project\'s connections (secret names, never values), shared schemas and WSDLs, Project properties and logging, a manifest and a sha256 checksum. The manifest includes Sutras, secrets, activity types and each Memory table\'s key, database/driver, referenced source objects, queries, schedule/time zone, limits and failsafe. Preflight rejects missing Memory-table dependencies and invalid configuration before deployment.</p>
 <ul>
 <li><strong>Check</strong>: the server knows every activity type, the secrets exist in its vault, and API paths and MCP skill names are not used by another project.</li>
 <li><strong>Deploy</strong>: Sutras are matched by name and created or updated as new versions (unchanged documents are left alone); Sutras not in the package are undeployed unless kept. Each deployment is stored in <code>package_deployments</code> with its report.</li>
@@ -702,7 +734,8 @@ sec('security', 'Security', `
 <li><strong>Gateway</strong>: per-service API policies (API key, Basic with listed users or system accounts holding Call services on the project, JWT, mutual TLS, WS-Security); TLS with uploaded or Let\'s Encrypt certificates.</li>
 <li><strong>Outbound</strong>: security profiles, client certificates, OAuth tokens stored encrypted, circuit breakers on HTTP connections.</li>
 <li><strong>Data never becomes code</strong>: SQL parameters are bound; formulas and templates are parsed, not evaluated; scripts receive values as environment variables and a JSON file; programs get arguments without a shell; file activities stay inside their folder; custom JavaScript runs in a sandboxed worker with limits.</li>
-<li><strong>Policies off by default</strong>: scripts, release activities and Sutras changing Sengine variables each need an administrator\'s switch in Admin Console &rarr; Server &rarr; Runtime.</li>
+<li><strong>Policies off by default</strong>: scripts and release activities each need an administrator\'s switch in Admin Console &rarr; Server &rarr; Runtime. Project and Engine properties are always read-only to Sutras.</li>
+<li><strong>Vendor supply chain</strong>: every build checks reviewed local dependency trees and packaging scope; connected CI, releases and a weekly workflow compare them with npm. A newer upstream version must be reviewed for API and behavior changes and pass focused plus complete regression tests before its pinned baseline moves.</li>
 </ul>`);
 
 sec('ai', 'AI and MCP', `
@@ -743,11 +776,11 @@ sec('api', 'Admin API routes', `
 ${tw(['Area', 'Routes'], api.html)}`);
 
 sec('settings', 'Environment settings', `
-<p>Process settings come from environment variables (<code>config.ts</code>). Everything else (gateway ports after the first start, TLS, policies, Sengine variables) is stored in the database and edited in Admin Console &rarr; Server.</p>
+<p>Process settings come from environment variables (<code>config.ts</code>). Everything else (gateway ports after the first start, TLS, policies, Engine properties) is stored in the database and edited in Admin Console &rarr; Server.</p>
 ${tw(['Variable', 'Default', 'Meaning'], SETTINGS.map(([a, b, c]) => `<tr id="env-${slug(a)}"><td><code>${esc(a)}</code></td><td>${esc(b)}</td><td>${c}</td></tr>`).join(''))}`);
 
 sec('testing', 'Tests', `
-<p><code>npm test</code> compiles the server, then runs every suite with Node\'s test runner. Multi-process suites start real servers (headless engines, clusters on one database, drain and failover). The PostgreSQL suite runs the in-process suites again on PGlite with shifted ports. Three suites run only when their tools exist: the Docker image build, a real PostgreSQL server through <code>SUTRA_TEST_PG_URL</code>, and DB Ops against a real MySQL server through <code>SUTRA_TEST_MYSQL_URL</code> (for example Laragon\'s). A guard test fails if names of other products appear in the source or documents.</p>
+<p><code>npm test</code> compiles the server, then runs every suite with Node\'s test runner. The build first runs the offline vendor integrity gate. Connected CI and release jobs also run its npm freshness mode; a weekly workflow detects an upstream release without waiting for a code change. Multi-process suites start real servers (headless engines, clusters on one database, drain and failover). The PostgreSQL suite runs the in-process suites again on PGlite with shifted ports. Three suites run only when their tools exist: the Docker image build, a real PostgreSQL server through <code>SUTRA_TEST_PG_URL</code>, and DB Ops against a real MySQL server through <code>SUTRA_TEST_MYSQL_URL</code> (for example Laragon\'s). A guard test fails if names of other products appear in the source or documents.</p>
 ${testFiles.map(f => `<h3 id="t-${slug(f)}">${esc(f)}</h3><ul class="tests">${testNames(f).map(n => `<li>${esc(n)}</li>`).join('')}</ul>`).join('')}`);
 
 // ---------------------------------------------------------------------------------------------

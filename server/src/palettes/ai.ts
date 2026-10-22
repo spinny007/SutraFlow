@@ -128,7 +128,7 @@ export const aiActivities: Activity[] = [
   {
     type: 'aiPrompt', palette: 'ai', name: 'AI prompt', glyph: '✦', ports: ['out'],
     desc: 'Sends instructions and mapped data to the AI provider and returns the text reply.',
-    fields: [provider, F('system', 'Instructions', 'textarea', 'You are a concise assistant for an integration Sutra.'), F('prompt', 'Prompt', 'textarea', '{{input}}', { tpl: true }), effort],
+    fields: [provider, F('system', 'Instructions', 'textarea', 'You are a concise assistant for an integration Sutra.', { vars: true }), F('prompt', 'Prompt', 'textarea', '{{input}}', { tpl: true }), effort],
     outputHint: { text: '', ...AI },
     execute: async c => ({ out: await ask(c, c.raw('system') || '', String(asPrompt(c.v('prompt'))), c.raw('effort')) }),
   },
@@ -136,7 +136,7 @@ export const aiActivities: Activity[] = [
     type: 'aiClassify', palette: 'ai', name: 'AI classify', glyph: '◈',
     ports: cfg => [...listOf(cfg.labels), 'other'],
     desc: 'The AI picks one label for the text. Each label is an output branch.',
-    fields: [provider, F('text', 'Text', 'textarea', '{{input}}', { tpl: true }), F('labels', 'Labels (comma separated)', 'text', 'refund, complaint, question', { ports: true }), F('guidance', 'Guidance', 'textarea', ''), effort],
+    fields: [provider, F('text', 'Text', 'textarea', '{{input}}', { tpl: true }), F('labels', 'Labels (comma separated)', 'text', 'refund, complaint, question', { ports: true }), F('guidance', 'Guidance', 'textarea', '', { vars: true }), effort],
     outputHint: { label: '', confidence: 0, reason: '', ...AI },
     execute: async c => {
       const labels = listOf(c.raw('labels'));

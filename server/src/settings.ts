@@ -19,10 +19,14 @@ import { resolve } from './template.js';
 const DYNAMIC = (v: unknown) => typeof v === 'string' && (v.startsWith('=') || v.includes('{{'));
 
 export function resolveSetting(f: Field | undefined, value: unknown, scope: Record<string, any>): any {
-  if (!f || f.tpl || !['text', 'number', 'list', 'select'].includes(f.type)) return value;
+  if (!f || f.tpl || (!['text', 'number', 'bool', 'list', 'select', 'kv'].includes(f.type) && !f.vars)) return value;
+  if (f.type === 'kv' && Array.isArray(value)) return value.map(row => row && typeof row === 'object'
+    ? { ...row, v: DYNAMIC(row.v) ? resolve(row.v, scope) : row.v }
+    : row);
   if (Array.isArray(value)) return value.map(x => (DYNAMIC(x) ? resolve(x, scope) : x));
   if (!DYNAMIC(value)) return value;
   const r = resolve(value, scope);
+  if (f.type === 'bool') return typeof r === 'string' ? !/^(|0|false|no|off)$/i.test(r.trim()) : !!r;
   return f.type === 'number' ? Number(r) : r;
 }
 
@@ -34,9 +38,29 @@ export function resolveSettings(fields: Field[], config: Record<string, any>, sc
 
 /** Resource settings: any text value may use {{gv.X}} / = formulas (secret names included). */
 export function resolveResourceConfig(config: Record<string, any>, scope: Record<string, any>) {
-  const out: Record<string, any> = {};
-  for (const [k, v] of Object.entries(config)) {
-    out[k] = Array.isArray(v) ? v.map(x => (DYNAMIC(x) ? resolve(x, scope) : x)) : DYNAMIC(v) && !/^(caPem|clientCertPem|certPem|jwtPublicKeyPem)$/.test(k) ? resolve(v, scope) : v;
-  }
-  return out;
+  const protectedText = /^(caPem|clientCertPem|certPem|jwtPublicKeyPem|trustedCertsPem|samlIdpCertPem|responseEncryptCertPem|encryptCertPem)$/;
+  // A resource is resolved before an activity context (and its secret proxy) exists. Fill only gv/ev
+  // here and preserve {{secret.X}} or any step-time reference for the connector to resolve later.
+  const staticValue = (text: string) => {
+    if (!DYNAMIC(text) || !/(?:\{\{\s*|\{\s*)(?:gv|ev)\./.test(text)) return text;
+    if (text.startsWith('=')) {
+      const refs = [...text.matchAll(/\{\s*([^{}]+?)\s*\}/g)].map(m => m[1].trim());
+      return refs.every(ref => /^(?:gv|ev)\./.test(ref)) ? resolve(text, scope) : text;
+    }
+    const kept: string[] = [];
+    const safe = text.replace(/\{\{[\s\S]*?\}\}/g, ref => {
+      if (/^\{\{\s*(?:gv|ev)\./.test(ref)) return ref;
+      kept.push(ref);
+      return `__SUTRA_REF_${kept.length - 1}__`;
+    });
+    const filled = String(resolve(safe, scope) ?? '');
+    return filled.replace(/__SUTRA_REF_(\d+)__/g, (_all, n) => kept[Number(n)] ?? '');
+  };
+  const walk = (v: unknown, key = ''): any => {
+    if (typeof v === 'string') return !protectedText.test(key) ? staticValue(v) : v;
+    if (Array.isArray(v)) return v.map(x => walk(x));
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x, k)]));
+    return v;
+  };
+  return walk(config);
 }

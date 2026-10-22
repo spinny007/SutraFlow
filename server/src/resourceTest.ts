@@ -24,11 +24,11 @@ import { testChat } from './connectors/chat.js';
 
 /**
  * "Test connection" in the resource editor: tries the settings as they are on screen (saved or not),
- * with project and Sengine variables resolved, and reports what happened in one sentence.
+ * with Project and Engine properties resolved, and reports what happened in one sentence.
  */
 export interface ResourceInput { id?: string; kind: string; name?: string; project_id?: string | null; config: Record<string, any> }
 
-/** The settings as they are on screen, with project and Sengine variables filled in, and a secret reader. */
+/** The settings as they are on screen, with Project and Engine properties filled in, and a secret reader. */
 export function prepare(input: ResourceInput) {
   const t0 = Date.now();
   const config = resolveResourceConfig(input.config || {}, { gv: effectiveVariables(input.project_id ?? null).values, ev: engineVariableValues() });

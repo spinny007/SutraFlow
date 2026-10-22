@@ -1,0 +1,33 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 2.0.0
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { issueToken } from './apps.js';
+
+/** OAuth 2.0 client-credentials endpoint for gateway apps (RFC 6749 section 4.4). */
+export async function tokenEndpoint(req: FastifyRequest, reply: FastifyReply) {
+  reply.header('cache-control', 'no-store');
+  if (req.method !== 'POST') return reply.code(405).header('allow', 'POST').send({ error: 'invalid_request', error_description: 'Use POST' });
+  const raw = typeof req.body === 'string' ? req.body : '';
+  const ct = String(req.headers['content-type'] || '');
+  let f: Record<string, string> = {};
+  try { f = ct.includes('json') ? JSON.parse(raw || '{}') : Object.fromEntries(new URLSearchParams(raw)); } catch { return reply.code(400).send({ error: 'invalid_request', error_description: 'The body is not form data or JSON' }); }
+  let id = f.client_id || '', secret = f.client_secret || '';
+  const basic = /^Basic\s+(.+)$/i.exec(String(req.headers.authorization || ''))?.[1];
+  if (basic) { const d = Buffer.from(basic, 'base64').toString('utf8'); const i = d.indexOf(':'); id = decodeURIComponent(d.slice(0, i)); secret = decodeURIComponent(d.slice(i + 1)); }
+  if (f.grant_type !== 'client_credentials') return reply.code(400).send({ error: 'unsupported_grant_type', error_description: 'Only client_credentials is supported' });
+  if (!id || !secret) return reply.code(401).send({ error: 'invalid_client', error_description: 'Send client_id and client_secret (the app id and one of its keys)' });
+  try {
+    const t = await issueToken(id, secret, f.scope);
+    ((req as any).gw ||= {}).appId = id;
+    return reply.send(t);
+  } catch (e: any) {
+    ((req as any).gw ||= {}).error = e.message;
+    return reply.code(e.status || 400).send({ error: e.message, ...(e.detail ? { error_description: e.detail } : {}) });
+  }
+}

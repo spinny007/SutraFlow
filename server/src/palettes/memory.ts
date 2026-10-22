@@ -12,7 +12,7 @@ import { F } from './common.js';
 import { resolve } from '../template.js';
 import { truthy } from '../expr.js';
 import { kvToObject } from '../resources.js';
-import { memTable, memGet, memPut, memDelete, memQuery, memClear, reload, memStats } from '../memtables.js';
+import { memTable, memGet, memPut, memDelete, memDeleteMatching, memQuery, memClear, reload, memStats } from '../memtables.js';
 
 /**
  * Memory tables palette: get, put, delete and query rows of a memory table (see memtables.ts), and
@@ -27,8 +27,8 @@ const tableOf = (c: { raw(k: string): any }) => {
 
 export const memoryActivities: Activity[] = [
   {
-    type: 'memGet', palette: 'memory', name: 'Memory get', glyph: '⚡', ports: ['found', 'missing'],
-    desc: 'Reads one row of a memory table by its key, from memory. A row not in memory is fetched with the table\'s lookup query when it has one.',
+    type: 'memGet', palette: 'memory', name: 'Get Memory Record', glyph: '⚡', ports: ['found', 'missing'],
+    desc: 'Gets one cached record by its configured key. When enabled, a missing record is fetched with the table\'s lookup query and cached; otherwise it follows missing.',
     fields: [table, F('key', 'Key', 'text', '{{input.customerId}}', { tpl: true, help: 'For a key of several fields, the values joined with |, such as {{input.country}}|{{input.city}}.' }),
       F('readThrough', 'Fetch a missing row with the lookup query', 'bool', true)],
     outputHint: { found: true, key: '', row: {} },
@@ -41,8 +41,8 @@ export const memoryActivities: Activity[] = [
     },
   },
   {
-    type: 'memPut', palette: 'memory', name: 'Memory put', glyph: '⚡', ports: ['out'],
-    desc: 'Adds or replaces a row in a memory table. Several rows at once: map a list. In a table with a copy in the database, the change is saved there too and reaches the other engines.',
+    type: 'memPut', palette: 'memory', name: 'Set Memory', glyph: '⚡', ports: ['out'],
+    desc: 'Adds or replaces one or more cached records by the table key. It changes the Memory table, not its Oracle, SQL Server, MySQL, PostgreSQL or SQLite source table. A durable copy reaches the other engines.',
     fields: [table, F('row', 'Row (or list of rows)', 'text', '{{input}}', { tpl: true, help: 'An object with the key fields of the table, or a list of such objects.' }),
       F('key', 'Key', 'text', '', { tpl: true, help: 'Empty = from the key fields of the row.' }),
       F('ttlSeconds', 'Keep for (seconds)', 'number', 0, { help: '0 = the time to live of the table.' })],
@@ -58,21 +58,42 @@ export const memoryActivities: Activity[] = [
     },
   },
   {
-    type: 'memDelete', palette: 'memory', name: 'Memory delete', glyph: '⚡', ports: ['out'],
-    desc: 'Removes a row from a memory table by its key, or every row.',
-    fields: [table, F('what', 'Remove', 'select', 'one row', { options: ['one row', 'every row'] }),
-      F('key', 'Key', 'text', '{{input.customerId}}', { tpl: true, showIf: { k: 'what', in: ['one row'] } })],
-    outputHint: { deleted: true, key: '' },
+    type: 'memDelete', palette: 'memory', name: 'Delete Memory Records', glyph: '⚡', ports: ['out'],
+    desc: 'Deletes cached records by one key, a list of keys, matching fields and a condition, or every record. It never deletes records from the source database.',
+    fields: [table,
+      F('what', 'Delete', 'select', 'one key', { options: ['one key', 'list of keys', 'matching records', 'every record'] }),
+      F('key', 'Key', 'text', '{{input.customerId}}', { tpl: true, showIf: { k: 'what', in: ['one key', 'one row'] } }),
+      F('keys', 'Keys', 'list', [], { tpl: true, showIf: { k: 'what', in: ['list of keys'] } }),
+      F('match', 'Fields equal to', 'kv', [], { tpl: true, showIf: { k: 'what', in: ['matching records'] } }),
+      F('condition', 'Condition', 'text', '', { showIf: { k: 'what', in: ['matching records'] }, help: 'Optional, per record: ={row.amount} > 100.' }),
+      F('limit', 'Maximum records', 'number', 1000, { showIf: { k: 'what', in: ['list of keys', 'matching records'] }, help: 'Safety limit for one execution.' }),
+    ],
+    outputHint: { matched: 1, deleted: true, count: 1, keys: [''] },
     execute: async c => {
       const t = await tableOf(c);
-      if (c.raw('what') === 'every row') { const n = t.rows.size; memClear(t); return { out: { deleted: n > 0, count: n } }; }
-      const key = String(c.v('key') ?? '');
-      return { out: { deleted: memDelete(t, key), key } };
+      const what = String(c.raw('what') || 'one key');
+      if (what === 'every record' || what === 'every row') { const keys = [...t.rows.keys()]; memClear(t); return { out: { matched: keys.length, deleted: keys.length > 0, count: keys.length, keys } }; }
+      if (what === 'one key' || what === 'one row') {
+        const key = String(c.v('key') ?? '');
+        if (!key) throw new Error('Key is empty');
+        const deleted = memDelete(t, key);
+        return { out: { matched: deleted ? 1 : 0, deleted, count: deleted ? 1 : 0, key, keys: deleted ? [key] : [] } };
+      }
+      const limit = Number(c.raw('limit')) || 1000;
+      if (what === 'list of keys') {
+        const keys = Array.isArray(c.v('keys')) ? c.v('keys').map(String).filter(Boolean) : String(c.v('keys') || '').split(',').map((x: string) => x.trim()).filter(Boolean);
+        const deleted = memDeleteMatching(t, { keys, limit });
+        return { out: { matched: deleted.length, deleted: deleted.length > 0, count: deleted.length, keys: deleted } };
+      }
+      const match = kvToObject(c.raw('match'), v => c.resolve(v) as any);
+      const cond = String(c.node.config?.condition ?? '').trim();
+      const deleted = memDeleteMatching(t, { match, test: cond ? row => truthy(resolve(cond, { row, input: c.input })) : undefined, limit });
+      return { out: { matched: deleted.length, deleted: deleted.length > 0, count: deleted.length, keys: deleted } };
     },
   },
   {
-    type: 'memQuery', palette: 'memory', name: 'Memory query', glyph: '⚡', ports: ['out', 'empty'],
-    desc: 'Finds rows of a memory table: fields equal to values, and an optional condition per row ({row.field}). Reads memory only.',
+    type: 'memQuery', palette: 'memory', name: 'Query Memory Records', glyph: '⚡', ports: ['out', 'empty'],
+    desc: 'Queries records already cached in a Memory table using equal fields and an optional per-record condition. It does not query the source database.',
     fields: [table, F('match', 'Fields equal to', 'kv', [], { tpl: true, help: 'Field name and value, such as city = {{input.city}}.' }),
       F('condition', 'Condition', 'text', '', { help: 'Optional, per row: ={row.amount} > 100.' }),
       F('limit', 'Maximum rows', 'number', 1000)],
@@ -87,8 +108,8 @@ export const memoryActivities: Activity[] = [
     },
   },
   {
-    type: 'memReload', palette: 'memory', name: 'Memory reload', glyph: '⚡', ports: ['out'],
-    desc: 'Loads a memory table again from its load query (for example after the source changed), and gives its figures.',
+    type: 'memReload', palette: 'memory', name: 'Refresh Memory Table', glyph: '⚡', ports: ['out'],
+    desc: 'Executes the configured source query and atomically replaces the cached table after the rows and limits validate. The previous successful table remains available if refresh fails.',
     fields: [table],
     outputHint: { rows: 0, bytes: 0, hits: 0, misses: 0, loadedAt: '' },
     execute: async c => {

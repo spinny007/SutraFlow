@@ -11,6 +11,8 @@ import crypto from 'node:crypto';
 import * as acme from 'acme-client';
 import { generate } from 'selfsigned';
 import { getSetting, setSetting } from '../db.js';
+import { asyncDatabase } from '../asyncdb.js';
+import { config } from '../config.js';
 import { encrypt, decrypt } from '../secrets.js';
 
 /**
@@ -107,21 +109,68 @@ export async function makeSelfSigned(domains: string[]) {
 
 // ---------- Let's Encrypt (ACME HTTP-01) ----------
 
-const challenges = new Map<string, string>();
-export const acmeChallenge = (token: string) => challenges.get(token);
+const ACME_LEASE = 'acme-certificate';
+const ACME_LEASE_MS = 10 * 60 * 1000;
+const CHALLENGE_MS = 15 * 60 * 1000;
+
+/** HTTP-01 is served from shared storage so any gateway node can answer the CA. */
+export async function acmeChallenge(token: string) {
+  const row = await asyncDatabase().get<{ key_authorization: string }>(
+    'select key_authorization from acme_challenges where token = ? and expires_at > ?', token, Date.now());
+  return row?.key_authorization;
+}
+
+export async function putAcmeChallenge(token: string, keyAuthorization: string, holder = config.engineId, expiresAt = Date.now() + CHALLENGE_MS) {
+  await asyncDatabase().run(`insert into acme_challenges(token, key_authorization, engine_id, expires_at) values(?, ?, ?, ?)
+    on conflict(token) do update set key_authorization = excluded.key_authorization, engine_id = excluded.engine_id, expires_at = excluded.expires_at`,
+  token, keyAuthorization, holder, expiresAt);
+}
+
+export async function removeAcmeChallenge(token: string) {
+  await asyncDatabase().run('delete from acme_challenges where token = ?', token);
+}
+
+/** A short database lease prevents two engines ordering or renewing the shared certificate together. */
+export async function claimAcmeLease(holder = config.engineId, at = Date.now()) {
+  return asyncDatabase().transaction('acme:lease', async tx => {
+    await tx.run(`insert into leases(name, holder, expires_at) values(?, ?, ?) on conflict(name) do nothing`, ACME_LEASE, holder, at + ACME_LEASE_MS);
+    const changed = await tx.run(`update leases set holder = ?, expires_at = ? where name = ? and (holder = ? or expires_at < ?)`,
+      holder, at + ACME_LEASE_MS, ACME_LEASE, holder, at);
+    return changed.changes > 0;
+  });
+}
+
+export async function releaseAcmeLease(holder = config.engineId) {
+  await asyncDatabase().run('delete from leases where name = ? and holder = ?', ACME_LEASE, holder);
+}
 
 let acmeRunning: Promise<void> | null = null;
 export const acmeStatus: { state: string; message: string; at?: string } = { state: 'idle', message: '' };
+export const getAcmeStatus = () => getSetting<typeof acmeStatus>('acmeStatus', acmeStatus);
+const setAcmeStatus = (state: string, message: string) => {
+  const value = { state, message, at: new Date().toISOString() };
+  Object.assign(acmeStatus, value);
+  setSetting('acmeStatus', value);
+};
 
 export function requestAcme(onIssued: () => void) {
   if (acmeRunning) return acmeRunning;
   acmeRunning = (async () => {
     const t = getTls();
+    let leased = false;
+    let keepLease: NodeJS.Timeout | undefined;
     try {
       if (!t.domains.length) throw new Error('Add at least one domain');
       if (!t.email) throw new Error('A contact email is required by Let\'s Encrypt');
       if (!t.agreeTos) throw new Error('Accept the Let\'s Encrypt Subscriber Agreement first');
-      Object.assign(acmeStatus, { state: 'running', message: `Requesting a certificate for ${t.domains.join(', ')}`, at: new Date().toISOString() });
+      leased = await claimAcmeLease();
+      if (!leased) {
+        return;
+      }
+      keepLease = setInterval(() => { void claimAcmeLease().catch(() => {}); }, ACME_LEASE_MS / 3);
+      keepLease.unref?.();
+      await asyncDatabase().run('delete from acme_challenges where expires_at <= ?', Date.now());
+      setAcmeStatus('running', `Requesting a certificate for ${t.domains.join(', ')}`);
       const stored = getSetting<{ iv: string; tag: string; data: string } | null>('acmeAccountKey', null);
       let accountKey: string;
       if (stored) accountKey = decrypt(stored);
@@ -139,16 +188,18 @@ export function requestAcme(onIssued: () => void) {
         email: t.email,
         termsOfServiceAgreed: true,
         challengePriority: ['http-01'],
-        challengeCreateFn: async (_a, ch, keyAuth) => { challenges.set(ch.token, keyAuth); },
-        challengeRemoveFn: async (_a, ch) => { challenges.delete(ch.token); },
+        challengeCreateFn: async (_a, ch, keyAuth) => { await putAcmeChallenge(ch.token, keyAuth); },
+        challengeRemoveFn: async (_a, ch) => { await removeAcmeChallenge(ch.token); },
       });
       storeCert(cert, key.toString(), t.staging ? 'letsencrypt-staging' : 'letsencrypt');
-      Object.assign(acmeStatus, { state: 'ok', message: `Certificate issued for ${t.domains.join(', ')}`, at: new Date().toISOString() });
+      setAcmeStatus('ok', `Certificate issued for ${t.domains.join(', ')}`);
       onIssued();
     } catch (e: any) {
-      Object.assign(acmeStatus, { state: 'error', message: e?.message || String(e), at: new Date().toISOString() });
+      setAcmeStatus('error', e?.message || String(e));
       throw e;
     } finally {
+      if (keepLease) clearInterval(keepLease);
+      if (leased) await releaseAcmeLease().catch(() => {});
       acmeRunning = null;
     }
   })();

@@ -169,6 +169,7 @@ create table if not exists tasks(
 create index if not exists tasks_pick on tasks(status, not_before);
 create index if not exists tasks_run on tasks(run_id);
 create table if not exists replay_guard(k text primary key, expires_at integer not null);
+create table if not exists sso_states(state text primary key, protocol text not null, request_id text not null, redirect_uri text not null, return_to text not null, expires_at integer not null);
 create table if not exists approval_votes(task_id integer not null, username text not null, approved integer not null, comment text, at text not null, on_behalf integer not null default 0, primary key(task_id, username));
 create table if not exists ws_connections(id text primary key, engine_id text not null, path text not null, flow_id text, subject text, opened_at integer not null);
 create index if not exists ws_connections_path on ws_connections(path, engine_id);
@@ -183,6 +184,8 @@ create table if not exists secrets(
 create table if not exists settings(key text primary key, value text not null);
 create table if not exists file_listener_state(flow_id text not null, node_id text not null, primary key(flow_id, node_id));
 create table if not exists file_listener_files(flow_id text not null, node_id text not null, path text not null, size integer not null, mtime text not null, primary key(flow_id, node_id, path));
+create table if not exists bus_messages(flow_id text not null, node_id text not null, message_key text not null, run_id text not null, status text not null, updated_at integer not null, primary key(flow_id, node_id, message_key));
+create index if not exists bus_messages_updated on bus_messages(updated_at);
 create table if not exists projects(
   id text primary key, name text not null, description text, config text not null, updated_at text not null);
 create table if not exists schemas(
@@ -202,6 +205,7 @@ create table if not exists engines(
   id text primary key, host text, pid integer, mode text, version text, started_at text not null,
   heartbeat_at integer not null, workers integer, active integer not null default 0, draining integer not null default 0);
 create table if not exists leases(name text primary key, holder text not null, expires_at integer not null);
+create table if not exists acme_challenges(token text primary key, key_authorization text not null, engine_id text not null, expires_at integer not null);
 create table if not exists users(
   username text primary key, hash text not null, role text not null, created_at text not null);
 create table if not exists roles(

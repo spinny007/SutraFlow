@@ -1,0 +1,36 @@
+{
+  "name": "ftp-srv",
+  "version": "4.6.3-sutra.1",
+  "description": "Modern, extensible FTP Server",
+  "keywords": [
+    "ftp",
+    "ftp-server",
+    "ftp-srv",
+    "ftp-svr",
+    "ftpd",
+    "ftpserver",
+    "server"
+  ],
+  "license": "MIT",
+  "files": [
+    "src",
+    "ftp-srv.js",
+    "ftp-srv.d.ts"
+  ],
+  "main": "ftp-srv.js",
+  "types": "./ftp-srv.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/autovance/ftp-srv"
+  },
+  "dependencies": {
+    "bluebird": "^3.5.1",
+    "bunyan": "^1.8.12",
+    "lodash": "^4.17.15",
+    "moment": "^2.22.1",
+    "yargs": "^15.4.1"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

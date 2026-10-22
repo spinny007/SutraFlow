@@ -12,12 +12,15 @@ import { useToast } from '../src/ui';
 import { act, type Action } from './log';
 import { PageHead, Err, Empty, Confirm, State, useLoad, useEvery, useMe, can, when } from './shared';
 
-interface Settings { key: string; source: string; database: string; loadSql: string; lookupSql: string; refreshMinutes: number; ttlSeconds: number; maxRows: number; maxMb: number; keep: string }
+interface Settings { key: string; source: string; database: string; databaseId: string; databaseDriver: string; databases: { id: string; name: string; driver: string }[]; loadSql: string; lookupSql: string; refresh: string; refreshMinutes: number; refreshCron: string; refreshTimezone: string; ttlSeconds: number; maxRows: number; maxMb: number; keep: string }
 interface Table {
   id: string; name: string; project: string | null; rows: number; bytes: number; hits: number; misses: number; loads: number;
-  loadedAt: string | null; version: number; failsafe: boolean; source: string; lastError: string | null; settings: Settings; notLoaded?: boolean;
+  loadedAt: string | null; version: number; failsafe: boolean; source: string; lastError: string | null; settings: Settings; nextRefresh: string | null; notLoaded?: boolean;
 }
-interface Rows { total: number; offset: number; limit: number; fields: string[]; rows: { key: string; row: any; expiresAt: string | null }[] }
+interface Rows { total: number; offset: number; limit: number; fields: string[]; rows: { key: string; row: any; bytes: number; expiresAt: string | null }[] }
+interface QuotaData { quotas: { engine: Quota; projects: Record<string, Quota> }; usage: { engine: Usage; projects: Record<string, Usage> } }
+interface Quota { maxRows: number; maxMb: number }
+interface Usage { rows: number; bytes: number; tables: number }
 
 const kb = (n: number) => (n < 1048576 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`);
 const rate = (t: Table) => (t.hits + t.misses ? `${Math.round((t.hits / (t.hits + t.misses)) * 100)}%` : '-');
@@ -46,6 +49,7 @@ export function Memory() {
   return (
     <>
       <PageHead title="Memory tables" sub="Small reference data each engine keeps in memory for lookups without a database round trip: codes, rates, routing, reusable values. Big data stays in the database or is streamed." />
+      {can(me, 'server') && <QuotaPanel apps={apps.data || []} />}
       <div className="c-filters">
         <div className="fld"><label htmlFor="m-proj">Project</label>
           <select id="m-proj" className="inp" value={project} onChange={e => setProject(e.target.value)}>
@@ -79,7 +83,7 @@ export function Memory() {
           </tbody>
         </table>
       )}
-      {current && <TableDetail key={current.id} t={current} projectName={projectName(current.project)} mayChange={mayChange} onChanged={() => list.reload()} />}
+      {current && <TableDetail key={current.id} t={current} projectName={projectName(current.project)} mayChange={mayChange} mayConfigure={can(me, 'server')} onChanged={() => list.reload()} />}
       {confirm && <Confirm title={confirm.title} action={confirm.title.split(' ')[0]} danger={confirm.danger} cmd={confirm.action} text={confirm.text}
         onYes={async () => { await act(confirm.action); toast(`${confirm.title}: done`); list.reload(); }} onClose={() => setConfirm(null)} />}
     </>
@@ -87,13 +91,15 @@ export function Memory() {
 }
 
 /** One table: its settings, figures, and rows a page at a time, with filters and changes by hand. */
-function TableDetail({ t, projectName, mayChange, onChanged }: { t: Table; projectName: string; mayChange: boolean; onChanged(): void }) {
+function TableDetail({ t, projectName, mayChange, mayConfigure, onChanged }: { t: Table; projectName: string; mayChange: boolean; mayConfigure: boolean; onChanged(): void }) {
   const toast = useToast();
   const [find, setFind] = useState('');
   const [field, setField] = useState('');
   const [value, setValue] = useState('');
   const [offset, setOffset] = useState(0);
   const [edit, setEdit] = useState<{ key: string; text: string } | null>(null);
+  const [configuring, setConfiguring] = useState(false);
+  const [cfg, setCfg] = useState({ ...t.settings });
   const [err, setErr] = useState('');
   const qs = new URLSearchParams({ offset: String(offset), limit: String(PAGE), ...(find ? { find } : {}), ...(field ? { field, value } : {}) }).toString();
   const rows = useLoad<Rows>(`/api/console/memory/${t.id}/rows?${qs}`, [qs]);
@@ -119,13 +125,18 @@ function TableDetail({ t, projectName, mayChange, onChanged }: { t: Table; proje
       <div className="c-cardhead"><strong>{t.name}</strong><span className="muted xs">{projectName}</span></div>
       <table className="t c-table"><tbody>
         <tr><th>Key</th><td>{s.key}</td><th>Rows come from</th><td>{s.source}{s.database ? ` (${s.database})` : ''}</td></tr>
-        <tr><th>Refresh</th><td>{s.refreshMinutes ? `every ${s.refreshMinutes} min` : 'on demand'}</td><th>Rows expire</th><td>{s.ttlSeconds ? `after ${s.ttlSeconds} s` : 'never'}</td></tr>
+        <tr><th>Refresh</th><td>{s.refresh === 'cron' ? `${s.refreshCron} (${s.refreshTimezone})` : s.refresh === 'interval' ? `every ${s.refreshMinutes} min` : 'on demand'}{t.nextRefresh ? `; next ${when(t.nextRefresh)}` : ''}</td><th>Rows expire</th><td>{s.ttlSeconds ? `after ${s.ttlSeconds} s` : 'never'}</td></tr>
         <tr><th>Limits</th><td>{s.maxRows.toLocaleString()} rows, {s.maxMb} MB (least recently used go first)</td><th>Failsafe</th><td>{s.keep}</td></tr>
         <tr><th>Figures here</th><td colSpan={3}>{t.rows.toLocaleString()} rows, {kb(t.bytes)}, {t.hits.toLocaleString()} hits, {t.misses.toLocaleString()} misses, loaded {t.loads} times, change {t.version}</td></tr>
         {s.loadSql && <tr><th>Load query</th><td colSpan={3}><pre className="c-code">{s.loadSql}</pre></td></tr>}
         {s.lookupSql && <tr><th>Lookup query</th><td colSpan={3}><pre className="c-code">{s.lookupSql}</pre></td></tr>}
       </tbody></table>
-      <p className="hint">The settings are changed in the designer (Resources); this page shows them and the rows. A change by hand is saved like Memory put{t.failsafe ? ' and reaches every engine' : ', on this engine only (memory only)'}.</p>
+      <p className="hint">Administrators may tune the source, schedule and limits here. A row changed by hand is saved like Set Memory{t.failsafe ? ' and reaches every engine' : ', on this engine only (memory only)'}.</p>
+      {mayConfigure && <button className="btn small" onClick={() => setConfiguring(!configuring)}>{configuring ? 'Close settings' : 'Configure table'}</button>}
+      {configuring && <MemoryConfig value={cfg} setValue={setCfg} onSave={async () => {
+        await act({ label: `Configure memory table ${t.name}`, method: 'PUT', url: `/api/console/memory/${t.id}/config`, body: { ...cfg, database: cfg.databaseId } });
+        toast(`${t.name}: configuration saved`); setConfiguring(false); onChanged();
+      }} />}
       <div className="c-filters">
         <div className="fld"><label htmlFor="mr-find">Find</label><input id="mr-find" className="inp" value={find} placeholder="In keys and values" onChange={e => { setFind(e.target.value); setOffset(0); }} /></div>
         <div className="fld"><label htmlFor="mr-field">Field</label>
@@ -146,18 +157,19 @@ function TableDetail({ t, projectName, mayChange, onChanged }: { t: Table; proje
       {rows.data && (
         <>
           <table className="t c-table">
-            <thead><tr><th>Key</th><th>Row</th><th>Expires</th><th></th></tr></thead>
+            <thead><tr><th>Key</th><th>Row</th><th>Size</th><th>Expires</th><th></th></tr></thead>
             <tbody>{rows.data.rows.map(r => (
               <tr key={r.key}>
                 <td><code>{r.key}</code></td>
                 <td><code className="xs">{JSON.stringify(r.row).slice(0, 300)}</code></td>
+                <td>{kb(r.bytes)}</td>
                 <td>{r.expiresAt ? when(r.expiresAt) : ''}</td>
                 <td className="c-actions">{mayChange && <>
                   <button className="btn small" onClick={() => setEdit({ key: r.key, text: JSON.stringify(r.row, null, 2) })}>Edit</button>
                   <button className="btn small" onClick={() => remove(r.key)}>Remove</button>
                 </>}</td>
               </tr>))}
-              {!rows.data.rows.length && <tr><td colSpan={4} className="muted">No rows{find || field ? ' match' : ''}</td></tr>}
+              {!rows.data.rows.length && <tr><td colSpan={5} className="muted">No rows{find || field ? ' match' : ''}</td></tr>}
             </tbody>
           </table>
           <div className="c-actions">
@@ -169,4 +181,43 @@ function TableDetail({ t, projectName, mayChange, onChanged }: { t: Table; proje
       )}
     </section>
   );
+}
+
+function MemoryConfig({ value, setValue, onSave }: { value: Settings; setValue(v: Settings): void; onSave(): Promise<void> }) {
+  const set = (k: keyof Settings, v: any) => setValue({ ...value, [k]: v });
+  return <section className="c-card">
+    <div className="c-filters">
+      <div className="fld"><label>Rows come from</label><select className="inp" value={value.source} onChange={e => set('source', e.target.value)}><option>filled by Sutras</option><option>database query</option></select></div>
+      {value.source === 'database query' && <div className="fld"><label>Database connection</label><select className="inp" value={value.databaseId} onChange={e => set('databaseId', e.target.value)}>{value.databases.map(d => <option key={d.id} value={d.id}>{d.name} ({d.driver})</option>)}</select></div>}
+      <div className="fld"><label>Key fields</label><input className="inp" value={value.key} onChange={e => set('key', e.target.value)} /></div>
+      <div className="fld"><label>Refresh</label><select className="inp" value={value.refresh} onChange={e => set('refresh', e.target.value)}><option>on demand</option><option>interval</option><option>cron</option></select></div>
+      {value.refresh === 'interval' && <div className="fld"><label>Every (minutes)</label><input className="inp" type="number" min="1" value={value.refreshMinutes} onChange={e => set('refreshMinutes', Number(e.target.value))} /></div>}
+      {value.refresh === 'cron' && <><div className="fld"><label>Cron expression</label><input className="inp" value={value.refreshCron} onChange={e => set('refreshCron', e.target.value)} /></div><div className="fld"><label>Time zone</label><input className="inp" value={value.refreshTimezone} onChange={e => set('refreshTimezone', e.target.value)} /></div></>}
+      <div className="fld"><label>Most rows</label><input className="inp" type="number" min="1" value={value.maxRows} onChange={e => set('maxRows', Number(e.target.value))} /></div>
+      <div className="fld"><label>Most memory (MB)</label><input className="inp" type="number" min="1" value={value.maxMb} onChange={e => set('maxMb', Number(e.target.value))} /></div>
+    </div>
+    {value.source === 'database query' && <><div className="fld"><label>Load query</label><textarea className="inp" rows={5} value={value.loadSql} onChange={e => set('loadSql', e.target.value)} /></div><div className="fld"><label>Lookup query for a missing record (optional)</label><textarea className="inp" rows={4} value={value.lookupSql} onChange={e => set('lookupSql', e.target.value)} /></div></>}
+    <div className="c-actions"><button className="btn primary small" onClick={() => void onSave()}>Save settings</button></div>
+  </section>;
+}
+
+function QuotaPanel({ apps }: { apps: { id: string; name: string }[] }) {
+  const toast = useToast();
+  const data = useLoad<QuotaData>('/api/console/memory-quotas');
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<QuotaData['quotas'] | null>(null);
+  if (!data.data) return data.error ? <Err text={data.error} /> : null;
+  const q = draft || data.data.quotas, u = data.data.usage;
+  const update = (next: QuotaData['quotas']) => setDraft(structuredClone(next));
+  const save = async () => { await act({ label: 'Set Memory table quotas', method: 'PUT', url: '/api/console/memory-quotas', body: q }); toast('Memory table quotas saved'); setEditing(false); setDraft(null); data.reload(); };
+  return <section className="c-card"><div className="c-cardhead"><strong>Cluster and project quotas</strong><button className="btn small" onClick={() => { if (!editing) setDraft(structuredClone(data.data!.quotas)); else setDraft(null); setEditing(!editing); }}>{editing ? 'Cancel' : 'Change quotas'}</button></div>
+    <table className="t c-table"><thead><tr><th>Scope</th><th>Use</th><th>Maximum records</th><th>Maximum memory</th></tr></thead><tbody>
+      <QuotaRow name="This engine" usage={u.engine} quota={q.engine} edit={editing} change={v => update({ ...q, engine: v })} />
+      {apps.map(p => <QuotaRow key={p.id} name={p.name} usage={u.projects[p.id] || { rows: 0, bytes: 0, tables: 0 }} quota={q.projects[p.id] || { maxRows: 250000, maxMb: 512 }} edit={editing} change={v => update({ ...q, projects: { ...q.projects, [p.id]: v } })} />)}
+    </tbody></table>{editing && <button className="btn primary small" onClick={() => void save()}>Save quotas</button>}
+  </section>;
+}
+
+function QuotaRow({ name, usage, quota, edit, change }: { name: string; usage: Usage; quota: Quota; edit: boolean; change(q: Quota): void }) {
+  return <tr><td>{name}</td><td>{usage.rows.toLocaleString()} records, {kb(usage.bytes)} in {usage.tables} tables</td><td>{edit ? <input className="inp" type="number" value={quota.maxRows} onChange={e => change({ ...quota, maxRows: Number(e.target.value) })} /> : quota.maxRows.toLocaleString()}</td><td>{edit ? <input className="inp" type="number" value={quota.maxMb} onChange={e => change({ ...quota, maxMb: Number(e.target.value) })} /> : `${quota.maxMb} MB`}</td></tr>;
 }

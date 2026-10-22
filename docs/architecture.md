@@ -45,6 +45,12 @@ A Sutra document is JSON: `nodes` (id, type, name, position, config, settings) a
 
 Draft → **publish** (immutable version N) → **deploy** (pick a version). The gateway, timers and the Run API serve only deployed versions. Test runs use the draft. A run stores the document it started with, so in-flight runs keep their version after a redeploy.
 
+A project has an immutable GUID independent of its display name. Renaming it keeps that identity and moves only its name-based files folder and deployment configuration, updating the configuration's project name at the same time.
+
+## Properties in every palette
+
+Project (`gv`) and Engine (`ev`) properties use one runtime resolver across all palettes and transition-line conditions. General settings such as folders, addresses, gateway paths and limits, schedules, queue/topic names and numeric limits resolve when an activity, route, timer or long-running listener is built. Mapped Input fields and connection conditions resolve against the same scope, as do recursively nested connection settings such as default headers. The transition editor provides the same property picker and missing-Project-property warning as activity fields, and a Condition data tree built from `input`, earlier `nodes`, Local `vars`, Project `gv`, Engine `ev`, `trigger` and `now`. SQL statement fields may use properties for administrator-controlled identifiers or clauses; values from callers and previous activities stay in bound `:name` parameters.
+
 ## Engine: how a run executes
 
 1. `startRun` inserts a run row and one **task** for the trigger step.
@@ -69,6 +75,8 @@ Results a step can return:
 
 **Crash recovery.** At startup, tasks left as running go back to pending. Because a step can therefore run twice, steps with side effects should be idempotent: pass an idempotency key such as `{{run.id}}` to the target API.
 
+**Queue/topic starters.** Kafka, RabbitMQ and ActiveMQ/AMQP subscriptions are owned only by the elected leader. Client acknowledgement waits for the full run to succeed; explicit acknowledgement waits for Confirm message. Before a protected delivery starts, `bus_messages` stores its Kafka topic/partition/offset or RabbitMQ/AMQP message id with a reserved run id. If a replacement leader receives the delivery, it waits for that durable run or acknowledges an already completed result instead of creating another run. Kafka always supplies its offset identity; external AMQP publishers must set a unique message id. The broker/outside-effect boundary is still at least once, so effects should accept an idempotency key.
+
 **Locks on PostgreSQL.** Each write transaction about a run takes an advisory lock for that run (`run:<id>`), or for a Sutra's queue when it has a Runs at once limit; other writes take one shared lock. Engines therefore save different runs at the same time. Engines claim tasks with `for update skip locked`.
 
 **In memory.** A Sutra tuned to run in memory goes to a second engine in the same process, whose runs and tasks live in a private in-memory SQLite database. The run row and its task rows are written to the database in one transaction when the run ends. Steps cost no database writes, but a run open when the process stops is lost, and steps that wait (approvals, Call Sutra with wait) are refused. Tests and debugging always run durable.
@@ -83,11 +91,21 @@ Outbound: step → resource (HTTP connection: TLS/mTLS/proxy; outbound security:
 
 Inbound: gateway → policy: HTTPS required → IP allow list → authentication (Basic, API key, JWT through jose, WS-Security UsernameToken with replay cache, mTLS through the TLS socket) → rate limit → CORS. Failures return 401/403/429; SOAP callers get a SOAP fault.
 
-## Scaling path
+## Reviewed vendor dependencies
 
-The single Sutra with SQLite suits development and small production loads. Most of the work is waiting on I/O, so one Sutra with 16–64 worker slots handles many concurrent calls. The engine touches storage only through `db.ts` and the task table, which is the seam for growing:
+`vendor/vendor-lock.json` is the supply-chain boundary for maintained local package forks. It records the reviewed npm version and tarball integrity, the patched local version and normalized tree hash, why every patch exists, consumers, focused tests, and whether the package is runtime or test-only. `npm run vendor:check` runs before every build without a network; CI, releases and the weekly freshness workflow add the official npm `latest` check. A newer upstream version blocks the connected gate until its API and behavior changes are reviewed, SutraFlow patches are reapplied, dependent code is aligned, and the focused and complete regression suites pass. `tools/build-release.mjs` reads the same policy so only shipped runtime entries enter an archive.
 
-1. Move to Postgres, and claim tasks with `SELECT … FOR UPDATE SKIP LOCKED` so several engine nodes can share one database.
-2. Run the gateway and the workers as separate deployments; replies then go through the database or a pub/sub channel instead of in-memory handles.
-3. Move large payloads to object storage and keep only references in task rows.
-4. Add per-connector concurrency limits and per-tenant quotas at the claim step.
+## Gateway TLS and ACME
+
+ACME is called only when the gateway uses **Let's Encrypt**. It automates issuance and renewal of a publicly trusted gateway certificate; self-signed and uploaded-certificate modes never call it.
+
+1. `web/admin/Server.tsx` saves the domains, email, staging choice and agreement, then calls `POST /api/server/tls/acme`.
+2. `server/src/api.ts` requires the Server permission, selects ACME mode and starts `requestAcme(reloadTls)`.
+3. `server/src/gateway/tls.ts` takes and renews the shared `acme-certificate` database lease, so only one engine orders at a time. It decrypts or creates the encrypted ACME account key, creates a fresh private key and CSR, and asks the Let's Encrypt staging or production directory for an HTTP-01 order. Its maintained client uses native Node cryptography and `@peculiar/x509`; it does not install or call `node-forge`.
+4. While validation is active, `tls.ts` keeps each token and key authorization in the shared `acme_challenges` table with its engine and expiry. Every `server/src/gateway/gateway.ts` serves it at `/.well-known/acme-challenge/<token>` before normal route dispatch. Public port 80 may reach any healthy gateway, but must reach that listener unchanged.
+5. On success, `tls.ts` stores the certificate chain and matching key through encrypted settings, reloads its HTTPS context and raises the cluster generation. Every other engine reloads the certificate on its next heartbeat without deliberately dropping existing connections.
+6. `server/src/index.ts` starts the renewal check. It runs shortly after boot and every 12 hours; a missing certificate or fewer than 30 days remaining starts the same path. Failure leaves the existing certificate installed for the next retry.
+
+Wildcard names are not supported because they require DNS-01. Challenge key authorizations are public proof values rather than private keys and expire after 15 minutes. A failed engine's issuance lease expires after 10 minutes; its in-flight ACME order is not transferred, so a later request or renewal check starts a new one.
+
+Planned scale-out changes and their implementation order are maintained in [the backlog](backlog.md), rather than in this description of the current architecture.

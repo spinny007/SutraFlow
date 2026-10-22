@@ -3,7 +3,7 @@
  * SutraFlow
  * Copyright (c) 2026-27 Surya Partap Singh
  * Developer: Surya Partap Singh | Website: MixAgile.com
- * File version: 1.9.0
+ * File version: 2.0.0
  * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
  * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
  * SPDX-License-Identifier: AGPL-3.0-only
@@ -24,11 +24,12 @@
  * Every minute a sample goes to samples.jsonl and every event to events.jsonl (so a report can be made
  * from them even if the tool is stopped), and at the end report.md and report.html are written.
  *
- *   node tools/soak.mjs --pg postgres://postgres@127.0.0.1:5432/postgres --hours 8
+ *   SUTRA_DB_PASSWORD=secret node tools/soak.mjs --pg postgres://postgres@db.example:5432/postgres --hours 8
  *   node tools/soak.mjs --report-only docs/benchmarks/soak-1.9.0
  *
  * Options
  *   --hours 8 | --minutes 15    how long the load runs (then up to 10 minutes for open runs to end)
+ *   SUTRA_DB_PASSWORD           PostgreSQL password kept out of the command line (PGPASSWORD also works)
  *   --engines 3                 processes: a studio and engines (all serve the gateway)
  *   --out folder                where samples, events and the report go (default docs/benchmarks/soak-<version>)
  *   --ollama http://127.0.0.1:11434 --model phi4-mini    the AI model (local Ollama)
@@ -101,6 +102,7 @@ if (flag('google-sign-in')) {
 
 const PG = opt('pg');
 if (!PG) { console.error('Give --pg <postgres admin url> (or --report-only <folder>)'); process.exit(2); }
+const PG_PASSWORD = process.env.SUTRA_DB_PASSWORD || process.env.PGPASSWORD || '';
 const MINUTES = opt('minutes') ? Number(opt('minutes')) : Number(opt('hours', 8)) * 60;
 const ENGINES = Math.max(2, Number(opt('engines', 3)));
 const SCALE = Number(opt('scale', 1));
@@ -148,7 +150,8 @@ async function retry(what, fn, tries = 10, waitMs = 3000) {
   }
 }
 const { default: pg } = await import('pg');
-const adminDb = await retry('connect to PostgreSQL', async () => { const c = new pg.Client({ connectionString: PG }); c.on('error', () => {}); await c.connect(); return c; });
+const pgOptions = connectionString => ({ connectionString, ...(PG_PASSWORD ? { password: PG_PASSWORD } : {}) });
+const adminDb = await retry('connect to PostgreSQL', async () => { const c = new pg.Client(pgOptions(PG)); c.on('error', () => {}); await c.connect(); return c; });
 const DBNAME = `sutra_soak_${Date.now()}`;
 await adminDb.query(`CREATE DATABASE ${DBNAME}`);
 const dbUrl = (() => { const u = new URL(PG); u.pathname = `/${DBNAME}`; return u; })();
@@ -174,7 +177,7 @@ const engineDbUrl = (() => { const u = new URL(dbUrl); u.hostname = '127.0.0.1';
 let toolDb = null;
 async function dbq(sql, args = []) {
   return retry('soak database query', async () => {
-    if (!toolDb) { toolDb = new pg.Client({ connectionString: dbUrl.toString() }); toolDb.on('error', () => { toolDb = null; }); await toolDb.connect(); }
+    if (!toolDb) { toolDb = new pg.Client(pgOptions(dbUrl.toString())); toolDb.on('error', () => { toolDb = null; }); await toolDb.connect(); }
     try { return (await toolDb.query(sql, args)).rows; } catch (e) { if (/terminat|connection|ECONN/i.test(e.message)) { try { await toolDb.end(); } catch { /* gone */ } toolDb = null; } throw e; }
   });
 }
@@ -190,6 +193,7 @@ function startEngine(i) {
   const env = {
     ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('SUTRA_'))),
     SUTRA_DATA_DIR: e.dir, SUTRA_MASTER_KEY: KEY, SUTRA_ADMIN_TOKEN: TOKEN, SUTRA_MODE: i === 0 ? 'studio' : 'engine', SUTRA_DB: engineDbUrl,
+    ...(PG_PASSWORD ? { SUTRA_DB_PASSWORD: PG_PASSWORD } : {}),
     SUTRA_ADMIN_PORT: String(e.port), SUTRA_GATEWAY_HTTP_PORT: String(e.http), SUTRA_GATEWAY_HTTPS_PORT: String(e.http + 1),
     SUTRA_ENGINE_ID: `soak-${i}`, SUTRA_ENVIRONMENT: 'test', SUTRA_RUN_RETENTION_DAYS: '0', SUTRA_REPLY_TIMEOUT_MS: '180000',
   };

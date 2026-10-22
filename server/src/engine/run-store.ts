@@ -64,4 +64,50 @@ export class RunStore {
     const result = await tx.run(`update tasks set ${set} where ${where}`, ...args, ...fenceArgs);
     if (!result.changes) throw new StaleStep();
   }
+
+  /** Atomically derives and records a run's public status from its durable task rows. */
+  async settle(runId: string, finishedAt: string): Promise<{ run: LoadedRun; status: string; finished: boolean } | null> {
+    return this.db.transaction(`run:${runId}`, async (tx, row) => {
+      const run = this.loaded(row);
+      if (!run || ['done', 'failed', 'cancelled'].includes(run.row.status)) return null;
+      const counts = Object.fromEntries((await tx.all<{ status: string; n: number }>('select status, count(*) n from tasks where run_id = ? group by status', runId)).map(r => [r.status, Number(r.n)]));
+      let status: string;
+      if (counts.pending || counts.running) status = 'running';
+      else if (counts.paused) status = 'paused';
+      else if (counts.waiting) status = 'waiting';
+      else status = run.state.failed ? 'failed' : 'done';
+      if (status === run.row.status) return null;
+      const finished = status === 'done' || status === 'failed';
+      const changed = await tx.commitWith<{ id: string }>(`update runs set status = ?, finished_at = ? where id = ? and status not in ('done', 'failed', 'cancelled') returning id`, status, finished ? finishedAt : null, runId);
+      return changed ? { run, status, finished } : null;
+    }, { sql: 'select * from runs where id = ?', args: [runId] });
+  }
+
+  /** Copies an ended in-memory run to durable storage, then removes its private in-memory rows. */
+  async persistTo(runId: string, target: AsyncStore): Promise<any | undefined> {
+    const run = await this.db.get<any>('select * from runs where id = ?', runId);
+    if (!run) return undefined;
+    const tasks = (await this.db.all<any>('select * from tasks where run_id = ? order by id', runId)).map(({ id: _id, ...task }) => task);
+    const outputs = await this.db.all<any>('select * from run_outputs where run_id = ?', runId);
+    const insert = async (tx: TxQ, table: string, rows: any[]) => {
+      if (!rows.length) return;
+      const cols = Object.keys(rows[0]);
+      const per = Math.max(1, Math.floor(30000 / cols.length));
+      for (let i = 0; i < rows.length; i += per) {
+        const part = rows.slice(i, i + per);
+        await tx.run(`insert into ${table}(${cols.join(', ')}) values ${part.map(() => `(${cols.map(() => '?').join(', ')})`).join(', ')}`, ...part.flatMap(item => cols.map(col => item[col])));
+      }
+    };
+    await target.transaction(`run:${runId}`, async tx => {
+      await insert(tx, 'runs', [run]);
+      await insert(tx, 'tasks', tasks);
+      await insert(tx, 'run_outputs', outputs);
+    });
+    await this.db.transaction(undefined, async tx => {
+      await tx.run('delete from tasks where run_id = ?', runId);
+      await tx.run('delete from run_outputs where run_id = ?', runId);
+      await tx.run('delete from runs where id = ?', runId);
+    });
+    return run;
+  }
 }

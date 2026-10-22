@@ -190,7 +190,8 @@ ${general.length || input.length ? `<p class="h">Settings reference</p>${setting
 }
 
 function connectionEntry(k: (typeof RESOURCE_KINDS)[number]) {
-  return `<h4 id="res-${k.kind}">${esc(k.name)} connection</h4><p class="meta">Project &rarr; Resources &middot; kind <code>${esc(k.kind)}</code></p><p>${esc(k.desc)}</p>${settingsTable('Settings', k.fields, k.fields)}`;
+  const heading = /\bconnection\b/i.test(k.name) ? k.name : `${k.name} connection`;
+  return `<h4 id="res-${k.kind}">${esc(heading)}</h4><p class="meta">Project &rarr; Resources &middot; kind <code>${esc(k.kind)}</code></p><p>${esc(k.desc)}</p>${settingsTable('Settings', k.fields, k.fields)}`;
 }
 
 function functionsChapter() {

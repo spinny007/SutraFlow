@@ -24,9 +24,11 @@ import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose';
 import { q, now, getSetting, setSetting, tx } from './db.js';
 import { getSecret } from './secrets.js';
 import { createAccount, getUser, setAccountGrants, type Grant } from './access.js';
+import { buildAuthnRequest, verifySamlResponse, SamlError } from './saml-sso.js';
 
 export interface SsoSettings {
   enabled: boolean;
+  protocol: 'oidc' | 'saml';
   /** Shown on the button: "Sign in with <name>". */
   name: string;
   /** The provider's issuer URL; its /.well-known/openid-configuration is read. */
@@ -43,11 +45,17 @@ export interface SsoSettings {
   groupRoles: { group: string; role: string; project?: string }[];
   createAccounts: boolean;
   linkExisting: boolean;
+  /** SAML 2.0 identity-provider sign-in URL, SP entity id, expected IdP issuer and signing certificate. */
+  samlEntryPoint: string;
+  samlEntityId: string;
+  samlIdpIssuer: string;
+  samlIdpCertPem: string;
 }
 
 export const SSO_DEFAULTS: SsoSettings = {
-  enabled: false, name: 'single sign-on', issuer: '', clientId: '', clientSecret: '', scopes: 'openid profile email',
+  enabled: false, protocol: 'oidc', name: 'single sign-on', issuer: '', clientId: '', clientSecret: '', scopes: 'openid profile email',
   usernameClaim: 'preferred_username', groupsClaim: 'groups', groupRoles: [], createAccounts: false, linkExisting: false,
+  samlEntryPoint: '', samlEntityId: '', samlIdpIssuer: '', samlIdpCertPem: '',
 };
 
 export const ssoSettings = (): SsoSettings => ({ ...SSO_DEFAULTS, ...getSetting<Partial<SsoSettings>>('sso', {}) });
@@ -58,9 +66,15 @@ export function saveSsoSettings(input: Partial<SsoSettings>) {
   s.groupRoles = (Array.isArray(s.groupRoles) ? s.groupRoles : []).filter(g => g && String(g.group || '').trim() && String(g.role || '').trim())
     .map(g => ({ group: String(g.group).trim(), role: String(g.role).trim(), project: String(g.project || '') }));
   if (s.enabled) {
-    if (!/^https:\/\/|^http:\/\/(127\.0\.0\.1|localhost)(:|\/|$)/.test(s.issuer)) throw new Error('Issuer: an https:// address (http only for 127.0.0.1 or localhost)');
-    if (!s.clientId) throw new Error('Client id is required');
-    if (s.clientSecret && getSecret(s.clientSecret) === undefined) throw new Error(`Secret "${s.clientSecret}" does not exist`);
+    if (s.protocol === 'saml') {
+      if (!/^https:\/\/|^http:\/\/(127\.0\.0\.1|localhost)(:|\/|$)/.test(s.samlEntryPoint)) throw new Error('SAML sign-in URL: an https:// address (http only for 127.0.0.1 or localhost)');
+      if (!s.samlEntityId) throw new Error('SAML service-provider entity id is required');
+      if (!s.samlIdpCertPem.includes('BEGIN CERTIFICATE')) throw new Error('SAML identity-provider signing certificate is required');
+    } else {
+      if (!/^https:\/\/|^http:\/\/(127\.0\.0\.1|localhost)(:|\/|$)/.test(s.issuer)) throw new Error('Issuer: an https:// address (http only for 127.0.0.1 or localhost)');
+      if (!s.clientId) throw new Error('Client id is required');
+      if (s.clientSecret && getSecret(s.clientSecret) === undefined) throw new Error(`Secret "${s.clientSecret}" does not exist`);
+    }
     const roles = new Set(q.all<any>('select id from roles').map(r => r.id));
     for (const g of s.groupRoles) if (!roles.has(g.role)) throw new Error(`Unknown role: ${g.role}`);
   }
@@ -113,6 +127,17 @@ export const safeReturn = (r: unknown) => (typeof r === 'string' && /^\/(?![/\\]
 export async function startSignIn(redirectUri: string, returnTo: unknown) {
   const s = ssoSettings();
   if (!s.enabled) throw new Error('Single sign-on is not set up');
+  if (s.protocol === 'saml') {
+    const state = crypto.randomBytes(16).toString('base64url');
+    const requestId = `_sutra_${crypto.randomUUID()}`;
+    q.run('delete from sso_states where expires_at <= ?', Date.now());
+    q.run('insert into sso_states(state, protocol, request_id, redirect_uri, return_to, expires_at) values(?, ?, ?, ?, ?, ?)',
+      state, 'saml', requestId, redirectUri, safeReturn(returnTo), Date.now() + STATE_MINUTES * 60e3);
+    const u = new URL(s.samlEntryPoint);
+    u.searchParams.set('SAMLRequest', buildAuthnRequest(requestId, s.samlEntityId, redirectUri));
+    u.searchParams.set('RelayState', state);
+    return { url: u.toString(), cookie: '' };
+  }
   const p = await provider(s.issuer);
   const state = crypto.randomBytes(16).toString('base64url');
   const nonce = crypto.randomBytes(16).toString('base64url');
@@ -120,16 +145,42 @@ export async function startSignIn(redirectUri: string, returnTo: unknown) {
   const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
   const u = new URL(p.d.authorization_endpoint);
   for (const [k, v] of Object.entries({ response_type: 'code', client_id: s.clientId, redirect_uri: redirectUri, scope: s.scopes || 'openid', state, nonce, code_challenge: challenge, code_challenge_method: 'S256' })) u.searchParams.set(k, v);
-  return { url: u.toString(), cookie: sign({ state, nonce, verifier, redirectUri, ret: safeReturn(returnTo), exp: Date.now() + STATE_MINUTES * 60e3 }) };
+  return { url: u.toString(), cookie: sign({ protocol: 'oidc', state, nonce, verifier, redirectUri, ret: safeReturn(returnTo), exp: Date.now() + STATE_MINUTES * 60e3 }) };
 }
 
 export class SsoError extends Error {}
+
+function takeSamlState(state: string) {
+  if (!state) return undefined;
+  return tx(() => {
+    const row = q.get<any>('select protocol, request_id, redirect_uri, return_to, expires_at from sso_states where state = ?', state);
+    q.run('delete from sso_states where state = ?', state);
+    return row && row.protocol === 'saml' && Number(row.expires_at) > Date.now() ? row : undefined;
+  });
+}
 
 /** The provider sent the browser back: the code for tokens, the ID token checked, the account found or made. */
 export async function finishSignIn(query: Record<string, any>, cookie: string | undefined): Promise<{ username: string; ret: string; created: boolean }> {
   const s = ssoSettings();
   if (!s.enabled) throw new SsoError('Single sign-on is not set up');
   if (query.error) throw new SsoError(`The identity provider refused the sign-in: ${String(query.error_description || query.error)}`);
+  if (query.SAMLResponse !== undefined || query.RelayState !== undefined) {
+    if (s.protocol !== 'saml') throw new SsoError('The single sign-on method changed while this sign-in was open. Try again.');
+    if (!query.SAMLResponse) throw new SsoError('The identity provider sent no SAML response');
+    const st = takeSamlState(String(query.RelayState || ''));
+    if (!st) throw new SsoError('The SAML response does not match a current sign-in, or it was already used. Try again.');
+    let identity;
+    try {
+      identity = verifySamlResponse(Buffer.from(String(query.SAMLResponse), 'base64').toString('utf8'), {
+        trustedCertPem: s.samlIdpCertPem, idpIssuer: s.samlIdpIssuer, audience: s.samlEntityId,
+        recipient: st.redirect_uri, requestId: st.request_id, skewSec: 60,
+      });
+    } catch (e: any) { throw new SsoError(e instanceof SamlError ? e.message : `The SAML response is not valid: ${e.message}`); }
+    const usernameValues = s.usernameClaim === 'NameID' ? [identity.subject] : identity.attributes[s.usernameClaim];
+    const groups = identity.attributes[s.groupsClaim] || [];
+    const claims: Record<string, any> = { sub: identity.subject, name: identity.name, email: identity.email, [s.usernameClaim]: usernameValues?.[0] || identity.subject, [s.groupsClaim]: groups };
+    return { ...signInPerson(s, claims, `saml:${identity.issuer || s.samlIdpIssuer}`), ret: st.return_to };
+  }
   const st = unsign(cookie);
   if (!st) throw new SsoError('The sign-in took too long or was started in another browser. Try again.');
   if (!query.state || query.state !== st.state) throw new SsoError('The sign-in does not match the one this browser started. Try again.');
@@ -151,8 +202,8 @@ export async function finishSignIn(query: Record<string, any>, cookie: string | 
 }
 
 /** The account of a person the provider vouched for: found by subject, linked, or created. */
-export function signInPerson(s: SsoSettings, claims: Record<string, any>): { username: string; created: boolean } {
-  const subject = `${s.issuer}|${String(claims.sub || '')}`;
+export function signInPerson(s: SsoSettings, claims: Record<string, any>, providerIssuer = s.issuer): { username: string; created: boolean } {
+  const subject = `${providerIssuer}|${String(claims.sub || '')}`;
   if (!claims.sub) throw new SsoError('The ID token has no subject');
   const raw = String(claims[s.usernameClaim] ?? claims.preferred_username ?? claims.email ?? claims.sub);
   const wanted = raw.replace(/[^A-Za-z0-9._@-]/g, '-').slice(0, 64);

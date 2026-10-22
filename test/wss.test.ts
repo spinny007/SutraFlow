@@ -142,6 +142,23 @@ test('XML encryption: requests encrypted for the service are decrypted; signed t
   assert.match(round.xml, /<o:OrderId>R-1<\/o:OrderId>/);
 });
 
+test('SOAP responses encrypt for the verified caller certificate or a configured certificate', async () => {
+  service('/soap/response-caller', { auth: 'wssX509', trustedCertsPem: ca.cert, wssTimestamp: 'required', responseEncryption: 'caller certificate', responseEncryptAlgorithm: 'aes256-gcm' });
+  const automatic = await send('/soap/response-caller', applyWss(envelope('RC-1'), { x509: x509(client), timestampTtlSec: 300 }));
+  assert.equal(automatic.status, 200, automatic.text);
+  assert.ok(automatic.text.includes('EncryptedData') && !automatic.text.includes('RC-1'), 'the response is unreadable on the wire');
+  const opened = decryptMessage(automatic.text, client.private);
+  assert.equal(opened.bodyEncrypted, true);
+  assert.match(opened.xml, /<OrderId>RC-1<\/OrderId><Caller>erp-client<\/Caller>/);
+
+  setSecret('WS_RESPONSE_PW', 'response-password-1');
+  service('/soap/response-configured', { auth: 'wssUsernameToken', users: [{ k: 'erp', v: 'WS_RESPONSE_PW' }], responseEncryption: 'configured certificate', responseEncryptCertPem: client.cert, responseEncryptAlgorithm: 'aes256-cbc' });
+  const configured = await send('/soap/response-configured', applyWss(envelope('RC-2'), { username: { user: 'erp', password: 'response-password-1', type: 'PasswordDigest' } }));
+  assert.equal(configured.status, 200, configured.text);
+  assert.ok(configured.text.includes('EncryptedData') && !configured.text.includes('RC-2'));
+  assert.match(decryptMessage(configured.text, client.private).xml, /<OrderId>RC-2<\/OrderId><Caller>erp<\/Caller>/);
+});
+
 test('an Invoke SOAP service step signs and encrypts with its outbound security profile', async () => {
   setSecret('CLIENT_KEY', client.private);
   const auth = saveResource({ kind: 'outboundAuth', name: 'Partner signing', config: { type: 'wssX509', certPem: client.cert, keySecret: 'CLIENT_KEY', timestamp: 300, encryptCertPem: server.cert, encryptAlgorithm: 'aes256-gcm' } });

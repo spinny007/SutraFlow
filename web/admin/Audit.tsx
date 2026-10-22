@@ -83,7 +83,7 @@ const ACTIONS: Record<string, string> = {
   'POST /api/access/users/:name/tokens': 'Created an API token', 'DELETE /api/access/users/:name/tokens/:id': 'Revoked an API token',
   'POST /api/access/roles': 'Added a role', 'PUT /api/access/roles/:id': 'Changed a role', 'DELETE /api/access/roles/:id': 'Deleted a role',
   'POST /api/auth/password': 'Changed own password', 'PUT /api/server/gateway': 'Changed gateway ports', 'PUT /api/server/tls': 'Changed certificates',
-  'PUT /api/engine-variables': 'Changed Sengine variables', 'PUT /api/scripts/policy': 'Changed the scripts policy', 'PUT /api/releases/policy': 'Changed the release policy',
+  'PUT /api/engine-variables': 'Changed Engine properties', 'PUT /api/scripts/policy': 'Changed the scripts policy', 'PUT /api/releases/policy': 'Changed the release policy',
   'POST /api/gateway/apps': 'Added a gateway app', 'PUT /api/gateway/apps/:id': 'Changed a gateway app', 'DELETE /api/gateway/apps/:id': 'Deleted a gateway app',
   'POST /api/gateway/apps/:id/keys': 'Created an app key', 'DELETE /api/gateway/apps/:id/keys/:keyId': 'Revoked an app key',
   'POST /api/gateway/plans': 'Added a plan', 'PUT /api/gateway/plans/:id': 'Changed a plan', 'DELETE /api/gateway/plans/:id': 'Deleted a plan',

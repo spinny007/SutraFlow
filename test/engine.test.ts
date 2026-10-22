@@ -57,6 +57,17 @@ test('for each runs per item and then done', async () => {
   assert.equal(r.state.outputs.Done, 3);
 });
 
+test('Set Local Variable and Get Local Variables return the latest run-local values', async () => {
+  const s = node('start', 'Start', { payload: '{"customer":"C-100"}' });
+  const set = node('setVar', 'Set local', { vars: [{ k: 'customer', v: '{{input.customer}}' }, { k: 'attempts', v: '2' }] });
+  const all = node('getVar', 'All local', { what: 'all variables' });
+  const one = node('getVar', 'One local', { what: 'one variable', name: 'customer' });
+  const r = await run([s, set, all, one], [edge(s, set), edge(set, all), edge(all, one)]);
+  assert.equal(r.status, 'done', r.error);
+  assert.deepEqual(r.state.outputs['All local'], { variables: { customer: 'C-100', attempts: '2' }, count: 2 });
+  assert.deepEqual(r.state.outputs['One local'], { name: 'customer', value: 'C-100', found: true });
+});
+
 test('retries with backoff, then error branch handles the failure', async () => {
   const s = node('start', 'Start', { payload: '{}' });
   const t = node('throw', 'Boom', { message: 'nope {{run.source}}' }, { retries: 2, retryDelayMs: 20 });

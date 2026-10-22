@@ -14,6 +14,7 @@ import { requireResource, effectiveResource, kvToObject, type Resource } from '.
 import { requireSecret } from '../secrets.js';
 import { registerListener, type ListenerContext } from '../listeners.js';
 import { F, when } from '../palettes/common.js';
+import { q } from '../db.js';
 
 const require = createRequire(import.meta.url);
 
@@ -206,8 +207,8 @@ export const busActivities: Activity[] = [
     },
   },
   {
-    type: 'busSubscribe', palette: 'bus', name: 'Message subscriber', glyph: '⇩', trigger: true, ports: ['out'],
-    desc: 'Starts the Sutra for each message on a queue or topic while deployed. Gives the body, the JMS headers and the custom properties. Acknowledge automatically, after the Sutra succeeds, or with a Confirm message activity.',
+    type: 'busSubscribe', palette: 'bus', name: 'Queue / topic trigger', glyph: '⇩', trigger: true, ports: ['out'],
+    desc: 'Subscribes to Kafka, RabbitMQ or ActiveMQ and starts the Sutra for each queue or topic message while deployed. Gives the body, JMS headers and custom properties. Acknowledge automatically, after the Sutra succeeds, or with a Confirm message activity.',
     fields: [
       ...brokerFields,
       F('destination', 'Queue / topic name', 'text', '{{gv.ORDERS_QUEUE}}', { help: 'May use project variables.' }),
@@ -218,6 +219,7 @@ export const busActivities: Activity[] = [
       F('declare', 'Create the queue if missing (durable)', 'bool', false, when('broker', 'rabbitmq')),
       F('messageType', 'Message type', 'select', 'JSON', { options: ['JSON', 'text', 'map', 'bytes'] }),
       F('ackMode', 'Acknowledge', 'select', 'client', { options: ['auto', 'client', 'explicit'], help: 'auto: on receipt. client: when the Sutra succeeds. explicit: with a Confirm message activity in the Sutra.' }),
+      F('deduplicate', 'Avoid duplicate runs', 'select', 'on', { options: ['on', 'off'], help: 'On uses the Kafka topic/partition/offset, or the AMQP/RabbitMQ message id, to remember completed messages across leader changes. External AMQP publishers should set a unique message id.' }),
       F('onFailure', 'When the Sutra fails', 'select', 'requeue', { options: ['requeue', 'reject (dead-letter)'], ...when('ackMode', 'client', 'explicit') }),
       F('maxRedeliveries', 'Reject after this many deliveries (0 = never)', 'number', 0, when('ackMode', 'client', 'explicit')),
       F('concurrency', 'Messages in parallel', 'number', 1, { help: 'RabbitMQ prefetch / AMQP credit / Kafka partitions at once.' }),
@@ -232,7 +234,7 @@ export const busActivities: Activity[] = [
   },
   {
     type: 'busConfirm', palette: 'bus', name: 'Confirm message', glyph: '✓', ports: ['out'],
-    desc: 'Acknowledges the message that started this run (Message subscriber with Acknowledge: explicit), or rejects / requeues it.',
+    desc: 'Acknowledges the message that started this run (Queue / topic trigger with Acknowledge: explicit), or rejects / requeues it.',
     fields: [F('action', 'Action', 'select', 'confirm', { options: ['confirm', 'requeue', 'reject (dead-letter)'] })],
     outputHint: { confirmed: true, action: 'confirm' },
     passThrough: true,
@@ -241,7 +243,7 @@ export const busActivities: Activity[] = [
       const a = c.raw('action') || 'confirm';
       if (!p) {
         if (c.scope.run?.source === 'test' || c.scope.run?.source === 'debug') { c.log('info', 'Test run: no message to confirm'); return { out: c.input }; }
-        throw new Error('This run was not started by a Message subscriber with Acknowledge: explicit, or the message was already confirmed');
+        throw new Error('This run was not started by a Queue / topic trigger with Acknowledge: explicit, or the message was already confirmed');
       }
       if (a === 'confirm') await p.confirm(); else if (a === 'requeue') await p.requeue(); else await p.reject();
       p.done = true;
@@ -264,17 +266,47 @@ function decodeBody(raw: unknown, type: string) {
 }
 
 /** Runs the flow for one message and settles it according to the acknowledge mode. */
-function handle(c: ListenerContext, cfg: Record<string, any>, input: Record<string, any>, settle: { ack(): any; requeue(): any; reject(): any }, deliveryCount: number) {
+async function priorDelivery(c: ListenerContext, key: string, settle: { ack(): any }): Promise<boolean> {
+  for (;;) {
+    const old = q.get<{ run_id: string; status: string }>('select run_id, status from bus_messages where flow_id = ? and node_id = ? and message_key = ?', c.flowId, c.node.id, key);
+    if (!old) return false;
+    if (old.status === 'done') { await settle.ack(); return true; }
+    const run = q.get<{ status: string }>('select status from runs where id = ?', old.run_id);
+    if (!run || ['failed', 'cancelled'].includes(run.status)) {
+      q.run('delete from bus_messages where flow_id = ? and node_id = ? and message_key = ?', c.flowId, c.node.id, key);
+      return false;
+    }
+    if (run.status === 'done') {
+      q.run(`update bus_messages set status = 'done', updated_at = ? where flow_id = ? and node_id = ? and message_key = ?`, Date.now(), c.flowId, c.node.id, key);
+      await settle.ack();
+      return true;
+    }
+    // A recovered run may still be finishing on another engine. Keep this broker delivery locked and
+    // consult the durable run row instead of starting the same message a second time.
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+}
+
+function handle(c: ListenerContext, cfg: Record<string, any>, input: Record<string, any>, settle: { ack(): any; requeue(): any; reject(): any }, deliveryCount: number, identity = '') {
   const mode = cfg.ackMode === 'auto' || cfg.ackMode === 'on receipt' ? 'auto' : cfg.ackMode === 'explicit' ? 'explicit' : 'client';
   const max = Number(cfg.maxRedeliveries) || 0;
   const fail = () => (cfg.onFailure === 'reject (dead-letter)' || (max && deliveryCount >= max) ? settle.reject() : settle.requeue());
+  const key = cfg.deduplicate === 'off' ? '' : identity;
   if (mode === 'auto') { c.fire(input).catch(e => c.status('error', e.message)); return Promise.resolve(); }
-  return new Promise<void>(resolve => {
+  return new Promise<void>(resolve => { void (async () => {
+    if (key && await priorDelivery(c, key, settle)) { resolve(); return; }
+    const reservedRun = crypto.randomUUID();
+    if (key) {
+      const claimed = q.run('insert into bus_messages(flow_id, node_id, message_key, run_id, status, updated_at) values(?, ?, ?, ?, ?, ?) on conflict(flow_id, node_id, message_key) do nothing', c.flowId, c.node.id, key, reservedRun, 'running', Date.now());
+      if (!claimed.changes && await priorDelivery(c, key, settle)) { resolve(); return; }
+    }
     // The entry exists before the run starts: a run can end before its start has returned the id.
     const entry: PendingAck | null = mode === 'explicit' ? { confirm: settle.ack, requeue: settle.requeue, reject: settle.reject, done: false } : null;
     let runId = '';
     c.fire(input, status => {
       Promise.resolve().then(async () => {
+        if (key && (status === 'done' || entry?.done)) q.run(`update bus_messages set status = 'done', updated_at = ? where flow_id = ? and node_id = ? and message_key = ?`, Date.now(), c.flowId, c.node.id, key);
+        else if (key) q.run('delete from bus_messages where flow_id = ? and node_id = ? and message_key = ?', c.flowId, c.node.id, key);
         if (mode === 'explicit') {
           if (entry && !entry.done) {
             if (runId) pending.delete(runId);
@@ -284,14 +316,21 @@ function handle(c: ListenerContext, cfg: Record<string, any>, input: Record<stri
         } else if (status === 'done') await settle.ack();
         else await fail();
       }).catch(e => c.status('error', `Acknowledgement failed: ${e.message}`)).finally(resolve);
-    }).then(id => {
+    }, reservedRun).then(id => {
+      if (!id) {
+        if (key) q.run('delete from bus_messages where flow_id = ? and node_id = ? and message_key = ?', c.flowId, c.node.id, key);
+        c.status('error', 'The Sutra did not start; the message will be delivered again');
+        Promise.resolve(fail()).catch(e => c.status('error', `Could not release the message: ${e.message}`)).finally(resolve);
+        return;
+      }
       runId = id;
       if (entry && !entry.done) pending.set(id, entry);
     }, e => {
       c.status('error', `The Sutra did not start: ${e.message}`);
+      if (key) q.run('delete from bus_messages where flow_id = ? and node_id = ? and message_key = ?', c.flowId, c.node.id, key);
       Promise.resolve(fail()).catch(() => {}).finally(resolve);
     });
-  });
+  })().catch(e => { c.status('error', `Message delivery guard failed: ${e.message}`); Promise.resolve(fail()).catch(() => {}).finally(resolve); }); });
 }
 
 registerListener('busSubscribe', async c => {
@@ -319,7 +358,7 @@ registerListener('busSubscribe', async c => {
           headers: { messageId, correlationId, replyTo, type: jt, contentType, timestamp: new Date(Number(message.timestamp)).toISOString(), redelivered: false, deliveryCount: 1 } };
         let requeued = false;
         const commit = () => consumer.commitOffsets([{ topic, partition, offset: (BigInt(message.offset) + 1n).toString() }]);
-        await handle(c, cfg, input, { ack: commit, reject: commit, requeue: () => { requeued = true; } }, 1);
+        await handle(c, cfg, input, { ack: commit, reject: commit, requeue: () => { requeued = true; } }, 1, `kafka:${topic}:${partition}:${message.offset}`);
         if (requeued) { const resume = pause(); setTimeout(resume, 5000); throw new Error('Sutra failed; the message will be processed again'); }
       },
     });
@@ -345,7 +384,7 @@ registerListener('busSubscribe', async c => {
       const deaths = Array.isArray(p.headers?.['x-death']) ? p.headers['x-death'].reduce((a: number, d: any) => a + (Number(d.count) || 0), 0) : 0;
       const input = { body: decodeBody(msg.content, type), properties: Object.fromEntries(Object.entries(p.headers || {}).filter(([k]) => !k.startsWith('x-'))), destination: dest, routingKey: msg.fields.routingKey,
         headers: { messageId: p.messageId, correlationId: p.correlationId, replyTo: p.replyTo, type: p.type, priority: p.priority, deliveryMode: p.deliveryMode === 2 ? 'persistent' : 'non-persistent', timestamp: p.timestamp ? new Date(p.timestamp * 1000).toISOString() : undefined, expiration: p.expiration, contentType: p.contentType, redelivered: msg.fields.redelivered, deliveryCount: deaths + 1 } };
-      await handle(c, cfg, input, { ack: () => ch.ack(msg), requeue: () => ch.nack(msg, false, true), reject: () => ch.nack(msg, false, false) }, deaths + 1);
+      await handle(c, cfg, input, { ack: () => ch.ack(msg), requeue: () => ch.nack(msg, false, true), reject: () => ch.nack(msg, false, false) }, deaths + 1, p.messageId ? `rabbitmq:${dest}:${p.messageId}` : '');
     }, { noAck: auto });
     c.status('ok', `Consuming ${cfg.destinationType === 'topic' ? 'topic' : 'queue'} ${dest}`);
     return async () => { await ch.close().catch(() => {}); await conn.close().catch(() => {}); };
@@ -366,7 +405,7 @@ registerListener('busSubscribe', async c => {
       ack: () => ctx.delivery.accept(),
       requeue: () => ctx.delivery.release({ delivery_failed: true }),
       reject: () => ctx.delivery.reject({ condition: 'sutra:flow-failed', description: 'Sutra failed' }),
-    }, count);
+    }, count, m.message_id ? `amqp1:${source.address}:${m.message_id}` : '');
   });
   conn.on('connection_open', () => c.status('ok', `Receiving from ${source.address}${cfg.selector ? ` where ${cfg.selector}` : ''}`));
   conn.on('disconnected', (ctx: any) => c.status('error', `Disconnected: ${ctx?.error?.message || 'broker not reachable'}; reconnecting`));

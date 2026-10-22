@@ -151,17 +151,14 @@ test('Test connection: HTTP, database, mail failure, with project variables reso
   } finally { await cap.close(); }
 });
 
-test('Sengine variables are read-only for Sutras unless the administrator allows changes', () => {
+test('Engine properties are read-only for Sutras', () => {
   projects.saveEngineVariables([{ name: 'REGION', value: 'south' }]);
   const ctx = { process: { project: pid } };
-  assert.equal(evalExpression("get-sengine-variable('REGION')", ctx), 'south');
-  assert.equal(evalExpression("get-engine-variable('REGION')", ctx), 'south', 'the earlier name still works');
-  assert.throws(() => evalExpression("set-sengine-variable('REGION', 'north')", ctx), /read-only for Sutras/);
-  projects.setSutrasMayChangeSengine(true);
-  assert.equal(evalExpression("set-sengine-variable('REGION', 'north')", ctx), 'north');
-  projects.setSutrasMayChangeSengine(false);
+  assert.equal(evalExpression("get-engine-variable('REGION')", ctx), 'south');
+  assert.throws(() => evalExpression("set-engine-variable('REGION', 'north')", ctx), /Unknown function/);
+  assert.throws(() => evalExpression("set-project-variable('REGION', 'north')", ctx), /Unknown function/);
   const names = functionCatalog().map(f => f.name);
-  assert.ok(names.includes('get-sengine-variable') && !names.includes('get-engine-variable'));
+  assert.ok(names.includes('get-engine-variable') && !names.includes('get-sengine-variable') && !names.some(n => n.startsWith('set-') && n.endsWith('-variable')));
 });
 
 test('no third-party product names in the code, docs or guide', () => {

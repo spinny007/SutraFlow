@@ -84,9 +84,18 @@ export function saveProject(p: { id?: string; name: string; description?: string
   }
   const name = String(p.name || prev?.name || 'Project').trim();
   if (q.get('select 1 from projects where lower(name) = lower(?) and id != ?', name, id)) throw new Error(`A project named "${name}" already exists`);
+  if (prev && prev.name !== name) assertRenameTargets(prev.name, name);
   q.run(`insert into projects(id, name, description, config, updated_at) values(?, ?, ?, ?, ?)
     on conflict(id) do update set name = excluded.name, description = excluded.description, config = excluded.config, updated_at = excluded.updated_at`,
     id, name, p.description ?? prev?.description ?? '', JSON.stringify(cfg), now());
+  if (prev && prev.name !== name) {
+    try { renameProjectAssets(prev.name, name); } catch (e) {
+      // Keep the database and name-based files/configuration consistent if a filesystem move fails.
+      try { assertRenameTargets(name, prev.name); renameProjectAssets(name, prev.name); } catch { /* best effort; preserve the original error */ }
+      q.run('update projects set name = ?, updated_at = ? where id = ?', prev.name, now(), id);
+      throw e;
+    }
+  }
   onProjectChange.forEach(fn => fn(id));
   return getProject(id)!;
 }
@@ -117,8 +126,6 @@ export function setOps(projectId: string, ops: Partial<OpsConfig>) {
     logging: ops.logging || {},
   };
   setSetting(`ops:${projectId}`, clean);
-  // A new deployment config replaces values set at run time by set-project-variable().
-  setSetting(`runtimeVars:${projectId}`, {});
   onProjectChange.forEach(fn => fn(projectId));
   return clean;
 }
@@ -186,6 +193,35 @@ export function projectFilesDir(projectName: string) {
   return path.join(config.dataDir, 'files', safe).split(path.sep).join('/');
 }
 
+function configFile(projectName: string) {
+  const dir = process.env.SUTRA_CONFIG_DIR || path.join(config.dataDir, 'config');
+  return path.join(dir, `${projectName.replace(/[<>:"/\\|?*\x00-\x1f]+/g, '-')}.json`);
+}
+function assertRenameTargets(from: string, to: string) {
+  const oldFiles = projectFilesDir(from), newFiles = projectFilesDir(to), oldConfig = configFile(from), newConfig = configFile(to);
+  if (oldFiles !== newFiles && fs.existsSync(oldFiles) && fs.existsSync(newFiles)) throw new Error(`Cannot rename the project: files folder ${newFiles} already exists`);
+  if (oldConfig !== newConfig && fs.existsSync(oldConfig) && fs.existsSync(newConfig)) throw new Error(`Cannot rename the project: deployment config ${newConfig} already exists`);
+}
+function renameProjectAssets(from: string, to: string) {
+  const oldFiles = projectFilesDir(from), newFiles = projectFilesDir(to), oldConfig = configFile(from), newConfig = configFile(to);
+  let filesMoved = false;
+  try {
+    if (oldFiles !== newFiles && fs.existsSync(oldFiles)) { fs.mkdirSync(path.dirname(newFiles), { recursive: true }); fs.renameSync(oldFiles, newFiles); filesMoved = true; }
+    if (oldConfig !== newConfig && fs.existsSync(oldConfig)) {
+      fs.mkdirSync(path.dirname(newConfig), { recursive: true });
+      const text = fs.readFileSync(oldConfig, 'utf8');
+      const body = JSON.parse(text);
+      if (body && typeof body === 'object') body.project = to;
+      fs.writeFileSync(newConfig, JSON.stringify(body, null, 2) + '\n');
+      fs.unlinkSync(oldConfig);
+    }
+  } catch (e) {
+    if (filesMoved && fs.existsSync(newFiles) && !fs.existsSync(oldFiles)) fs.renameSync(newFiles, oldFiles);
+    if (fs.existsSync(newConfig) && !fs.existsSync(oldConfig)) fs.renameSync(newConfig, oldConfig);
+    throw e;
+  }
+}
+
 /** ${env:NAME} and ${env:NAME:-default} read process environment variables. */
 export function substituteEnv(v: unknown): any {
   if (typeof v === 'string') {
@@ -206,11 +242,11 @@ export interface EffectiveVars { values: Record<string, any>; secrets: string[] 
 
 // ---------- settings read on every step, cached per engine ----------
 /**
- * Every step reads its project's variables and the Sengine variables. They change rarely, so each
+ * Every step reads its Project and Engine properties. They change rarely, so each
  * engine keeps them for a moment (the "Settings refresh" tuning, 1 s by default) instead of reading
  * the database each step. A change on this engine clears the cache at once; other engines see it
  * within the refresh time, or at once with the next deploy signal. Values set at run time with
- * set-project-variable() are always read fresh.
+ * Administrator changes clear the local cache and signal the other engines.
  */
 export const settingsCache = { ms: Number(process.env.SUTRA_SETTINGS_REFRESH_MS ?? profileFor().settingsRefreshMs) };
 const projectCache = new Map<string, { at: number; p: Project | undefined; ops: OpsConfig }>();
@@ -238,9 +274,8 @@ export function effectiveVariables(projectId: string | null | undefined): Effect
   if (!p) return { values: {}, secrets: [] };
   const values: Record<string, any> = {};
   const secrets: string[] = [];
-  const rt = p.config.variables.length ? getSetting<Record<string, string>>(`runtimeVars:${projectId}`, {}) : {};
   for (const v of p.config.variables) {
-    let raw = substituteEnv(rt[v.name] ?? ops.variables[v.name] ?? v.value);
+    let raw = substituteEnv(ops.variables[v.name] ?? v.value);
     if (typeof raw === 'string' && raw.includes('${files}')) raw = raw.split('${files}').join(projectFilesDir(p.name));
     if (v.type === 'number') values[v.name] = Number(raw);
     else if (v.type === 'boolean') values[v.name] = ['true', '1', 'yes'].includes(String(raw).toLowerCase());
@@ -252,19 +287,13 @@ export function effectiveVariables(projectId: string | null | undefined): Effect
   return { values, secrets };
 }
 
-/** set-project-variable(): a runtime value that wins until the deployment config changes. */
-export function setRuntimeVariable(projectId: string | null, name: string, value: unknown) {
-  if (!projectId) throw new Error('set-project-variable() needs a run that belongs to a project');
-  const p = requireProject(projectId);
-  const def = p.config.variables.find(v => v.name === name);
-  if (!def) throw new Error(`Project variable ${name} is not defined in ${p.name}`);
-  if (def.type === 'secret') throw new Error(`${name} is a secret variable and cannot be set from a Sutra`);
-  const rt = getSetting<Record<string, string>>(`runtimeVars:${projectId}`, {});
-  rt[name] = typeof value === 'object' ? JSON.stringify(value) : String(value ?? '');
-  setSetting(`runtimeVars:${projectId}`, rt);
+/** Non-secret project properties exposed to the Get Properties activity. */
+export function publicProjectVariableValues(projectId: string | null | undefined) {
+  if (!projectId) return {};
+  const p = getProject(projectId);
+  const values = effectiveVariables(projectId).values;
+  return Object.fromEntries((p?.config.variables || []).filter(v => v.type !== 'secret').map(v => [v.name, values[v.name]]));
 }
-export const runtimeVariables = (projectId: string) => getSetting<Record<string, string>>(`runtimeVars:${projectId}`, {});
-export function clearRuntimeVariables(projectId: string) { setSetting(`runtimeVars:${projectId}`, {}); }
 
 // ---------- engine (administrator) variables, shared by all projects ----------
 export interface EngineVariable { name: string; value: string; description?: string }
@@ -273,8 +302,8 @@ export function saveEngineVariables(vars: EngineVariable[]) {
   const seen = new Set<string>();
   const clean = vars.map(v => ({ name: String(v.name || '').trim(), value: String(v.value ?? ''), description: v.description ? String(v.description) : undefined }));
   for (const v of clean) {
-    if (!VAR_NAME.test(v.name)) throw new Error(`Sengine variable name "${v.name}" must start with a letter or _`);
-    if (seen.has(v.name)) throw new Error(`Sengine variable ${v.name} is defined twice`);
+    if (!VAR_NAME.test(v.name)) throw new Error(`Engine property name "${v.name}" must start with a letter or _`);
+    if (seen.has(v.name)) throw new Error(`Engine property ${v.name} is defined twice`);
     seen.add(v.name);
   }
   setSetting('engineVars', clean);
@@ -287,24 +316,12 @@ export function engineVariableValues() {
   if (settingsCache.ms > 0) engineVarCache = { at: Date.now(), values };
   return values;
 }
-/** Sutras read Sengine variables; changing them from a Sutra needs the administrator's permission. */
-export function sutrasMayChangeSengine() { return getSetting<boolean>('sengineWritable', false); }
-export function setSutrasMayChangeSengine(on: boolean) { setSetting('sengineWritable', !!on); }
 /** Script activities (PowerShell, shell, programs) run on the server only when the administrator allows them. */
 export function scriptsAllowed() { return getSetting<boolean>('scriptsAllowed', false); }
 export function setScriptsAllowed(on: boolean) { setSetting('scriptsAllowed', !!on); }
 /** Release activities (build, deploy, roll back packages) only when the administrator allows them. */
 export function releasesAllowed() { return getSetting<boolean>('releasesAllowed', false); }
 export function setReleasesAllowed(on: boolean) { setSetting('releasesAllowed', !!on); }
-
-export function setEngineVariable(name: string, value: unknown) {
-  if (!sutrasMayChangeSengine()) throw new Error(`Sengine variables are read-only for Sutras, so ${name} was not changed. An administrator can allow changes in Admin Console > Server > Runtime.`);
-  const vars = listEngineVariables();
-  const v = vars.find(x => x.name === name);
-  const text = typeof value === 'object' ? JSON.stringify(value) : String(value ?? '');
-  if (v) v.value = text; else vars.push({ name, value: text });
-  saveEngineVariables(vars);
-}
 
 export function effectiveLogging(projectId: string): LoggingConfig {
   const p = getProject(projectId);

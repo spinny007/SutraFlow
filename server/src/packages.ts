@@ -8,6 +8,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 import crypto from 'node:crypto';
+import { Cron } from 'croner';
 import { q, now } from './db.js';
 import { version as sutraVersion } from './config.js';
 import { engine } from './engine/engine.js';
@@ -47,6 +48,8 @@ export interface Package {
     sutras: { name: string; version: number; triggers: string[]; exposes: string[] }[];
     secrets: string[];
     activityTypes: string[];
+    /** Deployment preflight for every packaged cache and the external objects it reads. */
+    memoryTables: { name: string; key: string[]; source: string; database?: { name: string; driver: string }; loadQuery?: string; lookupQuery?: string; sourceObjects: string[]; refresh: { mode: string; minutes?: number; cron?: string; timezone?: string }; limits: { rows: number; mb: number }; failsafe: boolean }[];
   };
   checksum: string;
 }
@@ -103,6 +106,21 @@ const exposesOf = (doc: FlowDoc) => doc.nodes.flatMap(n =>
     : n.type === 'soapService' ? [`SOAP ${normPath(n.config.path)}`]
       : n.type === 'mcpTool' ? [`MCP ${n.config.toolName}`] : []);
 
+const sourceObjects = (sql: string) => [...sql.matchAll(/\b(?:from|join)\s+([\w.$#\[\]`"]+)/gi)].map(m => m[1].replace(/[\[\]`"]+/g, ''));
+function memoryManifest(resources: Package['resources']): Package['manifest']['memoryTables'] {
+  return resources.filter(r => r.kind === 'memoryTable').map(r => {
+    const c = r.config || {}, db = resources.find(x => x.id === c.database && x.kind === 'database');
+    const mode = String(c.refresh || (Number(c.refreshMinutes) > 0 ? 'interval' : 'on demand'));
+    return {
+      name: r.name, key: String(c.key || 'id').split(',').map((x: string) => x.trim()).filter(Boolean), source: String(c.source || 'filled by Sutras'),
+      ...(db ? { database: { name: db.name, driver: String(db.config.driver || '') } } : {}),
+      ...(c.loadSql ? { loadQuery: String(c.loadSql) } : {}), ...(c.lookupSql ? { lookupQuery: String(c.lookupSql) } : {}),
+      sourceObjects: sourceObjects(String(c.loadSql || '')), refresh: { mode, ...(mode === 'interval' ? { minutes: Number(c.refreshMinutes) || 0 } : {}), ...(mode === 'cron' ? { cron: String(c.refreshCron || ''), timezone: String(c.refreshTimezone || 'UTC') } : {}) },
+      limits: { rows: Number(c.maxRows) || 10000, mb: Number(c.maxMb) || 16 }, failsafe: c.keep !== 'memory only',
+    };
+  });
+}
+
 /**
  * Builds a package of a project. Each deployed Sutra is taken at its deployed version; a Sutra
  * that is not deployed is published from its draft and included as not deployed (or left out).
@@ -141,6 +159,7 @@ export function buildPackage(projectId: string, o: { version?: string; note?: st
       sutras: sutras.map(s => ({ name: s.name, version: s.version, triggers: triggersOf(s.doc), exposes: s.deployed ? exposesOf(s.doc) : [] })),
       secrets: secretsOf(resources, project.config.variables || [], docs),
       activityTypes: [...new Set(docs.flatMap(d => d.nodes.map(n => n.type)))].sort(),
+      memoryTables: memoryManifest(resources),
     },
   };
   return { ...body, checksum: checksumOf(body) };
@@ -154,6 +173,7 @@ export function readPackage(input: unknown): Package {
   if (p.formatVersion !== 1) throw new Error(`Package format ${p.formatVersion} is newer than this SutraFlow understands`);
   for (const k of ['name', 'version', 'project', 'sutras', 'resources', 'schemas', 'manifest', 'checksum']) if (p[k] === undefined) throw new Error(`The package has no ${k}`);
   if (checksumOf(p) !== p.checksum) throw new Error('The package checksum does not match its content: the file was changed or damaged');
+  if (!Array.isArray(p.manifest.memoryTables)) throw new Error('The package manifest has no Memory table deployment descriptors');
   return p as Package;
 }
 
@@ -172,6 +192,21 @@ export function checkPackage(p: Package, o: { project?: string } = {}): CheckRes
   const secrets = p.manifest.secrets.map(name => ({ name, present: getSecret(name) !== undefined }));
   const missing = secrets.filter(s => !s.present).map(s => s.name);
   if (missing.length) errors.push(`Missing secrets on this server: ${missing.join(', ')}. Add them under Resources > Secrets (or with the command-line tool) before deploying.`);
+  const supported = new Set(['oracle', 'mssql', 'mysql', 'postgres', 'sqlite']);
+  const described = new Map(p.manifest.memoryTables.map(m => [m.name.toLowerCase(), m]));
+  for (const r of p.resources.filter(x => x.kind === 'memoryTable')) {
+    const c = r.config || {}, m = described.get(r.name.toLowerCase());
+    if (!m) { errors.push(`${r.name}: its Memory table deployment descriptor is missing`); continue; }
+    if (!String(c.key || '').trim()) errors.push(`${r.name}: choose at least one key field`);
+    if ((Number(c.maxRows) || 0) < 1 || (Number(c.maxMb) || 0) < 1) errors.push(`${r.name}: row and memory limits must be greater than zero`);
+    if (c.source === 'database query') {
+      const db = p.resources.find(x => x.id === c.database && x.kind === 'database');
+      if (!db) errors.push(`${r.name}: its database connection is not included in the package`);
+      else if (!supported.has(String(db.config.driver || ''))) errors.push(`${r.name}: database ${db.name} does not use Oracle, SQL Server, MySQL, PostgreSQL or SQLite`);
+      if (!String(c.loadSql || '').trim()) errors.push(`${r.name}: its load query is empty`);
+    }
+    if (String(c.refresh) === 'cron') try { new Cron(String(c.refreshCron || ''), { timezone: String(c.refreshTimezone || 'UTC'), paused: true }).stop(); } catch (e: any) { errors.push(`${r.name}: refresh schedule is invalid (${e.message})`); }
+  }
   // Addresses served by deployed Sutras of other projects.
   const target = (o.project || p.project.name).toLowerCase();
   const theirs = new Map<string, string>();
@@ -298,7 +333,7 @@ export function importPackage(input: unknown, o: { project: string; sutras?: str
   const sutras = p.sutras.filter(s => !pick || pick.has(s.name.toLowerCase())).map(s => (drafts ? { ...s, deployed: false } : s));
   if (!sutras.length) throw new Error('Choose at least one Sutra');
   const used = pick ? usedBy(sutras.map(s => s.doc), p.resources, p.schemas) : { resources: p.resources, schemas: p.schemas };
-  const chosen: Package = { ...p, sutras, resources: used.resources, schemas: used.schemas, manifest: { ...p.manifest, sutras: p.manifest.sutras.filter((m: any) => sutras.some(s => s.name === m.name)), secrets: secretsOf(used.resources, p.project.variables || [], sutras.map(s => s.doc)) } };
+  const chosen: Package = { ...p, sutras, resources: used.resources, schemas: used.schemas, manifest: { ...p.manifest, sutras: p.manifest.sutras.filter((m: any) => sutras.some(s => s.name === m.name)), secrets: secretsOf(used.resources, p.project.variables || [], sutras.map(s => s.doc)), memoryTables: memoryManifest(used.resources) } };
   chosen.checksum = checksumOf(chosen);
   const c = checkPackage(chosen, { project: name });
   const errors = drafts ? c.errors.filter(e => !e.startsWith('Missing secrets')) : c.errors;

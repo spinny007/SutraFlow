@@ -27,13 +27,12 @@ import type { Duplex } from 'node:stream';
 import crypto from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { config } from '../config.js';
-import { q } from '../db.js';
 import { asyncDatabase } from '../asyncdb.js';
 import { engine } from '../engine/engine.js';
 import { effectiveResource } from '../resources.js';
 import { authorize, PolicyError, type Caller } from '../security/inbound.js';
 import { checkParsed, checkRaw, limitsOf, MessageRejected, validateMessage } from '../security/validate.js';
-import { firewallAllows, getFirewall, logRequest } from './apps.js';
+import { firewallAllows, getFirewallAsync, logRequest } from './apps.js';
 import type { FlowDoc, FlowNode } from '../engine/types.js';
 
 export interface WsRoute { path: string; re: RegExp; keys: string[]; flowId: string; projectId: string; version: number; doc: FlowDoc; node: FlowNode }
@@ -85,7 +84,7 @@ async function upgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer, 
     kind: 'websocket', method: 'GET', path, route: route?.doc.name, flowId: route?.flowId, projectId: route?.projectId, appId: caller?.appId, caller: caller?.subject,
     status, ms: 0, ip, runId: '', error, bytesIn: 0, bytesOut: 0,
   });
-  if (!firewallAllows(ip, getFirewall())) { log(403, undefined, undefined, 'Firewall'); return reject(socket, 403, 'Your address is not allowed'); }
+  if (!firewallAllows(ip, await getFirewallAsync())) { log(403, undefined, undefined, 'Firewall'); return reject(socket, 403, 'Your address is not allowed'); }
   const found = routesOf(path);
   if (!found) { log(404); return reject(socket, 404, 'No WebSocket service at this path'); }
   const { route, params } = found;
@@ -134,7 +133,8 @@ function send(c: Conn, data: unknown) {
 function opened(ws: WebSocket, route: WsRoute, caller: Caller, client: Conn['client'], params: Record<string, string>) {
   const c: Conn = { id: crypto.randomUUID(), ws, route, caller, client, params, queue: [], busy: false, alive: true };
   conns.set(c.id, c);
-  q.run('insert into ws_connections(id, engine_id, path, flow_id, subject, opened_at) values(?, ?, ?, ?, ?, ?)', c.id, config.engineId, route.path, route.flowId, caller.subject, Date.now());
+  void asyncDatabase().run('insert into ws_connections(id, engine_id, path, flow_id, subject, opened_at) values(?, ?, ?, ?, ?, ?)', c.id, config.engineId, route.path, route.flowId, caller.subject, Date.now())
+    .catch(e => { conns.delete(c.id); try { ws.close(1011, 'Connection registration failed'); } catch { /* closing */ } console.error('WebSocket connection:', e?.message || e); });
   const cfg = route.node.config;
   const maxBytes = Math.max(1, Number(cfg.maxMessageKb) || 256) * 1024;
   const limits = limitsOf(route.node.config.policy ? effectiveResource(route.node.config.policy)?.config : undefined);
@@ -173,7 +173,7 @@ function opened(ws: WebSocket, route: WsRoute, caller: Caller, client: Conn['cli
   });
   ws.on('close', (code, reason) => {
     conns.delete(c.id);
-    q.run('delete from ws_connections where id = ?', c.id);
+    void asyncDatabase().run('delete from ws_connections where id = ?', c.id).catch(() => {});
     if (hasEdges(route, 'close')) void fire(c, 'close', { code, reason: reason.toString() });
   });
   ws.on('error', () => { /* a broken connection closes */ });
@@ -249,12 +249,12 @@ function startTimers() {
 export function closeWebSockets(code = 1001, reason = 'Server going away') {
   for (const c of conns.values()) { try { c.ws.close(code, reason); } catch { /* gone */ } }
   conns.clear();
-  try { q.run('delete from ws_connections where engine_id = ?', config.engineId); } catch { /* database closed */ }
+  void asyncDatabase().run('delete from ws_connections where engine_id = ?', config.engineId).catch(() => {});
   if (pinger) { clearInterval(pinger); pinger = null; }
   if (poller) { clearInterval(poller); poller = null; }
 }
 
 /** At start: rows an earlier run of this engine left behind. */
-export function forgetStaleConnections() {
-  q.run('delete from ws_connections where engine_id = ?', config.engineId);
+export async function forgetStaleConnections() {
+  await asyncDatabase().run('delete from ws_connections where engine_id = ?', config.engineId);
 }

@@ -16,8 +16,8 @@ architecture page.
 | 4. Gateway management | Done |
 | 5. Alerts and dashboard | Done |
 | 6. SFTP / FTP palette | Done (with time limits per connection, Sutra folders and new samples) |
-| 7. Git projects from the designer | Next |
-| 8. Cluster throughput | Planned |
+| 7. Git projects from the designer | Done |
+| 8. Cluster throughput | Done |
 
 ## Phase 1: Users, roles, access and audit (server)
 
@@ -64,7 +64,7 @@ restart. Environment variables stay the defaults.
 - **Firewall**: IP allow / deny lists for the whole gateway.
 - **Request log and statistics**: every gateway call (service, app, status, time, size), errors, top
   and slowest services, charts.
-- OpenAPI for deployed REST services. A developer portal comes later.
+- OpenAPI for deployed REST services.
 
 ## Phase 5: Alerts and dashboard
 
@@ -90,11 +90,14 @@ from the vault, host key fingerprint) and FTP / FTPS, fenced into a base folder.
 
 ## Phase 7: Git projects from the designer
 
+Done.
+
 A project linked to a Git repository (any remote; HTTPS token or SSH key from the vault): commit,
 push, pull, branches, history and diffs of Sutra versions from the designer; CI builds packages from a
 commit with `sutra package --from-git`.
 
 ## Phase 8: Cluster throughput
 
-Per-run locks instead of one write lock on PostgreSQL, and queue consumers shared across engines
-instead of the leader only.
+Done. PostgreSQL uses a main-thread asynchronous connection pool, per-run advisory locks, atomic
+`skip locked` claims on every engine, and `LISTEN/NOTIFY` wake hints with durable polling as fallback.
+Gateway request accounting and policy lookups use the same asynchronous storage path.

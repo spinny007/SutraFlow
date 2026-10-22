@@ -184,7 +184,7 @@ export async function authorize(policy: Resource | undefined, req: InboundReques
       const secrets = names.map(name => ({ name, value: getSecret(name) })).filter((s): s is { name: string; value: string } => !!s.value);
       if (!secrets.length) throw new PolicyError(500, 'The policy has no signing secret');
       try {
-        const name = verifyRequest(secrets, {
+        const name = await verifyRequest(secrets, {
           algorithm: c.hmacAlgorithm || 'sha256', encoding: c.hmacEncoding === 'base64' ? 'base64' : 'hex', prefix: String(c.hmacPrefix || ''),
           signed: (c.hmacSigned || 'timestamp and body') as SignedParts, maxAgeSec: Number(c.hmacMaxAgeSec) > 0 ? Number(c.hmacMaxAgeSec) : 300,
         }, { method: req.method || 'POST', path: req.path || '/', timestamp: h(req, c.hmacTimestampHeader || 'X-Timestamp'), signature: h(req, c.hmacHeader || 'X-Signature'), body: req.rawBody ?? '' });
@@ -200,13 +200,13 @@ export async function authorize(policy: Resource | undefined, req: InboundReques
       const key = keyHeader || (bearer.startsWith('sfk_') ? bearer : '');
       if (!key && !bearer) throw new PolicyError(401, `Send an app key in ${c.apiKeyHeader || 'X-API-Key'} or an access token as Authorization: Bearer`, { 'www-authenticate': 'Bearer' });
       let app: App | null = null, scopes: string[] = [];
-      if (key) { app = appOfKey(key); if (app) scopes = app.scopes; }
+      if (key) { app = await appOfKey(key); if (app) scopes = app.scopes; }
       else { const t = await appOfToken(bearer); if (t) { app = t.app; scopes = t.scopes; } }
       if (!app) throw new PolicyError(401, 'Invalid, expired or revoked app key or token', { 'www-authenticate': 'Bearer error="invalid_token"' });
       const need = String(c.appScopes || '').split(/\s+/).filter(Boolean);
       const missing = need.filter(s => !scopes.includes(s));
       if (missing.length) throw new PolicyError(403, `The app is missing scope: ${missing.join(' ')}`, { 'www-authenticate': 'Bearer error="insufficient_scope"' });
-      const used = consume(app);
+      const used = await consume(app);
       if (!used.ok) throw new PolicyError(429, `The app's plan allows ${used.limit} requests per ${used.window}`, { 'retry-after': String(used.retryAfter) });
       caller = { method: 'app', subject: app.name, appId: app.id, claims: { appId: app.id, plan: app.planId, scopes }, scopes, responseHeaders: used.headers };
       break;

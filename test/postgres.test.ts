@@ -41,7 +41,7 @@ function runSuites(env: Record<string, string>) {
 
 test('every in-process suite passes on PostgreSQL (PGlite)', { timeout: 900000 }, async () => {
   const r = await runSuites({ SUTRA_DB: 'pglite:memory', SUTRA_TEST_PORT_OFFSET: '2000' });
-  const pass = /ℹ pass (\d+)/.exec(r.out)?.[1], fail = /ℹ fail (\d+)/.exec(r.out)?.[1];
+  const pass = /(?:ℹ|#) pass (\d+)/.exec(r.out)?.[1], fail = /(?:ℹ|#) fail (\d+)/.exec(r.out)?.[1];
   // The failing tests with their assertion lines, so a failure here says what went wrong.
   const lines = r.out.split(/\r?\n/);
   const at = lines.findIndex(l => /^✖ failing tests:/.test(l));

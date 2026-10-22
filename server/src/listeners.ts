@@ -30,7 +30,7 @@ export interface ListenerContext {
   doc: FlowDoc;
   node: FlowNode;
   /** Starts a run. onFinish lets queue listeners acknowledge only after the flow succeeded. */
-  fire(input: unknown, onFinish?: (status: string, runId: string) => void): Promise<string>;
+  fire(input: unknown, onFinish?: (status: string, runId: string) => void, runId?: string): Promise<string>;
   status(state: 'ok' | 'error', message: string): void;
 }
 export type ListenerStarter = (c: ListenerContext) => Promise<() => void | Promise<void>> | (() => void | Promise<void>);
@@ -64,7 +64,7 @@ async function rebuild() {
         flowId: d.flowId, projectId: d.projectId, version: d.version, doc: d.doc, node: resolved, status,
         // A run that cannot start (the database is unreachable) shows on the listener and is logged; the
         // event's source keeps it (an unacknowledged message, a file not moved) to try again later.
-        fire: (input, onFinish) => engine.startRun({ doc: d.doc, flowId: d.flowId, projectId: d.projectId, version: d.version, triggerNodeId: n.id, input, source: n.type, onFinish })
+        fire: (input, onFinish, runId) => engine.startRun({ id: runId, doc: d.doc, flowId: d.flowId, projectId: d.projectId, version: d.version, triggerNodeId: n.id, input, source: n.type, onFinish })
           .catch((e: any) => { status('error', `A run could not start: ${e?.message || e}`); console.error(`${d.doc.name} / ${n.name}: a run could not start:`, e?.message || e); return ''; }),
       };
       try {

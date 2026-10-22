@@ -33,7 +33,9 @@ export function housekeeping(o: { retentionDays?: number; now?: number } = {}) {
   }
   const days = o.retentionDays ?? config.runRetentionDays;
   if (!(days > 0)) return { deletedRuns, deletedAudit };
-  deletedRuns += prune(new Date((o.now ?? Date.now()) - days * 86400000).toISOString());
+  const cutoffMs = (o.now ?? Date.now()) - days * 86400000;
+  deletedRuns += prune(new Date(cutoffMs).toISOString());
+  q.run(`delete from bus_messages where status = 'done' and updated_at < ?`, cutoffMs);
   return { deletedRuns, deletedAudit };
 }
 

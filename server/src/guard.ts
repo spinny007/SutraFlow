@@ -42,8 +42,6 @@ export const RULES: Record<string, Rule> = {
   'PUT /api/projects/:id/ops': R('deploy', 'project'),
   'GET /api/projects/:id/ops/file': R('deploy', 'project'),
   'POST /api/projects/:id/ops/file': R('deploy', 'project'),
-  'GET /api/projects/:id/runtime-variables': R('view', 'project'),
-  'DELETE /api/projects/:id/runtime-variables': R('operate', 'project'),
   'GET /api/engine-variables': R(null),
   'PUT /api/engine-variables': R('server'),
   'GET /api/samples': R(null),
@@ -72,6 +70,9 @@ export const RULES: Record<string, Rule> = {
   'GET /api/console/machine': R('engines'),
   'PUT /api/console/engines/:id/name': R('engines'),
   'GET /api/console/memory': R('view'),
+  'GET /api/console/memory-quotas': R('server'),
+  'PUT /api/console/memory-quotas': R('server'),
+  'PUT /api/console/memory/:id/config': R('server'),
   'POST /api/console/memory/:id/reload': R('deploy', 'resource'),
   'POST /api/console/memory/:id/clear': R('deploy', 'resource'),
   'GET /api/console/memory/:id/rows': R('view', 'resource'),
@@ -88,8 +89,6 @@ export const RULES: Record<string, Rule> = {
   'POST /api/server/database/test': R('server', undefined, true),
   'POST /api/server/database/migrate': R('server'),
   'PUT /api/scripts/python': R('server'),
-  'GET /api/engine-variables/policy': R(null),
-  'PUT /api/engine-variables/policy': R('server'),
 
   'GET /api/oauth/:id': R('view', 'resource'),
   'GET /api/oauth/:id/start': R('connections', 'resource'),
@@ -257,7 +256,7 @@ export const RULES: Record<string, Rule> = {
 };
 
 /** Routes reachable before sign-in. */
-export const OPEN_ROUTES = new Set(['GET /api/auth/status', 'POST /api/auth/setup', 'POST /api/auth/login', 'POST /api/auth/logout', 'GET /api/oauth/callback', 'GET /api/auth/sso/start', 'GET /api/auth/sso/callback']);
+export const OPEN_ROUTES = new Set(['GET /api/auth/status', 'POST /api/auth/setup', 'POST /api/auth/login', 'POST /api/auth/logout', 'GET /api/oauth/callback', 'GET /api/auth/sso/start', 'GET /api/auth/sso/callback', 'POST /api/auth/sso/callback']);
 
 const SERVER_PERMS = new Set(PERMISSIONS.filter(p => p.scope === 'server').map(p => p.id));
 const projectOf = (table: string, id: unknown) => q.get<any>(`select project_id from ${table} where id = ?`, String(id ?? ''))?.project_id as string | undefined;

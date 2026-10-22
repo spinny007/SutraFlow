@@ -73,6 +73,8 @@ export interface Field {
   resourceKind?: string;
   /** Value may contain {{ }} references. */
   tpl?: boolean;
+  /** A General-tab code/text area may use administrator-managed project and engine variables. */
+  vars?: boolean;
   help?: string;
   /** Show only when another field has one of these values. */
   showIf?: { k: string; in: any[] };

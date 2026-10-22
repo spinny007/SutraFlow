@@ -1,0 +1,88 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 2.0.0
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { now } from '../db.js';
+import type { TxQ } from '../asyncdb.js';
+import { truthy } from '../expr.js';
+import { resolve } from '../template.js';
+import type { Activity, FlowDoc, FlowEdge, FlowNode } from './types.js';
+import type { LoadedRun, RunState } from './state.js';
+import type { TransitionTurn } from './transitions.js';
+
+/** Routes live and skip tokens, including conditions, joins and dead-path elimination. */
+export class Router {
+  constructor(private readonly deps: {
+    activity(type: string): Activity | undefined;
+    outputs(tx: TxQ, run: LoadedRun): Promise<Record<string, any>>;
+    scope(run: LoadedRun, outputs: Record<string, any>, state: RunState, output: any): Record<string, any>;
+    insert(tx: TxQ, turn: TransitionTurn | null, runId: string, nodeId: string, input: any, attempt: number, status: string, priority?: number): Promise<void>;
+  }) {}
+
+  async route(tx: TxQ, turn: TransitionTurn | null, run: LoadedRun, state: RunState, node: FlowNode, emits: { port: string; out: any }[], partial = false) {
+    const doc = run.doc;
+    const runId = run.row.id as string;
+    const outgoing = doc.edges.filter(edge => edge.from === node.id);
+    const emitted = new Set(emits.map(item => item.port));
+    for (const item of emits) {
+      const onPort = outgoing.filter(edge => edge.port === item.port);
+      const conditional = onPort.filter(edge => edge.when === 'when');
+      const taken = new Set<string>();
+      if (conditional.length) {
+        const scope = this.deps.scope(run, await this.deps.outputs(tx, run), state, item.out);
+        for (const edge of conditional) {
+          let ok = false;
+          try { ok = truthy(resolve(edge.condition || 'false', scope)); } catch (error: any) {
+            state.logs.push({ t: now(), level: 'warn', msg: `${node.name}: condition on connection ${edge.label ? `"${edge.label}"` : ''} could not be checked (${error.message}); not taken`, step: node.name });
+          }
+          if (ok) taken.add(edge.id);
+        }
+      }
+      for (const edge of onPort) {
+        const live = edge.when === 'when' ? taken.has(edge.id) : edge.when === 'otherwise' ? taken.size === 0 : true;
+        await this.deliver(tx, turn, runId, doc, state, edge, live, live ? item.out : undefined, run.row.priority);
+      }
+    }
+    if (!partial) for (const edge of outgoing.filter(item => !emitted.has(item.port))) await this.deliver(tx, turn, runId, doc, state, edge, false, undefined, run.row.priority);
+  }
+
+  private async deliver(tx: TxQ, turn: TransitionTurn | null, runId: string, doc: FlowDoc, state: RunState, edge: FlowEdge, live: boolean, output: any, priority?: number) {
+    const target = doc.nodes.find(node => node.id === edge.to);
+    if (!target) return;
+    const activity = this.deps.activity(target.type);
+    const inbound = doc.edges.filter(item => item.to === target.id);
+    const from = doc.nodes.find(node => node.id === edge.from)?.name || edge.from;
+    const prio = priority === undefined || priority === null ? undefined : Number(priority);
+    if (activity?.join) {
+      const join = (state.joins[target.id] ||= {});
+      join[edge.id] = { live, from, out: output };
+      if (inbound.every(item => join[item.id])) {
+        const lives = Object.values(join).filter(item => item.live);
+        delete state.joins[target.id];
+        if (lives.length) {
+          state.live[target.id] = true;
+          await this.deps.insert(tx, turn, runId, target.id, Object.fromEntries(lives.map(item => [item.from, item.out])), 0, 'pending', prio);
+        } else await this.skip(tx, turn, runId, doc, state, target, prio);
+      }
+      return;
+    }
+    if (live) {
+      state.live[target.id] = true;
+      await this.deps.insert(tx, turn, runId, target.id, output, 0, 'pending', prio);
+      return;
+    }
+    const skipped = (state.skips[target.id] ||= []);
+    if (!skipped.includes(edge.id)) skipped.push(edge.id);
+    if (!state.live[target.id] && inbound.every(item => skipped.includes(item.id))) await this.skip(tx, turn, runId, doc, state, target, prio);
+  }
+
+  private async skip(tx: TxQ, turn: TransitionTurn | null, runId: string, doc: FlowDoc, state: RunState, node: FlowNode, priority?: number) {
+    if (state.skipped[node.id]) return;
+    state.skipped[node.id] = true;
+    for (const edge of doc.edges.filter(item => item.from === node.id)) await this.deliver(tx, turn, runId, doc, state, edge, false, undefined, priority);
+  }
+}

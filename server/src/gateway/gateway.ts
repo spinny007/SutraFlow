@@ -19,19 +19,21 @@ import { authorize, corsHeaders, PolicyError, type Caller } from '../security/in
 import { xmlParser } from '../security/outbound.js';
 import { checkParsed, checkRaw, limitsOf, MessageRejected, validateMessage } from '../security/validate.js';
 import { decryptMessage, WssError } from '../security/wssin.js';
+import { applyWss } from '../security/wss.js';
 import { getSecret } from '../secrets.js';
 import { NS } from '../security/wss.js';
 import { listOf } from '../palettes/common.js';
 import { acmeChallenge, getCert, getTls } from './tls.js';
-import crypto from 'node:crypto';
-import { MCP_PROTOCOLS, toolDefinition, toolResult } from '../mcp.js';
 import { metrics } from '../metrics.js';
-import { version as sutraVersion } from '../config.js';
-import { firewallAllows, getFirewall, getGatewayOptions, issueToken, logRequest, openApi } from './apps.js';
-import { agentMcpEndpoints, agentMcpTools, callAgentTool, handleAgents, listAgents, rebuildAgents } from './agents.js';
+import { firewallAllows, getFirewallAsync, getGatewayOptions, logRequest, openApi } from './apps.js';
+import { agentMcpEndpoints, handleAgents, listAgents, rebuildAgents } from './agents.js';
 import { attachWebSockets, closeWebSockets, forgetStaleConnections, setWsRoutes, type WsRoute } from './websocket.js';
 import { parseRestBody, sendRest } from './rest.js';
 import { buildWsdl, renderXml, soapEnvelope, soapFault, xmlEsc } from './soap.js';
+import { handleMcp, type McpTool } from './mcp-handler.js';
+import { tokenEndpoint } from './oauth-handler.js';
+import { effectiveVariables, engineVariableValues } from '../projects.js';
+import { resolveSettings } from '../settings.js';
 export { buildWsdl } from './soap.js';
 
 /**
@@ -62,7 +64,6 @@ interface Route {
 
 let routes: Route[] = [];
 /** AI tools by MCP address: '/mcp' for tools without an MCP server, else the server's address. */
-interface McpTool { endpoint: string; serverId: string; flowId: string; projectId: string; version: number; doc: FlowDoc; node: FlowNode }
 let mcpTools: McpTool[] = [];
 export const mcpPath = (p: unknown) => '/' + String(p || 'mcp').trim().replace(/^\/+|\/+$/g, '').toLowerCase();
 
@@ -71,10 +72,12 @@ export function rebuildRoutes() {
   for (const d of deployedFlows()) {
     for (const n of d.doc.nodes) {
       if (n.type !== 'restService' && n.type !== 'soapService' && n.type !== 'wsService') continue;
-      const path = '/' + String(n.config.path || '').trim().replace(/^\/+|\/+$/g, '');
+      const act = engine.activity(n.type);
+      const resolved = act ? { ...n, config: resolveSettings(act.fields, n.config, { gv: effectiveVariables(d.projectId).values, ev: engineVariableValues() }) } : n;
+      const path = '/' + String(resolved.config.path || '').trim().replace(/^\/+|\/+$/g, '');
       const keys: string[] = [];
       const re = new RegExp('^' + path.replace(/[.+*?^${}()|[\]\\]/g, '\\$&').replace(/:([A-Za-z_]\w*)/g, (_, k) => { keys.push(k); return '([^/]+)'; }) + '/?$');
-      out.push({ kind: n.type === 'restService' ? 'rest' : n.type === 'soapService' ? 'soap' : 'ws', method: n.type === 'wsService' ? 'GET' : String(n.config.method || 'ANY').toUpperCase(), path, re, keys, flowId: d.flowId, projectId: d.projectId, version: d.version, doc: d.doc, node: n });
+      out.push({ kind: n.type === 'restService' ? 'rest' : n.type === 'soapService' ? 'soap' : 'ws', method: n.type === 'wsService' ? 'GET' : String(resolved.config.method || 'ANY').toUpperCase(), path, re, keys, flowId: d.flowId, projectId: d.projectId, version: d.version, doc: d.doc, node: resolved });
     }
   }
   // Literal paths before parameterised ones.
@@ -144,12 +147,12 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
   const path = decodeURIComponent(url.pathname);
 
   if (path.startsWith('/.well-known/acme-challenge/')) {
-    const ka = acmeChallenge(path.split('/').pop() || '');
+    const ka = await acmeChallenge(path.split('/').pop() || '');
     return ka ? reply.type('text/plain').send(ka) : reply.code(404).send('Not found');
   }
   if (path === '/health') return reply.send({ ok: true });
   const gw: GwInfo = ((req as any).gw = { kind: 'rest' });
-  if (!firewallAllows(req.ip, firewall())) { gw.error = 'Firewall'; return reply.code(403).send({ error: 'Your address is not allowed' }); }
+  if (!firewallAllows(req.ip, await getFirewallAsync())) { gw.error = 'Firewall'; return reply.code(403).send({ error: 'Your address is not allowed' }); }
   if (path === '/oauth/token') { gw.route = 'Access tokens'; return tokenEndpoint(req, reply); }
   if (path === '/openapi.json' && req.method === 'GET') {
     gw.route = 'OpenAPI';
@@ -161,7 +164,7 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
     if (done) return done;
   }
   const mcpAt = mcpPath(path);
-  if (mcpAt === '/mcp' || mcpTools.some(t => t.endpoint === mcpAt) || agentMcpEndpoints().includes(mcpAt)) { gw.kind = 'mcp'; gw.route = `MCP ${mcpAt}`; return handleMcp(req, reply, secure, mcpAt); }
+  if (mcpAt === '/mcp' || mcpTools.some(t => t.endpoint === mcpAt) || agentMcpEndpoints().includes(mcpAt)) { gw.kind = 'mcp'; gw.route = `MCP ${mcpAt}`; return handleMcp(req, reply, secure, mcpAt, mcpTools, waitReply); }
 
   const method = req.method.toUpperCase();
   const candidates = routes.filter(r => r.re.test(path));
@@ -191,8 +194,36 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
       const host = req.headers.host || 'localhost';
       return reply.type('text/xml; charset=utf-8').send(buildWsdl(n, `${secure ? 'https' : 'http'}://${host}${route.path}`));
     }
-    const fault = (status: number, code: string, msg: string, v12 = v12cfg) =>
-      reply.code(status).type(v12 ? 'application/soap+xml; charset=utf-8' : 'text/xml; charset=utf-8').send(soapFault(v12, code, msg));
+    let responseCaller: Caller | undefined;
+    const responseCert = () => {
+      const c = policy?.config || {};
+      if (c.responseEncryption === 'caller certificate') return String(responseCaller?.claims?.certificatePem || '');
+      if (c.responseEncryption === 'configured certificate') return String(c.responseEncryptCertPem || '');
+      return '';
+    };
+    const secureResponse = (xml: string) => {
+      const mode = policy?.config.responseEncryption || 'off';
+      if (mode === 'off') return xml;
+      const certPem = responseCert();
+      // Before authentication, a caller-certificate policy has no trusted recipient yet. Such faults
+      // stay plain; after authentication every normal response and fault is encrypted.
+      if (!certPem && mode === 'caller certificate' && !responseCaller) return xml;
+      if (!certPem) throw new WssError(mode === 'caller certificate'
+        ? 'SOAP response encryption needs a verified WS-Security X.509 caller certificate'
+        : 'SOAP response encryption has no configured recipient certificate');
+      return applyWss(xml, { timestampTtlSec: 300, encrypt: { certPem, algorithm: policy?.config.responseEncryptAlgorithm || 'aes256-gcm' } });
+    };
+    const sendSoap = (status: number, xml: string, v12 = v12cfg) => {
+      let body = xml;
+      try { body = secureResponse(xml); }
+      catch (e: any) {
+        gw.error = e.message;
+        body = soapFault(v12, 'soap:Server', `SOAP response security failed: ${e.message}`);
+        status = 500;
+      }
+      return reply.code(status).type(v12 ? 'application/soap+xml; charset=utf-8' : 'text/xml; charset=utf-8').send(body);
+    };
+    const fault = (status: number, code: string, msg: string, v12 = v12cfg) => sendSoap(status, soapFault(v12, code, msg), v12);
     if (method !== 'POST') return fault(405, 'soap:Client', 'SOAP requests must use POST');
     const limits = limitsOf(policy?.config);
     const soapMaxKb = Number(policy?.config.maxBodyKb) || 0;
@@ -217,6 +248,7 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
     let caller;
     try {
       caller = await authorize(policy, { headers: req.headers, ip: req.ip, secure, socket: req.raw.socket, wsSecurity: env.Header?.Security, soapXml: xml, method, path: url.pathname + url.search, rawBody: raw });
+      responseCaller = caller;
       noteCaller(gw, reply, caller);
     } catch (e: any) {
       const pe = e as PolicyError;
@@ -253,8 +285,7 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
       }
       const opResp = `${r.soap?.operation || input.operation}Response`;
       const bodyXml = r.body == null ? '' : typeof r.body === 'object' ? renderXml(r.body) : xmlEsc(String(r.body));
-      return reply.code(200).type(v12 ? 'application/soap+xml; charset=utf-8' : 'text/xml; charset=utf-8')
-        .send(soapEnvelope(v12, `<${opResp} xmlns="${xmlEsc(ns)}">${bodyXml}</${opResp}>`));
+      return sendSoap(200, soapEnvelope(v12, `<${opResp} xmlns="${xmlEsc(ns)}">${bodyXml}</${opResp}>`), v12);
     } catch (e: any) {
       if (e.runId) reply.header('x-sutra-run', e.runId);
       return fault(e.runId !== undefined ? 504 : 500, 'soap:Server', e.message, v12);
@@ -322,149 +353,8 @@ function noteCaller(gw: GwInfo, reply: FastifyReply, caller: Caller) {
   if (caller.responseHeaders) reply.headers(caller.responseHeaders);
 }
 
-// The firewall is read at most every two seconds; a change applies on every engine within that time.
-let fwCache = { at: 0, f: { allow: [] as string[], deny: [] as string[] } };
-const firewall = () => { if (Date.now() - fwCache.at > 2000) fwCache = { at: Date.now(), f: getFirewall() }; return fwCache.f; };
-export const refreshFirewall = () => { fwCache.at = 0; };
-
-/** OAuth2 client credentials for gateway apps (RFC 6749 section 4.4). */
-async function tokenEndpoint(req: FastifyRequest, reply: FastifyReply) {
-  reply.header('cache-control', 'no-store');
-  if (req.method !== 'POST') return reply.code(405).header('allow', 'POST').send({ error: 'invalid_request', error_description: 'Use POST' });
-  const raw = typeof req.body === 'string' ? req.body : '';
-  const ct = String(req.headers['content-type'] || '');
-  let f: Record<string, string> = {};
-  try { f = ct.includes('json') ? JSON.parse(raw || '{}') : Object.fromEntries(new URLSearchParams(raw)); } catch { return reply.code(400).send({ error: 'invalid_request', error_description: 'The body is not form data or JSON' }); }
-  let id = f.client_id || '', secret = f.client_secret || '';
-  const basic = /^Basic\s+(.+)$/i.exec(String(req.headers.authorization || ''))?.[1];
-  if (basic) { const d = Buffer.from(basic, 'base64').toString('utf8'); const i = d.indexOf(':'); id = decodeURIComponent(d.slice(0, i)); secret = decodeURIComponent(d.slice(i + 1)); }
-  if (f.grant_type !== 'client_credentials') return reply.code(400).send({ error: 'unsupported_grant_type', error_description: 'Only client_credentials is supported' });
-  if (!id || !secret) return reply.code(401).send({ error: 'invalid_client', error_description: 'Send client_id and client_secret (the app id and one of its keys)' });
-  try {
-    const t = await issueToken(id, secret, f.scope);
-    ((req as any).gw as GwInfo).appId = id;
-    return reply.send(t);
-  } catch (e: any) {
-    ((req as any).gw as GwInfo).error = e.message;
-    return reply.code(e.status || 400).send({ error: e.message, ...(e.detail ? { error_description: e.detail } : {}) });
-  }
-}
-
-// ---------- MCP: Sutras as skills for AI assistants (Streamable HTTP, JSON-RPC 2.0) ----------
-
-async function handleMcp(req: FastifyRequest, reply: FastifyReply, secure: boolean, endpoint: string) {
-  const method = req.method.toUpperCase();
-  if (method === 'GET') return reply.code(405).header('allow', 'POST, DELETE').send({ error: 'This MCP server answers POST requests; it does not open an event stream' });
-  if (method === 'DELETE' || method === 'OPTIONS') return reply.code(204).send();
-  if (method !== 'POST') return reply.code(405).header('allow', 'POST, DELETE').send();
-  let msg: any;
-  try { msg = JSON.parse(typeof req.body === 'string' ? req.body : String(req.body ?? '')); } catch {
-    return reply.code(400).send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Request is not valid JSON' } });
-  }
-  const tools = mcpTools.filter(t => t.endpoint === endpoint);
-  const agentTools = agentMcpTools(endpoint);
-  const server = tools.find(t => t.serverId)?.serverId || (agentTools[0]?.agent.node.config.mcpServer as string | undefined);
-  const srv = server ? effectiveResource(server) : undefined;
-  const batch = Array.isArray(msg) ? msg : [msg];
-  const ctx = { headers: req.headers, ip: req.ip, secure, socket: req.raw.socket };
-  const allowed = async (t: McpTool) => {
-    const ref = t.node.config.policy || (t.serverId ? effectiveResource(t.serverId)?.config.policy : '');
-    const policy = ref ? effectiveResource(ref) : undefined;
-    if (ref && !policy) throw new PolicyError(503, "The tool's security policy is missing; refusing to serve it unprotected");
-    const who = await authorize(policy, ctx);
-    const g = (req as any).gw as GwInfo | undefined;
-    if (g) { g.caller = who.subject; g.appId = who.appId; }
-    return who;
-  };
-  /** Agents on this address follow the MCP server's policy. */
-  const serverAllowed = async () => {
-    const ref = srv?.config.policy || '';
-    const policy = ref ? effectiveResource(ref) : undefined;
-    if (ref && !policy) throw new PolicyError(503, "The MCP server's security policy is missing; refusing to serve it unprotected");
-    const who = await authorize(policy, ctx);
-    const g = (req as any).gw as GwInfo | undefined;
-    if (g) { g.caller = who.subject; g.appId = who.appId; }
-    return who;
-  };
-  const out: any[] = [];
-  for (const m of batch) {
-    if (!m || m.jsonrpc !== '2.0' || typeof m.method !== 'string') { out.push({ jsonrpc: '2.0', id: m?.id ?? null, error: { code: -32600, message: 'Invalid request' } }); continue; }
-    if (m.id === undefined || m.id === null) continue; // notification
-    const ok = (result: any) => out.push({ jsonrpc: '2.0', id: m.id, result });
-    const err = (code: number, message: string) => out.push({ jsonrpc: '2.0', id: m.id, error: { code, message } });
-    if (m.method === 'initialize') {
-      const asked = String(m.params?.protocolVersion || '');
-      reply.header('mcp-session-id', crypto.randomUUID());
-      ok({
-        protocolVersion: MCP_PROTOCOLS.includes(asked) ? asked : MCP_PROTOCOLS[0],
-        capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: 'SutraFlow', title: srv?.config.title || 'SutraFlow skills', version: sutraVersion },
-        instructions: srv?.config.instructions || 'Each tool runs a SutraFlow Sutra (an integration process) and returns its outcome. Read each tool description to choose one.',
-      });
-    } else if (m.method === 'ping') {
-      ok({});
-    } else if (m.method === 'tools/list') {
-      const list: any[] = [];
-      let denied: PolicyError | undefined;
-      for (const t of tools) {
-        try { await allowed(t); list.push(toolDefinition(t.node)); } catch (e: any) { denied ||= e; }
-      }
-      for (const t of agentTools) {
-        try { await serverAllowed(); list.push(t.def); } catch (e: any) { denied ||= e; }
-      }
-      if (!list.length && denied) {
-        if (denied.headers) reply.headers(denied.headers);
-        return reply.code(denied.status || 401).send({ jsonrpc: '2.0', id: m.id, error: { code: -32001, message: denied.message } });
-      }
-      ok({ tools: list });
-    } else if (m.method === 'tools/call') {
-      const name = String(m.params?.name || '');
-      const at = agentTools.find(x => x.def.name === name);
-      if (at) {
-        let who;
-        try { who = await serverAllowed(); } catch (e: any) {
-          const pe = e as PolicyError;
-          if (pe.headers) reply.headers(pe.headers);
-          return reply.code(pe.status || 401).send({ jsonrpc: '2.0', id: m.id, error: { code: -32001, message: pe.message } });
-        }
-        if (!String(m.params?.arguments?.message || '').trim() && !m.params?.arguments?.job) { ok(toolResult('Missing argument: message', true)); continue; }
-        ok(await callAgentTool(at.agent, m.params?.arguments || {}, who));
-        continue;
-      }
-      const t = tools.find(x => x.node.config.toolName === name);
-      if (!t) { err(-32602, `Unknown tool: ${name}`); continue; }
-      let caller;
-      try { caller = await allowed(t); } catch (e: any) {
-        const pe = e as PolicyError;
-        if (pe.headers) reply.headers(pe.headers);
-        return reply.code(pe.status || 401).send({ jsonrpc: '2.0', id: m.id, error: { code: -32001, message: pe.message } });
-      }
-      const args = m.params?.arguments && typeof m.params.arguments === 'object' ? m.params.arguments : {};
-      const def = toolDefinition(t.node);
-      const missing = ((def.inputSchema.required || []) as string[]).filter(k => args[k] === undefined || args[k] === null || args[k] === '');
-      if (missing.length) { ok(toolResult(`Missing argument${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}`, true)); continue; }
-      const input = { arguments: args, tool: name, auth: caller, client: { ip: req.ip, secure, name: String(req.headers['user-agent'] || ''), version: '' } };
-      try {
-        const { runId, reply: r } = await waitReply(onReply => engine.startRun({ doc: t.doc, flowId: t.flowId, projectId: t.projectId, version: t.version, triggerNodeId: t.node.id, input, source: 'mcp', onReply, traceparent: String(req.headers.traceparent || '') }), config.replyTimeoutMs);
-        reply.header('x-sutra-run', runId);
-        if (r.failed) { ok(toolResult(`The Sutra failed: ${r.error || 'unknown error'}`, true)); continue; }
-        const b = r.body;
-        const fromReply = b && typeof b === 'object' && 'result' in b && 'isError' in b;
-        ok(toolResult(fromReply ? b.result : b, fromReply ? !!b.isError : false));
-      } catch (e: any) {
-        ok(toolResult(e.runId !== undefined ? 'The Sutra did not reply in time' : e.message, true));
-      }
-    } else if (m.method === 'resources/list') {
-      ok({ resources: [] });
-    } else if (m.method === 'prompts/list') {
-      ok({ prompts: [] });
-    } else {
-      err(-32601, `Method not found: ${m.method}`);
-    }
-  }
-  if (!out.length) return reply.code(202).send();
-  return reply.code(200).type('application/json').send(JSON.stringify(Array.isArray(msg) ? out : out[0]));
-}
+// apps.ts caches the firewall for two seconds; a settings change invalidates its local cache.
+export const refreshFirewall = () => { /* retained for the stable gateway API */ };
 
 // ---------- listeners ----------
 
@@ -524,7 +414,7 @@ function tlsOptions() {
 
 export async function startGateway() {
   await stopGateway();
-  forgetStaleConnections();
+  await forgetStaleConnections();
   rebuildRoutes();
   const s = getGatewaySettings();
   gatewayStatus.error = '';

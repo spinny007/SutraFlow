@@ -87,12 +87,17 @@ function FieldInput({ f, value, onChange, resources, secrets, onFocusField }: {
   let input: React.ReactNode;
   switch (f.type) {
     case 'select':
-      input = <select id={id} value={value} onChange={e => onChange(e.target.value)}>{(f.options || []).map(o => <option key={o} value={o}>{o}</option>)}</select>;
-      break;
-    case 'bool':
-      return (
-        <div className="fld"><label className="check"><input type="checkbox" checked={!!value} onChange={e => onChange(e.target.checked)} /> {f.label}</label>{f.help && <div className="hint">{f.help}</div>}</div>
-      );
+      return <div className="fld"><label htmlFor={id}>{f.label}<VarPicker target={id} onInsert={onChange} /></label>
+        <select id={id} value={value} onChange={e => onChange(e.target.value)}>
+          {typeof value === 'string' && (value.startsWith('=') || value.includes('{{')) && <option value={value}>{value}</option>}
+          {(f.options || []).map(o => <option key={o} value={o}>{o}</option>)}
+        </select>{f.help && <div className="hint">{f.help}</div>}</div>;
+    case 'bool': {
+      const dyn = typeof value === 'string' && (value.startsWith('=') || value.includes('{{'));
+      return dyn
+        ? <div className="fld"><label htmlFor={id}>{f.label}<VarPicker target={id} onInsert={onChange} /></label><div className="row"><input id={id} type="text" className="code" value={value} onChange={e => onChange(e.target.value)} /><button type="button" className="btn small" onClick={() => onChange(false)}>Use fixed value</button></div>{f.help && <div className="hint">{f.help}</div>}</div>
+        : <div className="fld"><span className="lbl">{f.label}<VarPicker target={id} onInsert={onChange} /></span><label className="check"><input type="checkbox" checked={!!value} onChange={e => onChange(e.target.checked)} /> {value ? 'On' : 'Off'}</label>{f.help && <div className="hint">{f.help}</div>}</div>;
+    }
     case 'number': {
       // A number, or a variable / formula such as {{gv.TIMEOUT}}.
       const dyn = typeof value === 'string' && (value.startsWith('=') || value.includes('{{'));
@@ -118,11 +123,14 @@ function FieldInput({ f, value, onChange, resources, secrets, onFocusField }: {
     }
     case 'secret':
       input = (
-        <select id={id} value={value} onChange={e => onChange(e.target.value)}>
-          <option value="">(none)</option>
-          {secrets.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
-          {value && !secrets.some(s => s.name === value) && <option value={value}>{value} (not created yet)</option>}
-        </select>
+        <>
+          <select id={id} value={value} onChange={e => onChange(e.target.value)}>
+            <option value="">(none)</option>
+            {secrets.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
+            {value && !secrets.some(s => s.name === value) && <option value={value}>{value.includes('{{') ? value : `${value} (not created yet)`}</option>}
+          </select>
+          <VarPicker target={id} onInsert={onChange} />
+        </>
       );
       break;
     case 'schema':
@@ -151,7 +159,7 @@ function FieldInput({ f, value, onChange, resources, secrets, onFocusField }: {
       input = <input id={id} type="text" className={code || String(value).includes('{{') || String(value).startsWith('=') ? 'code' : ''} spellCheck={false} placeholder={f.placeholder} value={value} onChange={e => onChange(e.target.value)} onFocus={focus} {...dropProps(!!f.tpl)} />;
   }
   // Settings fields can use project ({{gv.X}}) and engine ({{ev.X}}) variables.
-  const picker = !f.tpl && (f.type === 'text' || f.type === 'list' || f.type === undefined)
+  const picker = !f.tpl && (f.type === 'text' || f.type === 'list' || f.type === undefined || !!f.vars)
     ? <VarPicker target={id} onInsert={ref => {
       const el = document.getElementById(id) as HTMLInputElement | HTMLTextAreaElement | null;
       if (el && document.activeElement === el) insertAtCaret(el, ref);
@@ -177,7 +185,7 @@ function KvInput({ f, rows, onChange, onFocusField }: { f: Field; rows: { k: str
       {rows.map((r, i) => (
         <div className="kv" key={i}>
           <input className="inp code" aria-label={`${f.label} name ${i + 1}`} value={r.k} spellCheck={false} onChange={e => set(i, 'k', e.target.value)} autoFocus={lastAdded.current && i === rows.length - 1} />
-          <input className="inp code" aria-label={`${f.label} value ${i + 1}`} value={r.v} spellCheck={false} onChange={e => set(i, 'v', e.target.value)} onFocus={e => f.tpl && onFocusField?.(e.currentTarget)} {...dropProps(!!f.tpl)} />
+          <span className="kv-var"><input className="inp code" aria-label={`${f.label} value ${i + 1}`} value={r.v} spellCheck={false} onChange={e => set(i, 'v', e.target.value)} onFocus={e => f.tpl && onFocusField?.(e.currentTarget)} {...dropProps(!!f.tpl)} />{!f.tpl && <VarPicker target={`${f.k}-${i}`} onInsert={ref => set(i, 'v', `${r.v || ''}${ref}`)} />}</span>
           <button className="x" aria-label="Remove row" onClick={() => onChange(rows.filter((_, j) => j !== i))}>✕</button>
         </div>
       ))}
@@ -206,7 +214,7 @@ function SchemaPick({ f, id, value, onChange }: { f: Field; id: string; value: s
 }
 
 /** Small menu that inserts a project or engine variable reference. */
-function VarPicker({ target, onInsert }: { target: string; onInsert(ref: string): void }) {
+export function VarPicker({ target, onInsert }: { target: string; onInsert(ref: string): void }) {
   const { project } = useCatalog();
   const [open, setOpen] = useState(false);
   const [engine, setEngine] = useState<{ name: string; description?: string }[] | null>(null);

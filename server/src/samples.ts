@@ -407,7 +407,7 @@ export function addSamples(projectId: string, ids?: string[]) {
   // Counter, Wait and Sutra variables.
   const counter = want('counter') && save({
     name: 'Sample: Counter, Wait and Sutra variables',
-    description: 'Set variables stores a batch name; Counter keeps a number per day across runs; Wait pauses; the log line uses the Sutra variable and the counter.',
+    description: 'Set Local Variable stores a batch name; Counter keeps a number per day across runs; Wait pauses; the log line uses the local variable and the counter.',
     variables: [{ name: 'batch', type: 'string', value: 'morning' }],
     nodes: [
       N('s', 'start', 'Start', 60, 200, { payload: '{}' }),
@@ -665,7 +665,7 @@ export function addSamples(projectId: string, ids?: string[]) {
   // Queue in and out (needs a broker connection).
   const queue = want('queue') && save({
     name: 'Sample: Queue in and out',
-    description: 'Message subscriber takes orders from the queue "orders.in" (acknowledge: explicit); Map data reshapes them; Publish message sends them to "orders.out" as persistent messages; Confirm message acknowledges. Pick an ActiveMQ, RabbitMQ or Kafka connection in both, then deploy.',
+    description: 'Queue / topic trigger takes orders from the queue "orders.in" (acknowledge: explicit); Map data reshapes them; Publish message sends them to "orders.out" as persistent messages; Confirm message acknowledges. Pick an ActiveMQ, RabbitMQ or Kafka connection in both, then deploy.',
     nodes: [
       N('t', 'busSubscribe', 'Orders in', 60, 200, { broker: 'amqp1', amqpConn: '', rabbitConn: '', kafkaConn: '', destinationType: 'queue', destination: 'orders.in', selector: '', durableName: '', groupId: 'sutraflow', fromBeginning: false, declare: true, messageType: 'JSON', ackMode: 'explicit', onFailure: 'requeue', maxRedeliveries: 5, concurrency: 1, testMessage: JSON.stringify({ orderId: 'A-12', qty: 2 }, null, 2) }),
       N('m', 'mapper', 'Reshape', 380, 200, { start: 'empty', schema: '', mapping: { rules: { id: { expr: '{input.body.orderId}' }, quantity: { expr: 'number({input.body.qty})' }, receivedAt: { expr: 'current-dateTime()' } } } }),
@@ -903,7 +903,7 @@ export function addSamples(projectId: string, ids?: string[]) {
 
   const queueAgent = ai && want('agentqueue') && save({
     name: 'Sample: Agent fed by a queue',
-    description: 'Message subscriber takes questions from the queue "agent.questions" ({"sessionId", "message", "replyTo"}); the agent answers each (one at a time per session, in arrival order); Publish message sends the answer to the queue named in replyTo; Confirm message acknowledges the question only after the answer is sent, so nothing is lost. Pick a RabbitMQ or ActiveMQ connection in both, then deploy.',
+    description: 'Queue / topic trigger takes questions from the queue "agent.questions" ({"sessionId", "message", "replyTo"}); the agent answers each (one at a time per session, in arrival order); Publish message sends the answer to the queue named in replyTo; Confirm message acknowledges the question only after the answer is sent, so nothing is lost. Pick a RabbitMQ or ActiveMQ connection in both, then deploy.',
     nodes: [
       N('t', 'busSubscribe', 'Questions', 60, 220, { broker: 'amqp1', amqpConn: '', rabbitConn: '', kafkaConn: '', destinationType: 'queue', destination: 'agent.questions', messageType: 'JSON', ackMode: 'explicit', onFailure: 'requeue', maxRedeliveries: 5, concurrency: 4, declare: true, testMessage: JSON.stringify({ sessionId: 'cust-42', message: 'Is Assam tea in stock?', replyTo: 'agent.answers' }, null, 2) }),
       N('a', 'aiAgent', 'Agent', 380, 220, { provider: ai.id, instructions: 'You answer customer questions for Asha Traders in one or two sentences.', task: '{{input.body.message}}', memory: memStore!.id, session: '{{input.body.sessionId}}', tools: 'all AI tools of this project', canAsk: false, maxSteps: 6, effort: 'low' }),

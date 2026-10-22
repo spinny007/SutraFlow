@@ -26,7 +26,7 @@ export const CHAPTERS: Chapter[] = [
 <li><strong>The engine</strong>, which runs Sutras step by step and saves each finished step, so runs survive a restart and long waits cost nothing.</li>
 <li><strong>The gateway</strong> on ports 8080 (HTTP) and 8443 (HTTPS), which serves deployed APIs, separately from the studio.</li>
 </ul>
-[[note:Words used in this guide|A <em>project</em> holds Sutras, shared resources (connections), schemas and variables. A <em>Sutra</em> is one process diagram. An <em>activity</em> is one box on it; a <em>step</em> is one execution of an activity in a run; a <em>run</em> is one execution of a Sutra. <em>Sutra variables</em> live for one run, <em>Project variables</em> are shared by a project's Sutras, and <em>Sengine variables</em> are server settings made by the administrator.]]
+[[note:Words used in this guide|A <em>project</em> holds Sutras, shared resources (connections), schemas and properties. A <em>Sutra</em> is one process diagram. An <em>activity</em> is one box on it; a <em>step</em> is one execution of an activity in a run; a <em>run</em> is one execution of a Sutra. <em>Local variables</em> live for one run, <em>Project properties</em> are shared by a project's Sutras, and <em>Engine properties</em> are server settings made by the administrator.]]
 [[img:designer|The Designer: palettes on the left, the process in the middle, the selected activity's tabs on the right.]]`,
   },
   {
@@ -36,8 +36,8 @@ export const CHAPTERS: Chapter[] = [
 <p class="h">From a release (servers)</p>
 <p>Each release comes as <code>sutraflow-&lt;version&gt;-windows.zip</code> and <code>sutraflow-&lt;version&gt;-linux.tar.gz</code>, already built, each with a <code>.sha256</code> file; offline archives with the packages inside are there for servers without access to the npm registry. <code>RELEASE-NOTES.md</code> in the archive has the steps for each system and for upgrades.</p>
 <ol>
-<li>Check the download: <code>sha256sum -c sutraflow-1.9.1-linux.tar.gz.sha256</code>, or on Windows <code>Get-FileHash sutraflow-1.9.1-windows.zip -Algorithm SHA256</code> against the <code>.sha256</code> file.</li>
-<li>Unpack it: <code>tar -xzf sutraflow-1.9.1-linux.tar.gz -C /opt/sutraflow</code>, or <code>Expand-Archive sutraflow-1.9.1-windows.zip C:\\SutraFlow</code>.</li>
+<li>Check the download: <code>sha256sum -c sutraflow-2.0.0-linux.tar.gz.sha256</code>, or on Windows <code>Get-FileHash sutraflow-2.0.0-windows.zip -Algorithm SHA256</code> against the <code>.sha256</code> file.</li>
+<li>Unpack it: <code>tar -xzf sutraflow-2.0.0-linux.tar.gz -C /opt/sutraflow</code>, or <code>Expand-Archive sutraflow-2.0.0-windows.zip C:\\SutraFlow</code>.</li>
 <li>In the unpacked folder: <code>bin/sutraflow setup</code> (Windows: <code>bin\\sutraflow.cmd setup</code>) installs the runtime packages and makes <code>sutraflow.env</code>.</li>
 <li><code>bin/sutraflow start</code>, then open <code>http://127.0.0.1:4800</code> and create the administrator account.</li>
 </ol>
@@ -187,6 +187,7 @@ export const CHAPTERS: Chapter[] = [
 <p><strong>Clear log</strong> empties the file and its rotated copies; <strong>Clear test runs</strong> deletes the finished test and debug runs of the project and keeps deployed runs. Developers may do both on development and test servers; on a production server only an administrator may. Both are recorded in the audit log.</p>
 <p class="h">Missing project variables</p>
 <p>When a step reads a project variable the project does not define (<code>{{gv.X}}</code>, <code>{gv.X}</code>, <code>$gv.X</code> in JSONata or <code>get-project-variable('X')</code>), the activity shows ⚠ on the canvas and a warning at the top of its tabs, and it reads as empty while running. The same warning shows on a connection that reads one, and on every step that uses that connection. <strong>Add to project variables</strong> adds the missing names; give them values under <em>Configuration &gt; Project variables</em>. <em>Deploy</em> lists the same warnings.</p>
+<p>Every palette supports Project properties. General settings such as a folder, address, API path, schedule, queue, mailbox, model, limit or SQL text show <strong>{x}</strong> where a property can be inserted; mapped Input fields may use <code>{gv.NAME}</code> in formulas. Connection settings, including nested headers, are resolved the same way. For SQL, use Project properties only for administrator-controlled statement text such as a table or schema name, and keep request data in bound <code>:name</code> parameters.</p>
 <p class="h">Add a connection</p>
 <ol>
 <li>Next to <em>Resources</em>, click <strong>+</strong> and choose the kind, for example <em>HTTP connection</em>.</li>
@@ -226,7 +227,7 @@ export const CHAPTERS: Chapter[] = [
 <li><strong>Restricted mode</strong>: a clone opens restricted. Steps that run code or commands from the repository (PowerShell, shell scripts, programs, JavaScript, release steps, MCP commands) do not run until you click <strong>Trust the authors</strong>. Reading, editing and other steps work as usual.</li>
 </ul>
 <p class="h">Your own Git account</p>
-<p><strong>My Git accounts</strong> holds your personal access tokens for each server. They are encrypted, never shown again, and used only for your pull and push; nobody else, not even an administrator, can see them or push with them. Commits carry the account's author name and email, or your own. Each provider says which token to make (GitHub: a fine-grained token with Contents read and write). Public repositories clone without an account. Sign-in with a GitHub, GitLab or Bitbucket button comes later, once an administrator registers an app with them.</p>
+<p><strong>My Git accounts</strong> holds your personal access tokens for each server. They are encrypted, never shown again, and used only for your pull and push; nobody else, not even an administrator, can see them or push with them. Commits carry the account's author name and email, or your own. Each provider says which token to make (GitHub: a fine-grained token with Contents read and write). Public repositories clone without an account. OAuth sign-in buttons are not available; connect a personal access token.</p>
 <p class="h">Working with changes</p>
 [[img:git-changes|A project in Git: branch main, two changed Sutras (M changed, A added), the commit message, and the graph.]]
 <ol>
@@ -247,7 +248,7 @@ export const CHAPTERS: Chapter[] = [
     html: `
 <ol>
 <li>Click <strong>+ New Sutra</strong>, type its name, and choose a starter or start blank.</li>
-<li>Drag a <strong>trigger</strong> from the Triggers palette (or keep Manual start). A Sutra has one trigger.</li>
+<li>Drag a process starter (or keep Manual start). Starters carry a green <strong>▶</strong>: the common ones are in Triggers, while file, remote-file, email, queue/topic, cloud, chat, ADF, agent and MCP starters stay beside their related activities. A Sutra has one starter.</li>
 <li>Drag activities onto the canvas. Search the palettes with the box at the top.</li>
 <li>Connect an activity's output (a circle on its right) to the next activity's input (on its left). Activities with several outputs, such as [[if]] or [[router]], have one circle per output.</li>
 <li>Select each activity and fill in its tabs.</li>
@@ -266,7 +267,7 @@ export const CHAPTERS: Chapter[] = [
 <p>Click a connection to name it and decide when it is taken. The name and condition show on the canvas.</p>
 <table class="t"><thead><tr><th>Taken</th><th>Meaning</th></tr></thead><tbody>
 <tr><td><strong>Always</strong></td><td>Every time the activity finishes on that output. The default.</td></tr>
-<tr><td><strong>When a condition is true</strong></td><td>A formula on the previous activity's output, which it reads as <code>{input.x}</code>; for example <code>={input.amount} &gt; 1000</code> named <em>Order &gt; 1000</em>. Several "when" connections can be taken together.</td></tr>
+<tr><td><strong>When a condition is true</strong></td><td>A formula on the previous activity's output, which it reads as <code>{input.x}</code>. Browse <strong>Condition data</strong> to insert the previous activity, earlier activities, trigger data, Local variables or Project/Engine properties; the <strong>{x}</strong> button is the quick Project/Engine picker. For example, <code>={input.amount} &gt; {gv.LIMIT}</code> can be named <em>Over project limit</em>. Several "when" connections can be taken together.</td></tr>
 <tr><td><strong>Otherwise</strong></td><td>Taken when none of the "when" connections from the same output was taken.</td></tr>
 </tbody></table>
 <p>A connection that is not taken counts as a skipped branch, so a [[merge]] after it still continues. For many routes, or for routes on the same message used in several places, a [[router]] activity keeps them in one place.</p>
@@ -297,7 +298,7 @@ export const CHAPTERS: Chapter[] = [
     id: 'tabs', title: 'The activity tabs',
     html: `
 <table class="t"><thead><tr><th>Tab</th><th>What it holds</th></tr></thead><tbody>
-<tr><td><strong>General</strong></td><td>The activity's name and its fixed settings: folders, URLs, methods, connections, formats. Fields with <strong>{x}</strong> accept project and Sengine variables (<code>{{gv.OUTBOX}}</code>, <code>{{ev.REGION}}</code>) and <code>=</code> formulas. <em>Map inputs</em> opens the Input tab.</td></tr>
+<tr><td><strong>General</strong></td><td>The activity's name and its fixed settings: folders, URLs, methods, connections, formats. Fields with <strong>{x}</strong> accept Project and Engine properties (<code>{{gv.OUTBOX}}</code>, <code>{{ev.REGION}}</code>) and <code>=</code> formulas. <em>Map inputs</em> opens the Input tab.</td></tr>
 <tr><td><strong>Input</strong></td><td>The mapper: values that come from earlier activities (see <a href="#ch-mapping">Mapping data</a>).</td></tr>
 <tr><td><strong>Output</strong></td><td>The fields this activity produces, before any run; after a run, the values it received and produced.</td></tr>
 <tr><td><strong>Settings</strong></td><td>Retries with a growing delay, a timeout, a breakpoint for debugging, and <em>skip this activity</em>.</td></tr>
@@ -351,8 +352,7 @@ export const CHAPTERS: Chapter[] = [
 =count({input.rows}[Amount &gt; 1000])
 ={input.rows}[1].City                                  first row, then a field
 =xs:integer({input.qty})
-=concat({gv.OUT}, '\\', current-timestamp('YYYYMMDD'), '.csv')
-=set-project-variable('LAST_RUN', current-dateTime())</pre>
+=concat({gv.OUT}, '\\', current-timestamp('YYYYMMDD'), '.csv')</pre>
 <p>Backslashes in quoted text are literal, so Windows paths need no escaping. Write a quote twice to include it: <code>'O''Brien'</code>. Function names ignore case. Every function is listed in <a href="#ch-functions">Function reference</a>.</p>
 <p class="h">Templates in text fields</p>
 <p>Text fields such as an email body or a log message use <code>{{ }}</code> templates with pipes: <code>Order {{input.id | upper}} for {{input.amount | number:2}}</code>. The pipes are listed in <a href="#ch-pipes">Template pipes</a>.</p>
@@ -373,12 +373,13 @@ export const CHAPTERS: Chapter[] = [
     id: 'variables', title: 'Variables and the deployment config',
     html: `
 <table class="t"><thead><tr><th>Kind</th><th>Read as</th><th>Set where</th><th>Lifetime</th></tr></thead><tbody>
-<tr><td><strong>Sutra variables</strong></td><td><code>{vars.name}</code></td><td>Sutra properties; [[setVar]]</td><td>One run.</td></tr>
-<tr><td><strong>Project variables</strong></td><td><code>{gv.NAME}</code>, <code>{{gv.NAME}}</code>, <code>get-project-variable('NAME')</code></td><td>Project &rarr; Configuration; the deployment config; <code>set-project-variable</code></td><td>Kept; a value set at run time lasts until the server restarts or the config changes.</td></tr>
-<tr><td><strong>Sengine variables</strong></td><td><code>{ev.NAME}</code>, <code>{{ev.NAME}}</code>, <code>get-sengine-variable('NAME')</code></td><td>Admin Console → Server → Runtime</td><td>Kept; shared by every project on the server. Sutras read them only.</td></tr>
+<tr><td><strong>Local variables</strong></td><td><code>{vars.name}</code>; [[getVar]]</td><td>[[setVar]] in the Sutra</td><td>One run; saved with a durable wait or restart.</td></tr>
+<tr><td><strong>Project properties</strong></td><td><code>{gv.NAME}</code>, <code>{{gv.NAME}}</code>, <code>get-project-variable('NAME')</code>; [[getProperties]]</td><td>Project &rarr; Configuration or the deployment config, by an administrator</td><td>Shared by this project's Sutras; read-only to Sutras.</td></tr>
+<tr><td><strong>Engine properties</strong></td><td><code>{ev.NAME}</code>, <code>{{ev.NAME}}</code>, <code>get-engine-variable('NAME')</code>; [[getProperties]]</td><td>Admin Console → Server → Runtime</td><td>Shared by every project on the server; read-only to Sutras.</td></tr>
 </tbody></table>
-<p>Project variables have a type: string, number, boolean or secret. A secret variable holds the name of a vault secret, never the value.</p>
-[[tip:Read Sengine variables, do not change them|Sengine variables are mostly engine settings (a region, a data centre, a shared folder) that every project relies on. Read them in Sutras; change them only in <strong>Admin Console → Server → Runtime</strong>. <code>set-sengine-variable</code> works only when the administrator ticks <em>Allow Sutras to change Sengine variables</em>, and one Sutra could then change the behaviour of every project.]]
+<p>Project properties have a type: string, number, boolean or secret. A secret property holds the name of a vault secret, never the value. <strong>Get Properties</strong> never returns secret Project properties. Only an administrator changes Project or Engine properties; the engines discard their cached copy immediately on this engine and through the cluster deployment signal on the others.</p>
+<p>The same properties work throughout every palette. Use the <strong>{x}</strong> button in General settings, use <code>{gv.NAME}</code> in mapped Input formulas, and use them in connections. Gateway paths and limits, Timer schedules and listener settings are resolved when deployed listeners are rebuilt. SQL statement fields accept them for administrator-controlled identifiers and clauses; values coming from a request or an earlier step must remain bound <code>:name</code> parameters.</p>
+[[tip:Use the right scope|Use Local variables for values calculated during one run, Project properties for environment configuration shared inside one project, and Engine properties only for values shared by every project on a server.]]
 <p class="h">The deployment config file</p>
 <p>Operations staff change settings per environment without opening the studio. The deployment config holds overrides for project variables, resource settings (hosts, ports, URLs, queue names) and logging. Export it from the project, edit it, and import it, or place it at <code>data/config/&lt;project&gt;.json</code>.</p>
 <pre>{
@@ -387,6 +388,7 @@ export const CHAPTERS: Chapter[] = [
   "logging":   { "path": "D:\\\\logs\\\\orders.log", "level": "info" }
 }</pre>
 <p><code>\${env:NAME}</code> reads an environment variable of the server; <code>\${env:NAME:-default}</code> gives a default.</p>
+<p>Renaming a project keeps its stable id and also renames its <code>data/files/&lt;project&gt;</code> folder and matching <code>data/config/&lt;project&gt;.json</code> deployment config, including the config's project name.</p>
 <p class="h">Logging</p>
 <p>Each project writes its own log file: path, level, text or JSON lines, rotation by size, and optionally each step's input and output. Set it under Configuration or in the deployment config.</p>`,
   },
@@ -448,7 +450,7 @@ export const CHAPTERS: Chapter[] = [
 <ol>
 <li><strong>Trigger.</strong> A deployed trigger fires: a REST call on the gateway, a timer, a new file, a queue message, a Drive or SharePoint change, an AI tool call, a chat message; or a person presses Test, or another Sutra calls this one. The engine writes the run row (status <em>running</em>) and a task for the trigger step (<em>pending</em>), in one transaction. When the Sutra's <em>Runs at once</em> limit is reached, the run is <em>queued</em> instead and starts when another one ends.</li>
 <li><strong>Claim.</strong> Every engine has a number of workers (<em>Steps at once</em>, 16 by default). A free worker takes the next due task in one database statement: highest Sutra priority first, then the oldest; due means its not-before time has passed. With several engines on one database, exactly one of them wins each task and records itself as its owner. Engines look for work every quarter of a second, and at once when a step ends.</li>
-<li><strong>Prepare.</strong> The step sees: <code>{input}</code> (what the previous step sent on the connection), <code>{nodes.Step name}</code> (any earlier step's output), <code>{trigger}</code>, <code>{vars}</code> (Sutra variables), <code>{gv}</code> (project variables with the deployment config applied), <code>{ev}</code> (Sengine variables), <code>{run}</code> and secrets by name. Settings and mappings are resolved now, not earlier.</li>
+<li><strong>Prepare.</strong> The step sees: <code>{input}</code> (what the previous step sent on the connection), <code>{nodes.Step name}</code> (any earlier step's output), <code>{trigger}</code>, <code>{vars}</code> (Local variables), <code>{gv}</code> (Project properties with the deployment config applied), <code>{ev}</code> (Engine properties), <code>{run}</code> and secrets by name. Settings and mappings are resolved now, not earlier.</li>
 <li><strong>Execute.</strong> The activity runs within its time limit (the step's Settings, else the activity's own: 2 minutes for most, 10 for AI steps, longer for data platform steps). A step set to loop runs here many times: <em>for each item</em> one after the other, <em>repeat while</em> until the condition is false.</li>
 <li><strong>Checkpoint.</strong> In one transaction the engine stores the step's output (one row per step, apart from the run state), marks the task done, and inserts tasks for the next steps. This is the checkpoint: if the engine stops after it, nothing is lost and nothing is repeated.</li>
 <li><strong>Route.</strong> The output goes out on one port (<em>out</em>, <em>true</em>, <em>error</em>, <em>approved</em> ...). Each connection from that port carries a <em>live</em> token, or a <em>skip</em> token when its condition is false or the port was not used. A step runs once for each live token that reaches it. A <strong>Merge</strong> step waits until every incoming connection has delivered a token (live or skip) and then runs once with the live ones; so a branch not taken never blocks it.</li>
@@ -732,15 +734,33 @@ curl http://127.0.0.1:8080/orders/A-1001 -H "Authorization: Bearer ACCESS_TOKEN"
 <li><strong>X.509</strong>: paste the callers' certificates, or the CA that issues them, into <em>Trusted certificates</em>. A changed body, an untrusted or expired certificate, an unsigned Timestamp or a second Body is refused.</li>
 <li><strong>SAML</strong>: paste the identity provider's signing certificate, and set the issuer and audience.</li>
 <li><strong>Encrypted requests</strong>: put this service's private key in the vault and pick it under <em>XML encryption</em>; give callers the matching certificate. Requests encrypted for it are decrypted first (AES-GCM or AES-CBC, keys by RSA-OAEP; RSA 1.5 is refused), then checked. <em>Require an encrypted body</em> refuses plain ones.</li>
+<li><strong>Encrypted responses</strong>: choose <em>caller certificate</em> to encrypt replies for the certificate in a successfully verified X.509 request, or <em>configured certificate</em> and paste the recipient certificate for UsernameToken, SAML or another caller. Successful replies and faults after authentication are encrypted; a failure before a caller certificate is trusted stays a plain SOAP fault. AES-GCM is the default; use CBC only for an older partner.</li>
 </ul>
 [[img:resources|Resources: an API security policy using API keys held in the vault.]]
 <p class="h">TLS certificate of the gateway</p>
 <ul>
 <li><strong>Self-signed</strong>: for testing.</li>
 <li><strong>Own certificate</strong>: paste the PEM chain and key; the key is checked against the certificate and stored encrypted.</li>
-<li><strong>Let's Encrypt</strong>: enter the domains and an email. The gateway's HTTP port must be reachable as port 80 on each domain. Start with staging; certificates renew 30 days before they expire, without dropping connections.</li>
+<li><strong>Let's Encrypt</strong>: SutraFlow uses ACME to ask Let's Encrypt for a publicly trusted certificate and renew it automatically. No certificate files need to be copied by hand.</li>
 <li><strong>Client CA</strong>: enables mutual TLS for policies that use it.</li>
 </ul>
+<p class="h">Issue a Let's Encrypt certificate</p>
+<p>Before requesting one:</p>
+<ul>
+<li>Use public DNS names that resolve to the firewall, load balancer or machine in front of this gateway. Let's Encrypt does not issue a certificate for <code>localhost</code> or a private-only host name.</li>
+<li>Make public TCP port 80 reach the gateway's HTTP listener for every name. Forwarding public port 80 to a different internal gateway HTTP port is fine. Keep HTTP available for later renewals.</li>
+<li>Allow the server to make outbound HTTPS connections to Let's Encrypt. A reverse proxy must pass <code>/.well-known/acme-challenge/</code> to the SutraFlow gateway unchanged rather than authenticating it.</li>
+<li>Know the contact email and be authorised to accept the Let's Encrypt Subscriber Agreement. Wildcard names are not supported because SutraFlow uses the HTTP-01 challenge, not DNS-01.</li>
+</ul>
+<p>SutraFlow does not require an OpenSSL program for this operation. Certificate keys, the CSR and ACME signatures use Node's cryptography inside the server. OpenSSL is used only by the development release gate when it creates a temporary TLS test server.</p>
+<ol>
+<li>Open <strong>Admin Console &rarr; Server &rarr; Gateway &amp; TLS</strong>. Confirm the gateway bind address and its HTTP and HTTPS ports.</li>
+<li>Select <strong>Let's Encrypt</strong>, enter the names separated by commas (the first becomes the common name), and enter the contact email.</li>
+<li>For the first attempt, select <strong>Use the staging environment</strong>. Accept the Subscriber Agreement and choose <strong>Request certificate</strong>.</li>
+<li>Watch the status shown below the button. Test HTTPS after it succeeds. A staging certificate is deliberately untrusted; it proves that DNS, forwarding and the challenge route work.</li>
+<li>Clear staging and request again to obtain the trusted production certificate. The HTTPS listener reloads the certificate without dropping existing connections.</li>
+</ol>
+<p>The server checks twice a day. When fewer than 30 days remain it repeats the same HTTP-01 proof and installs the renewed certificate. The ACME account key and certificate private key are stored encrypted with this server's master key. In a cluster, a database lease lets one engine place the order, every gateway can answer its shared HTTP-01 tokens, and all engines reload the new certificate on their next heartbeat. The load balancer may therefore send the challenge to any healthy gateway node.</p>
 <p>TLS 1.2 is the minimum.</p>`,
   },
   {
@@ -770,11 +790,13 @@ curl http://127.0.0.1:8080/orders/A-1001 -H "Authorization: Bearer ACCESS_TOKEN"
   {
     id: 'messaging', title: 'Messaging: Kafka, RabbitMQ and ActiveMQ',
     html: `
-<p>The Service Bus palette works the JMS way: [[busPublish]] sends, [[busSubscribe]] starts a run per message, and [[busConfirm]] acknowledges at a point you choose.</p>
+<p>The Service Bus palette works the JMS way: [[busPublish]] sends, the <strong>Queue / topic trigger</strong> [[busSubscribe]] starts a run per message, and [[busConfirm]] acknowledges at a point you choose. It is a process starter even though it stays in the Service Bus palette, where its green ▶ identifies it.</p>
 <ul>
 <li>Put queue and topic names in project variables (<code>{{gv.ORDER_QUEUE}}</code>) so each environment can use its own.</li>
 <li>JMS headers: delivery mode (persistent or not), priority, time to live, message id, correlation id, reply-to and type; plus your own properties.</li>
 <li>Acknowledgement: <em>auto</em> on receipt, <em>client</em> after the run succeeds, <em>explicit</em> with Confirm message. On failure: requeue, or send to the dead-letter queue after a number of redeliveries.</li>
+<li>Only the elected leader subscribes. With duplicate protection on, Kafka topic/partition/offset or the RabbitMQ/AMQP message id is stored before the run starts. After failover, the new leader waits for an existing active run or acknowledges an already completed one instead of starting it again.</li>
+<li>Kafka always supplies an offset identity. RabbitMQ and AMQP publishers should assign a unique message id. When no identity is supplied, or duplicate protection is switched off, delivery remains at least once and activities with outside effects should use an idempotency key.</li>
 </ul>`,
   },
   {
@@ -835,6 +857,8 @@ ws.onopen = () =&gt; ws.send(JSON.stringify({ type: 'watch', orderId: 'A-1001' }
 <p class="h">SFTP and FTP servers</p>
 <p>The <strong>SFTP / FTP</strong> palette works with files on another server: [[remoteTrigger]], [[remoteList]], [[remoteRead]], [[remoteWrite]] and [[remoteMove]]. Each step names the protocol and an <em>SFTP server</em> or <em>FTP server</em> connection.</p>
 <ul>
+<li>Keep the server settings in that shared connection; do not repeat host names or credentials in activities. Every remote-file activity and trigger selects the connection in the designer and resolves it again on the engine at runtime.</li>
+<li>Host, port, user, base folder, limits and even the <em>name</em> of the password or key secret can use Project variables such as <code>{{gv.FTP_HOST}}</code>. Deployment configuration has the last word, so an administrator can give test and production different values before deployment without editing the Sutra. Secret values themselves stay in each server's vault.</li>
 <li><strong>SFTP</strong> signs in with a password or a private key from the vault. Paste the server's <em>host key fingerprint</em> (Test connection shows it, as <code>SHA256:...</code>) so a different server is refused.</li>
 <li><strong>FTP</strong> uses explicit TLS (FTPS) by default; implicit TLS and plain FTP are there for old servers.</li>
 <li>The <em>base folder</em> fences the steps in: a path such as <code>../../etc</code> is refused.</li>
@@ -867,9 +891,9 @@ ws.onopen = () =&gt; ws.send(JSON.stringify({ type: 'watch', orderId: 'A-1001' }
 [[note:Small data only|Memory tables are for values looked up often, not for big tables or files: each has a limit of rows and megabytes (10,000 rows and 16 MB by default, at most 100,000 and 256 MB), and a load query that returns more is refused. Big data stays in the database; big files are streamed in batches.]]
 <p class="h">Where the rows come from</p>
 <ul>
-<li><strong>A load query</strong> on a database connection loads the table at first use, and again every <em>Refresh every</em> minutes. A <code>WHERE</code> clause loads only the part that is looked up often (active products, this year's rates).</li>
+<li><strong>A load query</strong> on an Oracle, SQL Server, MySQL, PostgreSQL or SQLite connection loads the table at first use and on demand, at an interval, or from a cron expression with an IANA time zone. A <code>WHERE</code> clause loads only the part that is looked up often (active products, this year's rates).</li>
 <li><strong>A lookup query</strong> (optional) fetches a row that is not in memory, such as <code>SELECT ... WHERE code = :key</code>, and keeps it: the rest of a table is read only when asked for.</li>
-<li><strong>Sutras</strong> add and change rows with [[memPut]]; an administrator can change a value by hand in the Admin Console.</li>
+<li><strong>Sutras</strong> add and change cached rows with [[memPut]]; this never updates the external source database. An administrator can change a cached value by hand in the Admin Console.</li>
 <li>Rows can expire after a time (<em>Rows expire after</em>), and when the table is full the least recently used rows go first.</li>
 </ul>
 <p class="h">Failsafe</p>
@@ -883,18 +907,21 @@ ws.onopen = () =&gt; ws.send(JSON.stringify({ type: 'watch', orderId: 'A-1001' }
 <ul>
 <li>Each engine keeps a table as a key-value map in its own Node.js process (a JavaScript <code>Map</code> that also keeps the order of use, for dropping the least recently used rows). There is no extra server to run.</li>
 <li>The failsafe copy is two tables of the SutraFlow database (SQLite or PostgreSQL): <code>mem_rows</code> holds each row with the version of the change that wrote it, <code>mem_meta</code> the latest version per table. An engine compares versions at most once a second (<code>SUTRA_MEMORY_SYNC_MS</code>) and reads only the rows changed since.</li>
-<li>Reads (Memory get, memory-lookup) cost no database work while the table is in sync.</li>
-<li>Connection details and Project and Sengine variables are kept in memory the same way, for the <em>Settings refresh</em> time, and cleared at once when they change.</li>
+<li>Reads (Get Memory Record, memory-lookup) cost no database work while the table is in sync.</li>
+<li>A refresh builds and validates a replacement first, then swaps it atomically. A failed query, missing key or quota failure leaves the last good table available.</li>
+<li>For a failsafe table, only the cluster leader runs a scheduled refresh; after failover the new leader continues. A memory-only table refreshes independently on every engine.</li>
+<li>Connection details and Project and Engine properties are cached for the <em>Settings refresh</em> time and cleared when administrators change them.</li>
 </ul>
 <p class="h">The Admin Console</p>
 [[img:console-memory|Admin Console, Memory tables: each table with its rows, memory and hit rate; an open table with its settings and rows, a page at a time]]
-<p><strong>Operate &rarr; Memory tables</strong> lists every table with its project, rows and memory against its limits, hit rate, when it was loaded and its failsafe, filtered by project, name or failsafe. Open a table to see its settings (key, source, queries, refresh, expiry, limits) and its rows a page at a time, found by text or by a field's value.</p>
+<p><strong>Operate &rarr; Memory tables</strong> lists every table with its project, rows and memory against its limits, hit rate, when it was loaded and its failsafe, filtered by project, name or failsafe. An administrator configures the source connection and queries, interval or cron refresh, time zone and table limits there; sets cluster and per-project record/MB quotas; and opens a table to inspect records, their approximate size and expiry.</p>
 <ul>
 <li><strong>Reload</strong> is a hot reload: this engine loads the table again now, and every other engine within a second. Sutras keep running.</li>
 <li><strong>Edit</strong>, <strong>Add row</strong> and <strong>Remove</strong> change a single value by hand, such as a rate, without a deploy.</li>
 <li><strong>Clear</strong> empties the table; a lookup query fills it again as rows are asked for.</li>
 <li>The same from a command line: <code>sutra memory list</code>, <code>rows</code>, <code>reload</code>, <code>clear</code>, <code>set</code> and <code>remove</code>.</li>
 </ul>
+<p>Project release packages carry a Memory-table deployment descriptor: key fields, source database name and driver, referenced source objects, load and lookup queries, refresh/time zone, limits and failsafe mode. Package preflight rejects a missing database dependency, unsupported driver, empty load query, invalid cron expression or invalid limits before deployment.</p>
 [[tip:Good uses|Values read on almost every run and changed rarely: rates, codes, mappings between systems, limits, feature switches. Keep it durable in your own database too when it matters (the memory table is a fast copy), and prefer a load query with a WHERE clause plus a lookup query over loading a whole table.]]`,
   },
   {
@@ -1384,17 +1411,17 @@ print(json.dumps({"total": 42}))                              # the last line, a
   {
     id: 'secrets', title: 'Secrets and studio security',
     html: `
-<p class="h">Single sign-on (OpenID Connect)</p>
-<p>People can sign in to the designer and the Admin Console with your identity provider (Microsoft Entra ID, Okta, Keycloak, Google, Auth0 or any OpenID Connect provider). Password sign-in stays available, so an administrator can always get in.</p>
+<p class="h">Single sign-on (OpenID Connect or SAML 2.0)</p>
+<p>People can sign in to the designer, Admin Console and Approval Center with an OpenID Connect or SAML 2.0 identity provider (Microsoft Entra ID, Okta, Keycloak, Google, Auth0 and compatible providers). Password sign-in stays available, so an administrator can always get in.</p>
 <ol>
-<li>At the provider, register an application (a web app, authorization code flow) and note its client id and secret. Register the redirect address shown in SutraFlow (Admin Console &rarr; Users &rarr; Single sign-on), such as <code>https://sutra.example.com/api/auth/sso/callback</code>. Behind a proxy, set <code>SUTRA_PUBLIC_URL</code> so the address is the one people use.</li>
-<li>Ask the provider to put the person's groups in the ID token (a <code>groups</code> claim).</li>
-<li>Put the client secret in the vault, then fill in <em>Single sign-on</em>: issuer, client id, secret, the claim for the username, the groups claim.</li>
+<li>Open Admin Console &rarr; Users &rarr; Single sign-on and choose <em>OpenID Connect</em> or <em>SAML 2.0</em>. Register the callback address shown there, such as <code>https://sutra.example.com/api/auth/sso/callback</code>. Behind a proxy, set <code>SUTRA_PUBLIC_URL</code> so it is the public address people use.</li>
+<li>For OpenID Connect, register a web application using the authorization-code flow, put its client secret in the vault, then enter the issuer, client id, secret name and claims. Ask the provider to include the person's groups in the ID token.</li>
+<li>For SAML, register SutraFlow as a service provider using the HTTP-POST response binding. Enter the identity-provider Redirect SSO address, the service-provider entity id/audience, the IdP issuer and its signing certificate. Choose the assertion attributes for username and groups, or use <code>NameID</code> as the username.</li>
 <li>Map groups to roles: <code>sutra-admins</code> to Administrator on all projects, <code>shop-team</code> to Operator on the Shop project. At every sign-in a person's roles become those of their groups.</li>
 <li>Choose <em>Create accounts</em> (people get an account at their first sign-in) and, only when the provider controls usernames, <em>Link existing accounts</em>.</li>
 <li>Turn on <em>Offer single sign-on</em>. The sign-in pages show <em>Sign in with</em> your provider.</li>
 </ol>
-<p>The sign-in uses the authorization code flow with PKCE, a state and a nonce; the ID token's signature, issuer, audience and expiry are checked against the provider's published keys. A person is recognised by the provider's subject, so a renamed account stays the same person. Sign-ins with single sign-on are in the audit log.</p>
+<p>OpenID Connect uses the authorization-code flow with PKCE, state and nonce; the ID token's signature, issuer, audience and expiry are checked against the provider's published keys. SAML responses must carry a trusted signature and a single assertion bound to the one-time sign-in request, callback address, entity id, issuer and validity period; the state is stored briefly in the shared database so a cross-site POST works on any cluster engine and cannot be replayed. A person is recognised by the provider subject or SAML NameID, so a renamed account stays the same person. Sign-ins with either protocol are in the audit log.</p>
 <p class="h">The vault and sessions</p>
 <ul>
 <li>Passwords, keys and tokens live in the <strong>vault</strong> (Resources &rarr; Secrets), encrypted with AES-256-GCM. Settings hold the secret's <em>name</em>.</li>
@@ -1596,7 +1623,7 @@ stages:
   post { success { archiveArtifacts 'release.zip' } }
 }</pre>
 <p class="h">Container images</p>
-<p>For immutable production, bake the release into an engine image: <code>FROM sutraflow:1.9.1</code>, <code>COPY release.zip /deploy/</code>, and start it with <code>SUTRA_MODE=engine SUTRA_DEPLOY_DIR=/deploy</code>; the engine deploys every package in the folder at start. A new release is a new image.</p>
+<p>For immutable production, bake the release into an engine image: <code>FROM sutraflow:2.0.0</code>, <code>COPY release.zip /deploy/</code>, and start it with <code>SUTRA_MODE=engine SUTRA_DEPLOY_DIR=/deploy</code>; the engine deploys every package in the folder at start. A new release is a new image.</p>
 [[tip:Good practice|One zip, many environments: build once, deploy the same artifact to UAT and production.<br>Give each environment its own system account and token, with Deploy on the project only.<br>Let the pipeline fail on <code>sutra check</code> before anything changes; keep rollback one command away.<br>Store the zip with the pipeline run: it is the record of exactly what went live.]]`,
   },
   {
@@ -1852,9 +1879,9 @@ tools/migrate-to-postgres.sh --url "postgres://sutra:password@db.example.com:543
 <p class="h">Headless engines</p>
 <p>The same program started with <code>SUTRA_MODE=engine</code> runs Sutras without the studio: no designer pages and no editing. It keeps <code>/health</code>, <code>/ready</code> and <code>/metrics</code>, the Admin Console at <code>/admin</code> for its users, and an automation API for API tokens (the admin token or system account tokens). Packages in <code>SUTRA_DEPLOY_DIR</code> are deployed when it starts; a package that cannot be deployed stops the start.</p>
 <p class="h">Docker</p>
-<pre>docker build -t sutraflow:1.9.1 .
+<pre>docker build -t sutraflow:2.0.0 .
 docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=... \\
-           -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:1.9.1</pre>
+           -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:2.0.0</pre>
 <p>The image runs as a non-root user, checks its own health, and writes JSON logs. <code>docker-compose.yml</code> has a studio and an engine; <code>docker-compose.cluster.yml</code> has PostgreSQL, a studio and two engines.</p>
 <p class="h">Clusters</p>
 <p>Several engines share one database (<code>SUTRA_DB=postgres://...</code>), each with its own <code>SUTRA_ENGINE_ID</code> and all with the same <code>SUTRA_MASTER_KEY</code>.</p>
@@ -2070,7 +2097,7 @@ docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=...
 <tr><td>Steps at once</td><td>Engine tuning; <code>SUTRA_WORKERS</code></td><td>Steps one engine runs together. Too low: steps wait in the queue (see Queue wait in the Overview). Too high: memory and the database get busy.</td></tr>
 <tr><td>Steps at once in memory</td><td>Engine tuning; <code>SUTRA_MEMORY_WORKERS</code></td><td>The same for Sutras that run in memory; 0 = as Steps at once.</td></tr>
 <tr><td>Queue check</td><td>Engine tuning; <code>SUTRA_POLL_MS</code></td><td>How often an idle engine looks for due steps. Steps queued on the same engine start at once anyway; this only delays steps queued by another engine and retries. Lower answers sooner, higher saves database reads on small machines.</td></tr>
-<tr><td>Settings refresh</td><td>Engine tuning; <code>SUTRA_SETTINGS_REFRESH_MS</code></td><td>How long an engine keeps project and Sengine variables before reading them again (a change on the same engine applies at once, a deploy on any engine too).</td></tr>
+<tr><td>Settings refresh</td><td>Engine tuning; <code>SUTRA_SETTINGS_REFRESH_MS</code></td><td>How long an engine keeps Project and Engine properties before reading them again (a local administrator change applies at once, and the cluster signal clears other engines).</td></tr>
 <tr><td>Execution</td><td>Sutra tuning</td><td>Durable or in memory (above).</td></tr>
 <tr><td>Runs at once, Priority</td><td>Sutra tuning</td><td>Protect a slow back end; let urgent Sutras go first.</td></tr>
 <tr><td>Step data in history</td><td>Sutra tuning</td><td><em>none</em> or <em>errors only</em> keeps the database small for busy Sutras.</td></tr>
@@ -2081,7 +2108,7 @@ docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=...
 <p>The load test starts a studio and engines on a database of their own and runs a benchmark Sutra: a trigger and ten Transform steps, each computing a little and putting out the size of data shown. It counts finished steps per second, the time steps waited in the queue and took, what the database did, and the CPU and memory of the engines. Engines and PostgreSQL ran on the <strong>same</strong> machine, so the database took cores from the engines: a real cluster with PostgreSQL on its own server does better with several engines.</p>
 [[benchmarks]]
 <ul>
-<li><strong>What changed in this release.</strong> Engines used to take one lock for every write in the cluster, so a second engine added nothing (82 steps a second with one engine or two); each run now has its own lock, and engines claim steps with <em>skip locked</em>. Project and Sengine variables are cached for the settings refresh time instead of read for every step; the run state, step count and status are saved in one statement. Database transactions per step went from 14 to 7, and one engine went from 82 to about 120 steps a second. In memory, a step costs less than one transaction.</li>
+<li><strong>What changed in this release.</strong> Engines used to take one lock for every write in the cluster, so a second engine added nothing (82 steps a second with one engine or two); each run now has its own lock, and engines claim steps with <em>skip locked</em>. Project and Engine properties are cached for the settings refresh time instead of read for every step; the run state, step count and status are saved in one statement. Database transactions per step went from 14 to 7, and one engine went from 82 to about 120 steps a second. In memory, a step costs less than one transaction.</li>
 <li><strong>More engines</strong> scale when callers reach all of them, as behind a load balancer: with REST calls spread over the gateways, four engines did about three times the durable steps of one (352 against 116 a second), and in memory 1,660 against 540. When every run starts on one engine (a single timer, say), the others only help with the following steps, and in-memory runs not at all.</li>
 <li><strong>Bigger outputs cost more</strong>: each step writes its own output and reads the earlier ones. Since 1.8.0 (outputs kept apart from the run state) one engine on PostgreSQL ran 145 steps a second with 64 KB outputs (60 before), 40.7 with 256 KB (14.3) and 7.7 with 1 MB (2.6). For steps that pass large data along, keep the data in a file or a table and pass its name, or stream it.</li>
 <li>No run failed and none was lost in any scenario, including the one where an engine was killed.</li>

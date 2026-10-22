@@ -39,7 +39,7 @@ export const headerLines = version => [
 /** How a file type writes comments, or null for files that take no header. */
 function styleOf(rel) {
   const base = path.basename(rel);
-  if (/^(docs\/.*\.html|dist\/|node_modules\/|samples\/)/.test(rel)) return null; // generated or data
+  if (/^(docs\/.*\.html|dist\/|node_modules\/|samples\/|vendor\/)/.test(rel)) return null; // generated, data, or third-party code under its own licence
   if (/\.(ts|tsx|mjs|js|cjs|css)$/.test(base)) return 'block';
   if (/\.html$/.test(base)) return 'html';
   if (/\.cmd$/.test(base)) return 'rem';

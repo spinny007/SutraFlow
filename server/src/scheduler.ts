@@ -10,6 +10,8 @@
 import { Cron } from 'croner';
 import { engine } from './engine/engine.js';
 import { deployedFlows } from './flows.js';
+import { effectiveVariables, engineVariableValues } from './projects.js';
+import { resolveSettings } from './settings.js';
 
 /** Starts runs for Timer triggers of deployed flows. Rebuilt whenever deployments change. */
 let jobs: Array<{ stop(): void }> = [];
@@ -21,17 +23,19 @@ export function rebuildSchedules() {
   schedulerErrors.length = 0;
   for (const d of deployedFlows()) {
     for (const n of d.doc.nodes.filter(x => x.type === 'timer')) {
+      const act = engine.activity(n.type);
+      const cfg = act ? resolveSettings(act.fields, n.config, { gv: effectiveVariables(d.projectId).values, ev: engineVariableValues() }) : n.config;
       const fire = () => {
         engine.startRun({ doc: d.doc, flowId: d.flowId, projectId: d.projectId, version: d.version, triggerNodeId: n.id, input: { firedAt: new Date().toISOString() }, source: 'timer' })
           .catch((e: any) => { schedulerErrors.push(`${d.doc.name} / ${n.name}: ${e.message}`); });
       };
       try {
-        if (n.config.mode === 'interval') {
-          const s = Math.max(5, Number(n.config.every) || 300);
+        if (cfg.mode === 'interval') {
+          const s = Math.max(5, Number(cfg.every) || 300);
           const t = setInterval(fire, s * 1000);
           jobs.push({ stop: () => clearInterval(t) });
         } else {
-          const c = new Cron(String(n.config.cron || '0 * * * * *'), { timezone: n.config.timezone || undefined, protect: true }, fire);
+          const c = new Cron(String(cfg.cron || '0 * * * * *'), { timezone: cfg.timezone || undefined, protect: true }, fire);
           jobs.push({ stop: () => c.stop() });
         }
       } catch (e: any) {

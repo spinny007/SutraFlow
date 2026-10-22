@@ -8,11 +8,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 import { useState } from 'react';
-import { missingInNode } from './vars';
+import { missingInNode, variablesUsed } from './vars';
 import { MissingVariables } from './Project';
 import { post } from './api';
-import { FieldList, visible } from './Fields';
-import { Mapper, inferShape } from './Mapper';
+import { FieldList, VarPicker, insertAtCaret, visible } from './Fields';
+import { ConditionDataBrowser, Mapper, inferShape } from './Mapper';
 import { famOf, Json, since, useCatalog, useToast } from './ui';
 import { ACTIVE, portsOf, type FlowDoc, type FlowEdge, type FlowNode, type NodeDesign, type ProcessVariable, type RunDetail, type SNode } from './types';
 
@@ -41,15 +41,24 @@ interface Props {
 }
 
 export function Inspector(p: Props) {
+  const { project } = useCatalog();
   if (p.sel?.kind === 'edge') {
     const e = p.doc.edges.find(x => x.id === p.sel!.id);
     const a = p.doc.nodes.find(n => n.id === e?.from), b = p.doc.nodes.find(n => n.id === e?.to);
     const setEdge = (patch: Partial<FlowEdge>) => p.setDoc(d => ({ ...d, edges: d.edges.map(x => (x.id === e?.id ? { ...x, ...patch } : x)) }));
     const when = e?.when || 'always';
     const sameOutput = p.doc.edges.filter(x => e && x.from === e.from && x.port === e.port);
+    const defined = new Set((project?.config.variables || []).map(v => v.name));
+    const missing = variablesUsed(e?.condition).filter(name => !defined.has(name));
+    const insertCondition = (ref: string) => {
+      const text = ref.startsWith('{{') ? ref.slice(1, -1) : ref;
+      const input = document.getElementById('econd') as HTMLInputElement | null;
+      if (input) insertAtCaret(input, text); else setEdge({ condition: `${e?.condition || ''}${text}` });
+    };
     return (
       <aside className="side"><div className="tabbody">
         <div className="phead"><div><h2>{e?.label || 'Connection'}</h2><p>{a?.name} ({e?.port}) to {b?.name}</p></div></div>
+        <MissingVariables names={missing} />
         {e?.port === 'error' && <p className="muted">Runs when {a?.name} fails after its retries. The step receives <code>{'{input.error.message}'}</code> and the original <code>{'{input.input}'}</code>.</p>}
         <div className="fld"><label htmlFor="elabel">Name</label>
           <input id="elabel" type="text" placeholder="e.g. Order > 1000" value={e?.label || ''} onChange={ev => setEdge({ label: ev.target.value })} />
@@ -62,9 +71,11 @@ export function Inspector(p: Props) {
           </select>
           <div className="hint">{when === 'otherwise' ? `Taken when none of the "when" connections from ${a?.name} (${e?.port}) is taken.` : when === 'when' ? `Checked on ${a?.name}'s output each time it finishes. Several "when" connections can be taken at once.` : `Taken every time ${a?.name} finishes on ${e?.port}.`}</div></div>
         {when === 'when' && (
-          <div className="fld"><label htmlFor="econd">Condition</label>
+          <div className="fld"><label htmlFor="econd">Condition <VarPicker target="econd" onInsert={insertCondition} /></label>
             <input id="econd" type="text" className="code" spellCheck={false} value={e?.condition || ''} onChange={ev => setEdge({ condition: ev.target.value })} />
-            <div className="hint"><code>{'{input.x}'}</code> is {a?.name}'s output; <code>{'{nodes.Name.x}'}</code>, <code>{'{vars.x}'}</code> and <code>{'{gv.X}'}</code> work too. Examples: <code>{'={input.amount} > 1000'}</code>, <code>{"=upper-case({input.country}) = 'IN'"}</code>, <code>{'=count({input.rows}) = 0'}</code>.</div></div>
+            <div className="hint"><code>{'{input.x}'}</code> is {a?.name}'s output; <code>{'{nodes.Name.x}'}</code>, <code>{'{vars.x}'}</code>, <code>{'{gv.X}'}</code> and <code>{'{ev.X}'}</code> work too. Examples: <code>{'={input.amount} > {gv.LIMIT}'}</code>, <code>{"=upper-case({input.country}) = 'IN'"}</code>, <code>{'=count({input.rows}) = 0'}</code>.</div>
+            {a && <ConditionDataBrowser from={a} doc={p.doc} design={p.design} run={p.run} outputs={p.run?.outputs && Object.keys(p.run.outputs).length ? p.run.outputs : p.sample.outputs} localVars={p.sample.vars} onPick={path => insertCondition(`{${path}}`)} />}
+          </div>
         )}
         {sameOutput.length > 1 && <p className="muted xs">{sameOutput.length} connections leave {a?.name} ({e?.port}): {sameOutput.map(x => x.label || (x.when === 'when' ? x.condition : x.when) || 'always').join(' · ')}</p>}
         <button className="btn danger" onClick={p.removeSel}>Delete connection</button>

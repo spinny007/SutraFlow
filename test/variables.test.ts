@@ -1,0 +1,49 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { allActivities, PALETTES } from '../server/src/palettes/index.js';
+import { resolveSetting } from '../server/src/settings.js';
+import { resolveResourceConfig } from '../server/src/settings.js';
+
+test('every palette uses the common project-variable resolver for General settings', () => {
+  const scope = { gv: { CHECK: 'project-value', BOOL: false }, ev: { CHECK: 'engine-value' } };
+  for (const palette of PALETTES) {
+    const activities = allActivities.filter(a => a.palette === palette.id);
+    assert.ok(activities.length, `${palette.name} has activities`);
+    let covered = 0;
+    for (const activity of activities) {
+      for (const field of activity.fields) {
+        if (field.tpl || (!['text', 'number', 'bool', 'list', 'select', 'kv'].includes(field.type) && !field.vars)) continue;
+        covered++;
+        const value = field.type === 'list' ? ['{{gv.CHECK}}', '{{ev.CHECK}}'] : field.type === 'kv' ? [{ k: 'name', v: '{{gv.CHECK}}' }] : field.type === 'bool' ? '{{gv.BOOL}}' : '{{gv.CHECK}}';
+        const got = resolveSetting(field, value, scope);
+        if (field.type === 'list') assert.deepEqual(got, ['project-value', 'engine-value'], `${activity.type}.${field.k}`);
+        else if (field.type === 'kv') assert.deepEqual(got, [{ k: 'name', v: 'project-value' }], `${activity.type}.${field.k}`);
+        else if (field.type === 'bool') assert.equal(got, false, `${activity.type}.${field.k}`);
+        else if (field.type === 'number') assert.ok(Number.isNaN(got), `${activity.type}.${field.k} converts resolved numeric settings`);
+        else assert.equal(got, 'project-value', `${activity.type}.${field.k}`);
+      }
+    }
+    assert.ok(covered, `${palette.name} has at least one General setting that accepts Project properties`);
+  }
+});
+
+test('every process starter is identified consistently in the Designer palette', () => {
+  const expected = ['start', 'timer', 'restService', 'soapService', 'channelTrigger', 'wsService', 'wsClientTrigger', 'fileTrigger', 'remoteTrigger', 'busSubscribe', 'emailTrigger', 'googleDriveTrigger', 'msFilesTrigger', 'twitchLiveTrigger', 'discordTrigger', 'telegramTrigger', 'adfRunTrigger', 'agentChannel', 'mcpTool'];
+  assert.deepEqual(allActivities.filter(a => a.trigger).map(a => a.type).sort(), expected.sort());
+  const designer = fs.readFileSync(new URL('../web/src/Designer.tsx', import.meta.url), 'utf8');
+  assert.match(designer, /a\.trigger\s*&&\s*<span className="starter-mark"/, 'trigger activities carry the play marker even outside the Triggers group');
+  const inspector = fs.readFileSync(new URL('../web/src/Inspector.tsx', import.meta.url), 'utf8');
+  assert.match(inspector, /<ConditionDataBrowser/, 'transition conditions provide the same browsable Sutra data as activity inputs');
+});
+
+test('nested connection properties resolve while step-time secret references remain intact', () => {
+  const got = resolveResourceConfig({ headers: [{ k: 'Authorization', v: 'Bearer {{secret.TOKEN}} for {{gv.TENANT}}' }] }, { gv: { TENANT: 'north' }, ev: {} });
+  assert.deepEqual(got, { headers: [{ k: 'Authorization', v: 'Bearer {{secret.TOKEN}} for north' }] });
+});

@@ -22,6 +22,7 @@ const { q } = await import('../server/src/db.js');
 const { setSecret } = await import('../server/src/secrets.js');
 const { saveResource } = await import('../server/src/resources.js');
 const flows = await import('../server/src/flows.js');
+const projects = await import('../server/src/projects.js');
 const tls = await import('../server/src/gateway/tls.js');
 const gw = await import('../server/src/gateway/gateway.js');
 
@@ -29,11 +30,28 @@ let srv: Awaited<ReturnType<typeof boot>>;
 before(async () => { srv = await boot({ listenAdmin: false }); });
 after(async () => { await srv.stop(); });
 
-function deployFlow(name: string, nodes: any[], edges: any[]) {
-  const f = flows.saveFlow(undefined, { name, nodes, edges });
+function deployFlow(name: string, nodes: any[], edges: any[], projectId?: string) {
+  const f = flows.saveFlow(undefined, { name, nodes, edges }, projectId);
   flows.deploy(f.id);
   return f;
 }
+
+test('gateway starter settings resolve project variables before routes are published', async () => {
+  const pid = projects.saveProject({ name: `Gateway variables ${Date.now()}`, config: { variables: [
+    { name: 'API_PATH', type: 'string', value: '/variable-route' },
+    { name: 'BODY_KB', type: 'number', value: '8' },
+  ] } }).id;
+  const t = node('restService', 'Variable API', { method: 'POST', path: '{{gv.API_PATH}}', maxBodyKb: '{{gv.BODY_KB}}' });
+  const r = node('httpResponse', 'Reply', { status: '200', contentType: 'application/json', body: '{"ok":true}' });
+  const f = deployFlow('Variable route', [t, r], [edge(t, r)], pid);
+  try {
+    const route = gw.apiRoutes().find((x: any) => x.flowId === f.id)!;
+    assert.equal(route.path, '/variable-route');
+    assert.equal(route.node.config.maxBodyKb, 8);
+    const res = await fetch(`${env.http}/variable-route`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(res.status, 200);
+  } finally { flows.undeploy(f.id); }
+});
 async function runFlow(nodes: any[], edges: any[]) {
   const id = await engine.startRun({ doc: { name: 'Client', nodes, edges } });
   await engine.waitFor(id, 20000);
@@ -195,6 +213,24 @@ test('HTTPS gateway with self-signed certificate and Require HTTPS policy', asyn
   const info: any = tls.certInfo();
   assert.equal(info.source, 'self-signed');
   assert.ok(info.daysLeft > 300);
+});
+
+test('ACME challenges are shared through storage and issuance is leased across engines', async () => {
+  await tls.putAcmeChallenge('shared-token', 'shared-key-authorization', 'engine-a');
+  const challenge = await fetch(`${env.http}/.well-known/acme-challenge/shared-token`);
+  assert.equal(challenge.status, 200);
+  assert.equal(await challenge.text(), 'shared-key-authorization');
+
+  await tls.putAcmeChallenge('expired-token', 'expired', 'engine-a', Date.now() - 1);
+  assert.equal((await fetch(`${env.http}/.well-known/acme-challenge/expired-token`)).status, 404);
+  await tls.removeAcmeChallenge('shared-token');
+  assert.equal((await fetch(`${env.http}/.well-known/acme-challenge/shared-token`)).status, 404);
+
+  assert.equal(await tls.claimAcmeLease('engine-a'), true);
+  assert.equal(await tls.claimAcmeLease('engine-b'), false);
+  await tls.releaseAcmeLease('engine-a');
+  assert.equal(await tls.claimAcmeLease('engine-b'), true);
+  await tls.releaseAcmeLease('engine-b');
 });
 
 test('deploy refuses a path already served by another Sutra', () => {

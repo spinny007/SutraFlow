@@ -1,0 +1,80 @@
+# SutraFlow
+# Copyright (c) 2026-27 Surya Partap Singh
+# Developer: Surya Partap Singh | Website: MixAgile.com
+# File version: 2.0.0
+# License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+# A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+# SPDX-License-Identifier: AGPL-3.0-only
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux, PostgreSQL, MySQL, security
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: yes
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping --host=127.0.0.1 --user=root"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      SUTRA_TEST_PG_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      SUTRA_TEST_MYSQL_URL: mysql://root@127.0.0.1:3306/sutraflow_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run vendor:check:online
+      - run: npm audit --audit-level=high
+      - run: npm run typecheck
+      - run: npm run clean
+      - run: npm run build
+      - run: npm test
+
+  windows:
+    name: Windows regression
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm run typecheck
+      - run: npm run clean
+      - run: npm run build
+      - run: npm test

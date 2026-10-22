@@ -198,10 +198,10 @@ export const dbActivities: Activity[] = [
   {
     type: 'dbQuery', palette: 'db', name: 'SQL query', glyph: '⛁', ports: ['out', 'empty'],
     desc: 'Runs a SELECT and returns the rows. No rows goes to the empty output.',
-    fields: [conn, F('sql', 'SQL', 'code', 'SELECT id, customer, amount\nFROM orders\nWHERE id = :id'), paramField, F('maxRows', 'Maximum rows', 'number', 10000)],
+    fields: [conn, F('sql', 'SQL', 'code', 'SELECT id, customer, amount\nFROM orders\nWHERE id = :id', { vars: true, help: 'Project and Engine variables may supply administrator-controlled names or clauses. Put request data in bound :name parameters.' }), paramField, F('maxRows', 'Maximum rows', 'number', 10000)],
     outputHint: { rows: [{}], rowCount: 0, columns: [''] },
     execute: async c => {
-      const r = await (await connFor(c)).query(String(c.raw('sql') || ''), params(c));
+      const r = await (await connFor(c)).query(String(c.v('sql') || ''), params(c));
       const max = Number(c.raw('maxRows')) || 10000;
       if (r.rows.length > max) throw new Error(`Query returned ${r.rows.length} rows, more than the maximum of ${max}`);
       return { port: r.rows.length ? 'out' : 'empty', out: { ...r, first: r.rows[0] ?? null } };
@@ -210,11 +210,11 @@ export const dbActivities: Activity[] = [
   {
     type: 'dbUpdate', palette: 'db', name: 'SQL update', glyph: '⛃', ports: ['out'],
     desc: 'Runs INSERT, UPDATE, DELETE or MERGE and returns the number of affected rows (and RETURNING rows where supported).',
-    fields: [conn, F('sql', 'SQL', 'code', 'UPDATE orders SET status = :status WHERE id = :id'), F('params', 'Parameters', 'kv', [{ k: 'id', v: '{{input.orderId}}' }, { k: 'status', v: 'SHIPPED' }], { tpl: true, help: 'Values for :name placeholders.' }),
+    fields: [conn, F('sql', 'SQL', 'code', 'UPDATE orders SET status = :status WHERE id = :id', { vars: true, help: 'Project and Engine variables may supply administrator-controlled names or clauses. Put request data in bound :name parameters.' }), F('params', 'Parameters', 'kv', [{ k: 'id', v: '{{input.orderId}}' }, { k: 'status', v: 'SHIPPED' }], { tpl: true, help: 'Values for :name placeholders.' }),
       F('expect', 'Fail when no row is affected', 'bool', false)],
     outputHint: { rowCount: 0, rows: [] },
     execute: async c => {
-      const r = await (await connFor(c)).query(String(c.raw('sql') || ''), params(c));
+      const r = await (await connFor(c)).query(String(c.v('sql') || ''), params(c));
       if (c.raw('expect') && !r.rowCount) throw new Error('No row was affected');
       return { out: r };
     },
@@ -224,18 +224,18 @@ export const dbActivities: Activity[] = [
     desc: 'Calls a stored procedure with named parameters (in order for PostgreSQL, MySQL and Oracle).',
     fields: [conn, F('procedure', 'Procedure name', 'text', 'process_order'), F('params', 'Parameters (in order)', 'kv', [{ k: 'p_order_id', v: '{{input.orderId}}' }], { tpl: true })],
     outputHint: { rows: [], rowCount: 0, outputs: {} },
-    execute: async c => ({ out: await (await connFor(c)).procedure(String(c.raw('procedure') || ''), params(c)) }),
+    execute: async c => ({ out: await (await connFor(c)).procedure(String(c.v('procedure') || ''), params(c)) }),
   },
   {
     type: 'dbScript', palette: 'db', name: 'SQL script', glyph: '⛭', ports: ['out'], timeoutMs: 600000,
     desc: 'Runs an install or change script: CREATE DATABASE, CREATE TABLE, CREATE PROCEDURE, seed rows. Statements are separated by a line with only ";" and run one after another, not in one transaction: most databases keep table and procedure changes at once.',
     fields: [conn,
-      F('sql', 'Script', 'code', 'CREATE TABLE IF NOT EXISTS customers (\n  id VARCHAR(20) PRIMARY KEY,\n  name VARCHAR(100) NOT NULL\n)\n;\nINSERT INTO customers (id, name) VALUES (:id, :name)'),
+      F('sql', 'Script', 'code', 'CREATE TABLE IF NOT EXISTS customers (\n  id VARCHAR(20) PRIMARY KEY,\n  name VARCHAR(100) NOT NULL\n)\n;\nINSERT INTO customers (id, name) VALUES (:id, :name)', { vars: true, help: 'Project and Engine variables may supply administrator-controlled database or object names. Put data in bound :name parameters.' }),
       F('params', 'Parameters', 'kv', [], { tpl: true, help: 'Values for :name placeholders in any statement. Always sent as bound parameters.' }),
       F('onError', 'When a statement fails', 'select', 'stop', { options: ['stop', 'continue'], help: 'Stop: the step fails at that statement (those before it stay done). Continue: runs the rest and lists the failures.' })],
     outputHint: { results: [{ n: 0, statement: '', ok: true, rowCount: 0, error: '' }], ran: 0, failed: 0 },
     execute: async c => {
-      const stmts = String(c.raw('sql') || '').split(/^\s*;\s*$/m).map(s => s.trim()).filter(Boolean);
+      const stmts = String(c.v('sql') || '').split(/^\s*;\s*$/m).map(s => s.trim()).filter(Boolean);
       if (!stmts.length) throw new Error('The script has no statements');
       const p = params(c);
       const db = await connFor(c);
@@ -256,10 +256,10 @@ export const dbActivities: Activity[] = [
   {
     type: 'dbTransaction', palette: 'db', name: 'SQL transaction', glyph: '⛬', ports: ['out'],
     desc: 'Runs several statements in one transaction: all succeed or none are kept. Statements are separated by a line with only ";".',
-    fields: [conn, F('sql', 'Statements', 'code', 'INSERT INTO audit(order_id, action) VALUES (:id, \'ship\')\n;\nUPDATE orders SET status = \'SHIPPED\' WHERE id = :id'), paramField],
+    fields: [conn, F('sql', 'Statements', 'code', 'INSERT INTO audit(order_id, action) VALUES (:id, \'ship\')\n;\nUPDATE orders SET status = \'SHIPPED\' WHERE id = :id', { vars: true, help: 'Project and Engine variables may supply administrator-controlled names or clauses. Put request data in bound :name parameters.' }), paramField],
     outputHint: { results: [{ rowCount: 0 }] },
     execute: async c => {
-      const stmts = String(c.raw('sql') || '').split(/^\s*;\s*$/m).map(s => s.trim()).filter(Boolean);
+      const stmts = String(c.v('sql') || '').split(/^\s*;\s*$/m).map(s => s.trim()).filter(Boolean);
       const p = params(c);
       const results = await (await connFor(c)).transaction(async q => {
         const out: DbResult[] = [];
