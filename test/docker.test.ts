@@ -84,9 +84,14 @@ test('smoke test: the compiled server started as the image starts it passes the 
   } finally { await p.stop(); }
 });
 
-const dockerReady = spawnSync('docker', ['info'], { stdio: 'ignore', timeout: 15000 }).status === 0;
+// The image is Linux-based. A GitHub Windows runner can expose a healthy Docker
+// daemon in Windows-container mode, where `docker info` succeeds but this build
+// cannot. The Linux CI job owns the image-build gate; Windows still checks the
+// Dockerfile, compose files and compiled-server smoke test above.
+const dockerReady = process.platform !== 'win32'
+  && spawnSync('docker', ['info'], { stdio: 'ignore', timeout: 15000 }).status === 0;
 
-test('the image builds (when a Docker daemon is available)', { skip: !dockerReady && 'A Docker daemon is not available here' }, () => {
+test('the image builds (when a compatible Linux Docker daemon is available)', { skip: !dockerReady && 'A compatible Linux Docker daemon is not available here' }, () => {
   const r = spawnSync('docker', ['build', '-t', 'sutraflow:test', '.'], { cwd: root, encoding: 'utf8', timeout: 900000 });
   assert.equal(r.status, 0, r.stderr);
 });
