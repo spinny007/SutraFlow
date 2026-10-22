@@ -6,7 +6,14 @@ data
 *.sutra
 *.log
 docs/guide-images
-test
+# The vendor integrity gate runs during the Docker build and verifies these
+# reviewed test consumers exist. Keep only those review files in the build
+# context; the final runtime image copies neither test/ nor the build context.
+test/*
+!test/vendor.test.ts
+!test/gateway.test.ts
+!test/wss.test.ts
+!test/remote.test.ts
 .claude
 .env
 .env.*

@@ -42,6 +42,18 @@ test('the build context leaves out local state, secrets and build output', () =>
   for (const x of ['node_modules', 'data', 'dist', '.git', '.env', '*.sutra']) assert.ok(ignored.includes(x), `${x} is ignored`);
 });
 
+test('the Docker build context keeps every vendor review test required by the build gate', () => {
+  const ignored = fs.readFileSync(path.join(root, '.dockerignore'), 'utf8').split(/\r?\n/).map(l => l.trim());
+  const policy = JSON.parse(fs.readFileSync(path.join(root, 'vendor', 'vendor-lock.json'), 'utf8'));
+  const testTreeIgnored = ignored.some(l => ['test', 'test/', 'test/*', 'test/**'].includes(l));
+  if (!testTreeIgnored) return;
+  for (const rule of Object.values(policy.packages) as any[]) {
+    for (const rel of rule.tests || []) {
+      if (rel.startsWith('test/')) assert.ok(ignored.includes(`!${rel}`), `${rel} must be available to npm run vendor:check in the Docker build`);
+    }
+  }
+});
+
 test('compose: a studio and a headless engine with a token, separate data, a read-only deploy folder and time to drain', () => {
   assert.match(compose, /studio:[\s\S]*SUTRA_MODE: studio/);
   assert.match(compose, /engine:[\s\S]*SUTRA_MODE: engine/);
