@@ -84,7 +84,9 @@ test('smoke test: the compiled server started as the image starts it passes the 
   } finally { await p.stop(); }
 });
 
-test('the image builds (when Docker is installed)', { skip: spawnSync('docker', ['--version']).status !== 0 && 'Docker is not installed here' }, () => {
+const dockerReady = spawnSync('docker', ['info'], { stdio: 'ignore', timeout: 15000 }).status === 0;
+
+test('the image builds (when a Docker daemon is available)', { skip: !dockerReady && 'A Docker daemon is not available here' }, () => {
   const r = spawnSync('docker', ['build', '-t', 'sutraflow:test', '.'], { cwd: root, encoding: 'utf8', timeout: 900000 });
   assert.equal(r.status, 0, r.stderr);
 });

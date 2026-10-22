@@ -33,7 +33,7 @@ Each comes with a `.sha256` file to check the download.
 
 The complete regression suite passed: 369 tests, 368 passed, 1 optional Docker test skipped and 0 failed. Real PostgreSQL 18 and MySQL ran together. PostgreSQL coverage included pooled execution, database cut and reconnect, password- and SSL-protected migration, claim fencing, leader replacement and drain. MySQL coverage proved Sutra-driven INSERT, UPDATE and SELECT operations with bound parameters, injection safety, transaction rollback, install scripts and stored procedures. The suite also covered transition conditions backed by Project properties, PGlite as secondary compatibility regression, inbound REST and SOAP servers, SOAP callers, WS-Security request and response encryption, SAML and OpenID Connect sign-on, MCP/WebSocket security, cluster-shared ACME challenges and issuance leasing, FTP/SFTP with variable-backed connectors, Python and package/release operations. The complete `npm audit` reported 0 vulnerabilities.
 
-The single skip was the Docker image build because Docker is not installed on the release machine. Docker configuration and its compiled-server smoke test passed.
+The single skip was the Docker image build because no Docker daemon was available on the release machine. Docker configuration and its compiled-server smoke test passed.
 
 The one-hour PostgreSQL fault-and-large-file soak from 1.9.0 remains the latest completed soak baseline below. Work not completed by this release is tracked only in `docs/backlog.md`.
 

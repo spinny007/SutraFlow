@@ -103,7 +103,8 @@ test('the whole move on a real PostgreSQL: stop, copy, switch, start, check', { 
     assert.ok(projects.some((p: any) => p.name === 'Kept across the move'), 'the data came along');
     const info = (await api('GET', '/api/server/database')).body;
     assert.equal(info.kind, 'postgres');
-    assert.ok(!info.where.includes(target.password) || !target.password);
+    const shown = new URL(info.where);
+    assert.equal(decodeURIComponent(shown.password), target.password ? '***' : '', 'the displayed connection masks only the password, even when it equals the username');
   } finally {
     launcher('stop', 'all', '--force');
     await admin.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`).catch(() => {});
