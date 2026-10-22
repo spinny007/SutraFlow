@@ -28,7 +28,7 @@ import * as flows from './flows.js';
 import { PALETTES } from './palettes/index.js';
 import { describeWsdl } from './palettes/soap.js';
 import { RESOURCE_KINDS, listResources, getResource, saveResource, deleteResource } from './resources.js';
-import { listSecrets, setSecret, deleteSecret } from './secrets.js';
+import { getSecret, listSecrets, setSecret, deleteSecret } from './secrets.js';
 import { PIPES, resolve } from './template.js';
 import * as auth from './auth.js';
 import * as access from './access.js';
@@ -55,6 +55,7 @@ import { evalExpression, functionCatalog, refsOf, ExprError } from './expr.js';
 import { tailLog, clearLog } from './logger.js';
 import * as oauth from './connectors/oauth.js';
 import { listenerStatus } from './listeners.js';
+import { assertReadOnlyPreviewSql, inlineRunData, previewDatabaseQuery } from './connectors/db.js';
 import { testResource, prepare } from './resourceTest.js';
 import { listModels, ollamaPull, ollamaImport } from './ai/providers.js';
 import { addSamples, SAMPLES } from './samples.js';
@@ -695,6 +696,38 @@ export async function buildAdmin(): Promise<FastifyInstance> {
 
   /** Design-time shapes of every step (Process Data, Activity Input trees, Output fields). */
   app.post('/api/design/schemas', async (req: any) => designSchemas(flows.normalizeDoc(req.body?.doc)));
+
+  /** Run one read-only SQL activity against its selected connection and return at most ten sample rows. */
+  app.post('/api/design/query-preview', async (req: any) => {
+    const projectId = String(req.body?.projectId || '');
+    projects.requireProject(projectId);
+    const node = req.body?.node;
+    if (!node || !['dbQuery', 'databricksSql'].includes(node.type)) throw bad('Only SQL query and Databricks SQL can be previewed');
+    const stored = getResource(String(node.config?.connection || ''));
+    if (!stored || stored.project_id !== projectId) throw bad('Choose a connection from this project');
+    const provided = req.body?.scope && typeof req.body.scope === 'object' ? req.body.scope : {};
+    const scope = {
+      input: provided.input ?? {}, nodes: provided.nodes ?? {}, vars: provided.vars ?? {}, trigger: provided.trigger ?? {},
+      gv: projects.effectiveVariables(projectId).values, ev: projects.engineVariableValues(), now: new Date().toISOString(),
+    };
+    const activity = engine.activity(node.type)!;
+    const errors = activity.designErrors?.(node.config || {}) || [];
+    if (errors.length) throw bad(errors.join('\n'));
+    try {
+      if (node.type === 'dbQuery') return await previewDatabaseQuery(node.config.connection, node.config.sql, node.config.params, scope, 10);
+      const cfg = { ...node.config, maxRows: 10, waitMinutes: Math.min(2, Math.max(1, Number(node.config.waitMinutes) || 2)) };
+      const given = Object.fromEntries((Array.isArray(cfg.params) ? cfg.params : []).filter((x: any) => String(x?.k || '').trim()).map((x: any) => [String(x.k).trim(), resolve(x.v, scope)]));
+      assertReadOnlyPreviewSql(inlineRunData(cfg.statement, scope, given, 'Databricks SQL').sql);
+      const controller = new AbortController();
+      const result: any = await activity.execute({
+        node: { ...node, config: cfg }, projectId, input: scope.input, scope, signal: controller.signal,
+        raw: (key: string) => cfg[key], v: (key: string) => resolve(cfg[key], scope), resolve: (value: any) => resolve(value, scope),
+        secret: (name: string) => getSecret(name), status: () => {},
+      } as any);
+      const out = result?.out || {};
+      return { ...out, rows: (out.rows || []).slice(0, 10), count: Math.min(Number(out.count) || out.rows?.length || 0, 10), first: out.rows?.[0] ?? null, previewLimit: 10 };
+    } catch (e: any) { throw bad(e.message); }
+  });
 
   /** Live preview of a formula against sample data. */
   app.post('/api/expr/eval', async (req: any) => {

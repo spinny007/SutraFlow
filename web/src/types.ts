@@ -91,7 +91,7 @@ export interface SNode {
   enum?: string[];
   attr?: boolean;
 }
-export interface NodeDesign { in: SNode | null; out: SNode | null; ports?: Record<string, SNode>; inputTrees: Record<string, SNode>; warnings: string[] }
+export interface NodeDesign { in: SNode | null; out: SNode | null; ports?: Record<string, SNode>; inputTrees: Record<string, SNode>; errors: string[]; warnings: string[] }
 
 export interface MapRule { expr?: string; forEach?: string; where?: string; groupBy?: string; sortBy?: string; sortDesc?: boolean; ifCond?: string; choose?: { when: string; expr: string }[]; otherwise?: string }
 export interface MappingValue { rules: Record<string, MapRule>; fields?: string[] }

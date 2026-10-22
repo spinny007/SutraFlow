@@ -191,6 +191,8 @@ export interface Activity {
   passThrough?: boolean;
   /** Problems this step would meet on this server (a program, file or package missing), shown in the designer and on Deploy before anything runs. */
   designCheck?: (cfg: Record<string, any>) => string[];
+  /** Invalid configuration that blocks publishing or deployment, shown separately from advisory design warnings. */
+  designErrors?: (cfg: Record<string, any>) => string[];
   execute(ctx: ExecCtx): Promise<StepResult | void> | StepResult | void;
 }
 

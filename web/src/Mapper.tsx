@@ -352,6 +352,7 @@ export function Mapper({ node, act, doc, design, run, outputs, updateNode }: Pro
       ) : (
         <p className="muted" style={{ fontSize: 12.5, margin: '8px 2px' }}>Drag a field from Sutra Data onto an input, or select an input to write its formula. Lists dropped on a repeating target create a For-Each and map fields with matching names.</p>
       )}
+      {d?.errors?.length ? <div className="errbox" style={{ marginTop: 8 }}>{d.errors.join('\n')}</div> : null}
       {d?.warnings?.length ? <div className="warnbox" style={{ marginTop: 8 }}>{d.warnings.join('\n')}</div> : null}
     </div>
   );

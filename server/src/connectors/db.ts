@@ -13,6 +13,7 @@ import { DatabaseSync } from 'node:sqlite';
 import type { Activity, ExecCtx } from '../engine/types.js';
 import { requireResource, kvToObject, type Resource } from '../resources.js';
 import { config } from '../config.js';
+import { getSecret } from '../secrets.js';
 import { F } from '../palettes/common.js';
 import { resolveAdminText } from '../settings.js';
 import { resolve, asText } from '../template.js';
@@ -53,6 +54,46 @@ export function namedParams(sql: string) {
   }
   return out;
 }
+
+/**
+ * Checks a :name SQL statement against the designer's Parameters rows.
+ * The runtime remains authoritative, but surfacing the same mistakes in the
+ * designer prevents an avoidable failed run after deployment.
+ */
+export function namedParameterIssues(sql: unknown, rows: unknown, subject = 'SQL') {
+  const used = [...new Set(namedParams(String(sql ?? '')).map(p => p.name))];
+  const entries = (Array.isArray(rows) ? rows : []).map((row: any) => ({
+    name: String(row?.k ?? ''),
+    hasValue: row?.v !== undefined && row?.v !== null && String(row.v).length > 0,
+  }));
+  const names = entries.map(x => x.name).filter(Boolean);
+  const uniqueNames = [...new Set(names)];
+  const errors: string[] = [], warnings: string[] = [];
+
+  if (entries.some(x => !x.name && x.hasValue)) errors.push('A Parameters row has a value but no name.');
+  for (const name of uniqueNames) {
+    if (name !== name.trim()) errors.push(`Parameter name "${name}" has leading or trailing spaces. Use "${name.trim()}".`);
+    if (names.filter(n => n === name).length > 1) errors.push(`Parameter "${name}" is listed more than once. Keep one row.`);
+  }
+
+  const caseMismatches = new Set<string>();
+  for (const name of used) {
+    if (names.includes(name)) continue;
+    const close = uniqueNames.find(n => n.trim().toLowerCase() === name.toLowerCase());
+    if (close) {
+      caseMismatches.add(close);
+      if (close === close.trim()) errors.push(`${subject} uses :${name}, but Parameters contains "${close}". Parameter names are case-sensitive.`);
+    } else {
+      errors.push(`${subject} parameter :${name} has no value. Add "${name}" under Parameters.`);
+    }
+  }
+  for (const name of uniqueNames) {
+    if (!used.includes(name) && !caseMismatches.has(name)) warnings.push(`Parameter "${name}" is not used by the ${subject}. Remove it or add :${name} to the ${subject}.`);
+  }
+  return { errors, warnings };
+}
+export const namedParameterErrors = (sql: unknown, rows: unknown, subject = 'SQL') => namedParameterIssues(sql, rows, subject).errors;
+export const namedParameterWarnings = (sql: unknown, rows: unknown, subject = 'SQL') => namedParameterIssues(sql, rows, subject).warnings;
 
 /** Rewrites :name to the driver's placeholder style. */
 export function bindFor(driver: Driver, sql: string, params: Record<string, any>) {
@@ -248,6 +289,56 @@ export async function closeDbPools() {
   await Promise.all(all.map(p => p.conn.then(c => c.close()).catch(() => {})));
 }
 
+/** Refuse data-changing SQL in a designer preview. Returns the normalized SELECT text. */
+export function assertReadOnlyPreviewSql(sqlText: unknown) {
+  const text = String(sqlText || '').trim().replace(/;\s*$/, '');
+  if (!/^\s*(?:select|with)\b/i.test(text)) throw new Error('Test query accepts SELECT or WITH queries only. Update, script and transaction activities must be tested as a Sutra.');
+  // WITH can contain data-changing CTEs (and SELECT ... FOR UPDATE takes locks). Refuse every
+  // mutating keyword outside strings, quoted identifiers and comments. A read-only database account
+  // remains the strongest guard against side effects hidden inside a database function.
+  let visible = '', i = 0;
+  while (i < text.length) {
+    const c = text[i], two = text.slice(i, i + 2);
+    if (c === "'" || c === '"' || c === '`') {
+      let e = i + 1;
+      for (;;) { const q = text.indexOf(c, e); if (q < 0) { e = text.length; break; } if (text[q + 1] === c) { e = q + 2; continue; } e = q + 1; break; }
+      visible += ' '; i = e; continue;
+    }
+    if (two === '--') { const e = text.indexOf('\n', i); visible += ' '; i = e < 0 ? text.length : e; continue; }
+    if (two === '/*') { const e = text.indexOf('*/', i + 2); visible += ' '; i = e < 0 ? text.length : e + 2; continue; }
+    visible += c; i++;
+  }
+  const mutating = /\b(insert|update|delete|merge|replace|call|execute|exec|create|alter|drop|truncate|grant|revoke|copy|vacuum|attach|detach|pragma)\b/i.exec(visible);
+  if (mutating) throw new Error(`Test query is read-only and cannot contain ${mutating[1].toUpperCase()}. Test data-changing SQL by running the Sutra in a safe environment.`);
+  return text;
+}
+
+/** Read-only designer preview. The wrapper limits work at the database; normal runs are unchanged. */
+export async function previewDatabaseQuery(connectionId: string, sqlText: unknown, parameterRows: unknown, scope: Record<string, any>, limit = 10) {
+  const issues = namedParameterIssues(sqlText, parameterRows);
+  if (issues.errors.length) throw new Error(issues.errors.join('\n'));
+  const resource = requireResource(connectionId, 'database', 'Database connection');
+  const p = kvToObject(parameterRows, v => resolve(v, scope) as any) as Record<string, any>;
+  const bound = inlineRunData(sqlText, scope, p, 'SQL text');
+  const text = assertReadOnlyPreviewSql(bound.sql);
+  const n = Math.max(1, Math.min(100, Math.floor(limit) || 10));
+  const driver = resource.config.driver as Driver;
+  let previewSql: string;
+  if (driver === 'mssql') {
+    if (/^\s*select\s+distinct\b/i.test(text)) previewSql = text.replace(/^\s*select\s+distinct\b/i, m => `${m} TOP (${n})`);
+    else if (/^\s*select\b/i.test(text)) previewSql = text.replace(/^\s*select\b/i, m => `${m} TOP (${n})`);
+    else previewSql = /\border\s+by\b/i.test(text) ? `${text} OFFSET 0 ROWS FETCH NEXT ${n} ROWS ONLY` : `${text} ORDER BY (SELECT NULL) OFFSET 0 ROWS FETCH NEXT ${n} ROWS ONLY`;
+  } else if (driver === 'oracle') previewSql = `SELECT * FROM (${text}) sutra_preview WHERE ROWNUM <= ${n}`;
+  else previewSql = `SELECT * FROM (${text}) AS sutra_preview LIMIT ${n}`;
+  const secret = (name: string, what?: string) => {
+    const value = getSecret(name);
+    if (value === undefined) throw new Error(`${what || 'Secret'}: secret "${name}" does not exist`);
+    return value;
+  };
+  const result = await (await dbConnection(resource, secret)).query(previewSql, { ...p, ...bound.params });
+  return { ...result, rows: result.rows.slice(0, n), rowCount: result.rows.length, first: result.rows[0] ?? null, previewLimit: n };
+}
+
 const params = (c: ExecCtx) => kvToObject(c.raw('params'), v => c.resolve(v) as any) as Record<string, any>;
 const adminText = (c: ExecCtx, key: string, label: string) => resolveAdminText(c.node.config?.[key], c.scope, label);
 /** The SQL of a step with its run-data references bound, merged with the Parameters field. */
@@ -264,6 +355,8 @@ export const dbActivities: Activity[] = [
     type: 'dbQuery', palette: 'db', name: 'SQL query', glyph: '⛁', ports: ['out', 'empty'],
     desc: 'Runs a SELECT and returns the rows. No rows goes to the empty output.',
     fields: [conn, F('sql', 'SQL', 'code', 'SELECT id, customer, amount\nFROM orders\nWHERE id = :id', { vars: true, help: 'Project and Engine properties ({{gv.X}}, {{ev.X}}) are written into the SQL: names and clauses. Run data such as {{input.id}} is always sent as a bound parameter, the same as a :name parameter.' }), paramField, F('maxRows', 'Maximum rows', 'number', 10000)],
+    designCheck: cfg => namedParameterWarnings(cfg.sql, cfg.params),
+    designErrors: cfg => namedParameterErrors(cfg.sql, cfg.params),
     outputHint: { rows: [{}], rowCount: 0, columns: [''] },
     execute: async c => {
       const { sql, p } = sqlOf(c, 'SQL text');
@@ -278,6 +371,8 @@ export const dbActivities: Activity[] = [
     desc: 'Runs INSERT, UPDATE, DELETE or MERGE and returns the number of affected rows (and RETURNING rows where supported).',
     fields: [conn, F('sql', 'SQL', 'code', 'UPDATE orders SET status = :status WHERE id = :id', { vars: true, help: 'Project and Engine properties ({{gv.X}}, {{ev.X}}) are written into the SQL: names and clauses. Run data such as {{input.id}} is always sent as a bound parameter, the same as a :name parameter.' }), F('params', 'Parameters', 'kv', [{ k: 'id', v: '{{input.orderId}}' }, { k: 'status', v: 'SHIPPED' }], { tpl: true, help: 'Values for :name placeholders.' }),
       F('expect', 'Fail when no row is affected', 'bool', false)],
+    designCheck: cfg => namedParameterWarnings(cfg.sql, cfg.params),
+    designErrors: cfg => namedParameterErrors(cfg.sql, cfg.params),
     outputHint: { rowCount: 0, rows: [] },
     execute: async c => {
       const { sql, p } = sqlOf(c, 'SQL text');
@@ -300,6 +395,8 @@ export const dbActivities: Activity[] = [
       F('sql', 'Script', 'code', 'CREATE TABLE IF NOT EXISTS customers (\n  id VARCHAR(20) PRIMARY KEY,\n  name VARCHAR(100) NOT NULL\n)\n;\nINSERT INTO customers (id, name) VALUES (:id, :name)', { vars: true, help: 'Project and Engine properties ({{gv.X}}, {{ev.X}}) are written into the script: database and object names. Run data such as {{input.id}} is always sent as a bound parameter, the same as a :name parameter.' }),
       F('params', 'Parameters', 'kv', [], { tpl: true, help: 'Values for :name placeholders in any statement. Always sent as bound parameters.' }),
       F('onError', 'When a statement fails', 'select', 'stop', { options: ['stop', 'continue'], help: 'Stop: the step fails at that statement (those before it stay done). Continue: runs the rest and lists the failures.' })],
+    designCheck: cfg => namedParameterWarnings(cfg.sql, cfg.params, 'SQL script'),
+    designErrors: cfg => namedParameterErrors(cfg.sql, cfg.params, 'SQL script'),
     outputHint: { results: [{ n: 0, statement: '', ok: true, rowCount: 0, error: '' }], ran: 0, failed: 0 },
     execute: async c => {
       const { sql, p } = sqlOf(c, 'SQL script');
@@ -324,6 +421,8 @@ export const dbActivities: Activity[] = [
     type: 'dbTransaction', palette: 'db', name: 'SQL transaction', glyph: '⛬', ports: ['out'],
     desc: 'Runs several statements in one transaction: all succeed or none are kept. Statements are separated by a line with only ";".',
     fields: [conn, F('sql', 'Statements', 'code', 'INSERT INTO audit(order_id, action) VALUES (:id, \'ship\')\n;\nUPDATE orders SET status = \'SHIPPED\' WHERE id = :id', { vars: true, help: 'Project and Engine properties ({{gv.X}}, {{ev.X}}) are written into the SQL: names and clauses. Run data such as {{input.id}} is always sent as a bound parameter, the same as a :name parameter.' }), paramField],
+    designCheck: cfg => namedParameterWarnings(cfg.sql, cfg.params, 'SQL transaction'),
+    designErrors: cfg => namedParameterErrors(cfg.sql, cfg.params, 'SQL transaction'),
     outputHint: { results: [{ rowCount: 0 }] },
     execute: async c => {
       const { sql, p } = sqlOf(c, 'SQL transaction');

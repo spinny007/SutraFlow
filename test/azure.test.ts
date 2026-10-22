@@ -235,6 +235,13 @@ test('Databricks code block starts the stopped cluster, passes parameters as dat
 
 test('Databricks SQL sends named parameters, waits, and reads every chunk', async () => {
   const c = dbxConn();
+  const start = node('start', 'Start');
+  const invalid = node('databricksSql', 'Invalid parameters', { connection: c.id, statement: 'SELECT * FROM trips WHERE pickup_zip = :zip AND state = :state', params: [{ k: 'wrong', v: '{{input.zip}}' }] });
+  const checked = validateDoc({ name: 'Databricks parameter check', nodes: [start, invalid], edges: [edge(start, invalid)] }, pid);
+  assert.ok(checked.errors.includes('Invalid parameters: SQL parameter :zip has no value. Add "zip" under Parameters.'));
+  assert.ok(checked.errors.includes('Invalid parameters: SQL parameter :state has no value. Add "state" under Parameters.'));
+  assert.ok(checked.warnings.includes('Invalid parameters: Parameter "wrong" is not used by the SQL. Remove it or add :wrong to the SQL.'));
+
   const r = await run(node('databricksSql', 'Trips', { connection: c.id, statement: 'SELECT pickup_zip, count(*) AS trips FROM samples.nyctaxi.trips WHERE pickup_zip = :zip GROUP BY 1', params: [{ k: 'zip', v: '{{input.zip}}' }], maxRows: 100 }));
   assert.equal(r.status, 'done', r.error);
   assert.deepEqual(r.out.rows, [{ pickup_zip: '10001', trips: '42' }, { pickup_zip: '10002', trips: '7' }]);

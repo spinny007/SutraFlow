@@ -26,7 +26,7 @@ import { ConfirmDelete } from './ConfirmDelete';
 const ACT_MIME = 'application/x-sutra-activity';
 const uid = () => Math.random().toString(36).slice(2, 9);
 
-type NodeData = { n: FlowNode; status?: string; count?: number; bp?: boolean };
+type NodeData = { n: FlowNode; status?: string; count?: number; bp?: boolean; designErrors?: string[]; designWarnings?: string[] };
 type ANode = Node<NodeData, 'activity'>;
 
 const MetaCtx = createContext<Meta | null>(null);
@@ -47,7 +47,7 @@ const ActivityNode = memo(function ActivityNode({ data, selected }: NodeProps<AN
   return (
     <div className={`anode ${fam}${selected ? ' selected' : ''}${data.status ? ' st-' + data.status : ''}${data.n.settings?.disabled ? ' disabled' : ''}`} style={{ height }} title={data.n.description || undefined}>
       {data.bp && <span className="bp" title="Breakpoint" />}
-      <div className="head"><span className="glyph">{a?.glyph ?? '?'}</span><span className="nm">{data.n.name}</span>{data.n.description && <span className="dmark" aria-label="Has a description">≡</span>}{miss.length > 0 && <span className="vwarn" title={missingText(miss)} aria-label="Missing project variables">⚠</span>}<span className="dot" /></div>
+      <div className="head"><span className="glyph">{a?.glyph ?? '?'}</span><span className="nm">{data.n.name}</span>{data.n.description && <span className="dmark" aria-label="Has a description">≡</span>}{data.designErrors?.length ? <span className="verror" title={data.designErrors.join('\n')} aria-label="Activity errors">●</span> : null}{data.designWarnings?.length ? <span className="vwarn" title={data.designWarnings.join('\n')} aria-label="Activity warnings">⚠</span> : null}{miss.length > 0 && <span className="vwarn" title={missingText(miss)} aria-label="Missing project variables">⚠</span>}<span className="dot" /></div>
       <div className="ty">{a?.name ?? data.n.type}{data.count && data.count > 1 ? ` ×${data.count}` : ''}{data.n.settings?.loop ? <span className="loopmark" title={data.n.settings.loop === 'for each item' ? 'Runs once per item' : 'Repeats while a condition holds'}> ↻</span> : null}</div>
       {ports.length > 0 && <span className="ports-sep" />}
       {a && !a.trigger && !a.noInput && <Handle type="target" position={Position.Left} id="in" style={{ top: IN_Y }} />}
@@ -255,8 +255,8 @@ function DesignerInner() {
   // ---------- React Flow wiring ----------
   const nodes: ANode[] = useMemo(() => (doc?.nodes || []).map(n => ({
     id: n.id, type: 'activity', position: { x: n.x, y: n.y }, selected: sel?.kind === 'node' && sel.id === n.id,
-    data: { n, status: statusByNode[n.id]?.status, count: statusByNode[n.id]?.count, bp: breakpoints.includes(n.id) },
-  })), [doc, sel, statusByNode, breakpoints]);
+    data: { n, status: statusByNode[n.id]?.status, count: statusByNode[n.id]?.count, bp: breakpoints.includes(n.id), designErrors: design[n.id]?.errors, designWarnings: design[n.id]?.warnings },
+  })), [doc, sel, statusByNode, breakpoints, design]);
   const edges: Edge[] = useMemo(() => (doc?.edges || []).map(e => ({
     id: e.id, source: e.from, target: e.to, sourceHandle: e.port, targetHandle: 'in',
     selected: sel?.kind === 'edge' && sel.id === e.id,

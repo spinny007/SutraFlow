@@ -1,15 +1,37 @@
-# SutraFlow 2.0.4 release notes
+# SutraFlow 2.0.5 release notes
 
-Released 2026-10-22. Copyright (c) 2026-27 Surya Partap Singh, [MixAgile.com](https://mixagile.com). Licensed under the GNU Affero General Public License v3.0 only (AGPL-3.0-only); a commercial licence is available, see `COMMERCIAL-LICENSE.md`.
+Released 2026-10-23. Copyright (c) 2026-27 Surya Partap Singh, [MixAgile.com](https://mixagile.com). Licensed under the GNU Affero General Public License v3.0 only (AGPL-3.0-only); a commercial licence is available, see `COMMERCIAL-LICENSE.md`.
 
 | Download | For |
 |---|---|
-| `sutraflow-2.0.4-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
-| `sutraflow-2.0.4-linux.tar.gz` | Linux (x64 or arm64); also macOS |
+| `sutraflow-2.0.5-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
+| `sutraflow-2.0.5-linux.tar.gz` | Linux (x64 or arm64); also macOS |
 
 Each comes with a `.sha256` file to check the download.
 
-## What is new in 2.0.4
+## What is new in 2.0.5
+
+- **Named SQL parameters checked while designing**: SQL query, SQL update, SQL script, SQL transaction and Databricks SQL now compare every `:name` placeholder with the Parameters rows. Missing values, case mismatches, duplicate names, whitespace and unnamed rows are errors that block publishing; an extra row the SQL does not use is a warning. Repeated use of the same placeholder needs only one row; text inside quoted strings or comments and PostgreSQL `::` casts is ignored, matching runtime binding.
+- **Ten-row query preview**: SQL Query and Databricks SQL show **Test query (10 rows)** when a connection is selected. It uses the latest sample input and a database-side preview cap, then shows the returned columns and rows. Both previews accept only read-only `SELECT`/`WITH` statements, reject data-changing CTEs, and never insert a limit into the stored or deployed query.
+- **Same runtime safety**: the existing bound-parameter execution remains authoritative. A malformed design is still refused at runtime if it reaches an engine, while most mistakes are now visible before a test or deployment.
+- No database change: 2.0.5 shares a database with 2.0.0 to 2.0.4.
+
+### Fixes in 2.0.5
+
+| What you would have seen | Cause | Now |
+|---|---|---|
+| SQL used `:customerId` and `:status`, but Parameters contained only `id`; the activity showed no parameter warning and failed only when it ran. | Runtime binding checked missing values, but the designer did not compare SQL placeholders with its input rows. | The activity and Deploy show a missing placeholder as an error and an unused row as a warning before execution. |
+| `:customerId` and a row named `customerid` looked similar but failed at runtime. | Parameter names are case-sensitive, with no design-time explanation. | The error names both spellings and says that case matters. |
+| Duplicate parameter rows or stale rows left after editing SQL were easy to overlook. | Only placeholders required by the runtime were checked. | A duplicate row is an error and a stale unused row is a warning, without treating repeated use of one placeholder as a defect. |
+| A designer had to run the whole Sutra to see whether a SELECT returned the expected shape and sample records. | Connection tests checked only connectivity, not the activity SQL. | Test query returns at most ten sample rows through the selected database or Databricks warehouse without changing runtime SQL. |
+
+## 2.0.5 release gate
+
+Typechecking is clean and the dependency audit reports 0 vulnerabilities. The focused DB Ops and Databricks suites passed 20 tests with 0 failures. After the final read-only preview hardening, the complete suite passed 376 tests: 375 passed, 1 optional Docker-environment test skipped and 0 failed. It ran with real PostgreSQL and MySQL and included PostgreSQL pool execution, database outage and reconnect, password- and SSL-protected migration, claim fencing and multi-engine behavior; MySQL covered bound INSERT, UPDATE and SELECT, injection safety, rollback, install scripts and stored procedures. PGlite remained secondary compatibility coverage. The release manifest contains 204 runtime and guide files in each Windows and Linux archive and excludes source trees, tests and soak/benchmark output.
+
+## In 2.0.4
+
+### What was new in 2.0.4
 
 - **Run data written straight into SQL, always bound**: in SQL query, SQL update, SQL script, SQL transaction and Databricks SQL, a reference such as `{{input.id}}` written in the SQL text is sent to the database as a bound parameter, never as SQL text. `WHERE id = {{input.id}}` keeps the value's type; a quoted text such as `'{{input.id}}'` or `'%{{input.q}}%'` becomes one text parameter, filled in. Project and Engine properties (`{{gv.X}}`, `{{ev.X}}`) are still written into the statement for names and clauses, so one statement uses both. `:name` parameters work as before and can be mixed in. Run data inside a quoted name, a comment or a `$$` body cannot be bound and is refused with a clear message.
 - **Held duplicates on RabbitMQ and ActiveMQ**: a message delivered again while its first run is still going (for example waiting for an approval) is held unacknowledged and settled when that run ends: acknowledged when it finished, returned for a new run when it failed or was cancelled. It is not redelivered meanwhile, and each held copy gets one more delivery slot (prefetch or credit), so other messages keep flowing. Kafka pauses the partition and checks again every 5 seconds, with a status that says why.
@@ -29,7 +51,7 @@ Each comes with a `.sha256` file to check the download.
 | On Kafka, the status said "Sutra failed" while an earlier run was simply still going. | The same message was used for both cases. | The status says the offset is still being handled and when it is checked again. |
 | RabbitMQ messages without a message id had no duplicate protection, and nothing showed it. | Only the broker's message id was used. | Duplicate key and Messages without an id. |
 
-## 2.0.4 release gate
+### 2.0.4 release gate
 
 The complete regression suite passed: 375 tests, 374 passed, 1 skipped and 0 failed, with real PostgreSQL 18 and MySQL 8.4 together; the password-and-SSL PostgreSQL migration ran this time (Laragon's PostgreSQL binaries). New coverage: run data written in SQL text bound on SQLite, real MySQL and real PostgreSQL (the attack string `x' OR '1'='1` stays a value), Databricks SQL named parameters from inline references, refusal inside quoted names, comments and `$$` bodies; a copy of a broker message held while its run waits, then acknowledged when the run finishes, returned when it is cancelled, and left to the broker when the listener stops; Duplicate key and Messages without an id. `npm audit` reported 0 vulnerabilities.
 
@@ -243,14 +265,14 @@ What went wrong before, and what happens now. Most were found by the soak test (
 1. Install Node.js 24 from nodejs.org (or with nvm-windows) and open a new PowerShell window.
 2. Check the download:
    ```powershell
-   (Get-FileHash .\sutraflow-2.0.4-windows.zip -Algorithm SHA256).Hash.ToLower()
-   Get-Content .\sutraflow-2.0.4-windows.zip.sha256
+   (Get-FileHash .\sutraflow-2.0.5-windows.zip -Algorithm SHA256).Hash.ToLower()
+   Get-Content .\sutraflow-2.0.5-windows.zip.sha256
    ```
    The two values must match.
 3. Unpack it, for example to `C:\SutraFlow`:
    ```powershell
-   Expand-Archive .\sutraflow-2.0.4-windows.zip -DestinationPath C:\SutraFlow
-   cd C:\SutraFlow\sutraflow-2.0.4
+   Expand-Archive .\sutraflow-2.0.5-windows.zip -DestinationPath C:\SutraFlow
+   cd C:\SutraFlow\sutraflow-2.0.5
    ```
 4. Install the runtime packages and make the settings file:
    ```powershell
@@ -270,13 +292,13 @@ What went wrong before, and what happens now. Most were found by the soak test (
 1. Install Node.js 24 (from your distribution, NodeSource or nvm).
 2. Check the download:
    ```sh
-   sha256sum -c sutraflow-2.0.4-linux.tar.gz.sha256
+   sha256sum -c sutraflow-2.0.5-linux.tar.gz.sha256
    ```
 3. Unpack it, for example to `/opt`:
    ```sh
    sudo mkdir -p /opt/sutraflow && sudo chown "$USER" /opt/sutraflow
-   tar -xzf sutraflow-2.0.4-linux.tar.gz -C /opt/sutraflow
-   cd /opt/sutraflow/sutraflow-2.0.4
+   tar -xzf sutraflow-2.0.5-linux.tar.gz -C /opt/sutraflow
+   cd /opt/sutraflow/sutraflow-2.0.5
    ```
 4. Install the runtime packages and make the settings file:
    ```sh
@@ -295,17 +317,17 @@ What went wrong before, and what happens now. Most were found by the soak test (
 
 1. Back up: the data folder with `master.key`, and for PostgreSQL a `pg_dump` of the database.
 2. Stop gracefully: `sutraflow stop all` (running steps finish first).
-3. Unpack 2.0.4 into a new folder beside the old one. Copy `sutraflow.env` from the old folder; keep `SUTRA_DATA_DIR` pointing at the same data folder (or copy the folder).
+3. Unpack 2.0.5 into a new folder beside the old one. Copy `sutraflow.env` from the old folder; keep `SUTRA_DATA_DIR` pointing at the same data folder (or copy the folder).
 4. Run `sutraflow setup`, then `sutraflow start`. The database is upgraded at start (2.0.0 adds `sso_states`, `bus_messages` and `acme_challenges`; 1.9.0 adds `file_listener_state` and `file_listener_files`; from 1.7.6 it also adds `run_outputs`, `replay_guard`, `ws_connections`, `ws_outbox`, `users.idp_subject` and `engines.can_lead`; from 1.7.5 also `tasks.claim`; from 1.6 also the new indexes and memory-table tables). Nothing is removed, and open runs continue.
 5. In a cluster, **upgrade every engine before starting any of them again**: 1.8.0 engines keep step outputs apart from the run state, which older engines do not read, so the two must not share a database.
 6. On PostgreSQL, check `max_connections`: each engine opens its pool (`SUTRA_PG_POOL`, at most 20 by default) plus one connection. Engines × (pool + 1) must fit, with room for other clients.
 7. Optional: *Admin Console → Engines → This machine → Apply recommended tuning*.
 
-To go back to 1.9.1, stop 2.0.3 and start 1.9.1 again; the three additive 2.0.0 tables remain but 1.9.1 does not use them. To go back to 1.7.x, stop SutraFlow and restore the backup taken before the upgrade: runs that 1.8.0 or later ran keep their outputs in a table older versions do not read.
+To go back to 1.9.1, stop 2.0.5 and start 1.9.1 again; the three additive 2.0.0 tables remain but 1.9.1 does not use them. To go back to 1.7.x, stop SutraFlow and restore the backup taken before the upgrade: runs that 1.8.0 or later ran keep their outputs in a table older versions do not read.
 
 ## Docker
 
-The images are built from the source repository (`Dockerfile`, `docker-compose.yml`): `docker build -t sutraflow:2.0.4 .`. The release archives are for installs without Docker.
+The images are built from the source repository (`Dockerfile`, `docker-compose.yml`): `docker build -t sutraflow:2.0.5 .`. The release archives are for installs without Docker.
 
 ## Known limitations
 

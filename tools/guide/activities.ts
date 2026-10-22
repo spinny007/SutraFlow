@@ -424,14 +424,14 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     scope: ['A SELECT on PostgreSQL, MySQL/MariaDB, SQL Server, Oracle or SQLite.', 'Run data written in the SQL (<code>{{input.id}}</code>) and named parameters <code>:name</code>: both always bound, never pasted into the SQL.', 'A maximum row count.'],
     outScope: ['Changes: use [[dbUpdate]] or [[dbTransaction]].'],
     use: ['Looking up a customer, reading pending orders.'],
-    steps: ['Pick the database connection.', 'Write the SQL. Project and Engine properties name what differs per server (<code>FROM {{gv.SALES_SCHEMA}}.orders</code>); run data may be written in too (<code>WHERE id = \'{{input.orderId}}\'</code>) and is sent as a bound parameter, never as SQL text.', 'Or use <code>:name</code> in the SQL and add one parameter row per name, with its value.', 'Connect <em>empty</em> for no rows.'],
+    steps: ['Pick the database connection.', 'Write the SQL. Project and Engine properties name what differs per server (<code>FROM {{gv.SALES_SCHEMA}}.orders</code>); run data may be written in too (<code>WHERE id = \'{{input.orderId}}\'</code>) and is sent as a bound parameter, never as SQL text.', 'Or use <code>:name</code> in the SQL and add exactly one parameter row with the same case-sensitive name and its value. The designer and Deploy show missing, differently capitalised, duplicate and unnamed rows as errors; an extra unused row is a warning.', 'Choose <strong>Test query (10 rows)</strong> to run a read-only preview through the selected connection with the latest sample input. The preview adds its own database-side ten-row cap; it never changes or limits the deployed SQL.', 'Connect <em>empty</em> for no rows.'],
     output: ['<code>rows</code> (repeating), <code>count</code>, <code>first</code>.'],
   },
   dbUpdate: {
     scope: ['INSERT, UPDATE, DELETE or MERGE with bound parameters.', 'An expected row count that fails the step when not met.'],
     outScope: ['Several statements that must succeed together: use [[dbTransaction]].'],
     use: ['Saving a status, inserting an audit row.'],
-    steps: ['Pick the connection, write the statement and its parameters.', 'Optionally set the expected count, for example exactly 1.'],
+    steps: ['Pick the connection, write the statement and add exactly one parameter row for every <code>:name</code>. The designer and Deploy show a missing, differently capitalised, duplicate or unnamed row as an error; an extra unused row is a warning.', 'Optionally set the expected count, for example exactly 1.'],
     output: ['<code>affected</code> and, where the database returns them, generated keys.'],
   },
   dbProcedure: {
@@ -445,14 +445,14 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     scope: ['An install or change script: CREATE DATABASE, CREATE TABLE, CREATE PROCEDURE, seed rows.', 'Statements separated by a line with only <code>;</code>, run one after another, so procedure bodies may hold their own semicolons.', 'Stopping at the first failure, or running the rest and listing the failures.'],
     outScope: ['All-or-nothing changes to data: use [[dbTransaction]]. Most databases keep table and procedure changes at once anyway.'],
     use: ['Setting up the tables and procedures a Sutra needs, on a new server or in a test.'],
-    steps: ['Pick the connection.', 'Write the script; put a line with only <code>;</code> between statements.', 'Use <code>IF NOT EXISTS</code> and <code>DROP ... IF EXISTS</code> so the script can run again.', 'Choose what happens when a statement fails.'],
+    steps: ['Pick the connection.', 'Write the script; put a line with only <code>;</code> between statements. Add exactly one parameter row for every <code>:name</code>; design and deployment checks show a missing, differently capitalised, duplicate or unnamed row as an error and an extra unused row as a warning across the whole script.', 'Use <code>IF NOT EXISTS</code> and <code>DROP ... IF EXISTS</code> so the script can run again.', 'Choose what happens when a statement fails.'],
     output: ['<code>results</code> (one per statement, with <code>ok</code> and <code>error</code>), <code>ran</code> and <code>failed</code>.'],
   },
   dbTransaction: {
     scope: ['Several statements in one transaction: all succeed or none.'],
     outScope: ['Transactions that span steps.'],
     use: ['Order header and lines, transfers between tables.'],
-    steps: ['Write the statements, separated by semicolons, with <code>:name</code> parameters.', 'Add the parameters.'],
+    steps: ['Write the statements, separated by semicolons, with <code>:name</code> parameters.', 'Add exactly one parameter row for every case-sensitive name. The designer and Deploy show a missing, differently capitalised, duplicate or unnamed row as an error and an extra unused row as a warning across all statements.'],
     output: ['One result per statement.'],
   },
   /* ---------------- Service Bus ---------------- */
@@ -657,7 +657,7 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     scope: ['A SQL statement on a Databricks SQL warehouse with named parameters (<code>:name</code>), catalog and schema, all result chunks read.'],
     outScope: ['Writing large data sets: use a notebook or job.'],
     use: ['Reading lakehouse tables into a process: lookups, report rows, checks.'],
-    steps: ['Pick the workspace and warehouse (or its default); write the SQL with <code>:name</code> parameters and set them below.'],
+    steps: ['Pick the workspace and warehouse (or its default); write the SQL with <code>:name</code> parameters and add exactly one row for every case-sensitive name. The designer and Deploy show binding defects as errors and an unused row as a warning.', 'Choose <strong>Test query (10 rows)</strong> for a read-only SELECT sample through the selected warehouse. Write statements are refused in preview; the deployed statement keeps its configured row limit.'],
     output: ['<code>rows</code> as objects, <code>columns</code>, <code>count</code>; <em>empty</em> when no rows.'],
   },
   python: {

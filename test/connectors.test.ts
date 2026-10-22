@@ -21,7 +21,7 @@ const { q } = await import('../server/src/db.js');
 const flows = await import('../server/src/flows.js');
 const { setSecret } = await import('../server/src/secrets.js');
 const { saveResource } = await import('../server/src/resources.js');
-const { bindFor, namedParams, closeDbPools, inlineRunData } = await import('../server/src/connectors/db.js');
+const { assertReadOnlyPreviewSql, bindFor, namedParams, namedParameterIssues, closeDbPools, inlineRunData, previewDatabaseQuery } = await import('../server/src/connectors/db.js');
 const { priorDelivery, busTiming, messageKey, stopHolds, handle: handleDelivery } = await import('../server/src/connectors/bus.js');
 const { rebuildListeners, listenerStatus } = await import('../server/src/listeners.js');
 const oauth = await import('../server/src/connectors/oauth.js');
@@ -49,6 +49,42 @@ test('DB Ops placeholders per database, ignoring quotes, comments and ::casts', 
   assert.equal(bindFor('mssql', 'x = :a', { a: 1 }).sql, 'x = @a');
   assert.deepEqual(bindFor('oracle', 'x = :a', { a: 1 }).values, { a: 1 });
   assert.throws(() => bindFor('postgres', 'x = :missing', {}), /:missing has no value/);
+});
+
+test('designer checks missing, mismatched, duplicate and unused named SQL parameters', () => {
+  const sql = "SELECT ':ignored', value::text FROM orders -- :comment\nWHERE customer_id = :customerId AND status = :status AND again = :customerId";
+  assert.deepEqual(namedParameterIssues(sql, [
+    { k: 'customerid', v: '{{input.customerId}}' },
+    { k: 'id', v: '{{input.orderId}}' },
+    { k: 'id', v: '{{input.otherId}}' },
+    { k: '', v: '{{input.status}}' },
+  ]), {
+    errors: [
+      'A Parameters row has a value but no name.',
+      'Parameter "id" is listed more than once. Keep one row.',
+      'SQL uses :customerId, but Parameters contains "customerid". Parameter names are case-sensitive.',
+      'SQL parameter :status has no value. Add "status" under Parameters.',
+    ],
+    warnings: ['Parameter "id" is not used by the SQL. Remove it or add :id to the SQL.'],
+  });
+  assert.deepEqual(namedParameterIssues("SELECT ':not_one', x::text /* :nor_this */ WHERE id = :id", [{ k: 'id', v: 0 }]), { errors: [], warnings: [] });
+  assert.deepEqual(namedParameterIssues('SELECT * FROM t WHERE a = :a AND b = :b', [{ k: 'a', v: 1 }, { k: 'b', v: 2 }, { k: 'extra', v: 3 }]), {
+    errors: [],
+    warnings: ['Parameter "extra" is not used by the SQL. Remove it or add :extra to the SQL.'],
+  }, 'two matches plus one extra row is warning-only');
+  assert.deepEqual(namedParameterIssues('SELECT * FROM t WHERE id = :id', [{ k: ' id ', v: 1 }]), {
+    errors: ['Parameter name " id " has leading or trailing spaces. Use "id".'],
+    warnings: [],
+  });
+
+  for (const type of ['dbQuery', 'dbUpdate', 'dbScript', 'dbTransaction']) {
+    const a = engine.activity(type)!;
+    const errors = a.designErrors!({ sql: 'SELECT :wanted', params: [{ k: 'wrong', v: 1 }] });
+    const warnings = a.designCheck!({ sql: 'SELECT :wanted', params: [{ k: 'wrong', v: 1 }] });
+    assert.ok(errors.some((w: string) => w.includes(':wanted')), `${type} errors for the missing placeholder`);
+    assert.ok(warnings.some((w: string) => w.includes('"wrong" is not used')), `${type} warns for the unused row`);
+  }
+  assert.equal(engine.activity('dbProcedure')!.designErrors, undefined, 'procedure parameters are ordered arguments, not SQL placeholders');
 });
 
 test('SQL text: properties are written in, run data written in the SQL is bound', () => {
@@ -84,6 +120,16 @@ test('DB Ops on SQLite: update, query with bound parameters, transaction rollbac
   const chk = node('dbQuery', 'Check', { connection: db.id, sql: "SELECT count(*) AS n FROM orders WHERE id = 'B-2'", params: [] });
   const r3 = await run([s, chk], [edge(s, chk)]);
   assert.equal(r3.state.outputs.Check.first.n, 0, 'the first insert was rolled back');
+
+  const preview = await previewDatabaseQuery(db.id, 'SELECT id, amount FROM orders ORDER BY id', [], { input: {}, nodes: {}, vars: {}, gv: {}, ev: {} }, 10);
+  assert.equal(preview.previewLimit, 10);
+  assert.equal(preview.rows.length, 1);
+  assert.equal(preview.rows[0].id, 'A-1; DROP TABLE orders; --');
+  assert.match(preview.columns.join(','), /id,amount/);
+  await assert.rejects(() => previewDatabaseQuery(db.id, "DELETE FROM orders", [], {}, 10), /SELECT or WITH queries only/);
+  await assert.rejects(() => previewDatabaseQuery(db.id, "WITH removed AS (DELETE FROM orders RETURNING id) SELECT * FROM removed", [], {}, 10), /read-only.*DELETE/);
+  assert.throws(() => assertReadOnlyPreviewSql('UPDATE trips SET fare = 0'), /SELECT or WITH queries only/);
+  assert.throws(() => assertReadOnlyPreviewSql('WITH changed AS (UPDATE trips SET fare = 0 RETURNING *) SELECT * FROM changed'), /read-only.*UPDATE/);
 });
 
 test('Kafka: a copy delivered while its run waits pauses the partition instead of starting a second run', async () => {

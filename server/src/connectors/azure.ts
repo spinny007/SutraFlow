@@ -14,7 +14,7 @@ import { registerListener } from '../listeners.js';
 import { httpCall } from '../security/outbound.js';
 import { getSecret } from '../secrets.js';
 import { F, when } from '../palettes/common.js';
-import { inlineRunData } from './db.js';
+import { inlineRunData, namedParameterErrors, namedParameterWarnings } from './db.js';
 
 /**
  * Azure Data Factory and Databricks: run pipelines, jobs, notebooks, code blocks and SQL, wait for
@@ -499,7 +499,8 @@ export const azureActivities: Activity[] = [
       F('maxRows', 'Maximum rows', 'number', 10000),
       F('waitMinutes', 'Wait at most (minutes)', 'number', 30),
     ],
-    designCheck: cfg => [...(cfg.connection ? [] : ['Choose the Databricks workspace']), ...(String(cfg.statement || '').trim() ? [] : ['Write the SQL'])],
+    designCheck: cfg => [...(cfg.connection ? [] : ['Choose the Databricks workspace']), ...(String(cfg.statement || '').trim() ? [] : ['Write the SQL']), ...namedParameterWarnings(cfg.statement, cfg.params)],
+    designErrors: cfg => namedParameterErrors(cfg.statement, cfg.params),
     outputHint: { rows: [{}], columns: [''], count: 0, statementId: '', truncated: false },
     execute: async c => {
       const r = conn(c, 'databricks', 'Databricks workspace');

@@ -25,6 +25,7 @@ export interface NodeDesign {
   ports?: Record<string, SNode>;
   /** Target trees of mapping fields, by field key. */
   inputTrees: Record<string, SNode>;
+  errors: string[];
   warnings: string[];
 }
 
@@ -78,7 +79,7 @@ function portShape(d: NodeDesign | undefined, port: string, fromName: string): S
 function designNode(doc: FlowDoc, n: FlowNode, ins: { edge: { port: string }; from: FlowNode }[], all: Record<string, NodeDesign>, byName: Record<string, SNode | null>): NodeDesign {
   const act = engine.activity(n.type);
   const cfg = n.config || {};
-  const warnings: string[] = [];
+  const errors: string[] = [], warnings: string[] = [];
   let input: SNode | null = null;
   if (act?.join) input = { name: 'input', type: 'object', children: ins.map(i => ({ ...(portShape(all[i.from.id], i.edge.port, i.from.name) || ANY(i.from.name)), name: i.from.name })) };
   else if (ins.length) input = portShape(all[ins[0].from.id], ins[0].edge.port, ins[0].from.name);
@@ -120,8 +121,9 @@ function designNode(doc: FlowDoc, n: FlowNode, ins: { edge: { port: string }; fr
     warnings.push(e.message);
   }
   if (act?.designCheck) { try { warnings.push(...act.designCheck(cfg)); } catch (e: any) { warnings.push(e.message); } }
+  if (act?.designErrors) { try { errors.push(...act.designErrors(cfg)); } catch (e: any) { errors.push(e.message); } }
   // Looping activities: for each item gives every result; repeat while gives the last one and the count.
   if (n.settings?.loop === 'for each item') outShape = { name: n.name, type: 'object', children: [{ ...(outShape || ANY('iterations')), name: 'iterations', repeats: true }, { name: 'count', type: 'integer' }] };
   else if (n.settings?.loop === 'repeat while' && outShape) outShape = { ...outShape, children: [...(outShape.children || []), { name: '_iterations', type: 'integer' }] };
-  return { in: input, out: outShape ? { ...outShape, name: n.name } : outShape === null ? null : ANY(n.name), ports, inputTrees, warnings };
+  return { in: input, out: outShape ? { ...outShape, name: n.name } : outShape === null ? null : ANY(n.name), ports, inputTrees, errors, warnings };
 }

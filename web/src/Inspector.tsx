@@ -159,14 +159,30 @@ function ProcessVariables({ vars, onChange }: { vars: ProcessVariable[]; onChang
 
 function General(p: Props & { node: FlowNode }) {
   const { node } = p;
-  const { meta, resources, secrets } = useCatalog();
+  const { meta, projectId, resources, secrets } = useCatalog();
+  const [preview, setPreview] = useState<any>(null);
+  const [previewing, setPreviewing] = useState(false);
   const a = meta.activities.find(x => x.type === node.type);
   if (!a) return <div className="errbox">Unknown activity type {node.type}</div>;
   // Mappable inputs (templates, formulas, structured mappings) are edited in the Input tab.
   const fields = a.fields.filter(f => !f.tpl && f.type !== 'mapping');
   const mappable = a.fields.some(f => (f.tpl || f.type === 'mapping') && visible(f, node.config, a.fields));
   const setCfg = (k: string, v: any) => p.updateNode(node.id, n => ({ ...n, config: { ...n.config, [k]: v } }));
+  const errors = p.design[node.id]?.errors || [];
   const warnings = p.design[node.id]?.warnings || [];
+  const canPreview = node.type === 'dbQuery' || node.type === 'databricksSql';
+  const testQuery = async () => {
+    setPreviewing(true); setPreview(null);
+    const outputs = p.run?.outputs && Object.keys(p.run.outputs).length ? p.run.outputs : p.sample.outputs;
+    const taskInput = [...(p.run?.tasks || [])].reverse().find(t => t.node_id === node.id)?.input;
+    const incoming = p.doc.edges.find(e => e.to === node.id);
+    const previous = incoming ? p.doc.nodes.find(n => n.id === incoming.from) : undefined;
+    const input = taskInput ?? (previous ? outputs[previous.name] : undefined) ?? {};
+    try {
+      setPreview(await post('/api/design/query-preview', { projectId, node, scope: { input, nodes: outputs, vars: p.run?.vars || p.sample.vars || {}, trigger: {} } }));
+    } catch (e: any) { setPreview({ error: e.message }); }
+    finally { setPreviewing(false); }
+  };
   return (
     <>
       <div className={`phead ${famOf(meta, a.palette)}`}><span className="glyph">{a.glyph}</span><div><h2>{a.name}</h2><p>{a.desc}</p></div></div>
@@ -179,9 +195,15 @@ function General(p: Props & { node: FlowNode }) {
           onBlur={e => { const v = e.target.value.trim(); if (v !== (node.description || '')) p.updateNode(node.id, n => ({ ...n, description: v || undefined })); }} />
         <div className="hint">Shown when pointing at the step on the canvas, and in the Sutra's documentation (General tab of the Sutra: Documentation).</div>
       </div>
+      {errors.length > 0 && <div className="errbox">{errors.join('\n')}</div>}
       {warnings.length > 0 && <div className="warnbox">{warnings.join('\n')}</div>}
       <FieldList fields={fields} values={node.config} onChange={setCfg} resources={resources} secrets={secrets}
         extra={f => (node.type === 'soapInvoke' && (f.k === 'wsdlUrl' || f.k === 'wsdlRef') ? <WsdlLoader node={node} setCfg={setCfg} /> : null)} />
+      {canPreview && <div className="fld">
+        <button className="btn" onClick={testQuery} disabled={previewing || !node.config.connection || errors.length > 0}>{previewing ? 'Testing query…' : 'Test query (10 rows)'}</button>
+        <div className="hint">Uses the selected connection and the latest sample input. It never adds a limit to the deployed query.</div>
+        {preview?.error ? <div className="errbox">{preview.error}</div> : preview ? <div className="okbox"><b>Sample result</b><Json value={preview} /></div> : null}
+      </div>}
       {mappable && <p><button className="btn" onClick={() => p.setTab('input')}>Map inputs ›</button></p>}
       <div className="row" style={{ marginTop: 6 }}>
         {a.trigger && <button className="btn go" onClick={() => p.onTest(node.id)}>▶ Test from here</button>}
