@@ -135,10 +135,21 @@ test('SQL text may use administrator-managed project variables while values stay
   assert.equal(r.status, 'done', r.error);
   assert.deepEqual(r.state.outputs.Query.first, { queue_name: 'orders.in', item_id: 'A-1' });
 
-  const unsafe = node('dbQuery', 'Unsafe', { connection: db.id, sql: "select 'safe' as value where 'x' = '{{input.id}}'", params: [] });
-  const attacked = await run([s, unsafe], [edge(s, unsafe)], { id: "x' OR '1'='1" });
-  assert.equal(attacked.status, 'failed');
-  assert.match(attacked.error, /SQL text may use only Project and Engine properties.*bound parameters/);
+  // Run data written in the SQL text is bound, never pasted: the attack string is only a value.
+  const inline = node('dbQuery', 'Inline', { connection: db.id, sql: "select 'found' as value where 'x' = '{{input.id}}'", params: [] });
+  const attacked = await run([s, inline], [edge(s, inline)], { id: "x' OR '1'='1" });
+  assert.equal(attacked.status, 'done', attacked.error);
+  assert.equal(attacked.state.outputs.Inline.rowCount, 0, 'the quote in the input did not change the SQL');
+  const matched = await run([s, inline], [edge(s, inline)], { id: 'x' });
+  assert.equal(matched.state.outputs.Inline.first.value, 'found', 'the same reference matches a plain value');
+  const both = node('dbQuery', 'Both', { connection: db.id, sql: "select '{{gv.QUEUE}}' as queue_name, {{input.n}} + 1 as next, '%{{input.id}}%' as pattern, :id as item_id", params: [{ k: 'id', v: '{{input.id}}' }] });
+  const r2 = await run([s, both], [edge(s, both)], { id: "A'1", n: 41 });
+  assert.equal(r2.status, 'done', r2.error);
+  assert.deepEqual(r2.state.outputs.Both.first, { queue_name: 'orders.in', next: 42, pattern: "%A'1%", item_id: "A'1" });
+  const ident = node('dbQuery', 'Ident', { connection: db.id, sql: 'select 1 as "{{input.id}}"', params: [] });
+  const refused = await run([s, ident], [edge(s, ident)], { id: 'x' });
+  assert.equal(refused.status, 'failed');
+  assert.match(refused.error, /cannot be bound inside a quoted identifier/);
 });
 
 test('Service Bus: JMS headers and properties; explicit acknowledgement with Confirm message', async () => {

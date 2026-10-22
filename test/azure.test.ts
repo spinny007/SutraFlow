@@ -241,4 +241,11 @@ test('Databricks SQL sends named parameters, waits, and reads every chunk', asyn
   const sent = seen.filter(s => s.url === '/api/2.0/sql/statements' && s.method === 'POST').pop()!.body;
   assert.deepEqual(sent.parameters, [{ name: 'zip', value: '10001', type: 'STRING' }]);
   assert.equal(sent.warehouse_id, 'wh-1');
+
+  // Run data written in the statement is sent as a named parameter, never as SQL text.
+  const inline = await run(node('databricksSql', 'Inline', { connection: c.id, statement: "SELECT * FROM trips WHERE pickup_zip = '{{input.zip}}'", params: [], maxRows: 100 }));
+  assert.equal(inline.status, 'done', inline.error);
+  const sent2 = seen.filter(s => s.url === '/api/2.0/sql/statements' && s.method === 'POST').pop()!.body;
+  assert.equal(sent2.statement, 'SELECT * FROM trips WHERE pickup_zip = :sutra_v1');
+  assert.deepEqual(sent2.parameters, [{ name: 'sutra_v1', value: '10001', type: 'STRING' }]);
 });

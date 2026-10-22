@@ -421,10 +421,10 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     output: ['<code>rows</code>, <code>bytes</code>, <code>hits</code>, <code>misses</code>, <code>loadedAt</code>.'],
   },
   dbQuery: {
-    scope: ['A SELECT on PostgreSQL, MySQL/MariaDB, SQL Server, Oracle or SQLite.', 'Named parameters <code>:name</code>, always bound, never pasted into the SQL.', 'A maximum row count.'],
+    scope: ['A SELECT on PostgreSQL, MySQL/MariaDB, SQL Server, Oracle or SQLite.', 'Run data written in the SQL (<code>{{input.id}}</code>) and named parameters <code>:name</code>: both always bound, never pasted into the SQL.', 'A maximum row count.'],
     outScope: ['Changes: use [[dbUpdate]] or [[dbTransaction]].'],
     use: ['Looking up a customer, reading pending orders.'],
-    steps: ['Pick the database connection.', 'Write the SQL with <code>:name</code> parameters.', 'Add one parameter row per name, with its value.', 'Connect <em>empty</em> for no rows.'],
+    steps: ['Pick the database connection.', 'Write the SQL. Project and Engine properties name what differs per server (<code>FROM {{gv.SALES_SCHEMA}}.orders</code>); run data may be written in too (<code>WHERE id = \'{{input.orderId}}\'</code>) and is sent as a bound parameter, never as SQL text.', 'Or use <code>:name</code> in the SQL and add one parameter row per name, with its value.', 'Connect <em>empty</em> for no rows.'],
     output: ['<code>rows</code> (repeating), <code>count</code>, <code>first</code>.'],
   },
   dbUpdate: {
@@ -466,9 +466,9 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
   },
   busSubscribe: {
     scope: ['A queue/topic process starter for Kafka, RabbitMQ and ActiveMQ / AMQP 1.0; selectors, durable subscriptions and Kafka consumer groups.', 'Acknowledgement: auto (on receipt), client (after the run succeeds) or explicit ([[busConfirm]]).', 'Only the elected leader owns the subscription. Client and explicit modes retain a durable message identity across leader changes.', 'On failure: requeue, or reject after a delivery limit so the broker can dead-letter it; concurrency.'],
-    outScope: ['Exactly-once external side effects: keep them idempotent. Kafka has a durable offset identity; RabbitMQ and AMQP publishers must supply a unique message id for duplicate-run protection.'],
+    outScope: ['Exactly-once external side effects: keep them idempotent. Kafka has a durable offset identity; RabbitMQ and AMQP messages are recognised by their message id or by the <em>Duplicate key</em> you choose.'],
     use: ['Processing work from a queue, reacting to events.'],
-    steps: ['Choose the broker, connection and destination.', 'Choose the acknowledgement mode: <em>client</em> suits most Sutras; use <em>explicit</em> only for a deliberate commit point; use <em>auto</em> only when message loss is acceptable.', 'Leave <em>Avoid duplicate runs</em> on; for RabbitMQ or AMQP, make the publisher assign a unique message id.', 'Choose requeue or reject, set a finite delivery limit where appropriate, and configure the broker dead-letter destination.', 'Choose how many messages run at once.', 'Write a test message so you can test without a broker.', 'Deploy; the elected leader subscribes while the deployed version is active.'],
+    steps: ['Choose the broker, connection and destination.', 'Choose the acknowledgement mode: <em>client</em> suits most Sutras; use <em>explicit</em> only for a deliberate commit point; use <em>auto</em> only when message loss is acceptable.', 'Leave <em>Avoid duplicate runs</em> on; for RabbitMQ or AMQP, make the publisher assign a unique message id, or set <em>Duplicate key</em> (for example <code>{{body.orderId}}</code>).', 'Choose requeue or reject, set a finite delivery limit where appropriate, and configure the broker dead-letter destination.', 'Choose how many messages run at once.', 'Write a test message so you can test without a broker.', 'Deploy; the elected leader subscribes while the deployed version is active.'],
     output: ['<code>body</code>, <code>headers</code> (JMS headers), <code>properties</code>, <code>destination</code>, <code>redelivered</code>.'],
   },
   busConfirm: {

@@ -63,6 +63,12 @@ test('MySQL: create, insert with bound parameters (injection stays data), query,
   assert.equal(r.out.Find.first.id, "A-1'; DROP TABLE sf_orders; --", 'injection text stored as data');
   assert.equal(Number(r.out.Find.first.amount), 120.5);
   assert.equal(r.out.Find.first.status, 'shipped');
+
+  // Run data written straight into the SQL text is bound on this driver too.
+  const inline = node('dbQuery', 'Inline', { connection: conn, sql: "SELECT id, status FROM sf_orders WHERE id = '{{trigger.id}}' AND amount > {{trigger.amount}} - 1", params: [], maxRows: 10 });
+  const r2 = await run([s, inline], [edge(s, inline)]);
+  assert.equal(r2.status, 'done', r2.error);
+  assert.equal(r2.out.Inline.first?.id, "A-1'; DROP TABLE sf_orders; --", 'the inline reference was bound, not pasted');
 });
 
 test('MySQL: a transaction rolls back every statement when one fails', { skip }, async () => {

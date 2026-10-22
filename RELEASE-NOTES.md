@@ -1,15 +1,41 @@
-# SutraFlow 2.0.3 release notes
+# SutraFlow 2.0.4 release notes
 
 Released 2026-10-22. Copyright (c) 2026-27 Surya Partap Singh, [MixAgile.com](https://mixagile.com). Licensed under the GNU Affero General Public License v3.0 only (AGPL-3.0-only); a commercial licence is available, see `COMMERCIAL-LICENSE.md`.
 
 | Download | For |
 |---|---|
-| `sutraflow-2.0.3-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
-| `sutraflow-2.0.3-linux.tar.gz` | Linux (x64 or arm64); also macOS |
+| `sutraflow-2.0.4-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
+| `sutraflow-2.0.4-linux.tar.gz` | Linux (x64 or arm64); also macOS |
 
 Each comes with a `.sha256` file to check the download.
 
-## What is new in 2.0.3
+## What is new in 2.0.4
+
+- **Run data written straight into SQL, always bound**: in SQL query, SQL update, SQL script, SQL transaction and Databricks SQL, a reference such as `{{input.id}}` written in the SQL text is sent to the database as a bound parameter, never as SQL text. `WHERE id = {{input.id}}` keeps the value's type; a quoted text such as `'{{input.id}}'` or `'%{{input.q}}%'` becomes one text parameter, filled in. Project and Engine properties (`{{gv.X}}`, `{{ev.X}}`) are still written into the statement for names and clauses, so one statement uses both. `:name` parameters work as before and can be mixed in. Run data inside a quoted name, a comment or a `$$` body cannot be bound and is refused with a clear message.
+- **Held duplicates on RabbitMQ and ActiveMQ**: a message delivered again while its first run is still going (for example waiting for an approval) is held unacknowledged and settled when that run ends: acknowledged when it finished, returned for a new run when it failed or was cancelled. It is not redelivered meanwhile, and each held copy gets one more delivery slot (prefetch or credit), so other messages keep flowing. Kafka pauses the partition and checks again every 5 seconds, with a status that says why.
+- **Duplicate key**: messages without a message id (common with RabbitMQ) can be recognised by a chosen value such as `{{body.orderId}}` or `{{headers.correlationId}}`.
+- **Messages without an id**: process (the default, unchanged) or reject them to the broker's dead-letter queue.
+- **Guide**: a worked example of properties and run data in one SQL statement; held duplicates, Duplicate key, Messages without an id, and message selectors (ActiveMQ) versus routing (RabbitMQ) in the queue chapter.
+- No database change: 2.0.4 shares a database with 2.0.0 to 2.0.3.
+
+### Fixes in 2.0.4
+
+| What you would have seen | Cause | Now |
+|---|---|---|
+| SQL with `'{{input.id}}'` in its text failed with "SQL text may use only Project and Engine properties", so a query mixing properties and request data had to be rewritten with `:name` parameters. | 2.0.3 refused run data in SQL text to stop SQL injection. | Run data in SQL text is bound automatically: it works and stays safe. |
+| Databricks SQL pasted `{{input.x}}` from its statement straight into the SQL text. | The statement went through the general template resolver; the 2.0.3 guard covered only the DB Ops activities. | Databricks SQL binds run data as named parameters, like the DB Ops activities. |
+| On RabbitMQ, a message delivered again while its first run waited for an approval went round between broker and engine without pause, and could be dead-lettered by a quorum queue's delivery limit. | 2.0.3 requeued such a copy at once; the broker redelivered it at once. | The copy is held unacknowledged and settled when the run ends. |
+| On ActiveMQ / Artemis, the same situation dead-lettered the message after a few rounds although its run was fine. | The copy was released as a failed delivery, which counts toward the broker's redelivery limit. | The copy is held; a copy returned because its first run was cancelled is a plain release, not counted as a failure. |
+| On Kafka, the status said "Sutra failed" while an earlier run was simply still going. | The same message was used for both cases. | The status says the offset is still being handled and when it is checked again. |
+| RabbitMQ messages without a message id had no duplicate protection, and nothing showed it. | Only the broker's message id was used. | Duplicate key and Messages without an id. |
+
+## 2.0.4 release gate
+
+The complete regression suite passed: 375 tests, 374 passed, 1 skipped and 0 failed, with real PostgreSQL 18 and MySQL 8.4 together; the password-and-SSL PostgreSQL migration ran this time (Laragon's PostgreSQL binaries). New coverage: run data written in SQL text bound on SQLite, real MySQL and real PostgreSQL (the attack string `x' OR '1'='1` stays a value), Databricks SQL named parameters from inline references, refusal inside quoted names, comments and `$$` bodies; a copy of a broker message held while its run waits, then acknowledged when the run finishes, returned when it is cancelled, and left to the broker when the listener stops; Duplicate key and Messages without an id. `npm audit` reported 0 vulnerabilities.
+
+The skip was the Docker image build (no compatible Linux Docker daemon on the release machine). The one-hour PostgreSQL soak from 1.9.0 remains the runtime baseline.
+
+## In 2.0.3: what is new since 1.9.1
 
 - **Zero known dependency vulnerabilities**: both the production and complete development dependency trees pass `npm audit`. `basic-ftp` is current; ACME uses a locally maintained native-crypto build without `node-forge`; the test-only FTP server no longer depends on the vulnerable `ip` package or legacy UUID generator.
 - **Reviewed vendor supply chain**: `vendor-lock.json` pins each fork to an npm version and tarball integrity plus a normalized local-tree hash, patch reasons, consumers, focused tests and runtime packaging scope. Every build checks integrity; pull requests, releases and a weekly workflow fail when npm publishes a newer upstream version. Updates require an API/behavior review, patch reapplication and the full regression gate rather than silently replacing code.
@@ -38,7 +64,7 @@ Each comes with a `.sha256` file to check the download.
 | A valid SAML response could complete in a different client from the one that started sign-in. | SAML now requires a signed short-lived client cookie as well as its one-time database state. Browserless clients carry the same cookie between start and callback. |
 | A redelivered queue/topic message could hold a consumer while its existing run waited for approval. | The duplicate is released promptly for later redelivery while the durable run remains authoritative. |
 
-## 2.0.3 release gate
+### 2.0.3 release gate
 
 The complete regression suite passed: 371 tests, 369 passed, 2 optional environment tests skipped and 0 failed. Real PostgreSQL 18 and MySQL ran together. PostgreSQL coverage included pooled execution, database cut and reconnect, password- and SSL-protected migration, claim fencing, leader replacement and drain. MySQL coverage proved Sutra-driven INSERT, UPDATE and SELECT operations with bound parameters, injection safety, transaction rollback, install scripts and stored procedures. The suite also covered transition conditions backed by Project properties, PGlite as secondary compatibility regression, inbound REST and SOAP servers, SOAP callers, WS-Security request and response encryption, SAML client binding for browsers and browserless callers, OpenID Connect sign-on, MCP/WebSocket security, cluster-shared ACME challenges and issuance leasing, FTP/SFTP with variable-backed connectors, Python and package/release operations. The complete `npm audit` reported 0 vulnerabilities.
 
@@ -217,14 +243,14 @@ What went wrong before, and what happens now. Most were found by the soak test (
 1. Install Node.js 24 from nodejs.org (or with nvm-windows) and open a new PowerShell window.
 2. Check the download:
    ```powershell
-   (Get-FileHash .\sutraflow-2.0.3-windows.zip -Algorithm SHA256).Hash.ToLower()
-   Get-Content .\sutraflow-2.0.3-windows.zip.sha256
+   (Get-FileHash .\sutraflow-2.0.4-windows.zip -Algorithm SHA256).Hash.ToLower()
+   Get-Content .\sutraflow-2.0.4-windows.zip.sha256
    ```
    The two values must match.
 3. Unpack it, for example to `C:\SutraFlow`:
    ```powershell
-   Expand-Archive .\sutraflow-2.0.3-windows.zip -DestinationPath C:\SutraFlow
-   cd C:\SutraFlow\sutraflow-2.0.3
+   Expand-Archive .\sutraflow-2.0.4-windows.zip -DestinationPath C:\SutraFlow
+   cd C:\SutraFlow\sutraflow-2.0.4
    ```
 4. Install the runtime packages and make the settings file:
    ```powershell
@@ -244,13 +270,13 @@ What went wrong before, and what happens now. Most were found by the soak test (
 1. Install Node.js 24 (from your distribution, NodeSource or nvm).
 2. Check the download:
    ```sh
-   sha256sum -c sutraflow-2.0.3-linux.tar.gz.sha256
+   sha256sum -c sutraflow-2.0.4-linux.tar.gz.sha256
    ```
 3. Unpack it, for example to `/opt`:
    ```sh
    sudo mkdir -p /opt/sutraflow && sudo chown "$USER" /opt/sutraflow
-   tar -xzf sutraflow-2.0.3-linux.tar.gz -C /opt/sutraflow
-   cd /opt/sutraflow/sutraflow-2.0.3
+   tar -xzf sutraflow-2.0.4-linux.tar.gz -C /opt/sutraflow
+   cd /opt/sutraflow/sutraflow-2.0.4
    ```
 4. Install the runtime packages and make the settings file:
    ```sh
@@ -269,7 +295,7 @@ What went wrong before, and what happens now. Most were found by the soak test (
 
 1. Back up: the data folder with `master.key`, and for PostgreSQL a `pg_dump` of the database.
 2. Stop gracefully: `sutraflow stop all` (running steps finish first).
-3. Unpack 2.0.3 into a new folder beside the old one. Copy `sutraflow.env` from the old folder; keep `SUTRA_DATA_DIR` pointing at the same data folder (or copy the folder).
+3. Unpack 2.0.4 into a new folder beside the old one. Copy `sutraflow.env` from the old folder; keep `SUTRA_DATA_DIR` pointing at the same data folder (or copy the folder).
 4. Run `sutraflow setup`, then `sutraflow start`. The database is upgraded at start (2.0.0 adds `sso_states`, `bus_messages` and `acme_challenges`; 1.9.0 adds `file_listener_state` and `file_listener_files`; from 1.7.6 it also adds `run_outputs`, `replay_guard`, `ws_connections`, `ws_outbox`, `users.idp_subject` and `engines.can_lead`; from 1.7.5 also `tasks.claim`; from 1.6 also the new indexes and memory-table tables). Nothing is removed, and open runs continue.
 5. In a cluster, **upgrade every engine before starting any of them again**: 1.8.0 engines keep step outputs apart from the run state, which older engines do not read, so the two must not share a database.
 6. On PostgreSQL, check `max_connections`: each engine opens its pool (`SUTRA_PG_POOL`, at most 20 by default) plus one connection. Engines × (pool + 1) must fit, with room for other clients.
@@ -279,7 +305,7 @@ To go back to 1.9.1, stop 2.0.3 and start 1.9.1 again; the three additive 2.0.0 
 
 ## Docker
 
-The images are built from the source repository (`Dockerfile`, `docker-compose.yml`): `docker build -t sutraflow:2.0.3 .`. The release archives are for installs without Docker.
+The images are built from the source repository (`Dockerfile`, `docker-compose.yml`): `docker build -t sutraflow:2.0.4 .`. The release archives are for installs without Docker.
 
 ## Known limitations
 

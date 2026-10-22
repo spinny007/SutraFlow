@@ -15,6 +15,7 @@ import { requireResource, kvToObject, type Resource } from '../resources.js';
 import { config } from '../config.js';
 import { F } from '../palettes/common.js';
 import { resolveAdminText } from '../settings.js';
+import { resolve, asText } from '../template.js';
 
 const require = createRequire(import.meta.url);
 
@@ -66,6 +67,62 @@ export function bindFor(driver: Driver, sql: string, params: Record<string, any>
     last = p.end;
   });
   return { sql: out + sql.slice(last), values };
+}
+
+const ADMIN_REF = /^(?:gv|ev)\./;
+const REF = /\{\{((?:(?!\{\{|\}\}).)+)\}\}/gs;
+
+/**
+ * SQL text with {{...}} references. Project and Engine properties ({{gv.X}}, {{ev.X}}) are written into
+ * the text: administrator-controlled names and clauses. Every other reference (run input, trigger data,
+ * earlier outputs, local variables) becomes a bound parameter and never SQL text:
+ *   WHERE id = {{input.id}}          -> WHERE id = :sutra_v1           (the value, its type kept)
+ *   WHERE id = '{{input.id}}'        -> WHERE id = :sutra_v1           (the whole literal, as text)
+ *   WHERE name LIKE '%{{input.q}}%'  -> WHERE name LIKE :sutra_v1     (the literal filled, as text)
+ * Run data inside a "quoted" or `quoted` identifier, a comment or a $$ body cannot be bound and is refused.
+ */
+export function inlineRunData(text: unknown, scope: Record<string, any>, taken: Record<string, any> = {}, label = 'SQL text') {
+  const sql = String(text ?? '');
+  const params: Record<string, any> = {};
+  if (sql.startsWith('=')) return { sql: resolveAdminText(sql, scope, label), params };
+  if (!sql.includes('{{')) return { sql, params };
+  let n = 0;
+  const bind = (value: any) => {
+    let name: string;
+    do name = `sutra_v${++n}`; while (name in taken || name in params);
+    params[name] = value === undefined ? null : value;
+    return ':' + name;
+  };
+  const isRun = (ref: string) => !ADMIN_REF.test(ref.trim());
+  const hasRun = (part: string) => [...part.matchAll(REF)].some(m => isRun(m[1]));
+  const admin = (part: string) => part.replace(REF, (_all, ref: string) => asText(resolve(`{{${ref}}}`, scope)));
+  const refuse = (where: string) => { throw new Error(`${label}: run data cannot be bound inside ${where}. Use a :name parameter where a value goes, or a checked Project property for a name.`); };
+  let out = '', i = 0;
+  while (i < sql.length) {
+    const c = sql[i], two = sql.slice(i, i + 2);
+    if (c === "'") {
+      let e = i + 1;
+      for (;;) { const q = sql.indexOf("'", e); if (q < 0) { e = sql.length; break; } if (sql[q + 1] === "'") { e = q + 2; continue; } e = q + 1; break; }
+      const literal = sql.slice(i, e), inner = literal.slice(1, literal.endsWith("'") && literal.length > 1 ? -1 : undefined);
+      out += hasRun(inner) ? bind(asText(resolve(inner.replace(/''/g, "'"), scope))) : admin(literal);
+      i = e; continue;
+    }
+    let end = -1, where = '';
+    if (c === '"' || c === '`') { const q = sql.indexOf(c, i + 1); end = q < 0 ? sql.length : q + 1; where = 'a quoted identifier'; }
+    else if (two === '--') { const q = sql.indexOf('\n', i); end = q < 0 ? sql.length : q; where = 'a comment'; }
+    else if (two === '/*') { const q = sql.indexOf('*/', i + 2); end = q < 0 ? sql.length : q + 2; where = 'a comment'; }
+    else if (c === '$') {
+      const tag = /^\$[A-Za-z_]*\$/.exec(sql.slice(i))?.[0];
+      if (tag) { const q = sql.indexOf(tag, i + tag.length); end = q < 0 ? sql.length : q + tag.length; where = 'a $$ body'; }
+    }
+    if (end > i) { const part = sql.slice(i, end); if (hasRun(part)) refuse(where); out += admin(part); i = end; continue; }
+    if (two === '{{') {
+      const m = /^\{\{((?:(?!\{\{|\}\}).)+)\}\}/s.exec(sql.slice(i));
+      if (m) { out += isRun(m[1]) ? bind(resolve(m[0], scope)) : asText(resolve(m[0], scope)); i += m[0].length; continue; }
+    }
+    out += c; i++;
+  }
+  return { sql: out, params };
 }
 
 const toRows = (rows: any[], fields?: { name: string }[]): DbResult => ({ rows, rowCount: rows.length, columns: fields?.map(f => f.name) ?? (rows[0] ? Object.keys(rows[0]) : []) });
@@ -193,6 +250,12 @@ export async function closeDbPools() {
 
 const params = (c: ExecCtx) => kvToObject(c.raw('params'), v => c.resolve(v) as any) as Record<string, any>;
 const adminText = (c: ExecCtx, key: string, label: string) => resolveAdminText(c.node.config?.[key], c.scope, label);
+/** The SQL of a step with its run-data references bound, merged with the Parameters field. */
+const sqlOf = (c: ExecCtx, label: string) => {
+  const p = params(c);
+  const r = inlineRunData(c.node.config?.sql, c.scope, p, label);
+  return { sql: r.sql, p: { ...p, ...r.params } };
+};
 const conn = F('connection', 'Database connection', 'resource', '', { resourceKind: 'database' });
 const paramField = F('params', 'Parameters', 'kv', [{ k: 'id', v: '{{input.orderId}}' }], { tpl: true, help: 'Values for :name placeholders in the SQL. Always sent as bound parameters.' });
 
@@ -200,10 +263,11 @@ export const dbActivities: Activity[] = [
   {
     type: 'dbQuery', palette: 'db', name: 'SQL query', glyph: '⛁', ports: ['out', 'empty'],
     desc: 'Runs a SELECT and returns the rows. No rows goes to the empty output.',
-    fields: [conn, F('sql', 'SQL', 'code', 'SELECT id, customer, amount\nFROM orders\nWHERE id = :id', { vars: true, help: 'Project and Engine variables may supply administrator-controlled names or clauses. Put request data in bound :name parameters.' }), paramField, F('maxRows', 'Maximum rows', 'number', 10000)],
+    fields: [conn, F('sql', 'SQL', 'code', 'SELECT id, customer, amount\nFROM orders\nWHERE id = :id', { vars: true, help: 'Project and Engine properties ({{gv.X}}, {{ev.X}}) are written into the SQL: names and clauses. Run data such as {{input.id}} is always sent as a bound parameter, the same as a :name parameter.' }), paramField, F('maxRows', 'Maximum rows', 'number', 10000)],
     outputHint: { rows: [{}], rowCount: 0, columns: [''] },
     execute: async c => {
-      const r = await (await connFor(c)).query(adminText(c, 'sql', 'SQL text'), params(c));
+      const { sql, p } = sqlOf(c, 'SQL text');
+      const r = await (await connFor(c)).query(sql, p);
       const max = Number(c.raw('maxRows')) || 10000;
       if (r.rows.length > max) throw new Error(`Query returned ${r.rows.length} rows, more than the maximum of ${max}`);
       return { port: r.rows.length ? 'out' : 'empty', out: { ...r, first: r.rows[0] ?? null } };
@@ -212,11 +276,12 @@ export const dbActivities: Activity[] = [
   {
     type: 'dbUpdate', palette: 'db', name: 'SQL update', glyph: '⛃', ports: ['out'],
     desc: 'Runs INSERT, UPDATE, DELETE or MERGE and returns the number of affected rows (and RETURNING rows where supported).',
-    fields: [conn, F('sql', 'SQL', 'code', 'UPDATE orders SET status = :status WHERE id = :id', { vars: true, help: 'Project and Engine variables may supply administrator-controlled names or clauses. Put request data in bound :name parameters.' }), F('params', 'Parameters', 'kv', [{ k: 'id', v: '{{input.orderId}}' }, { k: 'status', v: 'SHIPPED' }], { tpl: true, help: 'Values for :name placeholders.' }),
+    fields: [conn, F('sql', 'SQL', 'code', 'UPDATE orders SET status = :status WHERE id = :id', { vars: true, help: 'Project and Engine properties ({{gv.X}}, {{ev.X}}) are written into the SQL: names and clauses. Run data such as {{input.id}} is always sent as a bound parameter, the same as a :name parameter.' }), F('params', 'Parameters', 'kv', [{ k: 'id', v: '{{input.orderId}}' }, { k: 'status', v: 'SHIPPED' }], { tpl: true, help: 'Values for :name placeholders.' }),
       F('expect', 'Fail when no row is affected', 'bool', false)],
     outputHint: { rowCount: 0, rows: [] },
     execute: async c => {
-      const r = await (await connFor(c)).query(adminText(c, 'sql', 'SQL text'), params(c));
+      const { sql, p } = sqlOf(c, 'SQL text');
+      const r = await (await connFor(c)).query(sql, p);
       if (c.raw('expect') && !r.rowCount) throw new Error('No row was affected');
       return { out: r };
     },
@@ -232,14 +297,14 @@ export const dbActivities: Activity[] = [
     type: 'dbScript', palette: 'db', name: 'SQL script', glyph: '⛭', ports: ['out'], timeoutMs: 600000,
     desc: 'Runs an install or change script: CREATE DATABASE, CREATE TABLE, CREATE PROCEDURE, seed rows. Statements are separated by a line with only ";" and run one after another, not in one transaction: most databases keep table and procedure changes at once.',
     fields: [conn,
-      F('sql', 'Script', 'code', 'CREATE TABLE IF NOT EXISTS customers (\n  id VARCHAR(20) PRIMARY KEY,\n  name VARCHAR(100) NOT NULL\n)\n;\nINSERT INTO customers (id, name) VALUES (:id, :name)', { vars: true, help: 'Project and Engine variables may supply administrator-controlled database or object names. Put data in bound :name parameters.' }),
+      F('sql', 'Script', 'code', 'CREATE TABLE IF NOT EXISTS customers (\n  id VARCHAR(20) PRIMARY KEY,\n  name VARCHAR(100) NOT NULL\n)\n;\nINSERT INTO customers (id, name) VALUES (:id, :name)', { vars: true, help: 'Project and Engine properties ({{gv.X}}, {{ev.X}}) are written into the script: database and object names. Run data such as {{input.id}} is always sent as a bound parameter, the same as a :name parameter.' }),
       F('params', 'Parameters', 'kv', [], { tpl: true, help: 'Values for :name placeholders in any statement. Always sent as bound parameters.' }),
       F('onError', 'When a statement fails', 'select', 'stop', { options: ['stop', 'continue'], help: 'Stop: the step fails at that statement (those before it stay done). Continue: runs the rest and lists the failures.' })],
     outputHint: { results: [{ n: 0, statement: '', ok: true, rowCount: 0, error: '' }], ran: 0, failed: 0 },
     execute: async c => {
-      const stmts = adminText(c, 'sql', 'SQL script').split(/^\s*;\s*$/m).map(s => s.trim()).filter(Boolean);
+      const { sql, p } = sqlOf(c, 'SQL script');
+      const stmts = sql.split(/^\s*;\s*$/m).map(s => s.trim()).filter(Boolean);
       if (!stmts.length) throw new Error('The script has no statements');
-      const p = params(c);
       const db = await connFor(c);
       const results: { n: number; statement: string; ok: boolean; rowCount: number; rows?: any[]; error?: string }[] = [];
       for (const [i, s] of stmts.entries()) {
@@ -258,11 +323,11 @@ export const dbActivities: Activity[] = [
   {
     type: 'dbTransaction', palette: 'db', name: 'SQL transaction', glyph: '⛬', ports: ['out'],
     desc: 'Runs several statements in one transaction: all succeed or none are kept. Statements are separated by a line with only ";".',
-    fields: [conn, F('sql', 'Statements', 'code', 'INSERT INTO audit(order_id, action) VALUES (:id, \'ship\')\n;\nUPDATE orders SET status = \'SHIPPED\' WHERE id = :id', { vars: true, help: 'Project and Engine variables may supply administrator-controlled names or clauses. Put request data in bound :name parameters.' }), paramField],
+    fields: [conn, F('sql', 'Statements', 'code', 'INSERT INTO audit(order_id, action) VALUES (:id, \'ship\')\n;\nUPDATE orders SET status = \'SHIPPED\' WHERE id = :id', { vars: true, help: 'Project and Engine properties ({{gv.X}}, {{ev.X}}) are written into the SQL: names and clauses. Run data such as {{input.id}} is always sent as a bound parameter, the same as a :name parameter.' }), paramField],
     outputHint: { results: [{ rowCount: 0 }] },
     execute: async c => {
-      const stmts = adminText(c, 'sql', 'SQL transaction').split(/^\s*;\s*$/m).map(s => s.trim()).filter(Boolean);
-      const p = params(c);
+      const { sql, p } = sqlOf(c, 'SQL transaction');
+      const stmts = sql.split(/^\s*;\s*$/m).map(s => s.trim()).filter(Boolean);
       const results = await (await connFor(c)).transaction(async q => {
         const out: DbResult[] = [];
         for (const s of stmts) out.push(await q(s, Object.fromEntries(namedParams(s).map(n => [n.name, p[n.name]]))));

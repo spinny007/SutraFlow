@@ -21,8 +21,8 @@ const { q } = await import('../server/src/db.js');
 const flows = await import('../server/src/flows.js');
 const { setSecret } = await import('../server/src/secrets.js');
 const { saveResource } = await import('../server/src/resources.js');
-const { bindFor, namedParams, closeDbPools } = await import('../server/src/connectors/db.js');
-const { priorDelivery } = await import('../server/src/connectors/bus.js');
+const { bindFor, namedParams, closeDbPools, inlineRunData } = await import('../server/src/connectors/db.js');
+const { priorDelivery, busTiming, messageKey, stopHolds, handle: handleDelivery } = await import('../server/src/connectors/bus.js');
 const { rebuildListeners, listenerStatus } = await import('../server/src/listeners.js');
 const oauth = await import('../server/src/connectors/oauth.js');
 
@@ -51,6 +51,21 @@ test('DB Ops placeholders per database, ignoring quotes, comments and ::casts', 
   assert.throws(() => bindFor('postgres', 'x = :missing', {}), /:missing has no value/);
 });
 
+test('SQL text: properties are written in, run data written in the SQL is bound', () => {
+  const scope = { gv: { SCHEMA: 'sales' }, ev: { REGION: 'eu' }, input: { id: "x' OR '1'='1", n: 7, q: 'ab' }, vars: { status: 'NEW' } };
+  const r = inlineRunData("SELECT * FROM {{gv.SCHEMA}}.orders WHERE id = '{{input.id}}' AND n = {{input.n}} AND name LIKE '%{{input.q}}%' AND region = '{{ev.REGION}}' AND s = {{vars.status | lower}}", scope);
+  assert.equal(r.sql, "SELECT * FROM sales.orders WHERE id = :sutra_v1 AND n = :sutra_v2 AND name LIKE :sutra_v3 AND region = 'eu' AND s = :sutra_v4");
+  assert.deepEqual(r.params, { sutra_v1: "x' OR '1'='1", sutra_v2: 7, sutra_v3: '%ab%', sutra_v4: 'new' });
+  assert.equal(inlineRunData("SELECT 'it''s {{input.q}}' AS t", scope).params.sutra_v1, "it's ab", 'doubled quotes stay one quote');
+  assert.equal(inlineRunData('x = {{input.n}}', scope, { sutra_v1: 'mine' }).sql, 'x = :sutra_v2', 'names in Parameters are not reused');
+  assert.equal(inlineRunData("x = '{{gv.SCHEMA}}' -- {{gv.SCHEMA}}", scope).sql, "x = 'sales' -- sales", 'properties may go anywhere');
+  for (const [sql, where] of [['x = "{{input.id}}"', 'quoted identifier'], ['x = 1 -- {{input.id}}', 'comment'], ['x = 1 /* {{input.id}} */', 'comment'], ['DO $$ BEGIN PERFORM {{input.id}}; END $$', '\\$\\$ body']]) {
+    assert.throws(() => inlineRunData(sql, scope), new RegExp(`cannot be bound inside a ${where}`), sql);
+  }
+  assert.throws(() => inlineRunData("=concat('x = ', {input.id})", scope), /only Project and Engine properties/, 'formulas build text, so they stay property-only');
+  assert.deepEqual(inlineRunData('SELECT 1', scope), { sql: 'SELECT 1', params: {} });
+});
+
 test('DB Ops on SQLite: update, query with bound parameters, transaction rollback', async () => {
   const db = saveResource({ kind: 'database', name: 'Local', config: { driver: 'sqlite', file: 'test-orders.sqlite' } });
   const s = node('start', 'Start', { payload: '{"id":"A-1; DROP TABLE orders; --","amount":120.5}' });
@@ -71,7 +86,7 @@ test('DB Ops on SQLite: update, query with bound parameters, transaction rollbac
   assert.equal(r3.state.outputs.Check.first.n, 0, 'the first insert was rolled back');
 });
 
-test('a redelivered broker message releases promptly while its durable run is waiting', async () => {
+test('Kafka: a copy delivered while its run waits pauses the partition instead of starting a second run', async () => {
   const start = node('start', 'Start'), approval = node('approval', 'Approve', { message: 'Wait here' });
   const flowId = crypto.randomUUID();
   const runId = await engine.startRun({ doc: { name: 'Waiting delivery', nodes: [start, approval], edges: [edge(start, approval)] }, flowId });
@@ -79,11 +94,88 @@ test('a redelivered broker message releases promptly while its durable run is wa
   q.run('insert into bus_messages(flow_id, node_id, message_key, run_id, status, updated_at) values(?, ?, ?, ?, ?, ?)', flowId, 'trigger', 'message-1', runId, 'running', Date.now());
   let acked = 0, requeued = 0;
   const began = Date.now();
-  assert.equal(await priorDelivery({ flowId, node: { id: 'trigger' } } as any, 'message-1', { ack: () => { acked++; }, requeue: () => { requeued++; } }), true);
+  let why = '';
+  assert.equal(await priorDelivery({ flowId, node: { id: 'trigger' } } as any, 'message-1', { ack: () => { acked++; }, requeue: (w?: string) => { requeued++; why = w || ''; } }), true);
+  assert.equal(why, 'duplicate', 'Kafka says why it pauses');
   assert.deepEqual([acked, requeued], [0, 1]);
   assert.ok(Date.now() - began < 200, 'the consumer slot is not held while the approval is waiting');
   assert.equal(Number(q.get<any>('select count(*) n from runs where id = ?', runId).n), 1, 'the existing run remains authoritative');
   await engine.cancel(runId);
+});
+
+test('RabbitMQ and ActiveMQ: a copy delivered while its run waits is held, then settled by how that run ends', async () => {
+  busTiming.holdPollMs = 50;
+  const start = node('start', 'Start'), approval = node('approval', 'Approve', { message: 'Wait here' });
+  const waitingRun = async (name: string) => {
+    const flowId = crypto.randomUUID();
+    const runId = await engine.startRun({ doc: { name, nodes: [start, approval], edges: [edge(start, approval)] }, flowId });
+    await until(() => q.get<any>('select status from runs where id = ?', runId)?.status === 'waiting');
+    q.run('insert into bus_messages(flow_id, node_id, message_key, run_id, status, updated_at) values(?, ?, ?, ?, ?, ?)', flowId, 'trigger', 'm-1', runId, 'running', Date.now());
+    const statuses: string[] = [];
+    const c = { flowId, node: { id: 'trigger' }, status: (_s: string, m: string) => statuses.push(m) } as any;
+    const seen = { acked: 0, requeued: 0, grown: 0, shrunk: 0 };
+    const settle = { ack: () => { seen.acked++; }, requeue: () => { seen.requeued++; }, hold: { grow: () => { seen.grown++; }, shrink: () => { seen.shrunk++; } } };
+    return { flowId, runId, c, seen, settle, statuses };
+  };
+
+  // The first run finishes: the held copy is acknowledged, never run twice, never redelivered meanwhile.
+  const a = await waitingRun('Held then done');
+  assert.equal(await priorDelivery(a.c, 'm-1', a.settle), true, 'no second run');
+  await new Promise(r => setTimeout(r, 300));
+  assert.deepEqual(a.seen, { acked: 0, requeued: 0, grown: 1, shrunk: 0 }, 'held unacknowledged while the approval waits, with one more slot');
+  assert.match(a.statuses.join(' '), /held while run/);
+  const task = q.get<any>(`select id from tasks where run_id = ? and status = 'waiting'`, a.runId);
+  await engine.decide(Number(task.id), true, 'tester');
+  await until(() => a.seen.acked === 1);
+  assert.deepEqual(a.seen, { acked: 1, requeued: 0, grown: 1, shrunk: 1 });
+  assert.equal(q.get<any>('select status from bus_messages where flow_id = ?', a.flowId).status, 'done', 'later copies are acknowledged at once');
+
+  // The first run is cancelled: the copy goes back to the broker to start a new run.
+  const b = await waitingRun('Held then cancelled');
+  await priorDelivery(b.c, 'm-1', b.settle);
+  await engine.cancel(b.runId);
+  await until(() => b.seen.requeued === 1);
+  assert.deepEqual(b.seen, { acked: 0, requeued: 1, grown: 1, shrunk: 1 });
+  assert.equal(q.get<any>('select 1 as x from bus_messages where flow_id = ?', b.flowId), undefined, 'the delivery guard is released for the new run');
+
+  // A listener that stops leaves held copies to the broker (they come back unacknowledged).
+  const d = await waitingRun('Held then stopped');
+  await priorDelivery(d.c, 'm-1', d.settle);
+  stopHolds(d.c);
+  await engine.cancel(d.runId);
+  await new Promise(r => setTimeout(r, 300));
+  assert.deepEqual([d.seen.acked, d.seen.requeued], [0, 0]);
+  busTiming.holdPollMs = 2000;
+});
+
+test('Duplicate key: messages without a broker message id are recognised by a chosen field', () => {
+  const input = { body: { orderId: 'A-7' }, headers: { correlationId: 'c-9' } };
+  assert.equal(messageKey({}, input, 'rabbitmq:orders:m-1'), 'rabbitmq:orders:m-1', 'the broker id comes first');
+  assert.equal(messageKey({}, input, ''), '', 'no id and no key: not deduplicated');
+  assert.equal(messageKey({ duplicateKey: '{{body.orderId}}' }, input, ''), 'key:A-7');
+  assert.equal(messageKey({ duplicateKey: '{{headers.correlationId}}' }, input, ''), 'key:c-9');
+  assert.equal(messageKey({ duplicateKey: '{{body.missing}}' }, input, ''), '', 'an empty value is not a key');
+  assert.equal(messageKey({ deduplicate: 'off', duplicateKey: '{{body.orderId}}' }, input, 'x'), '');
+});
+
+test('Messages without an id: processed by default, or rejected to the dead-letter queue when chosen', async () => {
+  const input = { body: { orderId: 'A-8' }, headers: {} };
+  const make = () => {
+    const seen = { fired: 0, rejected: 0, statuses: [] as string[] };
+    const c = { flowId: crypto.randomUUID(), node: { id: 'trigger' }, status: (_s: string, m: string) => seen.statuses.push(m), fire: async (_i: unknown, done?: (s: string, id: string) => void) => { seen.fired++; setTimeout(() => done?.('done', 'r1'), 5); return 'r1'; } } as any;
+    const settle = { ack: () => {}, requeue: () => {}, reject: () => { seen.rejected++; } };
+    return { c, seen, settle };
+  };
+  const a = make();
+  await handleDelivery(a.c, { ackMode: 'client', withoutId: 'reject (dead-letter)' }, input, a.settle, 1, '');
+  assert.deepEqual([a.seen.fired, a.seen.rejected], [0, 1]);
+  assert.match(a.seen.statuses.join(' '), /without a message id/);
+  const b = make();
+  await handleDelivery(b.c, { ackMode: 'client' }, input, b.settle, 1, '');
+  assert.deepEqual([b.seen.fired, b.seen.rejected], [1, 0], 'process is the default');
+  const k = make();
+  await handleDelivery(k.c, { ackMode: 'client', withoutId: 'reject (dead-letter)', duplicateKey: '{{body.orderId}}' }, input, k.settle, 1, '');
+  assert.deepEqual([k.seen.fired, k.seen.rejected], [1, 0], 'a Duplicate key counts as an id');
 });
 
 test('Send email over SMTP', async () => {

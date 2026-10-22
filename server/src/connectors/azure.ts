@@ -14,6 +14,7 @@ import { registerListener } from '../listeners.js';
 import { httpCall } from '../security/outbound.js';
 import { getSecret } from '../secrets.js';
 import { F, when } from '../palettes/common.js';
+import { inlineRunData } from './db.js';
 
 /**
  * Azure Data Factory and Databricks: run pipelines, jobs, notebooks, code blocks and SQL, wait for
@@ -492,7 +493,7 @@ export const azureActivities: Activity[] = [
     fields: [
       dbxConn,
       F('warehouseId', 'SQL warehouse id', 'text', '', { tpl: true, help: 'Empty = the default warehouse of the workspace connection.' }),
-      F('statement', 'SQL', 'code', 'SELECT pickup_zip, count(*) AS trips, round(avg(fare_amount), 2) AS avg_fare\nFROM samples.nyctaxi.trips\nWHERE pickup_zip = :zip\nGROUP BY pickup_zip', { vars: true, help: 'Project properties may supply administrator-controlled catalog, schema or table names. Keep request data in bound :name parameters.' }),
+      F('statement', 'SQL', 'code', 'SELECT pickup_zip, count(*) AS trips, round(avg(fare_amount), 2) AS avg_fare\nFROM samples.nyctaxi.trips\nWHERE pickup_zip = :zip\nGROUP BY pickup_zip', { vars: true, help: 'Project and Engine properties ({{gv.X}}, {{ev.X}}) are written into the SQL: catalog, schema or table names. Run data such as {{input.zip}} is always sent as a named parameter, the same as a :name parameter.' }),
       F('params', 'Parameters', 'kv', [{ k: 'zip', v: '{{input.zip}}' }], { tpl: true, help: 'Named parameters used as :name in the SQL.' }),
       F('catalog', 'Catalog', 'text', ''), F('schema', 'Schema', 'text', ''),
       F('maxRows', 'Maximum rows', 'number', 10000),
@@ -505,9 +506,12 @@ export const azureActivities: Activity[] = [
       const dbx = dbxClient(r, secretOf(c), c.signal);
       const warehouse = String(c.v('warehouseId') || r.config.warehouseId || '').trim();
       if (!warehouse) throw new Error('No SQL warehouse: give its id here or a default warehouse on the workspace connection');
-      const params = Object.entries(kvObj(c, 'params')).map(([name, v]) => ({ name, value: v === null || v === undefined ? null : typeof v === 'string' ? v : JSON.stringify(v), type: typeof v === 'number' ? (Number.isInteger(v) ? 'BIGINT' : 'DOUBLE') : typeof v === 'boolean' ? 'BOOLEAN' : 'STRING' }));
+      // Run data written in the SQL ({{input.zip}}) becomes a named parameter; {{gv.X}} stays text.
+      const given = kvObj(c, 'params');
+      const bound = inlineRunData(c.node.config?.statement, c.scope, given, 'Databricks SQL');
+      const params = Object.entries({ ...given, ...bound.params }).map(([name, v]) => ({ name, value: v === null || v === undefined ? null : typeof v === 'string' ? v : JSON.stringify(v), type: typeof v === 'number' ? (Number.isInteger(v) ? 'BIGINT' : 'DOUBLE') : typeof v === 'boolean' ? 'BOOLEAN' : 'STRING' }));
       const max = Math.max(1, Number(c.raw('maxRows')) || 10000);
-      let st = await dbx.call('POST', '/api/2.0/sql/statements', { warehouse_id: warehouse, statement: String(c.raw('statement') || ''), parameters: params, wait_timeout: '30s', on_wait_timeout: 'CONTINUE', format: 'JSON_ARRAY', disposition: 'INLINE', row_limit: max, ...(c.raw('catalog') ? { catalog: c.raw('catalog') } : {}), ...(c.raw('schema') ? { schema: c.raw('schema') } : {}) });
+      let st = await dbx.call('POST', '/api/2.0/sql/statements', { warehouse_id: warehouse, statement: bound.sql, parameters: params, wait_timeout: '30s', on_wait_timeout: 'CONTINUE', format: 'JSON_ARRAY', disposition: 'INLINE', row_limit: max, ...(c.raw('catalog') ? { catalog: c.raw('catalog') } : {}), ...(c.raw('schema') ? { schema: c.raw('schema') } : {}) });
       const t0 = Date.now(), limit = (Number(c.raw('waitMinutes')) > 0 ? Number(c.raw('waitMinutes')) : 30) * 60000;
       while (['PENDING', 'RUNNING'].includes(st.status?.state)) {
         if (Date.now() - t0 > limit) { await dbx.call('POST', `/api/2.0/sql/statements/${st.statement_id}/cancel`).catch(() => {}); throw new Error(`The statement was still running after ${Math.round(limit / 60000)} minutes and was cancelled`); }
