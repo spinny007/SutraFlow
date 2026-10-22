@@ -75,13 +75,21 @@ class MemTable {
   }
   /** Keeps a row in memory (LRU order: a used row moves to the end). */
   setLocal(k: string, v: any, exp: number) {
-    const rows = new Map(this.rows);
-    if (rows.has(k)) rows.delete(k);
-    rows.set(k, { v, exp });
-    let bytes = [...rows.values()].reduce((n, row) => n + size(row.v), 0);
-    while (rows.size > this.maxRows || (bytes > this.maxBytes && rows.size > 1)) { const [first, row] = rows.entries().next().value!; rows.delete(first); bytes -= size(row.v); }
-    assertAggregateQuota(this, rows.size, bytes);
-    this.rows = rows;
+    const old = this.rows.get(k);
+    let rowCount = this.rows.size - (old ? 1 : 0) + 1;
+    let bytes = this.bytes - (old ? size(old.v) : 0) + size(v);
+    const evict: string[] = [];
+    // Work out evictions and validate every quota before mutating the live table. This keeps a put
+    // O(evictions), normally O(1), while preserving copy-then-swap for a full Refresh.
+    for (const [key, row] of this.rows) {
+      if (rowCount <= this.maxRows && (bytes <= this.maxBytes || rowCount <= 1)) break;
+      if (key === k) continue;
+      evict.push(key); rowCount--; bytes -= size(row.v);
+    }
+    assertAggregateQuota(this, rowCount, bytes);
+    if (old) this.rows.delete(k);
+    for (const key of evict) this.rows.delete(key);
+    this.rows.set(k, { v, exp });
     this.bytes = bytes;
   }
   deleteLocal(k: string) {
@@ -408,11 +416,15 @@ export function allMemTables() {
   });
 }
 
+let quotaCache: { at: number; value: { engine: MemoryQuota; projects: Record<string, MemoryQuota> } } | null = null;
 export function memoryQuotas() {
-  return {
+  if (quotaCache && Date.now() - quotaCache.at < 1000) return quotaCache.value;
+  const value = {
     engine: getSetting<MemoryQuota>('memoryQuota:engine', DEFAULT_ENGINE_QUOTA),
     projects: getSetting<Record<string, MemoryQuota>>('memoryQuota:projects', {}),
   };
+  quotaCache = { at: Date.now(), value };
+  return value;
 }
 export function saveMemoryQuotas(value: { engine?: Partial<MemoryQuota>; projects?: Record<string, Partial<MemoryQuota>> }) {
   const clean = (q: Partial<MemoryQuota> | undefined, defaults: MemoryQuota): MemoryQuota => ({
@@ -429,6 +441,7 @@ export function saveMemoryQuotas(value: { engine?: Partial<MemoryQuota>; project
   }
   setSetting('memoryQuota:engine', engine);
   setSetting('memoryQuota:projects', projects);
+  quotaCache = { at: Date.now(), value: { engine, projects } };
   return { engine, projects };
 }
 export function memoryUsage() {
@@ -456,4 +469,4 @@ function assertAggregateQuota(t: MemTable, candidateRows: number, candidateBytes
 export async function startMemTables() { await Promise.allSettled(listResources('memoryTable').map(r => memTable(r.id))); }
 
 /** Stops the refresh timers (server shutdown, tests). */
-export function stopMemTables() { for (const t of tables.values()) t.scheduleStop?.(); tables.clear(); }
+export function stopMemTables() { for (const t of tables.values()) t.scheduleStop?.(); tables.clear(); quotaCache = null; }

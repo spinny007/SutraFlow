@@ -266,25 +266,25 @@ function decodeBody(raw: unknown, type: string) {
 }
 
 /** Runs the flow for one message and settles it according to the acknowledge mode. */
-async function priorDelivery(c: ListenerContext, key: string, settle: { ack(): any }): Promise<boolean> {
-  for (;;) {
-    const old = q.get<{ run_id: string; status: string }>('select run_id, status from bus_messages where flow_id = ? and node_id = ? and message_key = ?', c.flowId, c.node.id, key);
-    if (!old) return false;
-    if (old.status === 'done') { await settle.ack(); return true; }
-    const run = q.get<{ status: string }>('select status from runs where id = ?', old.run_id);
-    if (!run || ['failed', 'cancelled'].includes(run.status)) {
-      q.run('delete from bus_messages where flow_id = ? and node_id = ? and message_key = ?', c.flowId, c.node.id, key);
-      return false;
-    }
-    if (run.status === 'done') {
-      q.run(`update bus_messages set status = 'done', updated_at = ? where flow_id = ? and node_id = ? and message_key = ?`, Date.now(), c.flowId, c.node.id, key);
-      await settle.ack();
-      return true;
-    }
-    // A recovered run may still be finishing on another engine. Keep this broker delivery locked and
-    // consult the durable run row instead of starting the same message a second time.
-    await new Promise(resolve => setTimeout(resolve, 250));
+export async function priorDelivery(c: ListenerContext, key: string, settle: { ack(): any; requeue(): any }): Promise<boolean> {
+  const old = q.get<{ run_id: string; status: string }>('select run_id, status from bus_messages where flow_id = ? and node_id = ? and message_key = ?', c.flowId, c.node.id, key);
+  if (!old) return false;
+  if (old.status === 'done') { await settle.ack(); return true; }
+  const run = q.get<{ status: string }>('select status from runs where id = ?', old.run_id);
+  if (!run || ['failed', 'cancelled'].includes(run.status)) {
+    q.run('delete from bus_messages where flow_id = ? and node_id = ? and message_key = ?', c.flowId, c.node.id, key);
+    return false;
   }
+  if (run.status === 'done') {
+    q.run(`update bus_messages set status = 'done', updated_at = ? where flow_id = ? and node_id = ? and message_key = ?`, Date.now(), c.flowId, c.node.id, key);
+    await settle.ack();
+    return true;
+  }
+  // The durable run is still active (possibly waiting for approval). Release this duplicate delivery
+  // promptly instead of occupying a consumer slot until the run ends. Deduplication prevents a new
+  // run; the broker retries later and the durable run remains authoritative across leader changes.
+  await settle.requeue();
+  return true;
 }
 
 function handle(c: ListenerContext, cfg: Record<string, any>, input: Record<string, any>, settle: { ack(): any; requeue(): any; reject(): any }, deliveryCount: number, identity = '') {

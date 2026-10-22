@@ -5,7 +5,7 @@ This is the canonical list of work that is intentionally not complete. It separa
 ## Release and external validation
 
 - [ ] **24-hour remote-PostgreSQL soak — release gate.** Run `tools/soak.mjs` for 24 hours with PostgreSQL on a separate machine. Preserve the generated report and verify recovery, latency, memory, duplicate-step and database-log assertions.
-- [ ] **Build the real Docker image.** The Docker configuration and compiled-server smoke test pass, but the release machine used for 2.0.0 did not have Docker. Build and start the image on both the single-server and cluster Compose paths.
+- [ ] **Build the real Docker image.** The Docker configuration and compiled-server smoke test pass, but the release machine used for 2.0.3 did not have a compatible Linux Docker daemon. Build and start the image on both the single-server and cluster Compose paths.
 - [ ] **Let's Encrypt staging certification.** Exercise a real public domain, port 80 HTTP-01 challenge, issuance, renewal and multi-engine certificate reload against the Let's Encrypt staging service.
 - [ ] **Real-service connector certification.** The automated suite uses protocol-compatible stand-ins for several services. Certify the intended production versions of SQL Server, Oracle, Kafka, RabbitMQ, IMAP, Qdrant, Chroma and Pinecone, followed by Google, Microsoft, Dropbox, YouTube, Twitch, Discord, Telegram, Facebook, Azure Data Factory and Databricks APIs. Record service/version, test date and limitations rather than treating a stand-in as certification.
 

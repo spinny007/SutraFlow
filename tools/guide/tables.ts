@@ -62,7 +62,7 @@ export const TABLE_TEXT: Record<string, string> = {
   run_outputs: 'The output of each step of a run, one row per step name (a later pass of a loop replaces it), read by the steps after it. Kept apart from the run state so a step writes only its own output.',
   replay_guard: 'Signatures of HMAC-signed requests seen recently, so a replay to any engine is refused; each row expires after twice the allowed age.',
   acme_challenges: 'Short-lived HTTP-01 tokens and public key authorisations for a Let\'s Encrypt order, shared so any gateway engine can answer the challenge.',
-  sso_states: 'One-time SAML browser sign-in requests: random state, request id, callback and return path, shared by every engine and removed when used or expired.',
+  sso_states: 'One-time SAML browser or API-client sign-in requests: random state, request id, callback and return path, shared by every engine and paired with a signed client cookie; removed when used or expired.',
   ws_connections: 'Open WebSocket connections of every engine: id, engine, service path, Sutra, caller. Lets a step on one engine reach a connection held by another.',
   ws_outbox: 'Messages for WebSocket connections held by another engine, waiting a fraction of a second for that engine to deliver them.',
 };

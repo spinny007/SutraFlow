@@ -465,17 +465,17 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     output: ['<code>destination</code>, <code>messageId</code> and the broker\'s confirmation.'],
   },
   busSubscribe: {
-    scope: ['A queue/topic process starter for Kafka, RabbitMQ and ActiveMQ / AMQP 1.0; selectors, durable subscriptions and Kafka consumer groups.', 'Acknowledgement: auto (on receipt), client (after the run succeeds) or explicit ([[busConfirm]]).', 'Only the elected leader owns the subscription. Client and explicit modes retain a durable message identity across leader changes.', 'On failure: requeue, or dead-letter after a number of redeliveries; concurrency.'],
+    scope: ['A queue/topic process starter for Kafka, RabbitMQ and ActiveMQ / AMQP 1.0; selectors, durable subscriptions and Kafka consumer groups.', 'Acknowledgement: auto (on receipt), client (after the run succeeds) or explicit ([[busConfirm]]).', 'Only the elected leader owns the subscription. Client and explicit modes retain a durable message identity across leader changes.', 'On failure: requeue, or reject after a delivery limit so the broker can dead-letter it; concurrency.'],
     outScope: ['Exactly-once external side effects: keep them idempotent. Kafka has a durable offset identity; RabbitMQ and AMQP publishers must supply a unique message id for duplicate-run protection.'],
     use: ['Processing work from a queue, reacting to events.'],
-    steps: ['Choose the broker, connection and destination.', 'Choose the acknowledgement mode; <em>client</em> suits most Sutras.', 'Leave <em>Avoid duplicate runs</em> on; for RabbitMQ or AMQP, make the publisher assign a unique message id.', 'Choose what happens on failure and how many messages run at once.', 'Write a test message so you can test without a broker.', 'Deploy; the elected leader subscribes while the deployed version is active.'],
+    steps: ['Choose the broker, connection and destination.', 'Choose the acknowledgement mode: <em>client</em> suits most Sutras; use <em>explicit</em> only for a deliberate commit point; use <em>auto</em> only when message loss is acceptable.', 'Leave <em>Avoid duplicate runs</em> on; for RabbitMQ or AMQP, make the publisher assign a unique message id.', 'Choose requeue or reject, set a finite delivery limit where appropriate, and configure the broker dead-letter destination.', 'Choose how many messages run at once.', 'Write a test message so you can test without a broker.', 'Deploy; the elected leader subscribes while the deployed version is active.'],
     output: ['<code>body</code>, <code>headers</code> (JMS headers), <code>properties</code>, <code>destination</code>, <code>redelivered</code>.'],
   },
   busConfirm: {
     scope: ['Acknowledging, rejecting or requeuing the message that started the run, at the point you choose.'],
     outScope: ['Sutras not started by [[busSubscribe]] in explicit mode.'],
-    use: ['Acknowledging as soon as the data is safely stored, before slower steps.'],
-    steps: ['Set the subscriber\'s acknowledgement mode to explicit.', 'Place Confirm message where the message is safe, and choose the action.'],
+    use: ['Acknowledging after a deliberate irreversible boundary, such as committing an order or publishing the required reply; explicitly requeueing or dead-lettering a known outcome.'],
+    steps: ['Set the subscriber\'s acknowledgement mode to explicit.', 'Place Confirm message after the last operation that must finish before the broker may remove the message.', 'Choose confirm, requeue or reject (dead-letter). Put a decision on every intended completion path; ending without one follows the trigger\'s failure rule.', 'Do not confirm early when a later failure must cause redelivery.'],
     output: ['The input, unchanged.'],
   },
   /* ---------------- Email ---------------- */

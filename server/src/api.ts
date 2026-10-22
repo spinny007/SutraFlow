@@ -245,14 +245,16 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.get('/api/auth/sso/start', async (req: any, reply) => {
     try {
       const r = await startSignIn(ssoRedirect(req), req.query?.return);
-      // OIDC returns by GET and uses this signed, Lax cookie. SAML POST state is one-time server state,
-      // because browsers intentionally omit Lax cookies on cross-site POST callbacks.
-      if (r.cookie) reply.header('set-cookie', `${SSO_COOKIE}=${r.cookie}; HttpOnly; SameSite=Lax; Path=/api/auth/sso; Max-Age=600${req.protocol === 'https' ? '; Secure' : ''}`);
+      // OIDC returns by GET and can use Lax. SAML returns by a cross-site POST, so its signed client
+      // proof uses SameSite=None. Scripts use the same flow by carrying this cookie to the callback.
+      const saml = ssoSettings().protocol === 'saml';
+      if (r.cookie) reply.header('set-cookie', `${SSO_COOKIE}=${r.cookie}; HttpOnly; SameSite=${saml ? 'None' : 'Lax'}; Path=/api/auth/sso; Max-Age=600${saml || req.protocol === 'https' ? '; Secure' : ''}`);
       return reply.redirect(r.url, 302);
     } catch (e: any) { reply.code(503); return ssoPage(reply, 'Single sign-on is not available', e.message); }
   });
   const finishSso = async (req: any, reply: FastifyReply) => {
-    reply.header('set-cookie', `${SSO_COOKIE}=; HttpOnly; SameSite=Lax; Path=/api/auth/sso; Max-Age=0`);
+    const saml = ssoSettings().protocol === 'saml';
+    reply.header('set-cookie', `${SSO_COOKIE}=; HttpOnly; SameSite=${saml ? 'None' : 'Lax'}; Path=/api/auth/sso; Max-Age=0${saml || req.protocol === 'https' ? '; Secure' : ''}`);
     try {
       const r = await finishSignIn(req.method === 'POST' ? (req.body || {}) : (req.query || {}), cookie(req, SSO_COOKIE));
       signInAudit(req, r.username, r.created ? 'Sign in with single sign-on (account created)' : 'Sign in with single sign-on', 'ok', 200);

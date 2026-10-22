@@ -136,7 +136,7 @@ export async function startSignIn(redirectUri: string, returnTo: unknown) {
     const u = new URL(s.samlEntryPoint);
     u.searchParams.set('SAMLRequest', buildAuthnRequest(requestId, s.samlEntityId, redirectUri));
     u.searchParams.set('RelayState', state);
-    return { url: u.toString(), cookie: '' };
+    return { url: u.toString(), cookie: sign({ protocol: 'saml', state, exp: Date.now() + STATE_MINUTES * 60e3 }) };
   }
   const p = await provider(s.issuer);
   const state = crypto.randomBytes(16).toString('base64url');
@@ -167,7 +167,11 @@ export async function finishSignIn(query: Record<string, any>, cookie: string | 
   if (query.SAMLResponse !== undefined || query.RelayState !== undefined) {
     if (s.protocol !== 'saml') throw new SsoError('The single sign-on method changed while this sign-in was open. Try again.');
     if (!query.SAMLResponse) throw new SsoError('The identity provider sent no SAML response');
-    const st = takeSamlState(String(query.RelayState || ''));
+    const proof = unsign(cookie);
+    const relay = String(query.RelayState || '');
+    if (!proof || proof.protocol !== 'saml') throw new SsoError('The sign-in took too long or was started by another browser or API client. Try again.');
+    if (!relay || relay !== proof.state) throw new SsoError('The SAML response does not match the sign-in this browser or API client started. Try again.');
+    const st = takeSamlState(relay);
     if (!st) throw new SsoError('The SAML response does not match a current sign-in, or it was already used. Try again.');
     let identity;
     try {

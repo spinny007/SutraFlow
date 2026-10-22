@@ -36,8 +36,8 @@ export const CHAPTERS: Chapter[] = [
 <p class="h">From a release (servers)</p>
 <p>Each release comes as <code>sutraflow-&lt;version&gt;-windows.zip</code> and <code>sutraflow-&lt;version&gt;-linux.tar.gz</code>, already built, each with a <code>.sha256</code> file; offline archives with the packages inside are there for servers without access to the npm registry. <code>RELEASE-NOTES.md</code> in the archive has the steps for each system and for upgrades.</p>
 <ol>
-<li>Check the download: <code>sha256sum -c sutraflow-2.0.0-linux.tar.gz.sha256</code>, or on Windows <code>Get-FileHash sutraflow-2.0.0-windows.zip -Algorithm SHA256</code> against the <code>.sha256</code> file.</li>
-<li>Unpack it: <code>tar -xzf sutraflow-2.0.0-linux.tar.gz -C /opt/sutraflow</code>, or <code>Expand-Archive sutraflow-2.0.0-windows.zip C:\\SutraFlow</code>.</li>
+<li>Check the download: <code>sha256sum -c sutraflow-2.0.3-linux.tar.gz.sha256</code>, or on Windows <code>Get-FileHash sutraflow-2.0.3-windows.zip -Algorithm SHA256</code> against the <code>.sha256</code> file.</li>
+<li>Unpack it: <code>tar -xzf sutraflow-2.0.3-linux.tar.gz -C /opt/sutraflow</code>, or <code>Expand-Archive sutraflow-2.0.3-windows.zip C:\\SutraFlow</code>.</li>
 <li>In the unpacked folder: <code>bin/sutraflow setup</code> (Windows: <code>bin\\sutraflow.cmd setup</code>) installs the runtime packages and makes <code>sutraflow.env</code>.</li>
 <li><code>bin/sutraflow start</code>, then open <code>http://127.0.0.1:4800</code> and create the administrator account.</li>
 </ol>
@@ -187,7 +187,7 @@ export const CHAPTERS: Chapter[] = [
 <p><strong>Clear log</strong> empties the file and its rotated copies; <strong>Clear test runs</strong> deletes the finished test and debug runs of the project and keeps deployed runs. Developers may do both on development and test servers; on a production server only an administrator may. Both are recorded in the audit log.</p>
 <p class="h">Missing project variables</p>
 <p>When a step reads a project variable the project does not define (<code>{{gv.X}}</code>, <code>{gv.X}</code>, <code>$gv.X</code> in JSONata or <code>get-project-variable('X')</code>), the activity shows ⚠ on the canvas and a warning at the top of its tabs, and it reads as empty while running. The same warning shows on a connection that reads one, and on every step that uses that connection. <strong>Add to project variables</strong> adds the missing names; give them values under <em>Configuration &gt; Project variables</em>. <em>Deploy</em> lists the same warnings.</p>
-<p>Every palette supports Project properties. General settings such as a folder, address, API path, schedule, queue, mailbox, model, limit or SQL text show <strong>{x}</strong> where a property can be inserted; mapped Input fields may use <code>{gv.NAME}</code> in formulas. Connection settings, including nested headers, are resolved the same way. For SQL, use Project properties only for administrator-controlled statement text such as a table or schema name, and keep request data in bound <code>:name</code> parameters.</p>
+<p>Every palette supports Project properties. General settings such as a folder, address, API path, schedule, queue, mailbox, model, limit or SQL text show <strong>{x}</strong> where a property can be inserted; mapped Input fields may use <code>{gv.NAME}</code> in formulas. Connection settings, including nested headers, are resolved the same way. SQL text and procedure names accept only Project/Engine properties; a run-input, trigger, earlier-output, Local-variable or secret reference there is refused. Put those values in bound <code>:name</code> parameters.</p>
 <p class="h">Add a connection</p>
 <ol>
 <li>Next to <em>Resources</em>, click <strong>+</strong> and choose the kind, for example <em>HTTP connection</em>.</li>
@@ -794,10 +794,22 @@ curl http://127.0.0.1:8080/orders/A-1001 -H "Authorization: Bearer ACCESS_TOKEN"
 <ul>
 <li>Put queue and topic names in project variables (<code>{{gv.ORDER_QUEUE}}</code>) so each environment can use its own.</li>
 <li>JMS headers: delivery mode (persistent or not), priority, time to live, message id, correlation id, reply-to and type; plus your own properties.</li>
-<li>Acknowledgement: <em>auto</em> on receipt, <em>client</em> after the run succeeds, <em>explicit</em> with Confirm message. On failure: requeue, or send to the dead-letter queue after a number of redeliveries.</li>
-<li>Only the elected leader subscribes. With duplicate protection on, Kafka topic/partition/offset or the RabbitMQ/AMQP message id is stored before the run starts. After failover, the new leader waits for an existing active run or acknowledges an already completed one instead of starting it again.</li>
-<li>Kafka always supplies an offset identity. RabbitMQ and AMQP publishers should assign a unique message id. When no identity is supplied, or duplicate protection is switched off, delivery remains at least once and activities with outside effects should use an idempotency key.</li>
-</ul>`,
+<li>Only the elected leader subscribes. Other engines may execute the run's steps, but they do not open a second consumer. A replacement leader reopens the subscription after the lease changes.</li>
+</ul>
+<p class="h">Choose when to acknowledge</p>
+<table><thead><tr><th>Mode</th><th>Use it when</th><th>Do not use it when</th><th>What SutraFlow does</th></tr></thead><tbody>
+<tr><td><strong>Client — after success</strong><br>(recommended default)</td><td>Every successful path may finish before the broker message is removed. Good for normal validation, transformation, database work and short integrations.</td><td>You must confirm after one particular irreversible step, or the run may wait a long time for a person or child process.</td><td>Acknowledges only when the whole run is done. A failed or cancelled run follows <em>When the Sutra fails</em>.</td></tr>
+<tr><td><strong>Explicit — Confirm message</strong></td><td>The safe acknowledgement boundary is visible in the design: for example, after an order is committed or a reply is published. Put Confirm message after that operation on every success path.</td><td>You cannot identify one safe boundary, or a later step must be part of the same guarantee. Do not place it before the required outside effect: a later failure cannot bring an acknowledged message back.</td><td><em>confirm</em> acknowledges; <em>requeue</em> asks for another delivery; <em>reject (dead-letter)</em> rejects it. If the run ends without reaching Confirm message, SutraFlow treats that as failure and releases or rejects it according to the trigger settings.</td></tr>
+<tr><td><strong>Auto — on receipt</strong></td><td>Only for disposable events where losing a message is acceptable, such as best-effort telemetry already stored elsewhere.</td><td>Orders, payments, file movement, customer requests, approvals, or anything that must survive an engine crash.</td><td>The broker considers the message handled before the Sutra runs. A crash or failure therefore cannot redeliver it.</td></tr>
+</tbody></table>
+<p class="h">Failure, redelivery and duplicate protection</p>
+<ol>
+<li>Before a protected delivery starts, SutraFlow reserves its identity in the shared database and binds it to the run. Kafka always provides topic/partition/offset. RabbitMQ and AMQP publishers must set a stable, unique message id; without one the broker can redeliver, but SutraFlow cannot recognise the delivery across a leader change.</li>
+<li>If a run fails, choose <em>requeue</em> to try it again, or <em>reject (dead-letter)</em> to let the broker's dead-letter policy receive it. <em>Reject after this many deliveries</em> changes repeated requeues into a rejection at the configured count; zero means never reject because of the count. Configure the broker's dead-letter exchange/address as well—SutraFlow rejects the delivery but does not create the broker's dead-letter destination.</li>
+<li>If acknowledgement is lost, or a new leader receives the same message, it reads the durable reservation. A completed run is acknowledged without a second run. A failed or cancelled run releases the reservation and may run again. An active or waiting run causes the duplicate delivery to be released promptly for later redelivery, so it neither starts twice nor occupies a consumer slot throughout an approval.</li>
+<li>The database reservation prevents a second Sutra run for the same protected identity; it cannot undo an outside call made just before a crash. Pass the message identity as an idempotency key to payment, order and other write APIs, and make database writes unique where possible.</li>
+</ol>
+[[tip:Practical default|Use <strong>client</strong>, duplicate protection <strong>on</strong>, <strong>requeue</strong>, a finite redelivery limit and a broker dead-letter destination. Use <strong>explicit</strong> only when the process has a deliberate commit point. Use <strong>auto</strong> only when loss is acceptable. For a long approval, consider persisting the request and acknowledging at that deliberate point rather than retaining one broker delivery for hours.]]`,
   },
   {
     id: 'websocket', title: 'WebSockets: live connections',
@@ -1421,7 +1433,7 @@ print(json.dumps({"total": 42}))                              # the last line, a
 <li>Choose <em>Create accounts</em> (people get an account at their first sign-in) and, only when the provider controls usernames, <em>Link existing accounts</em>.</li>
 <li>Turn on <em>Offer single sign-on</em>. The sign-in pages show <em>Sign in with</em> your provider.</li>
 </ol>
-<p>OpenID Connect uses the authorization-code flow with PKCE, state and nonce; the ID token's signature, issuer, audience and expiry are checked against the provider's published keys. SAML responses must carry a trusted signature and a single assertion bound to the one-time sign-in request, callback address, entity id, issuer and validity period; the state is stored briefly in the shared database so a cross-site POST works on any cluster engine and cannot be replayed. A person is recognised by the provider subject or SAML NameID, so a renamed account stays the same person. Sign-ins with either protocol are in the audit log.</p>
+<p>OpenID Connect uses the authorization-code flow with PKCE, state and nonce; the ID token's signature, issuer, audience and expiry are checked against the provider's published keys. SAML responses must carry a trusted signature and a single assertion bound to the one-time sign-in request, callback address, entity id, issuer and validity period. The one-time state is stored briefly in the shared database, and a signed short-lived cookie proves that the same browser or API client started the sign-in. A browserless client follows the same two requests: retain the <code>sutra_sso</code> cookie from <code>/api/auth/sso/start</code> and send it with the callback. A person is recognised by the provider subject or SAML NameID, so a renamed account stays the same person. Sign-ins with either protocol are in the audit log.</p>
 <p class="h">The vault and sessions</p>
 <ul>
 <li>Passwords, keys and tokens live in the <strong>vault</strong> (Resources &rarr; Secrets), encrypted with AES-256-GCM. Settings hold the secret's <em>name</em>.</li>
@@ -1623,7 +1635,7 @@ stages:
   post { success { archiveArtifacts 'release.zip' } }
 }</pre>
 <p class="h">Container images</p>
-<p>For immutable production, bake the release into an engine image: <code>FROM sutraflow:2.0.0</code>, <code>COPY release.zip /deploy/</code>, and start it with <code>SUTRA_MODE=engine SUTRA_DEPLOY_DIR=/deploy</code>; the engine deploys every package in the folder at start. A new release is a new image.</p>
+<p>For immutable production, bake the release into an engine image: <code>FROM sutraflow:2.0.3</code>, <code>COPY release.zip /deploy/</code>, and start it with <code>SUTRA_MODE=engine SUTRA_DEPLOY_DIR=/deploy</code>; the engine deploys every package in the folder at start. A new release is a new image.</p>
 [[tip:Good practice|One zip, many environments: build once, deploy the same artifact to UAT and production.<br>Give each environment its own system account and token, with Deploy on the project only.<br>Let the pipeline fail on <code>sutra check</code> before anything changes; keep rollback one command away.<br>Store the zip with the pipeline run: it is the record of exactly what went live.]]`,
   },
   {
@@ -1879,9 +1891,9 @@ tools/migrate-to-postgres.sh --url "postgres://sutra:password@db.example.com:543
 <p class="h">Headless engines</p>
 <p>The same program started with <code>SUTRA_MODE=engine</code> runs Sutras without the studio: no designer pages and no editing. It keeps <code>/health</code>, <code>/ready</code> and <code>/metrics</code>, the Admin Console at <code>/admin</code> for its users, and an automation API for API tokens (the admin token or system account tokens). Packages in <code>SUTRA_DEPLOY_DIR</code> are deployed when it starts; a package that cannot be deployed stops the start.</p>
 <p class="h">Docker</p>
-<pre>docker build -t sutraflow:2.0.0 .
+<pre>docker build -t sutraflow:2.0.3 .
 docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=... \\
-           -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:2.0.0</pre>
+           -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:2.0.3</pre>
 <p>The image runs as a non-root user, checks its own health, and writes JSON logs. <code>docker-compose.yml</code> has a studio and an engine; <code>docker-compose.cluster.yml</code> has PostgreSQL, a studio and two engines.</p>
 <p class="h">Clusters</p>
 <p>Several engines share one database (<code>SUTRA_DB=postgres://...</code>), each with its own <code>SUTRA_ENGINE_ID</code> and all with the same <code>SUTRA_MASTER_KEY</code>.</p>

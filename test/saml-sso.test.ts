@@ -102,5 +102,9 @@ test('SAML sign-on refuses unsigned, changed-audience and mismatched browser res
   assert.match((await postSaml(response(s.requestId, s.acs, { audience: 'https:\/\/other.example' }), s.relay, s.cookie)).body, /not meant for/);
   s = await start();
   assert.match((await postSaml(response(s.requestId, s.acs), 'forged', s.cookie)).body, /does not match/);
+  s = await start();
+  assert.match((await postSaml(response(s.requestId, s.acs), s.relay, '')).body, /another browser or API client/);
+  const scripted = await postSaml(response(s.requestId, s.acs), s.relay, s.cookie);
+  assert.equal(scripted.statusCode, 200, 'a browserless client succeeds when it carries the start cookie to the callback');
 });
 

@@ -14,6 +14,7 @@ import type { Activity, ExecCtx } from '../engine/types.js';
 import { requireResource, kvToObject, type Resource } from '../resources.js';
 import { config } from '../config.js';
 import { F } from '../palettes/common.js';
+import { resolveAdminText } from '../settings.js';
 
 const require = createRequire(import.meta.url);
 
@@ -191,6 +192,7 @@ export async function closeDbPools() {
 }
 
 const params = (c: ExecCtx) => kvToObject(c.raw('params'), v => c.resolve(v) as any) as Record<string, any>;
+const adminText = (c: ExecCtx, key: string, label: string) => resolveAdminText(c.node.config?.[key], c.scope, label);
 const conn = F('connection', 'Database connection', 'resource', '', { resourceKind: 'database' });
 const paramField = F('params', 'Parameters', 'kv', [{ k: 'id', v: '{{input.orderId}}' }], { tpl: true, help: 'Values for :name placeholders in the SQL. Always sent as bound parameters.' });
 
@@ -201,7 +203,7 @@ export const dbActivities: Activity[] = [
     fields: [conn, F('sql', 'SQL', 'code', 'SELECT id, customer, amount\nFROM orders\nWHERE id = :id', { vars: true, help: 'Project and Engine variables may supply administrator-controlled names or clauses. Put request data in bound :name parameters.' }), paramField, F('maxRows', 'Maximum rows', 'number', 10000)],
     outputHint: { rows: [{}], rowCount: 0, columns: [''] },
     execute: async c => {
-      const r = await (await connFor(c)).query(String(c.v('sql') || ''), params(c));
+      const r = await (await connFor(c)).query(adminText(c, 'sql', 'SQL text'), params(c));
       const max = Number(c.raw('maxRows')) || 10000;
       if (r.rows.length > max) throw new Error(`Query returned ${r.rows.length} rows, more than the maximum of ${max}`);
       return { port: r.rows.length ? 'out' : 'empty', out: { ...r, first: r.rows[0] ?? null } };
@@ -214,7 +216,7 @@ export const dbActivities: Activity[] = [
       F('expect', 'Fail when no row is affected', 'bool', false)],
     outputHint: { rowCount: 0, rows: [] },
     execute: async c => {
-      const r = await (await connFor(c)).query(String(c.v('sql') || ''), params(c));
+      const r = await (await connFor(c)).query(adminText(c, 'sql', 'SQL text'), params(c));
       if (c.raw('expect') && !r.rowCount) throw new Error('No row was affected');
       return { out: r };
     },
@@ -224,7 +226,7 @@ export const dbActivities: Activity[] = [
     desc: 'Calls a stored procedure with named parameters (in order for PostgreSQL, MySQL and Oracle).',
     fields: [conn, F('procedure', 'Procedure name', 'text', 'process_order'), F('params', 'Parameters (in order)', 'kv', [{ k: 'p_order_id', v: '{{input.orderId}}' }], { tpl: true })],
     outputHint: { rows: [], rowCount: 0, outputs: {} },
-    execute: async c => ({ out: await (await connFor(c)).procedure(String(c.v('procedure') || ''), params(c)) }),
+    execute: async c => ({ out: await (await connFor(c)).procedure(adminText(c, 'procedure', 'Procedure name'), params(c)) }),
   },
   {
     type: 'dbScript', palette: 'db', name: 'SQL script', glyph: '⛭', ports: ['out'], timeoutMs: 600000,
@@ -235,7 +237,7 @@ export const dbActivities: Activity[] = [
       F('onError', 'When a statement fails', 'select', 'stop', { options: ['stop', 'continue'], help: 'Stop: the step fails at that statement (those before it stay done). Continue: runs the rest and lists the failures.' })],
     outputHint: { results: [{ n: 0, statement: '', ok: true, rowCount: 0, error: '' }], ran: 0, failed: 0 },
     execute: async c => {
-      const stmts = String(c.v('sql') || '').split(/^\s*;\s*$/m).map(s => s.trim()).filter(Boolean);
+      const stmts = adminText(c, 'sql', 'SQL script').split(/^\s*;\s*$/m).map(s => s.trim()).filter(Boolean);
       if (!stmts.length) throw new Error('The script has no statements');
       const p = params(c);
       const db = await connFor(c);
@@ -259,7 +261,7 @@ export const dbActivities: Activity[] = [
     fields: [conn, F('sql', 'Statements', 'code', 'INSERT INTO audit(order_id, action) VALUES (:id, \'ship\')\n;\nUPDATE orders SET status = \'SHIPPED\' WHERE id = :id', { vars: true, help: 'Project and Engine variables may supply administrator-controlled names or clauses. Put request data in bound :name parameters.' }), paramField],
     outputHint: { results: [{ rowCount: 0 }] },
     execute: async c => {
-      const stmts = String(c.v('sql') || '').split(/^\s*;\s*$/m).map(s => s.trim()).filter(Boolean);
+      const stmts = adminText(c, 'sql', 'SQL transaction').split(/^\s*;\s*$/m).map(s => s.trim()).filter(Boolean);
       const p = params(c);
       const results = await (await connFor(c)).transaction(async q => {
         const out: DbResult[] = [];

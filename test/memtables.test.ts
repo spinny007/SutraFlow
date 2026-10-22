@@ -134,6 +134,16 @@ test('limits: memory tables are for small reference data; a load that is too big
   assert.throws(() => mem.memPut(t, { name: 'no id' }), /has no id/);
 });
 
+test('Set Memory stays near-linear as a table grows', async () => {
+  const fast = saveResource({ kind: 'memoryTable', name: 'Fast writes', project_id: shop, config: { key: 'id', maxRows: 10000, maxMb: 32, keep: 'memory only' } });
+  const t = await mem.memTable(fast.id);
+  const started = performance.now();
+  for (let id = 0; id < 8000; id++) mem.memPut(t, { id, label: `record-${id}` });
+  const elapsed = performance.now() - started;
+  assert.equal(t.rows.size, 8000);
+  assert.ok(elapsed < 2000, `8,000 puts took ${Math.round(elapsed)} ms; each put must not copy and remeasure the whole table`);
+});
+
 test('Admin Console: tables with their settings and figures, rows, reload and clear', async () => {
   const list = (await call('GET', '/api/console/memory')).json();
   const r = list.find((x: any) => x.name === 'Rates');

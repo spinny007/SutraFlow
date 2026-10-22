@@ -22,6 +22,7 @@ const flows = await import('../server/src/flows.js');
 const { setSecret } = await import('../server/src/secrets.js');
 const { saveResource } = await import('../server/src/resources.js');
 const { bindFor, namedParams, closeDbPools } = await import('../server/src/connectors/db.js');
+const { priorDelivery } = await import('../server/src/connectors/bus.js');
 const { rebuildListeners, listenerStatus } = await import('../server/src/listeners.js');
 const oauth = await import('../server/src/connectors/oauth.js');
 
@@ -68,6 +69,21 @@ test('DB Ops on SQLite: update, query with bound parameters, transaction rollbac
   const chk = node('dbQuery', 'Check', { connection: db.id, sql: "SELECT count(*) AS n FROM orders WHERE id = 'B-2'", params: [] });
   const r3 = await run([s, chk], [edge(s, chk)]);
   assert.equal(r3.state.outputs.Check.first.n, 0, 'the first insert was rolled back');
+});
+
+test('a redelivered broker message releases promptly while its durable run is waiting', async () => {
+  const start = node('start', 'Start'), approval = node('approval', 'Approve', { message: 'Wait here' });
+  const flowId = crypto.randomUUID();
+  const runId = await engine.startRun({ doc: { name: 'Waiting delivery', nodes: [start, approval], edges: [edge(start, approval)] }, flowId });
+  await until(() => q.get<any>('select status from runs where id = ?', runId)?.status === 'waiting');
+  q.run('insert into bus_messages(flow_id, node_id, message_key, run_id, status, updated_at) values(?, ?, ?, ?, ?, ?)', flowId, 'trigger', 'message-1', runId, 'running', Date.now());
+  let acked = 0, requeued = 0;
+  const began = Date.now();
+  assert.equal(await priorDelivery({ flowId, node: { id: 'trigger' } } as any, 'message-1', { ack: () => { acked++; }, requeue: () => { requeued++; } }), true);
+  assert.deepEqual([acked, requeued], [0, 1]);
+  assert.ok(Date.now() - began < 200, 'the consumer slot is not held while the approval is waiting');
+  assert.equal(Number(q.get<any>('select count(*) n from runs where id = ?', runId).n), 1, 'the existing run remains authoritative');
+  await engine.cancel(runId);
 });
 
 test('Send email over SMTP', async () => {

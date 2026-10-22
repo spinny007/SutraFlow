@@ -64,3 +64,19 @@ export function resolveResourceConfig(config: Record<string, any>, scope: Record
   };
   return walk(config);
 }
+
+/**
+ * Administrator-controlled text that becomes executable configuration (SQL text, procedure names).
+ * Only Project and Engine properties may shape it. Run input, trigger data, prior outputs, local
+ * variables and secrets must travel through the activity's bound/value fields instead.
+ */
+export function resolveAdminText(value: unknown, scope: Record<string, any>, label: string): string {
+  const text = String(value ?? '');
+  if (!DYNAMIC(text)) return text;
+  const refs = text.startsWith('=')
+    ? [...text.matchAll(/\{\s*([^{}]+?)\s*\}/g)].map(m => m[1].trim())
+    : [...text.matchAll(/\{\{\s*([\s\S]*?)\s*\}\}/g)].map(m => m[1].trim());
+  const unsafe = refs.find(ref => !/^(?:gv|ev)\./.test(ref));
+  if (unsafe) throw new Error(`${label} may use only Project and Engine properties (gv/ev); put run data in bound parameters, not {{${unsafe}}}`);
+  return String(resolve(text, scope) ?? '');
+}

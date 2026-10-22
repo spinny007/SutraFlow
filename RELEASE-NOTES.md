@@ -1,15 +1,15 @@
-# SutraFlow 2.0.0 release notes
+# SutraFlow 2.0.3 release notes
 
 Released 2026-10-22. Copyright (c) 2026-27 Surya Partap Singh, [MixAgile.com](https://mixagile.com). Licensed under the GNU Affero General Public License v3.0 only (AGPL-3.0-only); a commercial licence is available, see `COMMERCIAL-LICENSE.md`.
 
 | Download | For |
 |---|---|
-| `sutraflow-2.0.0-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
-| `sutraflow-2.0.0-linux.tar.gz` | Linux (x64 or arm64); also macOS |
+| `sutraflow-2.0.3-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
+| `sutraflow-2.0.3-linux.tar.gz` | Linux (x64 or arm64); also macOS |
 
 Each comes with a `.sha256` file to check the download.
 
-## What is new in 2.0.0
+## What is new in 2.0.3
 
 - **Zero known dependency vulnerabilities**: both the production and complete development dependency trees pass `npm audit`. `basic-ftp` is current; ACME uses a locally maintained native-crypto build without `node-forge`; the test-only FTP server no longer depends on the vulnerable `ip` package or legacy UUID generator.
 - **Reviewed vendor supply chain**: `vendor-lock.json` pins each fork to an npm version and tarball integrity plus a normalized local-tree hash, patch reasons, consumers, focused tests and runtime packaging scope. Every build checks integrity; pull requests, releases and a weekly workflow fail when npm publishes a newer upstream version. Updates require an API/behavior review, patch reapplication and the full regression gate rather than silently replacing code.
@@ -22,18 +22,27 @@ Each comes with a `.sha256` file to check the download.
 - **Release packaging repaired for maintained local dependencies**: standard archives carry the local runtime ACME package; offline builds stage local packages before installing; Docker copies them before `npm ci`.
 - **Documentation consolidated**: the README, user guide and architecture page describe the Admin Runtime location, Python, connector configuration, asynchronous gateway path, engine split and ACME lifecycle without duplicate connection headings.
 - **Cluster-safe gateway certificates**: one database lease owns a Let's Encrypt order, every gateway serves the shared expiring HTTP-01 challenges, and listener or certificate changes reload across the cluster. Renewal remains automatic below 30 days.
-- **Additive ACME upgrade**: 2.0.0 creates `acme_challenges` for short-lived HTTP-01 key authorisations. Existing tables and data are unchanged.
+- **Additive database upgrade**: 2.0.0 creates `sso_states` for one-time SAML requests, `bus_messages` for durable broker-delivery identities and `acme_challenges` for short-lived HTTP-01 key authorisations. Existing tables and data are unchanged.
 - **Admin-managed Memory tables and properties**: administrators configure Oracle, SQL Server, MySQL, PostgreSQL or SQLite-backed cache queries, interval/cron refresh and time zones, inspect records and memory use, and enforce cluster/project row and MB quotas. Refresh is atomic and leader-safe. Packages carry and preflight every Memory-table dependency. Activities are named Get Memory Record, Set Memory, Query Memory Records, Delete Memory Records and Refresh Memory Table; run values use Set/Get Local Variable, while Get Properties reads administrator-managed Project and Engine properties. Project renaming also moves its files folder and deployment config.
 - **Project variables across every palette and transition**: General settings, mapped inputs, nested connector settings and connection-line conditions share the same runtime resolver. The transition editor has the same **{x}** picker and missing-property warning as activities, plus a browsable tree for previous and earlier activity output, trigger data, Local variables and Project/Engine properties. Deployed gateway paths and limits, Timer schedules, listener configuration and administrator-controlled SQL text can be environment-specific without editing a Sutra; SQL data values remain safely bound parameters.
 - **Repeatable TLS release test on Windows**: the SSL-required PostgreSQL migration test automatically discovers OpenSSL from Git for Windows or Laragon when it is not on `PATH`, while retaining `SUTRA_TEST_OPENSSL` as an override. Runtime TLS and ACME use Node cryptography and do not require an OpenSSL executable.
 - **Discoverable, failover-safe process starters**: every starter has a ▶ marker even when it lives in Files, Email, Service Bus, cloud, chat, ADF, agent or MCP rather than Triggers. Queue / topic trigger names Kafka, RabbitMQ and ActiveMQ directly, runs only on the leader, acknowledges after success or Confirm message, and keeps a durable Kafka-offset or AMQP-message-id guard so leader recovery does not create a second run for the same delivery.
 - **Stable project identity on rename**: a project keeps its immutable GUID while its display name, name-based files folder and deployment configuration are renamed together.
 
-## 2.0.0 release gate
+### Fixes in 2.0.3
 
-The complete regression suite passed: 369 tests, 368 passed, 1 optional Docker test skipped and 0 failed. Real PostgreSQL 18 and MySQL ran together. PostgreSQL coverage included pooled execution, database cut and reconnect, password- and SSL-protected migration, claim fencing, leader replacement and drain. MySQL coverage proved Sutra-driven INSERT, UPDATE and SELECT operations with bound parameters, injection safety, transaction rollback, install scripts and stored procedures. The suite also covered transition conditions backed by Project properties, PGlite as secondary compatibility regression, inbound REST and SOAP servers, SOAP callers, WS-Security request and response encryption, SAML and OpenID Connect sign-on, MCP/WebSocket security, cluster-shared ACME challenges and issuance leasing, FTP/SFTP with variable-backed connectors, Python and package/release operations. The complete `npm audit` reported 0 vulnerabilities.
+| Problem | Fix |
+|---|---|
+| Run input could be expanded directly inside SQL text, bypassing bound parameters. | SQL text, scripts, transactions and procedure names now accept only administrator-managed Project and Engine properties. Run data must use bound parameters. |
+| Set Memory copied and remeasured the whole table for every record, making bulk fills progressively slower. | A put now updates running row/byte counts and uses cached quotas; full copy-and-swap remains only for Refresh. |
+| A valid SAML response could complete in a different client from the one that started sign-in. | SAML now requires a signed short-lived client cookie as well as its one-time database state. Browserless clients carry the same cookie between start and callback. |
+| A redelivered queue/topic message could hold a consumer while its existing run waited for approval. | The duplicate is released promptly for later redelivery while the durable run remains authoritative. |
 
-The single skip was the Docker image build because no Docker daemon was available on the release machine. Docker configuration and its compiled-server smoke test passed.
+## 2.0.3 release gate
+
+The complete regression suite passed: 371 tests, 369 passed, 2 optional environment tests skipped and 0 failed. Real PostgreSQL 18 and MySQL ran together. PostgreSQL coverage included pooled execution, database cut and reconnect, password- and SSL-protected migration, claim fencing, leader replacement and drain. MySQL coverage proved Sutra-driven INSERT, UPDATE and SELECT operations with bound parameters, injection safety, transaction rollback, install scripts and stored procedures. The suite also covered transition conditions backed by Project properties, PGlite as secondary compatibility regression, inbound REST and SOAP servers, SOAP callers, WS-Security request and response encryption, SAML client binding for browsers and browserless callers, OpenID Connect sign-on, MCP/WebSocket security, cluster-shared ACME challenges and issuance leasing, FTP/SFTP with variable-backed connectors, Python and package/release operations. The complete `npm audit` reported 0 vulnerabilities.
+
+The two skips were the Docker image build (no compatible Linux Docker daemon on the release machine) and the isolated password-and-SSL PostgreSQL migration (no separate PostgreSQL binary folder was supplied). Docker configuration, its compiled-server smoke test, real PostgreSQL database-outage recovery, and the normal real PostgreSQL migration all passed.
 
 The one-hour PostgreSQL fault-and-large-file soak from 1.9.0 remains the latest completed soak baseline below. Work not completed by this release is tracked only in `docs/backlog.md`.
 
@@ -44,6 +53,12 @@ The one-hour PostgreSQL fault-and-large-file soak from 1.9.0 remains the latest 
 - **Designer stays focused**: its renamed **Services** page is read-only and shows published REST, SOAP and MCP addresses, listener health and run counts. Workflow authors can inspect endpoints without being presented with server mutation controls.
 - **Permissions unchanged and explicit**: the relocated pages require the existing Server permission, and the server continues to enforce every API operation. There is no database schema change and no workflow, engine or gateway protocol behavior change.
 - **Documentation aligned**: the README, user guide, architecture map and screenshot workflow point to the Admin Console location, including the Python setup instructions.
+
+### Fixes in 1.9.1
+
+| Problem | Fix |
+|---|---|
+| Machine-wide runtime, script and gateway controls appeared in the workflow Designer, where authors could not find or safely own them. | The controls moved to permission-checked Admin Console pages; the Designer Services page is read-only. |
 
 ### 1.9.1 release gate
 
@@ -60,6 +75,14 @@ The complete regression suite passed: 348 tests, 330 passed, 18 skipped and 0 fa
 - **Leader-safe file triggers**: handled file size and modification time are checkpointed in `file_listener_state` and `file_listener_files`, so a new leader does not baseline away a file that arrived or failed under the former leader.
 - **Failure model documented**: the architecture page now maps every engine module and explains the durable queue bus, claim fencing, leader election, takeover, recovered leaders, and the at-least-once boundary for activity effects.
 - **Additive database upgrade**: 1.9.0 creates the two file-listener checkpoint tables above. Existing tables and data are unchanged; upgrade all engines together so every possible leader uses the same listener behavior.
+
+### Fixes in 1.9.0
+
+| Problem | Fix |
+|---|---|
+| Setting Steps at once to zero did not reliably leave claiming paused. | Zero is preserved as an intentional pause instead of being replaced by a default. |
+| A temporary database failure during heartbeat could stop an engine. | Heartbeat errors are recovered, broken pool connections are discarded, and leadership is decided again from the lease after reconnect. |
+| A replacement leader could baseline away a file that arrived or failed under the old leader. | File size, modification time and handling state are checkpointed in the database and retried by the new leader. |
 
 ### 1.9.0 release gate
 
@@ -194,14 +217,14 @@ What went wrong before, and what happens now. Most were found by the soak test (
 1. Install Node.js 24 from nodejs.org (or with nvm-windows) and open a new PowerShell window.
 2. Check the download:
    ```powershell
-   (Get-FileHash .\sutraflow-2.0.0-windows.zip -Algorithm SHA256).Hash.ToLower()
-   Get-Content .\sutraflow-2.0.0-windows.zip.sha256
+   (Get-FileHash .\sutraflow-2.0.3-windows.zip -Algorithm SHA256).Hash.ToLower()
+   Get-Content .\sutraflow-2.0.3-windows.zip.sha256
    ```
    The two values must match.
 3. Unpack it, for example to `C:\SutraFlow`:
    ```powershell
-   Expand-Archive .\sutraflow-2.0.0-windows.zip -DestinationPath C:\SutraFlow
-   cd C:\SutraFlow\sutraflow-2.0.0
+   Expand-Archive .\sutraflow-2.0.3-windows.zip -DestinationPath C:\SutraFlow
+   cd C:\SutraFlow\sutraflow-2.0.3
    ```
 4. Install the runtime packages and make the settings file:
    ```powershell
@@ -221,13 +244,13 @@ What went wrong before, and what happens now. Most were found by the soak test (
 1. Install Node.js 24 (from your distribution, NodeSource or nvm).
 2. Check the download:
    ```sh
-   sha256sum -c sutraflow-2.0.0-linux.tar.gz.sha256
+   sha256sum -c sutraflow-2.0.3-linux.tar.gz.sha256
    ```
 3. Unpack it, for example to `/opt`:
    ```sh
    sudo mkdir -p /opt/sutraflow && sudo chown "$USER" /opt/sutraflow
-   tar -xzf sutraflow-2.0.0-linux.tar.gz -C /opt/sutraflow
-   cd /opt/sutraflow/sutraflow-2.0.0
+   tar -xzf sutraflow-2.0.3-linux.tar.gz -C /opt/sutraflow
+   cd /opt/sutraflow/sutraflow-2.0.3
    ```
 4. Install the runtime packages and make the settings file:
    ```sh
@@ -246,17 +269,17 @@ What went wrong before, and what happens now. Most were found by the soak test (
 
 1. Back up: the data folder with `master.key`, and for PostgreSQL a `pg_dump` of the database.
 2. Stop gracefully: `sutraflow stop all` (running steps finish first).
-3. Unpack 2.0.0 into a new folder beside the old one. Copy `sutraflow.env` from the old folder; keep `SUTRA_DATA_DIR` pointing at the same data folder (or copy the folder).
-4. Run `sutraflow setup`, then `sutraflow start`. The database is upgraded at start (from 1.8.x: the additive `file_listener_state` and `file_listener_files` tables; from 1.7.6: also `run_outputs`, `replay_guard`, `ws_connections`, `ws_outbox`, `users.idp_subject` and `engines.can_lead`; from 1.7.5 also `tasks.claim`; from 1.6 also the new indexes and memory-table tables); nothing is removed. Runs that were open go on.
+3. Unpack 2.0.3 into a new folder beside the old one. Copy `sutraflow.env` from the old folder; keep `SUTRA_DATA_DIR` pointing at the same data folder (or copy the folder).
+4. Run `sutraflow setup`, then `sutraflow start`. The database is upgraded at start (2.0.0 adds `sso_states`, `bus_messages` and `acme_challenges`; 1.9.0 adds `file_listener_state` and `file_listener_files`; from 1.7.6 it also adds `run_outputs`, `replay_guard`, `ws_connections`, `ws_outbox`, `users.idp_subject` and `engines.can_lead`; from 1.7.5 also `tasks.claim`; from 1.6 also the new indexes and memory-table tables). Nothing is removed, and open runs continue.
 5. In a cluster, **upgrade every engine before starting any of them again**: 1.8.0 engines keep step outputs apart from the run state, which older engines do not read, so the two must not share a database.
 6. On PostgreSQL, check `max_connections`: each engine opens its pool (`SUTRA_PG_POOL`, at most 20 by default) plus one connection. Engines × (pool + 1) must fit, with room for other clients.
 7. Optional: *Admin Console → Engines → This machine → Apply recommended tuning*.
 
-To go back to 1.9.1, stop 2.0.0 and start 1.9.1 again; they use the same database schema. To go back to 1.7.x, stop SutraFlow and restore the backup taken before the upgrade: runs that 1.8.0 or later ran keep their outputs in a table older versions do not read.
+To go back to 1.9.1, stop 2.0.3 and start 1.9.1 again; the three additive 2.0.0 tables remain but 1.9.1 does not use them. To go back to 1.7.x, stop SutraFlow and restore the backup taken before the upgrade: runs that 1.8.0 or later ran keep their outputs in a table older versions do not read.
 
 ## Docker
 
-The images are built from the source repository (`Dockerfile`, `docker-compose.yml`): `docker build -t sutraflow:2.0.0 .`. The release archives are for installs without Docker.
+The images are built from the source repository (`Dockerfile`, `docker-compose.yml`): `docker build -t sutraflow:2.0.3 .`. The release archives are for installs without Docker.
 
 ## Known limitations
 
