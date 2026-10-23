@@ -57,7 +57,14 @@ export function resolveResourceConfig(config: Record<string, any>, scope: Record
     return filled.replace(/__SUTRA_REF_(\d+)__/g, (_all, n) => kept[Number(n)] ?? '');
   };
   const walk = (v: unknown, key = ''): any => {
-    if (typeof v === 'string') return !protectedText.test(key) ? staticValue(v) : v;
+    if (typeof v === 'string') {
+      if (!protectedText.test(key)) return staticValue(v);
+      // PEM/configuration text is normally literal so certificate contents can
+      // never be treated as a template. An exact Project/Engine-property
+      // reference is safe and lets administrators select a certificate per
+      // deployment without copying it into every connection.
+      return /^\s*\{\{\s*(?:gv|ev)\.[^{}]+\s*\}\}\s*$/.test(v) ? staticValue(v) : v;
+    }
     if (Array.isArray(v)) return v.map(x => walk(x));
     if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x, k)]));
     return v;

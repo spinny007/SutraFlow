@@ -1,0 +1,25 @@
+{"at":"2026-10-23T01:53:45.020Z","min":0,"kind":"start","message":"SutraFlow 2.0.5, 3 processes, 2 minutes, database sutra_soak_1792720424500, 16 threads, 24 GB"}
+{"at":"2026-10-23T01:53:55.186Z","min":0.2,"kind":"setup","message":"26 Sutras deployed"}
+{"at":"2026-10-23T01:54:03.201Z","min":0.3,"kind":"load","message":"18 scenarios running"}
+{"at":"2026-10-23T01:55:51.131Z","min":2.1,"kind":"load","message":"load stopped and starters undeployed; waiting for open runs to end (at most 10 minutes)"}
+{"at":"2026-10-23T01:56:17.695Z","min":2.6,"kind":"check","message":"PASS No engine stopped by itself: 0 unexpected stops"}
+{"at":"2026-10-23T01:56:17.696Z","min":2.6,"kind":"check","message":"PASS No run left running: 0 runs still open after starters stopped"}
+{"at":"2026-10-23T01:56:17.722Z","min":2.6,"kind":"check","message":"PASS No step ran twice: 0 steps of single-pass Sutras completed more than once"}
+{"at":"2026-10-23T01:56:17.724Z","min":2.6,"kind":"check","message":"PASS Requests that failed: 3 of 4022 (0.075%), fault windows included"}
+{"at":"2026-10-23T01:56:17.725Z","min":2.6,"kind":"check","message":"PASS PostgreSQL DB Ops stayed correct: 40 completed, 0 failed"}
+{"at":"2026-10-23T01:56:17.725Z","min":2.6,"kind":"check","message":"PASS MySQL DB Ops stayed correct: 40 completed, 0 failed"}
+{"at":"2026-10-23T01:56:17.726Z","min":2.6,"kind":"check","message":"PASS SQLite DB Ops stayed correct: 40 completed, 0 failed"}
+{"at":"2026-10-23T01:56:17.728Z","min":2.6,"kind":"check","message":"PASS Timer kept time: 11 runs of 12 expected (every 10 s)"}
+{"at":"2026-10-23T01:56:17.730Z","min":2.6,"kind":"check","message":"PASS Every channel message reached its subscriber: 40 subscriber runs for 40 published"}
+{"at":"2026-10-23T01:56:17.731Z","min":2.6,"kind":"check","message":"PASS Bus messages acknowledged: 100 accepted, 0 released, 0 rejected of 100 sent"}
+{"at":"2026-10-23T01:56:17.734Z","min":2.6,"kind":"check","message":"PASS WebSocket client trigger ran for the server's messages: 46 runs for 46 messages pushed"}
+{"at":"2026-10-23T01:56:17.735Z","min":2.6,"kind":"check","message":"PASS WebSocket broadcasts arrived: 30 received of 30 expected (6 broadcasts to the clients connected at the time)"}
+{"at":"2026-10-23T01:56:17.736Z","min":2.6,"kind":"check","message":"PASS Engine 0 stays responsive: event loop delay: p99 per minute 36 ms typical, 71 ms in the worst 5% of minutes; longest single wait 210 ms"}
+{"at":"2026-10-23T01:56:17.737Z","min":2.6,"kind":"check","message":"PASS Engine 1 stays responsive: event loop delay: p99 per minute 35 ms typical, 35 ms in the worst 5% of minutes; longest single wait 553 ms"}
+{"at":"2026-10-23T01:56:17.738Z","min":2.6,"kind":"check","message":"PASS Engine 2 stays responsive: event loop delay: p99 per minute 35 ms typical, 35 ms in the worst 5% of minutes; longest single wait 560 ms"}
+{"at":"2026-10-23T01:56:17.740Z","min":2.6,"kind":"check","message":"PASS REST orders stays as fast: p95 228 ms in the first period, 221 ms in the last"}
+{"at":"2026-10-23T01:56:17.740Z","min":2.6,"kind":"check","message":"PASS REST in memory stays as fast: p95 19 ms in the first period, 13 ms in the last"}
+{"at":"2026-10-23T01:56:17.740Z","min":2.6,"kind":"check","message":"PASS REST signed and validated stays as fast: p95 665 ms in the first period, 629 ms in the last"}
+{"at":"2026-10-23T01:56:17.741Z","min":2.6,"kind":"check","message":"PASS SOAP UsernameToken stays as fast: p95 444 ms in the first period, 624 ms in the last"}
+{"at":"2026-10-23T01:56:17.741Z","min":2.6,"kind":"check","message":"PASS WebSocket echo stays as fast: p95 222 ms in the first period, 219 ms in the last"}
+{"at":"2026-10-23T01:56:17.749Z","min":2.6,"kind":"end","message":"report written to C:\\Users\\kunwa\\Documents\\LocalGitHub\\SutraFlow\\docs\\benchmarks\\soak-2.0.5-dbops-preflight"}

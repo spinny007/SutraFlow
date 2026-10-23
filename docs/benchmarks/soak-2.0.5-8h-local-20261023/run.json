@@ -1,0 +1,6 @@
+{
+  "pid": 69968,
+  "startedAt": "2026-10-23T07:27:06.0572380+05:30",
+  "output": "C:\\Users\\kunwa\\Documents\\LocalGitHub\\SutraFlow\\docs\\benchmarks\\soak-2.0.5-8h-local-20261023",
+  "command": "C:\\Users\\kunwa\\AppData\\Local\\Author Software\\nvm\\installs\\v24.21.0\\node.exe tools/soak.mjs --pg postgres://postgres@127.0.0.1:5432/postgres --mysql mysql://root@127.0.0.1:3306 --hours 8 --engines 4 --scale 1 --ollama http://127.0.0.1:11434 --model phi4-mini:latest --files 10,25,50,75,100 --files-every 25 --sftp-every 35 --rag-every 80 --drive-sizes 10,25,50,75,100 --drive-every 60 --out docs/benchmarks/soak-2.0.5-8h-local-20261023"
+}

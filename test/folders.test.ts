@@ -205,6 +205,7 @@ test('samples go to Samples/<topic> folders and get the connections they need', 
   assert.ok(SAMPLES.every(s => s.folder?.startsWith('Samples')), 'every sample has a folder');
   const list = flows.listFlows(pid);
   assert.equal(list.filter(f => !f.folder.startsWith('Samples/')).length, 0, 'no sample at the top');
+  assert.deepEqual(list.filter(f => !String(flows.getFlow(f.id)?.doc.description || '').trim()).map(f => f.name), [], 'every sample explains itself in generated documentation');
   const folder = (n: string) => list.find(f => f.name === n)?.folder;
   assert.equal(folder('Sample: SQL install script'), 'Samples/SQL');
   assert.equal(folder('Sample: Microservice Orders'), 'Samples/REST and microservices');
@@ -228,7 +229,15 @@ test('samples go to Samples/<topic> folders and get the connections they need', 
   }
   assert.deepEqual(empty, []);
   const names = listResources(undefined, pid).map(r => r.name).sort();
-  for (const n of ['Sample SMTP', 'Sample IMAP', 'Sample MySQL', 'Sample ActiveMQ', 'Sample Firebase', 'Sample Google', 'Sample Dropbox', 'Sample Facebook', 'Sample SFTP', 'Sample FTP', 'Local Ollama', 'Sample SQLite']) assert.ok(names.includes(n), n);
+  for (const n of ['Sample SMTP', 'Sample IMAP', 'Sample MySQL', 'Sample Kafka', 'Sample RabbitMQ', 'Sample ActiveMQ', 'Sample Firebase', 'Sample Google', 'Sample Dropbox', 'Sample Facebook', 'Sample SFTP', 'Sample FTP', 'Local Ollama', 'Sample SQLite']) assert.ok(names.includes(n), n);
+  for (const n of ['Sample Kafka (TLS + SASL)', 'Sample Kafka (mutual TLS)', 'Sample RabbitMQ (mutual TLS)', 'Sample ActiveMQ (mutual TLS)']) assert.ok(names.includes(n), `${n} gives the messaging samples a secure alternative`);
+  for (const f of list.filter(x => ['Sample: Queue in and out', 'Sample: Agent fed by a queue'].includes(x.name))) {
+    for (const n of flows.getFlow(f.id)!.doc.nodes.filter(x => ['busPublish', 'busSubscribe'].includes(x.type))) {
+      assert.equal(getResource(n.config.kafkaConn)?.kind, 'kafka', `${f.name}/${n.name} has Kafka ready to select`);
+      assert.equal(getResource(n.config.rabbitConn)?.kind, 'rabbitmq', `${f.name}/${n.name} has RabbitMQ ready to select`);
+      assert.equal(getResource(n.config.amqpConn)?.kind, 'amqp1', `${f.name}/${n.name} has ActiveMQ ready to select`);
+    }
+  }
   assert.equal(names.length, new Set(names).size, 'each connection made once');
 
   addSamples(pid, ['sftp', 'email']);

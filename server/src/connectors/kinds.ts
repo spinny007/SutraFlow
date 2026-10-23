@@ -61,6 +61,10 @@ export const CONNECTOR_KINDS: ResourceKind[] = [
     fields: [
       F('brokers', 'Brokers', 'list', ['localhost:9092']), F('clientId', 'Client ID', 'text', 'sutraflow'),
       F('ssl', 'TLS', 'bool', false),
+      F('caPem', 'Trusted CA certificates (PEM)', 'code', '', { ...when('ssl', true), help: 'Required when the broker uses a private CA, including Aiven. Leave empty to use the operating system trust store.' }),
+      F('clientCertPem', 'Client certificate (PEM)', 'code', '', { ...when('ssl', true), group: 'Mutual TLS', help: 'Optional. Use with a private key secret when the broker authenticates clients by certificate.' }),
+      F('clientKeySecret', 'Client private key', 'secret', '', { ...when('ssl', true), group: 'Mutual TLS', help: 'Vault secret containing the PEM private key for the client certificate.' }),
+      F('clientKeyPassphraseSecret', 'Private key passphrase', 'secret', '', { ...when('ssl', true), group: 'Mutual TLS', help: 'Optional vault secret for an encrypted client private key.' }),
       F('sasl', 'SASL', 'select', 'none', { options: ['none', 'plain', 'scram-sha-256', 'scram-sha-512'] }),
       F('user', 'Username', 'text', '', { showIf: { k: 'sasl', in: ['plain', 'scram-sha-256', 'scram-sha-512'] } }),
       F('passwordSecret', 'Password', 'secret', '', { showIf: { k: 'sasl', in: ['plain', 'scram-sha-256', 'scram-sha-512'] } }),
@@ -72,6 +76,10 @@ export const CONNECTOR_KINDS: ResourceKind[] = [
       F('url', 'URL', 'text', 'amqp://localhost:5672/', { help: 'amqps:// for TLS. The password comes from the secret below.' }),
       F('user', 'Username', 'text', 'guest'), F('passwordSecret', 'Password', 'secret', ''),
       F('vhost', 'Virtual host', 'text', '/'),
+      F('caPem', 'Trusted CA certificates (PEM)', 'code', '', { group: 'TLS', help: 'For an amqps URL with a private CA. Empty uses the operating system trust store.' }),
+      F('clientCertPem', 'Client certificate (PEM)', 'code', '', { group: 'Mutual TLS', help: 'Optional. Use with a vault private-key secret.' }),
+      F('clientKeySecret', 'Client private key', 'secret', '', { group: 'Mutual TLS' }),
+      F('clientKeyPassphraseSecret', 'Private key passphrase', 'secret', '', { group: 'Mutual TLS', help: 'Optional, for an encrypted client key.' }),
     ],
   },
   {
@@ -79,9 +87,13 @@ export const CONNECTOR_KINDS: ResourceKind[] = [
     fields: [
       F('host', 'Host', 'text', 'localhost'), F('port', 'Port', 'number', 5672), F('tls', 'TLS', 'bool', false),
       F('user', 'Username', 'text', 'admin'), F('passwordSecret', 'Password', 'secret', ''),
-      F('containerId', 'Container ID', 'text', 'sutraflow'),
+      F('containerId', 'Container ID prefix', 'text', 'sutraflow', { help: 'SutraFlow adds a unique publisher or listener suffix. Keep this prefix distinct for each SutraFlow installation.' }),
       F('queuePrefix', 'Queue address prefix', 'text', '', { help: 'ActiveMQ Classic: empty or queue://. Artemis: empty.' }),
       F('topicPrefix', 'Topic address prefix', 'text', 'topic://', { help: 'ActiveMQ Classic: topic://. Artemis: empty, with the address set to multicast.' }),
+      F('caPem', 'Trusted CA certificates (PEM)', 'code', '', { ...when('tls', true), group: 'TLS', help: 'For a private broker CA. Empty uses the operating system trust store.' }),
+      F('clientCertPem', 'Client certificate (PEM)', 'code', '', { ...when('tls', true), group: 'Mutual TLS', help: 'Optional. Use with a vault private-key secret.' }),
+      F('clientKeySecret', 'Client private key', 'secret', '', { ...when('tls', true), group: 'Mutual TLS' }),
+      F('clientKeyPassphraseSecret', 'Private key passphrase', 'secret', '', { ...when('tls', true), group: 'Mutual TLS', help: 'Optional, for an encrypted client key.' }),
     ],
   },
   {

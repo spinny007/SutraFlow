@@ -1,0 +1,17 @@
+{"at":"2026-10-23T02:00:01.240Z","min":0,"kind":"start","message":"SutraFlow 2.0.5, 4 processes, 480 minutes, database sutra_soak_1792720800880, 16 threads, 24 GB"}
+{"at":"2026-10-23T02:00:10.185Z","min":0.2,"kind":"setup","message":"26 Sutras deployed"}
+{"at":"2026-10-23T02:00:18.194Z","min":0.3,"kind":"load","message":"22 scenarios running"}
+{"at":"2026-10-23T02:25:18.294Z","min":25.3,"kind":"file","message":"soak-30600-10mb.csv: 198000 rows to the watched folder"}
+{"at":"2026-10-23T02:35:18.375Z","min":35.3,"kind":"file","message":"soak-42853-25mb.csv: 486000 rows to the SFTP inbox"}
+{"at":"2026-10-23T02:35:18.684Z","min":35.3,"kind":"file","message":"soak-42854-50mb.csv: 968000 rows to the FTP inbox"}
+{"at":"2026-10-23T02:50:18.765Z","min":50.3,"kind":"file","message":"soak-61218-75mb.csv: 1434000 rows to the watched folder"}
+{"at":"2026-10-23T03:10:18.929Z","min":70.3,"kind":"file","message":"soak-85708-100mb.csv: 1898000 rows to the SFTP inbox"}
+{"at":"2026-10-23T03:10:19.017Z","min":70.3,"kind":"file","message":"soak-85711-10mb.csv: 198000 rows to the FTP inbox"}
+{"at":"2026-10-23T03:15:18.451Z","min":75.3,"kind":"file","message":"soak-91827-25mb.csv: 486000 rows to the watched folder"}
+{"at":"2026-10-23T03:21:10.853Z","min":81.2,"kind":"document","message":"soak-doc-97935-50mb.txt: done in 52 s"}
+{"at":"2026-10-23T03:40:18.895Z","min":100.3,"kind":"file","message":"soak-122361-75mb.csv: 1434000 rows to the watched folder"}
+{"at":"2026-10-23T03:45:19.237Z","min":105.3,"kind":"file","message":"soak-128440-100mb.csv: 1898000 rows to the SFTP inbox"}
+{"at":"2026-10-23T03:45:19.366Z","min":105.3,"kind":"file","message":"soak-128446-10mb.csv: 198000 rows to the FTP inbox"}
+{"at":"2026-10-23T04:06:25.789Z","min":126.4,"kind":"pause","message":"no sample for 4 minutes: the computer slept or this tool was held; every process was paused"}
+{"at":"2026-10-23T04:06:28.556Z","min":126.5,"kind":"file","message":"soak-150222-25mb.csv: 486000 rows to the watched folder"}
+{"at":"2026-10-23T04:13:35.576Z","min":133.6,"kind":"pause","message":"no sample for 7 minutes: the computer slept or this tool was held; every process was paused"}

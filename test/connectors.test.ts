@@ -22,13 +22,42 @@ const flows = await import('../server/src/flows.js');
 const { setSecret } = await import('../server/src/secrets.js');
 const { saveResource } = await import('../server/src/resources.js');
 const { assertReadOnlyPreviewSql, bindFor, namedParams, namedParameterIssues, closeDbPools, inlineRunData, previewDatabaseQuery } = await import('../server/src/connectors/db.js');
-const { priorDelivery, busTiming, messageKey, stopHolds, handle: handleDelivery } = await import('../server/src/connectors/bus.js');
+const { priorDelivery, busTiming, messageKey, stopHolds, handle: handleDelivery, logicalJmsDestination, kafkaTlsOptions, brokerTlsOptions } = await import('../server/src/connectors/bus.js');
 const { rebuildListeners, listenerStatus } = await import('../server/src/listeners.js');
 const oauth = await import('../server/src/connectors/oauth.js');
 
 let srv: Awaited<ReturnType<typeof boot>>;
 before(async () => { srv = await boot({ listenAdmin: false }); });
 after(async () => { await closeDbPools(); await srv.stop(); });
+
+test('ActiveMQ JMS destination qualifiers are hidden from Sutra message headers', () => {
+  assert.equal(logicalJmsDestination('queue://reply.orders'), 'reply.orders');
+  assert.equal(logicalJmsDestination('topic://events'), 'events');
+  assert.equal(logicalJmsDestination('plain.address'), 'plain.address');
+  assert.equal(logicalJmsDestination(undefined), undefined);
+});
+
+test('Kafka TLS requires complete mutual-TLS credentials and keeps private keys in the vault', () => {
+  assert.equal(kafkaTlsOptions({ ssl: false }, () => ''), false);
+  assert.equal(kafkaTlsOptions({ ssl: true }, () => ''), true);
+  assert.deepEqual(kafkaTlsOptions({ ssl: true, caPem: ' CA ' }, () => ''), { rejectUnauthorized: true, ca: ['CA'] });
+  assert.throws(() => kafkaTlsOptions({ ssl: true, clientCertPem: 'CERT' }, () => ''), /both Client certificate and Client private key/);
+  const asked: string[] = [];
+  assert.deepEqual(kafkaTlsOptions({ ssl: true, clientCertPem: 'CERT', clientKeySecret: 'KAFKA_KEY', clientKeyPassphraseSecret: 'KAFKA_PASS' }, n => { asked.push(n); return n === 'KAFKA_KEY' ? 'KEY' : 'PASS'; }), {
+    rejectUnauthorized: true, cert: ['CERT'], key: 'KEY', passphrase: 'PASS',
+  });
+  assert.deepEqual(asked, ['KAFKA_KEY', 'KAFKA_PASS']);
+});
+
+test('RabbitMQ and AMQP 1.0 TLS require a complete client certificate pair and strict CA validation', () => {
+  assert.deepEqual(brokerTlsOptions({ caPem: ' CA ' }, () => '', 'RabbitMQ'), { rejectUnauthorized: true, ca: ['CA'] });
+  assert.throws(() => brokerTlsOptions({ clientKeySecret: 'KEY' }, () => '', 'AMQP 1.0'), /both Client certificate and Client private key/);
+  const asked: string[] = [];
+  assert.deepEqual(brokerTlsOptions({ caPem: 'CA', clientCertPem: 'CERT', clientKeySecret: 'KEY', clientKeyPassphraseSecret: 'PASS' }, n => {
+    asked.push(n); return n === 'KEY' ? 'PRIVATE KEY' : 'PASSPHRASE';
+  }, 'RabbitMQ'), { rejectUnauthorized: true, ca: ['CA'], cert: 'CERT', key: 'PRIVATE KEY', passphrase: 'PASSPHRASE' });
+  assert.deepEqual(asked, ['KEY', 'PASS']);
+});
 
 async function run(nodes: any[], edges: any[], input?: any) {
   const id = await engine.startRun({ doc: { name: 'C', nodes, edges }, input });

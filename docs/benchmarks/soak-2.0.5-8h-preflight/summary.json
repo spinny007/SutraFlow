@@ -1,0 +1,871 @@
+{
+  "version": "2.0.5",
+  "started": "2026-10-22T19:28:00.559Z",
+  "ended": "2026-10-22T19:32:25.386Z",
+  "minutes": 4,
+  "engines": 3,
+  "machine": "AMD Ryzen 7 7435HS, 16 threads, 24 GB, win32",
+  "node": "v22.23.2",
+  "pausedMinutes": 0,
+  "database": "PostgreSQL (through a proxy), SQLite, MySQL",
+  "model": "phi4-mini:latest on Ollama",
+  "sizes": [
+    10,
+    20,
+    30,
+    40,
+    50,
+    60
+  ],
+  "checks": [
+    {
+      "name": "No engine stopped by itself",
+      "ok": true,
+      "detail": "0 unexpected stops"
+    },
+    {
+      "name": "No run left running",
+      "ok": true,
+      "detail": "0 runs still open after starters stopped"
+    },
+    {
+      "name": "No step ran twice",
+      "ok": true,
+      "detail": "0 steps of single-pass Sutras completed more than once"
+    },
+    {
+      "name": "Requests that failed",
+      "ok": false,
+      "detail": "396 of 11396 (3.475%), fault windows included"
+    },
+    {
+      "name": "PostgreSQL DB Ops stayed correct",
+      "ok": false,
+      "detail": "0 completed, 131 failed"
+    },
+    {
+      "name": "MySQL DB Ops stayed correct",
+      "ok": false,
+      "detail": "0 completed, 131 failed"
+    },
+    {
+      "name": "SQLite DB Ops stayed correct",
+      "ok": false,
+      "detail": "0 completed, 130 failed"
+    },
+    {
+      "name": "Timer kept time",
+      "ok": true,
+      "detail": "23 runs of 24 expected (every 10 s)"
+    },
+    {
+      "name": "Every channel message reached its subscriber",
+      "ok": true,
+      "detail": "130 subscriber runs for 130 published"
+    },
+    {
+      "name": "Bus messages acknowledged",
+      "ok": true,
+      "detail": "326 accepted, 0 released, 0 rejected of 326 sent"
+    },
+    {
+      "name": "WebSocket client trigger ran for the server's messages",
+      "ok": true,
+      "detail": "140 runs for 140 messages pushed"
+    },
+    {
+      "name": "WebSocket broadcasts arrived",
+      "ok": true,
+      "detail": "105 received of 105 expected (21 broadcasts to the clients connected at the time)"
+    },
+    {
+      "name": "Engine 0 stays responsive",
+      "ok": true,
+      "detail": "event loop delay: p99 per minute 37 ms typical, 77 ms in the worst 5% of minutes; longest single wait 647 ms"
+    },
+    {
+      "name": "Engine 1 stays responsive",
+      "ok": true,
+      "detail": "event loop delay: p99 per minute 35 ms typical, 38 ms in the worst 5% of minutes; longest single wait 662 ms"
+    },
+    {
+      "name": "Engine 2 stays responsive",
+      "ok": true,
+      "detail": "event loop delay: p99 per minute 36 ms typical, 48 ms in the worst 5% of minutes; longest single wait 657 ms"
+    },
+    {
+      "name": "REST orders stays as fast",
+      "ok": true,
+      "detail": "p95 240 ms in the first period, 225 ms in the last"
+    },
+    {
+      "name": "REST in memory stays as fast",
+      "ok": true,
+      "detail": "p95 29 ms in the first period, 23 ms in the last"
+    },
+    {
+      "name": "REST signed and validated stays as fast",
+      "ok": true,
+      "detail": "p95 253 ms in the first period, 220 ms in the last"
+    },
+    {
+      "name": "SOAP UsernameToken stays as fast",
+      "ok": true,
+      "detail": "p95 243 ms in the first period, 219 ms in the last"
+    },
+    {
+      "name": "WebSocket echo stays as fast",
+      "ok": true,
+      "detail": "p95 248 ms in the first period, 227 ms in the last"
+    },
+    {
+      "name": "Bus message stays as fast",
+      "ok": true,
+      "detail": "p95 1 ms in the first period, 1 ms in the last"
+    }
+  ],
+  "faults": [],
+  "scenarios": [
+    {
+      "name": "REST orders",
+      "ok": 4058,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 1122,
+          "p50": 93,
+          "p95": 240,
+          "p99": 530
+        },
+        {
+          "n": 1109,
+          "p50": 92,
+          "p95": 238,
+          "p99": 293
+        },
+        {
+          "n": 1107,
+          "p50": 74,
+          "p95": 223,
+          "p99": 254
+        },
+        {
+          "n": 720,
+          "p50": 74,
+          "p95": 225,
+          "p99": 246
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "REST in memory",
+      "ok": 3168,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 870,
+          "p50": 15,
+          "p95": 29,
+          "p99": 213
+        },
+        {
+          "n": 865,
+          "p50": 13,
+          "p95": 25,
+          "p99": 46
+        },
+        {
+          "n": 868,
+          "p50": 10,
+          "p95": 23,
+          "p99": 31
+        },
+        {
+          "n": 565,
+          "p50": 10,
+          "p95": 23,
+          "p99": 28
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "REST signed and validated",
+      "ok": 648,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 177,
+          "p50": 96,
+          "p95": 253,
+          "p99": 1633
+        },
+        {
+          "n": 177,
+          "p50": 82,
+          "p95": 237,
+          "p99": 753
+        },
+        {
+          "n": 177,
+          "p50": 70,
+          "p95": 227,
+          "p99": 664
+        },
+        {
+          "n": 117,
+          "p50": 83,
+          "p95": 220,
+          "p99": 696
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "SOAP UsernameToken",
+      "ok": 648,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 177,
+          "p50": 87,
+          "p95": 243,
+          "p99": 1354
+        },
+        {
+          "n": 176,
+          "p50": 97,
+          "p95": 231,
+          "p99": 1203
+        },
+        {
+          "n": 178,
+          "p50": 87,
+          "p95": 226,
+          "p99": 1177
+        },
+        {
+          "n": 117,
+          "p50": 85,
+          "p95": 219,
+          "p99": 849
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "SOAP X.509 signed and encrypted",
+      "ok": 164,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 44,
+          "p50": 153,
+          "p95": 356,
+          "p99": 839
+        },
+        {
+          "n": 45,
+          "p50": 116,
+          "p95": 301,
+          "p99": 1496
+        },
+        {
+          "n": 45,
+          "p50": 111,
+          "p95": 255,
+          "p99": 672
+        },
+        {
+          "n": 30,
+          "p50": 81,
+          "p95": 249,
+          "p99": 1177
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "WebSocket echo",
+      "ok": 1606,
+      "fail": 4,
+      "errors": [
+        [
+          "not connected",
+          4
+        ]
+      ],
+      "hours": [
+        {
+          "n": 434,
+          "p50": 102,
+          "p95": 248,
+          "p99": 601
+        },
+        {
+          "n": 439,
+          "p50": 91,
+          "p95": 230,
+          "p99": 729
+        },
+        {
+          "n": 443,
+          "p50": 87,
+          "p95": 229,
+          "p99": 1136
+        },
+        {
+          "n": 290,
+          "p50": 97,
+          "p95": 227,
+          "p99": 1256
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "WebSocket broadcast",
+      "ok": 21,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 5,
+          "p50": 76,
+          "p95": 201,
+          "p99": 201
+        },
+        {
+          "n": 6,
+          "p50": 131,
+          "p95": 1955,
+          "p99": 1955
+        },
+        {
+          "n": 6,
+          "p50": 93,
+          "p95": 1353,
+          "p99": 1353
+        },
+        {
+          "n": 4,
+          "p50": 77,
+          "p95": 751,
+          "p99": 751
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "PostgreSQL DB Ops",
+      "ok": 0,
+      "fail": 131,
+      "errors": [
+        [
+          "run done: {}",
+          131
+        ]
+      ],
+      "hours": [
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "MySQL DB Ops",
+      "ok": 0,
+      "fail": 131,
+      "errors": [
+        [
+          "run failed: Read: Bind parameters must not contain undefined. To pass SQL NULL specify JS null",
+          131
+        ]
+      ],
+      "hours": [
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "SQLite DB Ops",
+      "ok": 0,
+      "fail": 130,
+      "errors": [
+        [
+          "run failed: Read: Provided value cannot be bound to SQLite parameter 1.",
+          130
+        ]
+      ],
+      "hours": [
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Channel publish",
+      "ok": 130,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 35,
+          "p50": 572,
+          "p95": 632,
+          "p99": 965
+        },
+        {
+          "n": 36,
+          "p50": 545,
+          "p95": 625,
+          "p99": 1948
+        },
+        {
+          "n": 36,
+          "p50": 545,
+          "p95": 590,
+          "p99": 1355
+        },
+        {
+          "n": 23,
+          "p50": 540,
+          "p95": 557,
+          "p99": 564
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Error handler",
+      "ok": 130,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 35,
+          "p50": 608,
+          "p95": 1104,
+          "p99": 1109
+        },
+        {
+          "n": 36,
+          "p50": 711,
+          "p95": 1132,
+          "p99": 2177
+        },
+        {
+          "n": 35,
+          "p50": 702,
+          "p95": 1061,
+          "p99": 1415
+        },
+        {
+          "n": 24,
+          "p50": 686,
+          "p95": 1127,
+          "p99": 2709
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Called Sutra and approval",
+      "ok": 21,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 5,
+          "p50": 10102,
+          "p95": 10184,
+          "p99": 10184
+        },
+        {
+          "n": 5,
+          "p50": 10137,
+          "p95": 11477,
+          "p99": 11477
+        },
+        {
+          "n": 6,
+          "p50": 10094,
+          "p95": 11284,
+          "p99": 11284
+        },
+        {
+          "n": 5,
+          "p50": 10099,
+          "p95": 11051,
+          "p99": 11051
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "MCP tool",
+      "ok": 65,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 17,
+          "p50": 89,
+          "p95": 222,
+          "p99": 222
+        },
+        {
+          "n": 18,
+          "p50": 91,
+          "p95": 1770,
+          "p99": 1770
+        },
+        {
+          "n": 18,
+          "p50": 57,
+          "p95": 1195,
+          "p99": 1195
+        },
+        {
+          "n": 12,
+          "p50": 132,
+          "p95": 783,
+          "p99": 783
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Bus message",
+      "ok": 326,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 89,
+          "p50": 0,
+          "p95": 1,
+          "p99": 2
+        },
+        {
+          "n": 89,
+          "p50": 0,
+          "p95": 1,
+          "p99": 3
+        },
+        {
+          "n": 90,
+          "p50": 0,
+          "p95": 0,
+          "p99": 1
+        },
+        {
+          "n": 58,
+          "p50": 0,
+          "p95": 1,
+          "p99": 1
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "RAG search",
+      "ok": 10,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 2,
+          "p50": 591,
+          "p95": 591,
+          "p99": 591
+        },
+        {
+          "n": 3,
+          "p50": 522,
+          "p95": 2451,
+          "p99": 2451
+        },
+        {
+          "n": 3,
+          "p50": 564,
+          "p95": 1726,
+          "p99": 1726
+        },
+        {
+          "n": 2,
+          "p50": 1634,
+          "p95": 1634,
+          "p99": 1634
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "RAG ask (Ollama)",
+      "ok": 2,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 1,
+          "p50": 138,
+          "p95": 138,
+          "p99": 138
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 1,
+          "p50": 114,
+          "p95": 114,
+          "p99": 114
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "AI agent chat (Ollama)",
+      "ok": 3,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 1,
+          "p50": 4411,
+          "p95": 4411,
+          "p99": 4411
+        },
+        {
+          "n": 1,
+          "p50": 4075,
+          "p95": 4075,
+          "p99": 4075
+        },
+        {
+          "n": 1,
+          "p50": 3852,
+          "p95": 3852,
+          "p99": 3852
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    }
+  ],
+  "stuckRuns": [],
+  "stuckTasks": [],
+  "files": {
+    "csv": [],
+    "sftp": [],
+    "ftp": [],
+    "docs": [],
+    "drive": []
+  },
+  "ws": {
+    "connects": 5,
+    "drops": 0,
+    "broadcastsSent": 21,
+    "broadcastsExpected": 105,
+    "broadcastsGot": 105
+  },
+  "bus": {
+    "sent": 326,
+    "accepted": 326,
+    "released": 0,
+    "rejected": 0
+  },
+  "feed": 140,
+  "restarts": [
+    {
+      "engine": 0,
+      "restarts": 0
+    },
+    {
+      "engine": 1,
+      "restarts": 0
+    },
+    {
+      "engine": 2,
+      "restarts": 0
+    }
+  ]
+}

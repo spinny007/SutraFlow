@@ -59,7 +59,8 @@ export const SAMPLES: { id: string; name: string; desc: string; palettes: string
   { id: 'release', name: 'Release pipeline', palettes: 'Release, Flow control, Email', desc: 'A Sutra that releases a project: builds a package, checks it, deploys it to a test copy, waits for approval, deploys to production, and logs each step; any problem goes to one handler.', needs: 'release activities allowed in Admin Console > Server > Runtime; for remote engines, their admin tokens in the vault' },
   { id: 'localai', name: 'Local AI with Ollama', palettes: 'AI', desc: 'Classifies, summarises and rates a customer email with a local Ollama model, offline.', needs: 'Ollama running on this machine with at least one model' },
   { id: 'email', name: 'Email a report', palettes: 'Email, Custom code', desc: 'Builds an HTML report and emails it; a failure is logged.', needs: 'an Email (SMTP) connection' },
-  { id: 'queue', name: 'Queue in and out', palettes: 'Service Bus', desc: 'Takes orders from a queue, reshapes them, publishes them on, and confirms each message.', needs: 'a Kafka, RabbitMQ or ActiveMQ connection' },
+  { id: 'queue', name: 'Queue in and out', palettes: 'Service Bus', desc: 'Takes orders from Kafka, RabbitMQ or ActiveMQ, reshapes and publishes them, then explicitly confirms only after the outgoing broker accepted them.', needs: 'one configured Kafka, RabbitMQ or ActiveMQ connection' },
+  { id: 'brokerrest', name: 'Broker REST APIs', palettes: 'HTTP, Service Bus', desc: 'Three HTTP-client examples: publish through Kafka REST, publish and fetch through RabbitMQ HTTP, and publish and fetch through ActiveMQ REST. These complement rather than replace native Queue / topic triggers.', needs: 'the broker REST/management endpoint enabled and an HTTP connection plus Basic-auth vault secret' },
   { id: 'soappublic', name: 'Call a public SOAP service', palettes: 'SOAP / Web services', desc: 'Loads the WSDL of a free public calculator service and calls its Add and Multiply operations; a fault and a network error each have their own output.', needs: 'internet access' },
   { id: 'soapmock', name: 'Mock SOAP service and its caller', palettes: 'Triggers, SOAP / Web services', desc: 'A mock weather SOAP service with a WSDL and canned replies (and a fault for an unknown city), and a Sutra that calls it with a raw envelope, as you would before the real service exists.', needs: 'the mock service deployed' },
   { id: 'microservices', name: 'JSON microservices', palettes: 'Triggers, HTTP, Data & mapping', desc: 'Three small REST services: Customers and Stock answer JSON on their own, Orders calls both over HTTP and returns one combined JSON reply (or 404 / 409 / 502).', needs: 'the three services deployed' },
@@ -68,7 +69,7 @@ export const SAMPLES: { id: string; name: string; desc: string; palettes: string
   { id: 'ftp', name: 'FTP: upload, list, read, archive', palettes: 'SFTP / FTP, Triggers', desc: 'The same steps over FTP or FTPS: write, list with rows, read lines, move to a dated archive name; a Remote file trigger picks up new files and deletes them after the run.', needs: 'an FTP server: set the host, user and password of the "Sample FTP" connection' },
   { id: 'agentdesk', name: 'AI agent: order desk with tools and memory', palettes: 'AI', desc: 'A published agent (chat page, OpenAI API, MCP tool, A2A) that checks its input with the AI guard, looks orders and stock up with two AI tool Sutras, remembers each conversation, and asks a person before any refund.', needs: 'Ollama with a model (phi4-mini works); the three Sutras deployed to chat at /chat/order-desk' },
   { id: 'agentrag', name: 'AI agent: knowledge base (RAG)', palettes: 'AI, Apps', desc: 'Fills a knowledge base from web pages and from a SharePoint library (kept up to date by a trigger), and a policy assistant that answers only from it, with sources.', needs: 'Ollama with a model; for SharePoint, a Microsoft OAuth connection' },
-  { id: 'agentqueue', name: 'AI agent: fed by a message queue', palettes: 'AI, Service Bus', desc: 'Takes questions from a RabbitMQ or ActiveMQ queue, answers each with the agent (one at a time per conversation), publishes the answer to a reply queue and confirms the message.', needs: 'a RabbitMQ or ActiveMQ connection; Ollama with a model' },
+  { id: 'agentqueue', name: 'AI agent: fed by a message queue', palettes: 'AI, Service Bus', desc: 'Takes questions from Kafka, RabbitMQ or ActiveMQ, keeps each conversation in its own AI-memory session, publishes the answer to the requested destination, then explicitly confirms.', needs: 'one configured Kafka, RabbitMQ or ActiveMQ connection; Ollama with a model' },
   { id: 'agentteam', name: 'AI agent: supervisor and specialists', palettes: 'AI', desc: 'A supervisor agent published at /chat/help sends each question to the order desk or the policy assistant with Hand off to agent, and answers with what they say.', needs: 'the order desk and knowledge base samples; Ollama with a model' },
   { id: 'agentmcp', name: 'AI agent: tools from another MCP server', palettes: 'AI', desc: 'Lists the tools of an outside MCP server (the file system server started with npx), calls one directly, and gives them to an agent that answers questions about files.', needs: 'Node.js npx on the server; Ollama with a model' },
   { id: 'agentdocs', name: 'AI document assistant: RAG over a folder', palettes: 'AI, Files, Triggers, REST', desc: 'Every 15 minutes, reads the PDF, Word, PowerPoint and Markdown files of a folder into a knowledge base (changed files again, deleted ones out), and answers from it three ways: a REST API, an MCP tool for AI assistants, and a chat agent. Sample documents included.', needs: 'Ollama with a model for the API and the agent (the MCP tool needs none)' },
@@ -665,14 +666,87 @@ export function addSamples(projectId: string, ids?: string[]) {
   // Queue in and out (needs a broker connection).
   const queue = want('queue') && save({
     name: 'Sample: Queue in and out',
-    description: 'Queue / topic trigger takes orders from the queue "orders.in" (acknowledge: explicit); Map data reshapes them; Publish message sends them to "orders.out" as persistent messages; Confirm message acknowledges. Pick an ActiveMQ, RabbitMQ or Kafka connection in both, then deploy.',
+    description: 'A broker-safe consume-transform-publish pattern. Queue / topic trigger reads JSON orders from orders.in with explicit acknowledgement and a durable duplicate guard. Map data reshapes the order; Publish message waits until orders.out is accepted by Kafka, RabbitMQ or ActiveMQ; only then Confirm message acknowledges the input. Configure the matching Sample broker connection and select the same broker in both bus steps. On failure before Confirm, SutraFlow returns the input for redelivery up to the trigger ceiling. Kafka identifies deliveries by topic/partition/offset; RabbitMQ and AMQP use message id (or the configured Duplicate key).',
     nodes: [
-      N('t', 'busSubscribe', 'Orders in', 60, 200, { broker: 'amqp1', amqpConn: '', rabbitConn: '', kafkaConn: '', destinationType: 'queue', destination: 'orders.in', selector: '', durableName: '', groupId: 'sutraflow', fromBeginning: false, declare: true, messageType: 'JSON', ackMode: 'explicit', onFailure: 'requeue', maxRedeliveries: 5, concurrency: 1, testMessage: JSON.stringify({ orderId: 'A-12', qty: 2 }, null, 2) }),
+      N('t', 'busSubscribe', 'Orders in', 60, 200, { broker: 'amqp1', amqpConn: '', rabbitConn: '', kafkaConn: '', destinationType: 'queue', destination: 'orders.in', selector: '', durableName: '', groupId: 'sutraflow-orders', fromBeginning: false, declare: true, messageType: 'JSON', ackMode: 'explicit', deduplicate: 'on', duplicateKey: '{{body.orderId}}', withoutId: 'process', onFailure: 'requeue', maxRedeliveries: 5, concurrency: 1, testMessage: JSON.stringify({ body: { orderId: 'A-12', qty: 2 }, headers: { messageId: 'sample-order-A-12' }, properties: { source: 'sample' } }, null, 2) }),
       N('m', 'mapper', 'Reshape', 380, 200, { start: 'empty', schema: '', mapping: { rules: { id: { expr: '{input.body.orderId}' }, quantity: { expr: 'number({input.body.qty})' }, receivedAt: { expr: 'current-dateTime()' } } } }),
-      N('p', 'busPublish', 'Orders out', 700, 200, { broker: 'amqp1', amqpConn: '', rabbitConn: '', kafkaConn: '', destinationType: 'queue', destination: 'orders.out', exchange: '', messageType: 'JSON', body: '{{input}}', deliveryMode: 'persistent', priority: 4, timeToLive: 0, messageId: '', correlationId: '{{trigger.headers.messageId}}', replyTo: '', jmsType: 'Order', key: '', acks: 'all', properties: [{ k: 'source', v: 'sutraflow' }] }),
+      N('p', 'busPublish', 'Orders out', 700, 200, { broker: 'amqp1', amqpConn: '', rabbitConn: '', kafkaConn: '', destinationType: 'queue', destination: 'orders.out', exchange: '', messageType: 'JSON', body: '{{input}}', deliveryMode: 'persistent', priority: 4, timeToLive: 0, messageId: '', correlationId: '{{trigger.headers.messageId}}', replyTo: '', jmsType: 'Order', key: '{{input.id}}', acks: 'all', properties: [{ k: 'source', v: 'sutraflow' }] }),
       N('c', 'busConfirm', 'Confirm', 1020, 200, { action: 'confirm' }),
     ],
     edges: [E('t', 'm'), E('m', 'p'), E('p', 'c')],
+  });
+
+  // Broker REST APIs are useful to HTTP-only clients, but do not replace native queue/topic triggers.
+  const brokerRest = want('brokerrest');
+  const kafkaRestHttp = brokerRest && conn('httpConnection', 'Sample Kafka REST', {
+    baseUrl: '{{gv.KAFKA_REST_URL}}', timeoutMs: 30000, verifyTls: true, caPem: '{{gv.KAFKA_REST_CA_PEM}}', headers: [],
+  });
+  const kafkaRestAuth = brokerRest && conn('outboundAuth', 'Sample Kafka REST Basic auth', {
+    type: 'basic', username: '{{gv.KAFKA_REST_USER}}', passwordSecret: '{{gv.KAFKA_REST_PASSWORD_SECRET}}',
+  });
+  const rabbitRestHttp = brokerRest && conn('httpConnection', 'Sample RabbitMQ HTTP', {
+    baseUrl: '{{gv.RABBITMQ_HTTP_URL}}', timeoutMs: 30000, verifyTls: true, headers: [],
+  });
+  const rabbitRestAuth = brokerRest && conn('outboundAuth', 'Sample RabbitMQ HTTP Basic auth', {
+    type: 'basic', username: '{{gv.RABBITMQ_HTTP_USER}}', passwordSecret: '{{gv.RABBITMQ_HTTP_PASSWORD_SECRET}}',
+  });
+  const activeRestHttp = brokerRest && conn('httpConnection', 'Sample ActiveMQ REST', {
+    baseUrl: '{{gv.ACTIVEMQ_REST_URL}}', timeoutMs: 30000, verifyTls: true, headers: [{ k: 'Origin', v: '{{gv.ACTIVEMQ_REST_ORIGIN}}' }],
+  });
+  const activeRestAuth = brokerRest && conn('outboundAuth', 'Sample ActiveMQ REST Basic auth', {
+    type: 'basic', username: '{{gv.ACTIVEMQ_REST_USER}}', passwordSecret: '{{gv.ACTIVEMQ_REST_PASSWORD_SECRET}}',
+  });
+  const kafkaRest = kafkaRestHttp && kafkaRestAuth && save({
+    name: 'Sample: Kafka REST publish',
+    description: 'Publishes one JSON record through a Kafka REST proxy (Aiven Karapace/Confluent-compatible API). Set KAFKA_REST_URL, KAFKA_REST_USER, KAFKA_REST_PASSWORD_SECRET and optionally KAFKA_REST_CA_PEM, then put the password in the vault. This is for an HTTP-only integration; use the native Kafka connection and Queue / topic trigger for consumer groups, offsets, retries and workflow acknowledgement.',
+    nodes: [
+      N('s', 'start', 'Record', 60, 220, { payload: JSON.stringify({ topic: 'orders.rest', key: 'A-1001', value: { orderId: 'A-1001', amount: 1450 } }, null, 2) }),
+      N('p', 'httpRequest', 'Publish over Kafka REST', 400, 220, { connection: kafkaRestHttp.id, auth: kafkaRestAuth.id, method: 'POST', url: '/topics/{{input.topic | urlencode}}', query: [], headers: [{ k: 'Accept', v: 'application/vnd.kafka.v2+json' }, { k: 'Content-Type', v: 'application/vnd.kafka.json.v2+json' }], bodyType: 'json', body: '{\n  "records": [\n    { "key": {{input.key | json}}, "value": {{input.value | json}} }\n  ]\n}', parse: 'json', failOn: '4xx or 5xx' }),
+      N('l', 'log', 'Log partition and offset', 760, 220, { level: 'info', message: 'Kafka REST accepted the record: {{input.body | json}}' }),
+    ],
+    edges: [E('s', 'p'), E('p', 'l')],
+  });
+  const kafkaRestSubscribe = kafkaRestHttp && kafkaRestAuth && save({
+    name: 'Sample: Kafka REST subscribe',
+    description: 'Shows the complete stateful Kafka REST consumer lifecycle: create a consumer instance, subscribe it to a topic, publish a sample record, poll records, commit its offsets and close it. Set the same Kafka REST project variables and vault secret as the publish sample. REST polling is useful for HTTP-only integration; use the native Queue / topic trigger for a continuously deployed consumer with partition concurrency, retries, duplicate protection and workflow acknowledgement.',
+    nodes: [
+      N('s', 'start', 'Consumer settings', 40, 220, { payload: JSON.stringify({ topic: 'orders.rest', group: 'sutraflow-rest-sample', value: { orderId: 'A-REST-2001', amount: 625 } }, null, 2) }),
+      N('c', 'httpRequest', 'Create consumer', 320, 220, { connection: kafkaRestHttp.id, auth: kafkaRestAuth.id, method: 'POST', url: '/consumers/{{input.group | urlencode}}', query: [], headers: [{ k: 'Accept', v: 'application/vnd.kafka.v2+json' }, { k: 'Content-Type', v: 'application/vnd.kafka.v2+json' }], bodyType: 'json', body: '{\n  "name": "sutraflow-{{sutraContext.id}}",\n  "format": "json",\n  "auto.offset.reset": "earliest",\n  "auto.commit.enable": "false"\n}', parse: 'json', failOn: '4xx or 5xx' }),
+      N('u', 'httpRequest', 'Subscribe to topic', 600, 220, { connection: kafkaRestHttp.id, auth: kafkaRestAuth.id, method: 'POST', url: '{{nodes.Create consumer.body.base_uri}}/subscription', query: [], headers: [{ k: 'Content-Type', v: 'application/vnd.kafka.v2+json' }], bodyType: 'json', body: '{ "topics": [{{trigger.topic | json}}] }', parse: 'auto', failOn: '4xx or 5xx' }),
+      N('p', 'httpRequest', 'Publish sample record', 880, 220, { connection: kafkaRestHttp.id, auth: kafkaRestAuth.id, method: 'POST', url: '/topics/{{trigger.topic | urlencode}}', query: [], headers: [{ k: 'Accept', v: 'application/vnd.kafka.v2+json' }, { k: 'Content-Type', v: 'application/vnd.kafka.json.v2+json' }], bodyType: 'json', body: '{ "records": [{ "value": {{trigger.value | json}} }] }', parse: 'json', failOn: '4xx or 5xx' }),
+      N('g', 'httpRequest', 'Poll records', 1160, 220, { connection: kafkaRestHttp.id, auth: kafkaRestAuth.id, method: 'GET', url: '{{nodes.Create consumer.body.base_uri}}/records', query: [{ k: 'timeout', v: '10000' }, { k: 'max_bytes', v: '1048576' }], headers: [{ k: 'Accept', v: 'application/vnd.kafka.json.v2+json' }], bodyType: 'none', parse: 'json', failOn: '4xx or 5xx' }),
+      N('m', 'httpRequest', 'Commit offsets', 1440, 160, { connection: kafkaRestHttp.id, auth: kafkaRestAuth.id, method: 'POST', url: '{{nodes.Create consumer.body.base_uri}}/offsets', query: [], headers: [{ k: 'Content-Type', v: 'application/vnd.kafka.v2+json' }], bodyType: 'json', body: '{}', parse: 'auto', failOn: '4xx or 5xx' }),
+      N('x', 'httpRequest', 'Close consumer', 1720, 160, { connection: kafkaRestHttp.id, auth: kafkaRestAuth.id, method: 'DELETE', url: '{{nodes.Create consumer.body.base_uri}}', query: [], headers: [], bodyType: 'none', parse: 'auto', failOn: '4xx or 5xx' }),
+      N('l', 'log', 'Log records', 2000, 160, { level: 'info', message: 'Kafka REST records: {{nodes.Poll records.body | json}}' }),
+    ],
+    edges: [E('s', 'c'), E('c', 'u'), E('u', 'p'), E('p', 'g'), E('g', 'm'), E('m', 'x'), E('x', 'l')],
+  });
+  const rabbitRest = rabbitRestHttp && rabbitRestAuth && save({
+    name: 'Sample: RabbitMQ HTTP publish and fetch',
+    description: 'Declares a durable sample queue, publishes JSON through RabbitMQ\'s management HTTP API, fetches and acknowledges one message, then deletes the sample queue. Set RABBITMQ_HTTP_URL, RABBITMQ_HTTP_USER and RABBITMQ_HTTP_PASSWORD_SECRET as project properties and put that named password in the vault. RabbitMQ recommends AMQP for real messaging: use the native RabbitMQ connection and Queue / topic trigger for efficient consumers, publisher confirms, redelivery and explicit workflow acknowledgement.',
+    nodes: [
+      N('s', 'start', 'Message', 60, 220, { payload: JSON.stringify({ queue: 'sutraflow.rest.sample', body: { orderId: 'R-1001', amount: 725 } }, null, 2) }),
+      N('q', 'httpRequest', 'Declare queue', 360, 220, { connection: rabbitRestHttp.id, auth: rabbitRestAuth.id, method: 'PUT', url: '/api/queues/%2F/{{input.queue | urlencode}}', query: [], headers: [], bodyType: 'json', body: '{ "durable": true, "auto_delete": false, "arguments": {} }', parse: 'json', failOn: '4xx or 5xx' }),
+      N('p', 'httpRequest', 'Publish over RabbitMQ HTTP', 680, 220, { connection: rabbitRestHttp.id, auth: rabbitRestAuth.id, method: 'POST', url: '/api/exchanges/%2F/amq.default/publish', query: [], headers: [], bodyType: 'json', body: '{\n  "properties": { "content_type": "application/json", "message_id": {{trigger.body.orderId | json}} },\n  "routing_key": {{trigger.queue | json}},\n  "payload": {{trigger.body | json | json}},\n  "payload_encoding": "string"\n}', parse: 'json', failOn: '4xx or 5xx' }),
+      N('g', 'httpRequest', 'Fetch one over HTTP', 1000, 220, { connection: rabbitRestHttp.id, auth: rabbitRestAuth.id, method: 'POST', url: '/api/queues/%2F/{{trigger.queue | urlencode}}/get', query: [], headers: [], bodyType: 'json', body: '{ "count": 1, "ackmode": "ack_requeue_false", "encoding": "auto", "truncate": 50000 }', parse: 'json', failOn: '4xx or 5xx' }),
+      N('d', 'httpRequest', 'Delete sample queue', 1320, 220, { connection: rabbitRestHttp.id, auth: rabbitRestAuth.id, method: 'DELETE', url: '/api/queues/%2F/{{trigger.queue | urlencode}}', query: [], headers: [], bodyType: 'none', parse: 'auto', failOn: '4xx or 5xx' }),
+      N('l', 'log', 'Log fetched message', 1640, 220, { level: 'info', message: 'RabbitMQ HTTP returned: {{nodes.Fetch one over HTTP.body | json}}' }),
+    ],
+    edges: [E('s', 'q'), E('q', 'p'), E('p', 'g'), E('g', 'd'), E('d', 'l')],
+  });
+  const activeRest = activeRestHttp && activeRestAuth && save({
+    name: 'Sample: ActiveMQ REST publish and fetch',
+    description: 'Uses ActiveMQ Classic\'s supported Jolokia management REST endpoint to create a sample queue, send JSON, browse it, remove that exact message and delete the queue. Set ACTIVEMQ_REST_URL, ACTIVEMQ_REST_ORIGIN, ACTIVEMQ_REST_USER and ACTIVEMQ_REST_PASSWORD_SECRET as project properties and put that named password in the vault. Classic 6.3 disables the deprecated MessageServlet by default because it is unmaintained and has security issues; this sample does not enable it. Use AMQP 1.0 for SutraFlow Queue / topic triggers and OpenWire/JMS for Java clients when you need durable subscription and workflow acknowledgement semantics.',
+    nodes: [
+      N('s', 'start', 'Message', 40, 220, { payload: JSON.stringify({ brokerName: 'localhost', queue: 'sutraflow.rest.sample', body: { orderId: 'A-REST-1001', amount: 990 } }, null, 2) }),
+      N('q', 'httpRequest', 'Create queue', 300, 220, { connection: activeRestHttp.id, auth: activeRestAuth.id, method: 'POST', url: '/api/jolokia/', query: [], headers: [], bodyType: 'json', body: '{ "type": "exec", "mbean": "org.apache.activemq:type=Broker,brokerName={{input.brokerName}}", "operation": "addQueue(java.lang.String)", "arguments": [{{input.queue | json}}] }', parse: 'json', failOn: '4xx or 5xx' }),
+      N('p', 'httpRequest', 'Publish over Jolokia', 580, 220, { connection: activeRestHttp.id, auth: activeRestAuth.id, method: 'POST', url: '/api/jolokia/', query: [], headers: [], bodyType: 'json', body: '{ "type": "exec", "mbean": "org.apache.activemq:type=Broker,brokerName={{trigger.brokerName}},destinationType=Queue,destinationName={{trigger.queue}}", "operation": "sendTextMessage(java.lang.String)", "arguments": [{{trigger.body | json | json}}] }', parse: 'json', failOn: '4xx or 5xx' }),
+      N('b', 'httpRequest', 'Browse message', 860, 220, { connection: activeRestHttp.id, auth: activeRestAuth.id, method: 'POST', url: '/api/jolokia/', query: [], headers: [], bodyType: 'json', body: '{ "type": "exec", "mbean": "org.apache.activemq:type=Broker,brokerName={{trigger.brokerName}},destinationType=Queue,destinationName={{trigger.queue}}", "operation": "browse()", "arguments": [] }', parse: 'json', failOn: '4xx or 5xx' }),
+      N('r', 'httpRequest', 'Remove browsed message', 1140, 220, { connection: activeRestHttp.id, auth: activeRestAuth.id, method: 'POST', url: '/api/jolokia/', query: [], headers: [], bodyType: 'json', body: '{ "type": "exec", "mbean": "org.apache.activemq:type=Broker,brokerName={{trigger.brokerName}},destinationType=Queue,destinationName={{trigger.queue}}", "operation": "removeMessage(java.lang.String)", "arguments": [{{nodes.Browse message.body.value[0].JMSMessageID | json}}] }', parse: 'json', failOn: '4xx or 5xx' }),
+      N('d', 'httpRequest', 'Delete sample queue', 1420, 220, { connection: activeRestHttp.id, auth: activeRestAuth.id, method: 'POST', url: '/api/jolokia/', query: [], headers: [], bodyType: 'json', body: '{ "type": "exec", "mbean": "org.apache.activemq:type=Broker,brokerName={{trigger.brokerName}}", "operation": "removeQueue(java.lang.String)", "arguments": [{{trigger.queue | json}}] }', parse: 'json', failOn: '4xx or 5xx' }),
+      N('l', 'log', 'Log browsed message', 1700, 220, { level: 'info', message: 'ActiveMQ Jolokia returned: {{nodes.Browse message.body.value | json}}' }),
+    ],
+    edges: [E('s', 'q'), E('q', 'p'), E('p', 'b'), E('b', 'r'), E('r', 'd'), E('d', 'l')],
   });
 
   // Public SOAP service from its WSDL.
@@ -903,11 +977,11 @@ export function addSamples(projectId: string, ids?: string[]) {
 
   const queueAgent = ai && want('agentqueue') && save({
     name: 'Sample: Agent fed by a queue',
-    description: 'Queue / topic trigger takes questions from the queue "agent.questions" ({"sessionId", "message", "replyTo"}); the agent answers each (one at a time per session, in arrival order); Publish message sends the answer to the queue named in replyTo; Confirm message acknowledges the question only after the answer is sent, so nothing is lost. Pick a RabbitMQ or ActiveMQ connection in both, then deploy.',
+    description: 'A reliable broker-facing AI worker for Kafka, RabbitMQ or ActiveMQ. Queue / topic trigger receives {sessionId, message, replyTo} on agent.questions with explicit acknowledgement. AI Agent uses sessionId to isolate conversation memory per caller. Publish message waits for the answer destination to accept the result, using sessionId as the Kafka key; Confirm then acknowledges the question. A failure before Confirm returns the message for redelivery, while the durable delivery guard prevents a leader change from starting the same broker delivery twice.',
     nodes: [
-      N('t', 'busSubscribe', 'Questions', 60, 220, { broker: 'amqp1', amqpConn: '', rabbitConn: '', kafkaConn: '', destinationType: 'queue', destination: 'agent.questions', messageType: 'JSON', ackMode: 'explicit', onFailure: 'requeue', maxRedeliveries: 5, concurrency: 4, declare: true, testMessage: JSON.stringify({ sessionId: 'cust-42', message: 'Is Assam tea in stock?', replyTo: 'agent.answers' }, null, 2) }),
+      N('t', 'busSubscribe', 'Questions', 60, 220, { broker: 'amqp1', amqpConn: '', rabbitConn: '', kafkaConn: '', destinationType: 'queue', destination: 'agent.questions', groupId: 'sutraflow-agent-questions', fromBeginning: false, messageType: 'JSON', ackMode: 'explicit', deduplicate: 'on', duplicateKey: '{{body.sessionId}}:{{body.message}}', withoutId: 'process', onFailure: 'requeue', maxRedeliveries: 5, concurrency: 4, declare: true, testMessage: JSON.stringify({ body: { sessionId: 'cust-42', message: 'Is Assam tea in stock?', replyTo: 'agent.answers' }, headers: { messageId: 'sample-question-1' }, properties: { source: 'sample' } }, null, 2) }),
       N('a', 'aiAgent', 'Agent', 380, 220, { provider: ai.id, instructions: 'You answer customer questions for Asha Traders in one or two sentences.', task: '{{input.body.message}}', memory: memStore!.id, session: '{{input.body.sessionId}}', tools: 'all AI tools of this project', canAsk: false, maxSteps: 6, effort: 'low' }),
-      N('p', 'busPublish', 'Answer', 700, 220, { broker: 'amqp1', amqpConn: '', rabbitConn: '', kafkaConn: '', destinationType: 'queue', destination: "=coalesce({trigger.body.replyTo}, 'agent.answers')", messageType: 'JSON', body: '{"sessionId": "{{trigger.body.sessionId}}", "answer": {{input.answer | json}}}', deliveryMode: 'persistent', correlationId: '{{trigger.headers.messageId}}' }),
+      N('p', 'busPublish', 'Answer', 700, 220, { broker: 'amqp1', amqpConn: '', rabbitConn: '', kafkaConn: '', destinationType: 'queue', destination: "=coalesce({trigger.body.replyTo}, 'agent.answers')", messageType: 'JSON', body: '{"sessionId": "{{trigger.body.sessionId}}", "answer": {{input.answer | json}}}', deliveryMode: 'persistent', correlationId: '{{trigger.headers.messageId}}', key: '{{trigger.body.sessionId}}', acks: 'all' }),
       N('c', 'busConfirm', 'Confirm', 1020, 220, { action: 'confirm' }),
     ],
     edges: [E('t', 'a'), E('a', 'p', 'done'), E('a', 'p', 'limit reached'), E('p', 'c')],
@@ -1188,11 +1262,30 @@ export function addSamples(projectId: string, ids?: string[]) {
   });
 
   linkConnections(projectId, made, conn);
+  if (made.some(m => m.sample === 'queue' || m.sample === 'agentqueue')) {
+    conn('kafka', 'Sample Kafka (TLS + SASL)', {
+      brokers: ['{{gv.KAFKA_BROKER}}'], clientId: 'sutraflow-samples', ssl: true, caPem: '{{gv.KAFKA_CA_PEM}}',
+      clientCertPem: '', clientKeySecret: '', sasl: 'plain', user: '{{gv.KAFKA_USER}}', passwordSecret: '{{gv.KAFKA_PASSWORD_SECRET}}',
+    });
+    conn('kafka', 'Sample Kafka (mutual TLS)', {
+      brokers: ['{{gv.KAFKA_MTLS_BROKER}}'], clientId: 'sutraflow-samples', ssl: true, caPem: '{{gv.KAFKA_CA_PEM}}',
+      clientCertPem: '{{gv.KAFKA_CLIENT_CERT_PEM}}', clientKeySecret: '{{gv.KAFKA_CLIENT_KEY_SECRET}}', sasl: 'none',
+    });
+    conn('rabbitmq', 'Sample RabbitMQ (mutual TLS)', {
+      url: '{{gv.RABBITMQ_AMQPS_URL}}', user: '{{gv.RABBITMQ_USER}}', passwordSecret: '{{gv.RABBITMQ_PASSWORD_SECRET}}', vhost: '{{gv.RABBITMQ_VHOST}}',
+      caPem: '{{gv.RABBITMQ_CA_PEM}}', clientCertPem: '{{gv.RABBITMQ_CLIENT_CERT_PEM}}', clientKeySecret: '{{gv.RABBITMQ_CLIENT_KEY_SECRET}}',
+    });
+    conn('amqp1', 'Sample ActiveMQ (mutual TLS)', {
+      host: '{{gv.ACTIVEMQ_HOST}}', port: '{{gv.ACTIVEMQ_AMQPS_PORT}}', tls: true, user: '{{gv.ACTIVEMQ_USER}}', passwordSecret: '{{gv.ACTIVEMQ_PASSWORD_SECRET}}',
+      containerId: 'sutraflow-samples', queuePrefix: '', topicPrefix: 'topic://', caPem: '{{gv.ACTIVEMQ_CA_PEM}}',
+      clientCertPem: '{{gv.ACTIVEMQ_CLIENT_CERT_PEM}}', clientKeySecret: '{{gv.ACTIVEMQ_CLIENT_KEY_SECRET}}',
+    });
+  }
   for (const m of made) setFlowFolder(m.id, folderOf(m.sample));
   // Connections made for the samples go to a Samples folder of Resources.
   for (const r of listResources(undefined, projectId)) if (!resourcesBefore.has(r.id) && !r.folder) setItemFolder('resources', r.id, 'Samples');
 
-  return [forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, release, localAi, email, queue, timer, fileTrig, textFormats, dbUpd, dbProc, soapCall, emailIn, firebase, google, apps, aiMore,
+  return [forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, release, localAi, email, queue, kafkaRest, kafkaRestSubscribe, rabbitRest, activeRest, timer, fileTrig, textFormats, dbUpd, dbProc, soapCall, emailIn, firebase, google, apps, aiMore,
     soapPublic, soapMock, soapMockCall, msCustomers, msStock, msOrders, sqlInstall, sqlService, ...sftp, ...ftp,
     toolOrder, toolStock, desk, ragWeb, ragSp, ragAsk, queueAgent, team, mcpAgent, docOne, docFeed, docApi, docTool, docAgent, adfRunS, adfAlert, dbxNb, dbxSql, pyInline, pyFile, ytPublish, ytReport, twLive, dcBot, tgBot, tgNotify]
     .filter((f): f is NonNullable<typeof f> & { id: string; name: string } => !!f)
@@ -1211,7 +1304,7 @@ const FOLDERS: Record<string, string[]> = {
   'AI': ['localai', 'aimore'],
   'Email': ['email', 'emailin'],
   'Apps': ['firebase', 'google', 'apps', 'skills'],
-  'Queues': ['queue'],
+  'Queues': ['queue', 'brokerrest'],
   'Operations': ['scripts', 'release'],
   'AI agents': ['agentdesk', 'agentrag', 'agentqueue', 'agentteam', 'agentmcp', 'agentdocs'],
   'Azure and Databricks': ['adf', 'databricks'],
@@ -1232,7 +1325,7 @@ export const SAMPLE_SUTRAS: Record<string, string[]> = {
   'Samples/Operations': ['Scripts', 'Release pipeline'],
   'Samples/AI': ['Local AI with Ollama', 'AI translate extract route and reply'],
   'Samples/Email': ['Email a report', 'Email trigger orders by email'],
-  'Samples/Queues': ['Queue in and out'],
+  'Samples/Queues': ['Queue in and out', 'Kafka REST publish', 'Kafka REST subscribe', 'RabbitMQ HTTP publish and fetch', 'ActiveMQ REST publish and fetch'],
   'Samples/SOAP': ['Call a SOAP service', 'Call a public SOAP service', 'Mock SOAP weather service', 'Call the mock SOAP service'],
   'Samples/SFTP and FTP': ['SFTP upload list read archive', 'SFTP file trigger', 'FTP upload list read archive', 'FTP file trigger'],
   'Samples/AI agents': ['AI tool order status', 'AI tool stock check', 'Order desk agent', 'Knowledge feed from web pages', 'Knowledge feed from SharePoint', 'Policy assistant', 'Agent fed by a queue', 'Supervisor agent', 'Agent with outside MCP tools', 'Add one document to knowledge', 'Document feed from a folder', 'Document questions API', 'AI tool search documents', 'Document assistant'],
@@ -1271,9 +1364,9 @@ const SAMPLE_CONNECTIONS: Record<string, (type: string) => { name: string; confi
   smtp: () => ({ name: 'Sample SMTP', config: { host: 'smtp.example.com', port: 587 } }),
   imap: () => ({ name: 'Sample IMAP', config: { host: 'imap.example.com', port: 993 } }),
   database: () => ({ name: 'Sample MySQL', config: { driver: 'mysql', host: '127.0.0.1', port: 3306, database: '', user: 'root', passwordSecret: '' } }),
-  kafka: () => ({ name: 'Sample Kafka', config: { brokers: ['localhost:9092'] } }),
-  rabbitmq: () => ({ name: 'Sample RabbitMQ', config: {} }),
-  amqp1: () => ({ name: 'Sample ActiveMQ', config: {} }),
+  kafka: () => ({ name: 'Sample Kafka', config: { brokers: ['localhost:9092'], clientId: 'sutraflow-samples', ssl: false, sasl: 'none' } }),
+  rabbitmq: () => ({ name: 'Sample RabbitMQ', config: { url: 'amqp://localhost:5672/', user: 'guest', passwordSecret: '', vhost: '/' } }),
+  amqp1: () => ({ name: 'Sample ActiveMQ', config: { host: 'localhost', port: 5673, tls: false, user: 'admin', passwordSecret: '', containerId: 'sutraflow-samples', queuePrefix: '', topicPrefix: 'topic://' } }),
   firebase: () => ({ name: 'Sample Firebase', config: {} }),
   sftp: () => ({ name: 'Sample SFTP', config: { host: 'sftp.example.com', port: 22, user: 'sample' } }),
   ftp: () => ({ name: 'Sample FTP', config: { host: 'ftp.example.com', port: 21, user: 'sample' } }),
@@ -1295,7 +1388,7 @@ function shown(f: Field, cfg: Record<string, any>, fields: Field[]) {
   return true;
 }
 
-/** Sets every empty, visible connection field of the sample steps to a sample connection in the project. */
+/** Sets every empty visible connection, plus every selectable Service Bus alternative. */
 function linkConnections(projectId: string, made: { id: string }[], conn: (kind: string, name: string, cfg: Record<string, any>) => { id: string }) {
   const kinds = new Set(RESOURCE_KINDS.map(k => k.kind));
   for (const m of made) {
@@ -1307,7 +1400,8 @@ function linkConnections(projectId: string, made: { id: string }[], conn: (kind:
       for (const fld of act?.fields || []) {
         if (fld.type !== 'resource' || !fld.resourceKind || !kinds.has(fld.resourceKind) || n.config[fld.k]) continue;
         const make = SAMPLE_CONNECTIONS[fld.resourceKind];
-        if (!make || !shown(fld, n.config, act!.fields)) continue;
+        const busAlternative = n.type === 'busPublish' || n.type === 'busSubscribe';
+        if (!make || (!shown(fld, n.config, act!.fields) && !busAlternative)) continue;
         const c = make(n.type);
         if (!c) continue;
         n.config[fld.k] = conn(fld.resourceKind, c.name, c.config).id;

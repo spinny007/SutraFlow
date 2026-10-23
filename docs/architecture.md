@@ -75,7 +75,7 @@ Results a step can return:
 
 **Crash recovery.** At startup, tasks left as running go back to pending. Because a step can therefore run twice, steps with side effects should be idempotent: pass an idempotency key such as `{{run.id}}` to the target API.
 
-**Queue/topic starters.** Kafka, RabbitMQ and ActiveMQ/AMQP subscriptions are owned only by the elected leader. Client acknowledgement waits for the full run to succeed; explicit acknowledgement waits for Confirm message. Before a protected delivery starts, `bus_messages` stores its Kafka topic/partition/offset or RabbitMQ/AMQP message id with a reserved run id. If a replacement leader receives the delivery, it waits for that durable run or acknowledges an already completed result instead of creating another run. Kafka always supplies its offset identity; external AMQP publishers must set a unique message id. The broker/outside-effect boundary is still at least once, so effects should accept an idempotency key.
+**Queue/topic starters.** Kafka, RabbitMQ and ActiveMQ/AMQP subscriptions are owned only by the elected leader. Client acknowledgement waits for the full run to succeed; explicit acknowledgement waits for Confirm message. Before a protected delivery starts, `bus_messages` stores its Kafka topic/partition/offset or RabbitMQ/AMQP message id with a reserved run id. If a replacement leader receives the delivery, it waits for that durable run or acknowledges an already completed result instead of creating another run. Kafka always supplies its offset identity; external AMQP publishers must set a unique message id. RabbitMQ in-place requeues are counted by the listener because they do not create `x-death`; ActiveMQ AMQP connections use distinct publisher/listener container IDs. Java OpenWire/JMS and SutraFlow AMQP can share an ActiveMQ destination; Classic must use `transport.transformer=jms` on the AMQP connector for ordinary JMS bodies. Kafka, RabbitMQ and ActiveMQ connectors all enforce certificate verification and support system or private CA trust plus optional mutual TLS with vault-held private keys; Kafka additionally supports SASL plain and SCRAM. The broker/outside-effect boundary is still at least once, so effects should accept an idempotency key.
 
 **Locks on PostgreSQL.** Each write transaction about a run takes an advisory lock for that run (`run:<id>`), or for a Sutra's queue when it has a Runs at once limit; other writes take one shared lock. Engines therefore save different runs at the same time. Engines claim tasks with `for update skip locked`.
 
@@ -84,6 +84,22 @@ Results a step can return:
 **Request/reply.** The gateway registers a reply handle for the run. The first Send HTTP response or SOAP reply step answers the caller, and the Sutra may continue afterwards. If the run ends without a reply step, the caller receives the last output (200) or the error (500 or a SOAP fault). Callers wait at most `SUTRA_REPLY_TIMEOUT_MS`; the run itself continues after that.
 
 **Masking.** Secrets revealed while a step runs (through a resource or `{{secret.X}}`) are replaced by `••••••` in its stored output, logs and variables.
+
+## Messaging certification and benchmark record
+
+The [architecture page's messaging certification record](sutraflow-architecture.html#messaging-certification) documents the 23 October 2026 SutraFlow 2.0.6 results, protocol terminology, security configurations, scenario matrix and measurement limits. This is internal interoperability certification, not a broker-vendor certificate.
+
+| Real service | Protocol | Connection modes passed | Native results |
+|---|---|---|---|
+| Hosted Aiven Kafka | Kafka wire protocol / KafkaJS | TLS + SASL PLAIN; separately client-certificate mutual TLS | 7/7 per mode |
+| RabbitMQ 4.4.0 | AMQP 0-9-1 / amqplib | Plain TCP; separately private-CA mutual TLS through a test proxy | 8/8 per mode |
+| ActiveMQ Classic 6.3.2 | AMQP 1.0 / rhea, interoperating with Java Jakarta Messaging over OpenWire | Plain AMQP; separately private-CA mutual TLS through a test proxy; Java OpenWire probe on TCP | 13/13 per mode |
+
+The 56 native scenario executions cover body/metadata, acknowledgement modes, confirm/requeue/reject, missing confirmation, retry ceilings, duplicate protection, listener replacement and concurrency. Broker-specific tests additionally cover Kafka keys/offsets/partitions, RabbitMQ TTL/durable topic bindings, and ActiveMQ selectors/TTL/durable topics/two-way Java interoperability. TLS is transport security; SASL is authentication; JMS/Jakarta Messaging is a Java API, while AMQP and OpenWire are wire protocols. The test proxy verifies SutraFlow's mTLS client path, not the broker's native TLS-listener setup. SCRAM is configurable but was not exercised by the hosted certification.
+
+Four REST checks also passed: Kafka publish and create/subscribe/poll/commit/close over HTTPS, RabbitMQ management publish/fetch/ack/cleanup, ActiveMQ Jolokia create/send/browse/remove/cleanup, and engine execution of all four generated REST samples (including Kafka subscribe). The local management endpoints used loopback HTTP. ActiveMQ's deprecated MessageServlet remains disabled. REST management operations do not carry the native trigger's acknowledgement guarantees.
+
+These are correctness and recovery checks. Sustained messaging throughput and p50/p95/p99 latency were not measured; engine soak figures must not be presented as broker-protocol benchmark results. The HTML record lists the exact suites, tested boundaries and information required for a future performance measurement.
 
 ## Security paths
 

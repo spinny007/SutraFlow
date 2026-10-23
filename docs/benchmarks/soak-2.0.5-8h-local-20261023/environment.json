@@ -1,0 +1,97 @@
+{
+  "recordedAt": "2026-10-23T07:27:02.9837676+05:30",
+  "timezone": "Asia/Calcutta",
+  "version": "2.0.5",
+  "durationHours": 8,
+  "node": "v24.21.0",
+  "commandOptions": {
+    "filesMb": [
+      10,
+      25,
+      50,
+      75,
+      100
+    ],
+    "mysql": "127.0.0.1:3306",
+    "scale": 1,
+    "filesEveryMinutes": 25,
+    "faultEngineKill": true,
+    "driveEveryMinutes": 60,
+    "faultDatabaseOutageSeconds": 20,
+    "ollama": "127.0.0.1:11434",
+    "postgresql": "127.0.0.1:5432",
+    "ragEveryMinutes": 80,
+    "model": "phi4-mini:latest",
+    "sftpAndFtpEveryMinutes": 35,
+    "engines": 4
+  },
+  "machine": {
+    "logicalProcessors": 16,
+    "freeDiskGb": 160.4,
+    "os": "Microsoft Windows 11 Home Single Language",
+    "totalMemoryGb": 23.7,
+    "cpu": "AMD Ryzen 7 7435HS                             "
+  },
+  "git": {
+    "diffStat": [
+      " tools/soak.mjs | 51 ++++++++++++++++++++++++++++++++++++++++++++++++++-",
+      " 1 file changed, 50 insertions(+), 1 deletion(-)"
+    ],
+    "commit": "c0531e9c34dab045bb9a931451d3e30094ac8042",
+    "status": [
+      " M tools/soak.mjs",
+      "?? docs/benchmarks/soak-2.0.5-8h-preflight/",
+      "?? docs/benchmarks/soak-2.0.5-dbops-preflight/"
+    ]
+  },
+  "listeners": [
+    {
+      "LocalAddress": "::",
+      "LocalPort": 11434,
+      "OwningProcess": 34460
+    },
+    {
+      "LocalAddress": "::1",
+      "LocalPort": 5432,
+      "OwningProcess": 30988
+    },
+    {
+      "LocalAddress": "::",
+      "LocalPort": 3306,
+      "OwningProcess": 36572
+    },
+    {
+      "LocalAddress": "127.0.0.1",
+      "LocalPort": 5432,
+      "OwningProcess": 30988
+    },
+    {
+      "LocalAddress": "127.0.0.1",
+      "LocalPort": 4810,
+      "OwningProcess": 41340
+    },
+    {
+      "LocalAddress": "127.0.0.1",
+      "LocalPort": 4800,
+      "OwningProcess": 41704
+    }
+  ],
+  "googleDrive": {
+    "refreshToken": true,
+    "clientSecret": false,
+    "folder": "1bWYnLxM6Ea_YecThA1FUQyQXN1cWMWTq",
+    "fileExists": true,
+    "clientId": false
+  },
+  "postgresConfig": [
+    "max_connections = 100\t\t\t# (change requires restart)",
+    "shared_buffers = 128MB\t\t\t# min 128kB",
+    "max_wal_size = 1GB",
+    "min_wal_size = 80MB"
+  ],
+  "openssl": {
+    "version": "OpenSSL 3.2.3 3 Sep 2024 (Library: OpenSSL 3.2.3 3 Sep 2024)",
+    "path": "C:\\laragon\\bin\\git\\mingw64\\bin\\openssl.exe"
+  },
+  "note": "Local databases are loopback services; PostgreSQL transport SSL is therefore not used. SOAP X.509 remains covered by the workload. Existing 4800/4810 listeners are recorded as ambient load."
+}

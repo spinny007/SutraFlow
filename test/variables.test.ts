@@ -47,3 +47,13 @@ test('nested connection properties resolve while step-time secret references rem
   const got = resolveResourceConfig({ headers: [{ k: 'Authorization', v: 'Bearer {{secret.TOKEN}} for {{gv.TENANT}}' }] }, { gv: { TENANT: 'north' }, ev: {} });
   assert.deepEqual(got, { headers: [{ k: 'Authorization', v: 'Bearer {{secret.TOKEN}} for north' }] });
 });
+
+test('PEM connection fields accept exact Project and Engine properties without templating certificate text', () => {
+  const got = resolveResourceConfig({
+    caPem: '{{gv.KAFKA_CA}}', clientCertPem: '{{ev.KAFKA_CERT}}',
+    trustedCertsPem: 'literal {{gv.KAFKA_CA}} suffix', clientKeySecret: '{{gv.KAFKA_KEY_SECRET}}',
+  }, { gv: { KAFKA_CA: 'CA PEM', KAFKA_KEY_SECRET: 'KAFKA_KEY' }, ev: { KAFKA_CERT: 'CLIENT PEM' } });
+  assert.deepEqual(got, {
+    caPem: 'CA PEM', clientCertPem: 'CLIENT PEM', trustedCertsPem: 'literal {{gv.KAFKA_CA}} suffix', clientKeySecret: 'KAFKA_KEY',
+  });
+});

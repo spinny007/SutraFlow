@@ -33,6 +33,7 @@
  *   --engines 3                 processes: a studio and engines (all serve the gateway)
  *   --out folder                where samples, events and the report go (default docs/benchmarks/soak-<version>)
  *   --ollama http://127.0.0.1:11434 --model phi4-mini    the AI model (local Ollama)
+ *   --mysql mysql://root@127.0.0.1:3306                  also exercise DB Ops on MySQL
  *   --files 10,20,30,40,50,60   CSV and document sizes in MB, used in turn
  *   --files-every 20 --rag-every 60 --sftp-every 30     minutes between big files, documents, SFTP files
  *   --scale 1                   multiplies the request rates
@@ -102,7 +103,9 @@ if (flag('google-sign-in')) {
 
 const PG = opt('pg');
 if (!PG) { console.error('Give --pg <postgres admin url> (or --report-only <folder>)'); process.exit(2); }
+const MYSQL = opt('mysql');
 const PG_PASSWORD = process.env.SUTRA_DB_PASSWORD || process.env.PGPASSWORD || '';
+const MYSQL_PASSWORD = process.env.SOAK_MYSQL_PASSWORD || '';
 const MINUTES = opt('minutes') ? Number(opt('minutes')) : Number(opt('hours', 8)) * 60;
 const ENGINES = Math.max(2, Number(opt('engines', 3)));
 const SCALE = Number(opt('scale', 1));
@@ -155,6 +158,14 @@ const adminDb = await retry('connect to PostgreSQL', async () => { const c = new
 const DBNAME = `sutra_soak_${Date.now()}`;
 await adminDb.query(`CREATE DATABASE ${DBNAME}`);
 const dbUrl = (() => { const u = new URL(PG); u.pathname = `/${DBNAME}`; return u; })();
+let mysqlAdmin = null, mysqlDbName = '', mysqlConfig = null;
+if (MYSQL) {
+  const u = new URL(MYSQL), mysql = (await import('mysql2/promise')).default;
+  mysqlDbName = `sutra_soak_${Date.now()}`;
+  mysqlConfig = { host: u.hostname, port: Number(u.port || 3306), user: decodeURIComponent(u.username || 'root'), password: MYSQL_PASSWORD || decodeURIComponent(u.password || '') };
+  mysqlAdmin = await retry('connect to MySQL', () => mysql.createConnection(mysqlConfig));
+  await mysqlAdmin.query(`CREATE DATABASE \`${mysqlDbName}\``);
+}
 
 /** The engines reach the database through this proxy; cut() drops every connection and refuses new ones for a while. */
 const proxy = (() => {
@@ -291,6 +302,12 @@ const ftpSrv = FtpSrv && new FtpSrv({ url: `ftp://127.0.0.1:${ftpPort}`, pasv_ur
 ftpSrv?.on('login', ({ username, password }, resolve, reject) => (username === 'soak' && password === 'soak-ftp-pass' ? resolve({ root: ftpRoot }) : reject(new Error('Bad login'))));
 await ftpSrv?.listen();
 const docs = fs.mkdtempSync(path.join(WORK, 'docs-'));
+// The explicit DB Ops scenarios use the same small schema on PostgreSQL, MySQL and SQLite.
+await dbq('CREATE TABLE soak_values (id varchar(80) primary key, n integer not null)');
+if (mysqlAdmin) await mysqlAdmin.query(`CREATE TABLE \`${mysqlDbName}\`.soak_values (id varchar(80) primary key, n integer not null)`);
+const sqliteFile = path.join(WORK, 'soak-dbops.sqlite');
+const { DatabaseSync } = await import('node:sqlite');
+const sqliteSetup = new DatabaseSync(sqliteFile); sqliteSetup.exec('CREATE TABLE soak_values (id text primary key, n integer not null)'); sqliteSetup.close();
 
 // ---------- the project ----------
 const project = await api('POST', '/api/projects', { name: 'Soak' });
@@ -302,6 +319,8 @@ await secret('SOAK_SERVICE_KEY', certs.service.private);
 await secret('SOAK_MCP_KEY', 'soak-mcp-key-123');
 await secret('SOAK_SFTP_PW', 'soak-sftp-pass');
 await secret('SOAK_FTP_PW', 'soak-ftp-pass');
+if (PG_PASSWORD) await secret('SOAK_PG_PW', PG_PASSWORD);
+if (mysqlConfig?.password) await secret('SOAK_MYSQL_PW', mysqlConfig.password);
 if (GOOGLE) { await secret('SOAK_GOOGLE_SECRET', GOOGLE.clientSecret); await secret('SOAK_GOOGLE_REFRESH', GOOGLE.refreshToken); }
 const res = (kind, name, config) => api('POST', '/api/resources', { kind, name, project_id: P, config });
 const polHmac = await res('inboundPolicy', 'Soak HMAC', { auth: 'hmac', hmacSecrets: ['SOAK_HMAC'], requireHttps: false, rateLimitPerMinute: 0 });
@@ -315,6 +334,9 @@ const ftp = FtpSrv && await res('ftp', 'Soak FTP', { host: '127.0.0.1', port: ft
 const google = GOOGLE ? await res('oauthApp', 'Soak Google Drive', { provider: 'google', clientId: GOOGLE.clientId, clientSecretSecret: 'SOAK_GOOGLE_SECRET', refreshTokenSecret: 'SOAK_GOOGLE_REFRESH', scopes: 'https://www.googleapis.com/auth/drive' }) : null;
 const wsConn = await res('websocket', 'Soak feed', { url: `ws://127.0.0.1:${feed.port}/feed`, reconnectMinMs: 500, reconnectMaxMs: 5000, pingSeconds: 15 });
 const ai = AI ? await res('aiProvider', 'Soak Ollama', { engine: 'Ollama', baseUrl: OLLAMA, model: MODEL, maxTokens: 300 }) : null;
+const pgOps = await res('database', 'Soak PostgreSQL DB Ops', { driver: 'postgres', host: dbUrl.hostname, port: Number(dbUrl.port || 5432), database: DBNAME, user: decodeURIComponent(dbUrl.username || 'postgres'), passwordSecret: PG_PASSWORD ? 'SOAK_PG_PW' : '', poolMax: 4 });
+const mysqlOps = mysqlConfig ? await res('database', 'Soak MySQL DB Ops', { driver: 'mysql', host: mysqlConfig.host, port: mysqlConfig.port, database: mysqlDbName, user: mysqlConfig.user, passwordSecret: mysqlConfig.password ? 'SOAK_MYSQL_PW' : '', poolMax: 4 }) : null;
+const sqliteOps = await res('database', 'Soak SQLite DB Ops', { driver: 'sqlite', file: sqliteFile });
 // Big documents: pgvector in the soak database (the built-in store is for small knowledge bases).
 await dbq('CREATE EXTENSION IF NOT EXISTS vector').catch(e => event('setup', `pgvector is not available (${e.message}); RAG uses the built-in store`));
 const hasVector = (await dbq("select 1 from pg_extension where extname = 'vector'")).length > 0;
@@ -434,6 +456,21 @@ async function sutra(name, nodes, edges, tuning) {
     await sutra('Soak AI agent', [ac, ag, ar], [E(ac, ag), E(ag, ar, 'done')]);
   }
 }
+{ // DB Ops against the three locally available database engines.
+  const dbFlow = async (name, connection) => {
+    const s = N('start', 'Start', { payload: '{}' });
+    const tx = N('dbTransaction', 'Write atomically', {
+      connection,
+      sql: 'INSERT INTO soak_values(id, n) VALUES (:id, :n)\n;\nUPDATE soak_values SET n = :next WHERE id = :id',
+      params: [{ k: 'id', v: '{{trigger.id}}' }, { k: 'n', v: '{{trigger.n}}' }, { k: 'next', v: '{{trigger.next}}' }],
+    });
+    const q = N('dbQuery', 'Read', { connection, sql: 'SELECT id, n FROM soak_values WHERE id = :id', params: [{ k: 'id', v: '{{trigger.id}}' }], maxRows: 10 });
+    await sutra(name, [s, tx, q], [E(s, tx), E(tx, q)]);
+  };
+  await dbFlow('Soak DB PostgreSQL', pgOps.id);
+  if (mysqlOps) await dbFlow('Soak DB MySQL', mysqlOps.id);
+  await dbFlow('Soak DB SQLite', sqliteOps.id);
+}
 event('setup', `${Object.keys(flowIds).length} Sutras deployed`);
 await sleep(8000);
 
@@ -529,6 +566,13 @@ every('WebSocket broadcast', 30000, async () => {
 });
 // Starting a run is not repeated when the answer is lost: that could start it twice.
 const runApi = (name, input, wait = 0) => api('POST', `/api/flows/${flowIds[name]}/run${wait ? `?wait=${wait}` : ''}`, { input }, 1);
+for (const [scenario, flow] of [['PostgreSQL DB Ops', 'Soak DB PostgreSQL'], ...(mysqlOps ? [['MySQL DB Ops', 'Soak DB MySQL']] : []), ['SQLite DB Ops', 'Soak DB SQLite']]) {
+  every(scenario, 5000, async () => {
+    const n = ++seq, id = `${scenario.split(' ')[0]}-${n}`;
+    const r = await runApi(flow, { id, n, next: n + 1 }, 30000);
+    expect(r.status === 'done' && r.outputs?.Read?.first?.id === id && Number(r.outputs?.Read?.first?.n) === n + 1, `run ${r.status}: ${r.error || JSON.stringify(r.outputs?.Read?.first || {})}`);
+  }, 2);
+}
 every('Channel publish', 5000, async () => { const r = await runApi('Soak channel publisher', { n: ++seq }, 30000); expect(r.status === 'done', `run ${r.status}: ${r.error}`); });
 every('Error handler', 5000, async () => { const r = await runApi('Soak error handler', { n: ++seq }, 30000); expect(['done'].includes(r.status), `run ${r.status}: ${r.error}`); });
 const approvalRuns = new Map();
@@ -745,6 +789,10 @@ const [repeated] = await dbq(`select count(*)::int n from (select run_id, node_i
 check('No step ran twice', repeated.n === 0, `${repeated.n} steps of single-pass Sutras completed more than once`);
 const total = Object.values(stats).reduce((a, s) => a + s.ok + s.fail, 0), failed = Object.values(stats).reduce((a, s) => a + s.fail, 0);
 check('Requests that failed', failed / Math.max(1, total) < 0.005, `${failed} of ${total} (${(failed / Math.max(1, total) * 100).toFixed(3)}%), fault windows included`);
+for (const name of ['PostgreSQL DB Ops', ...(mysqlOps ? ['MySQL DB Ops'] : []), 'SQLite DB Ops']) {
+  const s = stats[name], n = s.ok + s.fail;
+  check(`${name} stayed correct`, s.ok > 0 && s.fail / Math.max(1, n) < 0.005, `${s.ok} completed, ${s.fail} failed`);
+}
 const timerRuns = Object.values(await flowRuns('Soak timer')).reduce((a, b) => a + b, 0), timerWant = Math.floor((MINUTES * 60) / 10);
 check('Timer kept time', timerRuns >= timerWant * 0.9, `${timerRuns} runs of ${timerWant} expected (every 10 s)`);
 const pubRuns = (await flowRuns('Soak channel publisher')).done || 0, subRuns = (await flowRuns('Soak channel subscriber')).done || 0;
@@ -795,7 +843,7 @@ for (const s of Object.values(stats).filter(x => x.hours.filter(h => h.n > 50).l
 
 const summary = {
   version: VERSION, started: new Date(T0).toISOString(), ended: new Date().toISOString(), minutes: MINUTES, engines: ENGINES, machine: `${os.cpus()[0].model.trim()}, ${os.cpus().length} threads, ${Math.round(os.totalmem() / 1073741824)} GB, ${os.platform()}`,
-  node: process.version, pausedMinutes: Math.round(pausedMs / 60000), database: 'PostgreSQL (through a proxy)', model: AI ? `${MODEL} on Ollama` : null, sizes: SIZES, checks, faults,
+  node: process.version, pausedMinutes: Math.round(pausedMs / 60000), database: `PostgreSQL (through a proxy), SQLite${mysqlOps ? ', MySQL' : ''}`, model: AI ? `${MODEL} on Ollama` : null, sizes: SIZES, checks, faults,
   scenarios: Object.values(stats).map(s => ({ name: s.name, ok: s.ok, fail: s.fail, errors: Object.entries(s.errors).sort((a, b) => b[1] - a[1]).slice(0, 5), hours: s.hours })),
   stuckRuns, stuckTasks,
   files, ws: wsState, bus: { ...bus, sender: undefined }, feed: feed.sent,
@@ -813,6 +861,7 @@ if (SHARE) fs.rmSync(inbox, { recursive: true, force: true });
 try { await toolDb?.end(); } catch { /* closed */ }
 await adminDb.query(`DROP DATABASE IF EXISTS ${DBNAME} WITH (FORCE)`).catch(() => {});
 await adminDb.end().catch(() => {});
+if (mysqlAdmin) { await mysqlAdmin.query(`DROP DATABASE IF EXISTS \`${mysqlDbName}\``).catch(() => {}); await mysqlAdmin.end().catch(() => {}); }
 fs.rmSync(WORK, { recursive: true, force: true });
 process.exit(checks.every(c => c.ok) ? 0 : 1);
 

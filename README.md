@@ -2,14 +2,14 @@
 
 **A visual integration designer and engine.** Drag activities onto a canvas, map data between steps, test and debug, and deploy *Sutras* (integration processes) that run as REST, SOAP and MCP services, on schedules, or on events: files, queues, mail, cloud drives, chat messages and more.
 
-![Version](https://img.shields.io/badge/version-2.0.5-2f6fd8)
+![Version](https://img.shields.io/badge/version-2.0.6-2f6fd8)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Commercial licence available](https://img.shields.io/badge/commercial%20licence-available-orange)](COMMERCIAL-LICENSE.md)
 ![Node.js](https://img.shields.io/badge/node-%E2%89%A5%2022.13-339933?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-7-3178c6?logo=typescript&logoColor=white)
 ![Database](https://img.shields.io/badge/database-SQLite%20%7C%20PostgreSQL-4169e1?logo=postgresql&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Docker-555)
-![Tests](https://img.shields.io/badge/tests-370-success)
+![Tests](https://img.shields.io/badge/tests-378-success)
 
 ![The SutraFlow designer: palettes, canvas and the step inspector](docs/guide-images/designer.jpg)
 
@@ -116,7 +116,9 @@ Every activity except triggers has an **error** output, retries with backoff, a 
 
 Every process starter is marked **▶** in the palette row. Starters stay with the activities they relate to: File trigger is under Files, Email trigger under Email, Queue / topic trigger under Service Bus, and the cloud, chat, ADF, agent and MCP starters under their own palettes. REST service is also the inbound webhook/API starter. All palettes and transition-line conditions accept Project variables: use the **{x}** picker in General settings, connection resources and a selected transition, or `{gv.NAME}` in mapped Input formulas. A selected conditional transition also has a browsable Condition data tree for the previous activity, earlier activities, trigger data, Local variables, Project properties and Engine properties. Gateway paths and limits, schedules, listener settings, nested connection headers and administrator-controlled SQL text resolve them at runtime. SQL text and procedure names accept only Project/Engine properties; request, trigger and prior-step data are rejected there and must use bound `:name` parameters.
 
-The Queue / topic trigger is owned only by the elected leader. In client mode it acknowledges after the Sutra succeeds; explicit mode waits for Confirm message. Its durable duplicate guard survives leader changes, using Kafka topic/partition/offset or a RabbitMQ/AMQP message id. External RabbitMQ and AMQP publishers should therefore assign a unique message id; outside side effects should still use an idempotency key.
+The Queue / topic trigger is owned only by the elected leader. In client mode it acknowledges after the Sutra succeeds; explicit mode waits for Confirm message. Its durable duplicate guard survives leader changes, using Kafka topic/partition/offset or a RabbitMQ/AMQP message id. External RabbitMQ and AMQP publishers should therefore assign a unique message id; outside side effects should still use an idempotency key. Kafka connections support TLS with a private CA, SASL plain/SCRAM and optional client-certificate authentication (private key in the vault); every connection field and secret name may come from a Project or Engine property. RabbitMQ uses AMQP 0-9-1. SutraFlow connects to ActiveMQ over AMQP 1.0 while Java applications may use OpenWire/JMS; ActiveMQ Classic needs <code>transport.transformer=jms</code> on the AMQP connector when the two protocols exchange the same message bodies.
+
+HTTP-only integrations can start from four tested samples: **Kafka REST publish**, **Kafka REST subscribe** (create, subscribe, poll, commit and close), **RabbitMQ HTTP publish and fetch**, and **ActiveMQ REST publish and fetch**. ActiveMQ Classic 6.3 disables its deprecated MessageServlet for security, so the sample uses Jolokia management operations; production message consumers should use AMQP 1.0 or OpenWire/JMS instead. All REST connection URLs, users, CA/origin settings and vault-secret names can come from Project properties.
 
 FTP and SFTP remain connection-driven: every remote-file activity and trigger selects an **FTP server** or **SFTP server** resource. Connection fields—including host, port, user, base folder and the vault-secret name—may use Project variables such as `{{gv.FTP_HOST}}`; deployment configuration can override them before deployment, while the actual password or private key remains in that server's vault. See [Files, streaming, SFTP and FTP](docs/sutraflow-user-guide.html#ch-files).
 
@@ -229,7 +231,7 @@ test/                   the test suites
 
 ## Testing
 
-The suite has 370 declared tests. It uses real child processes and network calls for HTTP, SOAP with WS-Security, TLS, SMTP, AMQP 1.0, SFTP and FTP servers, SQLite, Python, multi-process clusters, the launcher and the command-line tool. Real PostgreSQL and MySQL integration tests are the database release gate. PGlite also runs the in-process suite through PostgreSQL compatibility as fast secondary regression coverage; it does not replace testing against PostgreSQL.
+The suite has 378 declared tests. It uses real child processes and network calls for HTTP, SOAP with WS-Security, TLS, SMTP, Kafka, RabbitMQ, AMQP 1.0/OpenWire JMS, SFTP and FTP servers, SQLite, Python, multi-process clusters, the launcher and the command-line tool. Real PostgreSQL and MySQL integration tests are the database release gate. PGlite also runs the in-process suite through PostgreSQL compatibility as fast secondary regression coverage; it does not replace testing against PostgreSQL.
 
 The process-level tests exercise the central durability claims directly: engines share work without duplicating completed steps, elect and replace a leader, recover work from an engine killed mid-step, hand work back during drain, persist approvals and long waits without holding a worker, and deploy and call packages through both local and remote CLI paths.
 
@@ -243,12 +245,12 @@ $env:SUTRA_TEST_OPENSSL = 'C:/laragon/bin/git/mingw64/bin/openssl.exe'
 npm test
 ``` The pgvector storage path is covered with a protocol-compatible test server; run an additional deployment test against the intended PostgreSQL/pgvector version before relying on it in production.
 
-Tested against stand-in services that answer like the real ones, but not yet against the real services: SQL Server, Oracle, Kafka, RabbitMQ, IMAP, Let's Encrypt, Qdrant, Chroma, Pinecone, and the Google, Microsoft, Dropbox, YouTube, Twitch, Discord, Telegram, Facebook, Azure Data Factory and Databricks APIs.
+Tested against stand-in services that answer like the real ones, but not yet against the real services: SQL Server, Oracle, IMAP, Let's Encrypt, Qdrant, Chroma, Pinecone, and the Google, Microsoft, Dropbox, YouTube, Twitch, Discord, Telegram, Facebook, Azure Data Factory and Databricks APIs. The v2.0.6 gate certifies RabbitMQ 4.4 over AMQP 0-9-1 and ActiveMQ Classic 6.3 over AMQP 1.0, including two-way Java OpenWire/JMS interoperability, plus hosted Aiven Kafka with TLS+SASL PLAIN and mutual TLS. The native matrices passed 56 scenario executions across the connection modes. Four REST integration checks also passed, including execution of every generated broker REST sample. See the [messaging certification record](docs/sutraflow-architecture.html#messaging-certification) for tested configurations and limits.
 
 ## Known limitations
 
 - **Twitch and Discord triggers** poll (every minute and every few seconds) rather than receive pushed events.
-- **The soak test** covers the starters that run on one machine; Email (IMAP), Kafka, RabbitMQ and the cloud triggers are tested against stand-ins in the test suite only.
+- **The soak test** covers the starters that run on one machine. Email (IMAP) and cloud triggers still use stand-ins in the normal suite; broker certification is a separate opt-in real-service gate so CI never needs production credentials.
 
 ## Contributing
 

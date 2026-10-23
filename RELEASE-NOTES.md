@@ -1,15 +1,50 @@
-# SutraFlow 2.0.5 release notes
+# SutraFlow 2.0.6 release notes
 
 Released 2026-10-23. Copyright (c) 2026-27 Surya Partap Singh, [MixAgile.com](https://mixagile.com). Licensed under the GNU Affero General Public License v3.0 only (AGPL-3.0-only); a commercial licence is available, see `COMMERCIAL-LICENSE.md`.
 
 | Download | For |
 |---|---|
-| `sutraflow-2.0.5-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
-| `sutraflow-2.0.5-linux.tar.gz` | Linux (x64 or arm64); also macOS |
+| `sutraflow-2.0.6-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
+| `sutraflow-2.0.6-linux.tar.gz` | Linux (x64 or arm64); also macOS |
 
 Each comes with a `.sha256` file to check the download.
 
-## What is new in 2.0.5
+## What is new in 2.0.6
+
+- **Real ActiveMQ and RabbitMQ certification**: opt-in integration matrices exercise publish/subscribe, client and explicit acknowledgement, confirm/requeue/reject, delivery ceilings, JSON/text/map/bytes bodies, JMS headers and properties, selectors, TTL, durable topics, duplicate protection, listener replacement and concurrency against real brokers.
+- **ActiveMQ Java interoperability**: a test-only Java client sends and receives over OpenWire/JMS while SutraFlow uses AMQP 1.0 against the same destination. ActiveMQ Classic deployments that cross the protocols must set `transport.transformer=jms` on the AMQP connector.
+- **Reliable broker connections**: AMQP container IDs are now a configurable prefix with stable unique publisher/listener suffixes; AMQP deployment waits for the receiver link and Kafka deployment waits for both consumer-group join and the first completed fetch before reporting ready; shutdown cancels reconnect state before closing. ActiveMQ JMS destination qualifiers are normalized at the Sutra boundary.
+- **Correct explicit redelivery**: choosing **requeue** no longer marks the durable duplicate identity complete, so the returned message starts its intended retry. RabbitMQ in-place requeues are counted even though the broker does not add an `x-death` header, and the configured delivery ceiling is enforced.
+- **Strict TLS and mutual TLS for every broker**: Kafka, RabbitMQ and ActiveMQ / AMQP 1.0 connections accept private CA certificates and optional client certificates with vault-held private keys/passphrases. Kafka also supports SASL plain and SCRAM over TLS. Exact Project or Engine property references may select PEM values and vault-secret names per deployment; literal certificate text is never treated as a template and certificate verification cannot be disabled.
+- **Repeatable Kafka certification**: an opt-in real-broker matrix covers TLS/SASL or mutual TLS, headers, keys, offsets, client retries and explicit acknowledgement without placing credentials in source or reports.
+- **Broker-ready samples and documentation**: Queue in and out and Agent fed by a queue receive all three plain/local connections plus Kafka TLS+SASL, Kafka mTLS, RabbitMQ mTLS and ActiveMQ mTLS examples made only from safe property/secret-name placeholders. Four executable HTTP alternatives cover Kafka REST publish, Kafka REST subscribe (create/subscribe/poll/commit/close), RabbitMQ HTTP publish/fetch/ack/cleanup and ActiveMQ Jolokia create/send/browse/remove/cleanup. Their descriptions document the safe publish-before-confirm boundary, delivery identities, retry behavior and per-session AI memory. Three focused guide chapters define broker choices (including when a REST API is and is not equivalent), every connector/activity option, OpenWire versus AMQP 1.0, Windows/Linux prerequisites, certificates, dead letters and vendor documentation boundaries.
+- **Messaging operations illustrated**: fresh Admin Console screenshots show deployed RabbitMQ/ActiveMQ starters and a real completed message-processing run with explicit confirmation. The architecture page records protocols, security modes, exact certification coverage and the distinction between functional certification and a sustained messaging benchmark. The guide contents remain sticky on desktop and narrow screens.
+- No mandatory database change: 2.0.6 shares the SutraFlow schema used by 2.0.0 to 2.0.5.
+
+### Fixes in 2.0.6
+
+| What you would have seen | Cause | Now |
+|---|---|---|
+| Explicit **requeue** returned a message to ActiveMQ or RabbitMQ, but the next delivery was silently acknowledged without another run. | The explicit-decision path treated every Confirm action as terminal in the durable duplicate guard. | Only confirm and reject complete the identity; requeue releases it for the intended next run. |
+| RabbitMQ could requeue a failed message forever even with a delivery ceiling. | `basic.nack(requeue=true)` does not add RabbitMQ's `x-death` header, so every attempt looked like delivery 1. | The listener counts in-place attempts and rejects at the configured ceiling. |
+| ActiveMQ rejected or raced a second SutraFlow connection with a duplicate client/container id. | The configured container id was used as the complete id for publishers and listeners. | It is a prefix; every role has a distinct stable suffix, and old reconnect state is closed before listener replacement. |
+| A message published immediately after deployment could wait although the listener status already said it was ready. | AMQP listener registration completed before the broker had opened its receiver link. | Deployment waits for receiver-open or reports a bounded connection failure. |
+| A message published immediately after a new Kafka trigger reported ready could be skipped by a new consumer group with **Read from beginning** off. | Group join occurs before KafkaJS finishes its initial offset/fetch round trip. | Listener deployment waits for both group join and the first completed fetch before it reports ready. |
+| A very short explicit-acknowledgement Sutra could reach **Confirm message** and fail with “no message to confirm.” | The run could execute before `startRun()` returned and registered its pending acknowledgement handle. | The handle is registered under the reserved durable run id before execution starts, then cleaned up on every start failure. |
+| Java OpenWire consumers received native AMQP encoding bytes, or `JMSReplyTo` appeared as `queue://name`. | ActiveMQ Classic defaults to its native AMQP transformer and qualifies JMS destinations on the wire. | The guide requires `transport.transformer=jms` for cross-protocol bodies, a two-way Java test proves it, and SutraFlow presents the logical destination name. |
+| A private-CA or client-certificate broker could not always be represented by a SutraFlow connection. | Kafka exposed only a TLS switch and SASL credentials; RabbitMQ and AMQP 1.0 had no private-CA/client-certificate fields. | All three connectors accept trusted CA PEM, client certificate, vault private key and optional passphrase, with strict certificate verification. |
+
+## 2.0.6 release gate
+
+On 2026-10-23, RabbitMQ 4.4.0 passed 8/8 scenarios and ActiveMQ Classic 6.3.2 passed 13/13 scenarios independently over plain connections and strict mutual TLS through a test TLS proxy. ActiveMQ included two-way AMQP 1.0 and Java OpenWire/JMS payload interoperability. Hosted Aiven Kafka passed 7/7 scenarios independently with TLS+SASL and client-certificate authentication. Four REST integration checks passed, including the Kafka publish/consumer lifecycle and execution of all four generated REST sample Sutras against the real services.
+
+The final clean build and PostgreSQL/MySQL regression run passed: 387 tests, 379 passed, 8 skipped and 0 failed. It includes PGlite compatibility, real PostgreSQL pooling, notifications, outage recovery, claim fencing, cluster failover, password/SSL migration, and real MySQL queries, parameter binding, rollback and procedures. The eight skips are the optional Linux Docker build and seven broker checks certified separately above. All three TypeScript checks pass. Dependency audit reports 0 vulnerabilities; vendor integrity and npm freshness checks, document anchor validation, and sample/guide/architecture generators pass.
+
+Each Windows/Linux release contains 206 runtime and guide files, including the messaging screenshots, and excludes tests, soak reports, benchmarks, source trees and development dependencies. The Linux archive retains executable shell/launcher permissions; native Linux execution is not certified on this Windows release machine because WSL and a Linux Docker runtime are unavailable.
+
+## In 2.0.5
+
+### What was new in 2.0.5
 
 - **Named SQL parameters checked while designing**: SQL query, SQL update, SQL script, SQL transaction and Databricks SQL now compare every `:name` placeholder with the Parameters rows. Missing values, case mismatches, duplicate names, whitespace and unnamed rows are errors that block publishing; an extra row the SQL does not use is a warning. Repeated use of the same placeholder needs only one row; text inside quoted strings or comments and PostgreSQL `::` casts is ignored, matching runtime binding.
 - **Ten-row query preview**: SQL Query and Databricks SQL show **Test query (10 rows)** when a connection is selected. It uses the latest sample input and a database-side preview cap, then shows the returned columns and rows. Both previews accept only read-only `SELECT`/`WITH` statements, reject data-changing CTEs, and never insert a limit into the stored or deployed query.
@@ -25,7 +60,7 @@ Each comes with a `.sha256` file to check the download.
 | Duplicate parameter rows or stale rows left after editing SQL were easy to overlook. | Only placeholders required by the runtime were checked. | A duplicate row is an error and a stale unused row is a warning, without treating repeated use of one placeholder as a defect. |
 | A designer had to run the whole Sutra to see whether a SELECT returned the expected shape and sample records. | Connection tests checked only connectivity, not the activity SQL. | Test query returns at most ten sample rows through the selected database or Databricks warehouse without changing runtime SQL. |
 
-## 2.0.5 release gate
+### 2.0.5 release gate
 
 Typechecking is clean and the dependency audit reports 0 vulnerabilities. The focused DB Ops and Databricks suites passed 20 tests with 0 failures. After the final read-only preview hardening, the complete suite passed 376 tests: 375 passed, 1 optional Docker-environment test skipped and 0 failed. It ran with real PostgreSQL and MySQL and included PostgreSQL pool execution, database outage and reconnect, password- and SSL-protected migration, claim fencing and multi-engine behavior; MySQL covered bound INSERT, UPDATE and SELECT, injection safety, rollback, install scripts and stored procedures. PGlite remained secondary compatibility coverage. The release manifest contains 204 runtime and guide files in each Windows and Linux archive and excludes source trees, tests and soak/benchmark output.
 

@@ -56,30 +56,106 @@ const amqpAddress = (r: Resource, type: string, name: string) => {
   return (type === 'topic' ? r.config.topicPrefix ?? 'topic://' : r.config.queuePrefix ?? '') + name;
 };
 
+/** ActiveMQ's JMS transformer qualifies Destination values on the AMQP wire. */
+export const logicalJmsDestination = (value: unknown) =>
+  typeof value === 'string' ? value.replace(/^(?:queue|topic):\/\//, '') : value;
+
 // ---------- clients ----------
+export function kafkaTlsOptions(c: Record<string, any>, secret: Secret) {
+  if (!c.ssl) return false;
+  const ca = String(c.caPem || '').trim();
+  const cert = String(c.clientCertPem || '').trim();
+  const keyName = String(c.clientKeySecret || '').trim();
+  const passphraseName = String(c.clientKeyPassphraseSecret || '').trim();
+  if (!ca && !cert && !keyName && !passphraseName) return true;
+  if (!!cert !== !!keyName) throw new Error('Kafka mutual TLS needs both Client certificate and Client private key');
+  return {
+    rejectUnauthorized: true,
+    ...(ca ? { ca: [ca] } : {}),
+    ...(cert ? { cert: [cert], key: secret(keyName, 'Kafka client private key') } : {}),
+    ...(passphraseName ? { passphrase: secret(passphraseName, 'Kafka client key passphrase') } : {}),
+  };
+}
+
+export function brokerTlsOptions(c: Record<string, any>, secret: Secret, broker: string) {
+  const ca = String(c.caPem || '').trim();
+  const cert = String(c.clientCertPem || '').trim();
+  const keyName = String(c.clientKeySecret || '').trim();
+  const passphraseName = String(c.clientKeyPassphraseSecret || '').trim();
+  if (!!cert !== !!keyName) throw new Error(`${broker} mutual TLS needs both Client certificate and Client private key`);
+  return {
+    rejectUnauthorized: true,
+    ...(ca ? { ca: [ca] } : {}),
+    ...(cert ? { cert, key: secret(keyName, `${broker} client private key`) } : {}),
+    ...(passphraseName ? { passphrase: secret(passphraseName, `${broker} client key passphrase`) } : {}),
+  };
+}
+
 function kafkaClient(r: Resource, secret: Secret) {
   const { Kafka, logLevel } = require('kafkajs');
   const c = r.config;
   return new Kafka({
-    clientId: c.clientId || 'sutraflow', brokers: c.brokers, ssl: !!c.ssl, logLevel: logLevel.NOTHING,
+    clientId: c.clientId || 'sutraflow', brokers: c.brokers, ssl: kafkaTlsOptions(c, secret), logLevel: logLevel.NOTHING,
     sasl: c.sasl && c.sasl !== 'none' ? { mechanism: c.sasl, username: c.user, password: secret(c.passwordSecret, 'Kafka password') } : undefined,
   });
 }
-function rabbitUrl(r: Resource, secret: Secret) {
+function rabbitConnection(r: Resource, secret: Secret) {
   const u = new URL(r.config.url || 'amqp://localhost:5672/');
   if (r.config.user) { u.username = encodeURIComponent(r.config.user); u.password = encodeURIComponent(r.config.passwordSecret ? secret(r.config.passwordSecret, 'RabbitMQ password') : ''); }
   if (r.config.vhost && r.config.vhost !== '/') u.pathname = '/' + encodeURIComponent(r.config.vhost);
-  return u.toString();
+  return { url: u.toString(), socket: u.protocol === 'amqps:' ? brokerTlsOptions(r.config, secret, 'RabbitMQ') : undefined };
 }
-function amqpConnect(r: Resource, secret: Secret, reconnect = true) {
+function amqpConnect(r: Resource, secret: Secret, reconnect = true, role = 'connection') {
   const rhea = require('rhea');
-  const container = rhea.create_container({ id: r.config.containerId || 'sutraflow' });
+  // ActiveMQ uses the AMQP container id as a client id and refuses two live
+  // connections with the same value. The resource value is therefore a prefix,
+  // not the complete id: publishers, tests and each deployed listener get their
+  // own identity. Listener roles are stable so durable subscriptions survive a
+  // reconnect and leader restart.
+  const base = String(r.config.containerId || 'sutraflow').replace(/[^A-Za-z0-9_.-]/g, '-');
+  const suffix = String(role).replace(/[^A-Za-z0-9_.-]/g, '-');
+  const container = rhea.create_container({ id: `${base}-${suffix}` });
+  // Rhea raises an uncaught exception when a broker rejects a reconnect and no
+  // connection_error listener exists. Disconnection is reported to the caller
+  // below; this listener makes a transient duplicate-client rejection during a
+  // fast durable-listener replacement non-fatal to the engine process.
+  container.on('connection_error', () => {});
   const conn = container.connect({
     host: r.config.host, port: Number(r.config.port) || 5672, transport: r.config.tls ? 'tls' : 'tcp',
     username: r.config.user || undefined, password: r.config.passwordSecret ? secret(r.config.passwordSecret, 'AMQP password') : undefined,
+    ...(r.config.tls ? brokerTlsOptions(r.config, secret, 'AMQP 1.0') : {}),
     reconnect, initial_reconnect_delay: 500, max_reconnect_delay: 30000,
   });
   return { container, conn, rhea };
+}
+
+/** Stop reconnect timers before closing; otherwise a listener rebuild can race its old connection. */
+async function closeAmqpConnection(conn: any) {
+  try { conn.set_reconnect?.(false); } catch { if (conn.options) conn.options.reconnect = false; }
+  if (conn.scheduled_reconnect) {
+    clearTimeout(conn.scheduled_reconnect);
+    conn.scheduled_reconnect = undefined;
+  }
+  if (!conn.socket_ready && !conn.socket) return;
+  await new Promise<void>(resolve => {
+    let finished = false;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      conn.removeListener?.('disconnected', done);
+      resolve();
+    };
+    // A remote close frame arrives before the TCP socket is gone. Wait for the
+    // disconnected event; otherwise a listener rebuild can reuse its durable
+    // client id while ActiveMQ still considers the old socket live.
+    const timer = setTimeout(() => {
+      try { conn.abort_socket?.(conn.socket); } catch { /* already gone */ }
+      setTimeout(done, 50);
+    }, 1500);
+    conn.once?.('disconnected', done);
+    try { if (!conn.is_closed?.()) conn.close(); } catch { done(); }
+  });
 }
 
 const producers = new Map<string, Promise<any>>();
@@ -91,11 +167,12 @@ async function publisher(b: Broker, r: Resource, secret: Secret) {
       if (b === 'kafka') { const pr = kafkaClient(r, secret).producer(); await pr.connect(); return pr; }
       if (b === 'rabbitmq') {
         const amqp = require('amqplib');
-        const conn = await amqp.connect(rabbitUrl(r, secret));
+        const o = rabbitConnection(r, secret);
+        const conn = await amqp.connect(o.url, o.socket);
         conn.on('close', () => producers.delete(key));
         return conn.createConfirmChannel();
       }
-      const { conn } = amqpConnect(r, secret);
+      const { conn } = amqpConnect(r, secret, true, `publisher-${process.pid}`);
       await new Promise<void>((res, rej) => {
         conn.once('connection_open', () => res());
         conn.once('connection_error', (ctx: any) => rej(new Error(ctx?.connection?.error?.description || 'AMQP connection failed')));
@@ -118,7 +195,7 @@ export async function closeBusPublishers() {
       const v = await p;
       if (key.startsWith('kafka:')) await v.disconnect();
       else if (key.startsWith('rabbitmq:')) await v.connection?.close?.();
-      else { if (v.conn.options) v.conn.options.reconnect = false; v.conn.close(); }
+      else await closeAmqpConnection(v.conn);
     } catch { /* best effort */ }
   }));
 }
@@ -130,7 +207,14 @@ function bodyBytes(body: unknown, type: string): { buf: Buffer; contentType: str
 }
 
 // ---------- explicit acknowledgement (Confirm message) ----------
-interface PendingAck { confirm(): Promise<void> | void; requeue(): Promise<void> | void; reject(): Promise<void> | void; done: boolean }
+type AckDecision = 'confirm' | 'requeue' | 'reject';
+interface PendingAck {
+  confirm(): Promise<void> | void;
+  requeue(): Promise<void> | void;
+  reject(): Promise<void> | void;
+  /** Set before the broker is settled so run completion can update the durable duplicate guard correctly. */
+  decision?: AckDecision;
+}
 const pending = new Map<string, PendingAck>();
 
 export const busActivities: Activity[] = [
@@ -188,7 +272,13 @@ export const busActivities: Activity[] = [
       }
       const address = amqpAddress(r, c.raw('destinationType'), dest);
       let sender = pub.senders.get(address);
-      if (!sender) { sender = pub.conn.open_sender(address); pub.senders.set(address, sender); }
+      if (!sender) {
+        sender = pub.conn.open_sender(address);
+        // Each concurrent publish temporarily installs outcome listeners. This is
+        // expected up to the configured activity concurrency, not a leak.
+        sender.setMaxListeners?.(0);
+        pub.senders.set(address, sender);
+      }
       await new Promise<void>((res, rej) => {
         const send = () => {
           const d = sender.send({
@@ -238,7 +328,7 @@ export const busActivities: Activity[] = [
   {
     type: 'busConfirm', palette: 'bus', name: 'Confirm message', glyph: '✓', ports: ['out'],
     desc: 'Acknowledges the message that started this run (Queue / topic trigger with Acknowledge: explicit), or rejects / requeues it.',
-    fields: [F('action', 'Action', 'select', 'confirm', { options: ['confirm', 'requeue', 'reject (dead-letter)'] })],
+    fields: [F('action', 'Action', 'select', 'confirm', { options: ['confirm', 'requeue', 'reject (dead-letter)'], help: 'confirm removes or commits the delivery; requeue asks for another delivery; reject does not return it to the source. Configure a broker dead-letter route if rejected messages must be retained.' })],
     outputHint: { confirmed: true, action: 'confirm' },
     passThrough: true,
     execute: async c => {
@@ -248,8 +338,11 @@ export const busActivities: Activity[] = [
         if (c.scope.run?.source === 'test' || c.scope.run?.source === 'debug') { c.log('info', 'Test run: no message to confirm'); return { out: c.input }; }
         throw new Error('This run was not started by a Queue / topic trigger with Acknowledge: explicit, or the message was already confirmed');
       }
-      if (a === 'confirm') await p.confirm(); else if (a === 'requeue') await p.requeue(); else await p.reject();
-      p.done = true;
+      // Record the decision before settling. A very fast broker callback can let the run
+      // finish immediately after this await, and completion must still know whether this
+      // delivery was terminal (confirm/reject) or intentionally returned (requeue).
+      p.decision = a === 'confirm' ? 'confirm' : a === 'requeue' ? 'requeue' : 'reject';
+      if (p.decision === 'confirm') await p.confirm(); else if (p.decision === 'requeue') await p.requeue(); else await p.reject();
       pending.delete(c.runId);
       c.log('info', `Message ${a === 'confirm' ? 'confirmed' : a}`);
       return { out: c.input };
@@ -356,14 +449,19 @@ export function handle(c: ListenerContext, cfg: Record<string, any>, input: Reco
       if (!claimed.changes && await priorDelivery(c, key, settle)) { resolve(); return; }
     }
     // The entry exists before the run starts: a run can end before its start has returned the id.
-    const entry: PendingAck | null = mode === 'explicit' ? { confirm: settle.ack, requeue: settle.requeue, reject: settle.reject, done: false } : null;
-    let runId = '';
+    const entry: PendingAck | null = mode === 'explicit' ? { confirm: settle.ack, requeue: settle.requeue, reject: settle.reject } : null;
+    // The engine is given the reserved id, so expose the acknowledgement handle before
+    // starting it. A one-step Sutra can otherwise reach Confirm message before
+    // startRun() resolves and incorrectly report that there is no message to confirm.
+    let runId: string = reservedRun;
+    if (entry) pending.set(reservedRun, entry);
     c.fire(input, status => {
       Promise.resolve().then(async () => {
-        if (key && (status === 'done' || entry?.done)) q.run(`update bus_messages set status = 'done', updated_at = ? where flow_id = ? and node_id = ? and message_key = ?`, Date.now(), c.flowId, c.node.id, key);
+        const explicitTerminal = entry?.decision === 'confirm' || entry?.decision === 'reject';
+        if (key && (mode === 'explicit' ? explicitTerminal : status === 'done')) q.run(`update bus_messages set status = 'done', updated_at = ? where flow_id = ? and node_id = ? and message_key = ?`, Date.now(), c.flowId, c.node.id, key);
         else if (key) q.run('delete from bus_messages where flow_id = ? and node_id = ? and message_key = ?', c.flowId, c.node.id, key);
         if (mode === 'explicit') {
-          if (entry && !entry.done) {
+          if (entry && !entry.decision) {
             if (runId) pending.delete(runId);
             await fail();
             if (status === 'done') c.status('error', 'A run finished without Confirm message; the message was redelivered');
@@ -373,15 +471,17 @@ export function handle(c: ListenerContext, cfg: Record<string, any>, input: Reco
       }).catch(e => c.status('error', `Acknowledgement failed: ${e.message}`)).finally(resolve);
     }, reservedRun).then(id => {
       if (!id) {
+        if (entry) pending.delete(reservedRun);
         if (key) q.run('delete from bus_messages where flow_id = ? and node_id = ? and message_key = ?', c.flowId, c.node.id, key);
         c.status('error', 'The Sutra did not start; the message will be delivered again');
         Promise.resolve(fail()).catch(e => c.status('error', `Could not release the message: ${e.message}`)).finally(resolve);
         return;
       }
       runId = id;
-      if (entry && !entry.done) pending.set(id, entry);
+      if (entry && !entry.decision) pending.set(id, entry);
     }, e => {
       c.status('error', `The Sutra did not start: ${e.message}`);
+      if (entry) pending.delete(reservedRun);
       if (key) q.run('delete from bus_messages where flow_id = ? and node_id = ? and message_key = ?', c.flowId, c.node.id, key);
       Promise.resolve(fail()).catch(() => {}).finally(resolve);
     });
@@ -401,32 +501,56 @@ registerListener('busSubscribe', async c => {
 
   if (b === 'kafka') {
     const consumer = kafkaClient(r, secret).consumer({ groupId: cfg.groupId || 'sutraflow' });
+    const deliveryAttempts = new Map<string, number>();
     await consumer.connect();
     await consumer.subscribe({ topic: dest, fromBeginning: !!cfg.fromBeginning });
+    let readyTimer: NodeJS.Timeout | undefined;
+    const ready = new Promise<void>((resolve, reject) => {
+      let joined = false; let fetching = false;
+      const done = () => {
+        if (!joined || !fetching) return;
+        if (readyTimer) clearTimeout(readyTimer);
+        offJoin(); offFetch(); resolve();
+      };
+      const offJoin = consumer.on(consumer.events.GROUP_JOIN, () => { joined = true; done(); });
+      // GROUP_JOIN precedes offset initialisation. Publishing before the first fetch
+      // response can be treated as pre-existing data for a new group with
+      // fromBeginning=false. FETCH means the initial broker round trip is complete;
+      // only then is the deployed trigger genuinely ready for new messages.
+      const offFetch = consumer.on(consumer.events.FETCH, () => { fetching = true; done(); });
+      readyTimer = setTimeout(() => { offJoin(); offFetch(); reject(new Error(`Timed out starting Kafka consumer group ${cfg.groupId || 'sutraflow'}`)); }, 30000);
+      readyTimer.unref?.();
+    });
     await consumer.run({
       autoCommit: auto,
       partitionsConsumedConcurrently: n,
       eachMessage: async ({ topic, partition, message, pause }: any) => {
         const headers = Object.fromEntries(Object.entries(message.headers || {}).map(([k, v]: any) => [k, v?.toString()]));
         const { messageId, correlationId, replyTo, type: jt, contentType, ...props } = headers as Record<string, string>;
+        const attemptKey = `${topic}:${partition}:${message.offset}`;
+        const count = (deliveryAttempts.get(attemptKey) || 0) + 1;
         const input = { body: decodeBody(message.value, type), properties: props, destination: topic, key: message.key?.toString(), partition, offset: message.offset,
-          headers: { messageId, correlationId, replyTo, type: jt, contentType, timestamp: new Date(Number(message.timestamp)).toISOString(), redelivered: false, deliveryCount: 1 } };
+          headers: { messageId, correlationId, replyTo, type: jt, contentType, timestamp: new Date(Number(message.timestamp)).toISOString(), redelivered: count > 1, deliveryCount: count } };
         let requeued: string | false = false;
         const commit = () => consumer.commitOffsets([{ topic, partition, offset: (BigInt(message.offset) + 1n).toString() }]);
-        await handle(c, cfg, input, { ack: commit, reject: commit, requeue: (why?: string) => { requeued = why || 'failed'; } }, 1, `kafka:${topic}:${partition}:${message.offset}`);
+        await handle(c, cfg, input, { ack: commit, reject: commit, requeue: (why?: string) => { requeued = why || 'failed'; } }, count, `kafka:${topic}:${partition}:${message.offset}`);
         if (requeued) {
+          if (requeued !== 'duplicate') deliveryAttempts.set(attemptKey, count);
           const resume = pause(); setTimeout(resume, 5000);
           throw new Error(requeued === 'duplicate' ? `Offset ${message.offset} is still being handled by an earlier run; partition ${partition} checks again in 5 seconds` : 'Sutra failed; the message will be processed again');
         }
+        deliveryAttempts.delete(attemptKey);
       },
     });
+    await ready;
     c.status('ok', `Consuming ${dest} as ${cfg.groupId}`);
     return () => { stopHolds(c); return consumer.disconnect(); };
   }
 
   if (b === 'rabbitmq') {
     const amqp = require('amqplib');
-    const conn = await amqp.connect(rabbitUrl(r, secret));
+    const o = rabbitConnection(r, secret);
+    const conn = await amqp.connect(o.url, o.socket);
     const ch = await conn.createChannel();
     let queue = dest;
     if (cfg.destinationType === 'topic') {
@@ -437,6 +561,11 @@ registerListener('busSubscribe', async c => {
     } else if (cfg.declare) await ch.assertQueue(queue, { durable: true });
     await ch.prefetch(n);
     let extra = 0;
+    // RabbitMQ's x-death header is added by dead-lettering, not by an ordinary
+    // basic.nack(requeue=true). Count those in-place retries ourselves so the
+    // delivery ceiling works for classic queues too. After a listener restart,
+    // the broker's redelivered flag provides the conservative second attempt.
+    const deliveryAttempts = new Map<string, number>();
     const hold: HoldSlot = {
       grow: () => { extra++; ch.prefetch(n + extra).catch(() => {}); },
       shrink: () => { extra = Math.max(0, extra - 1); ch.prefetch(n + extra).catch(() => {}); },
@@ -445,15 +574,25 @@ registerListener('busSubscribe', async c => {
       if (!msg) return;
       const p = msg.properties;
       const deaths = Array.isArray(p.headers?.['x-death']) ? p.headers['x-death'].reduce((a: number, d: any) => a + (Number(d.count) || 0), 0) : 0;
+      const identity = p.messageId ? `rabbitmq:${dest}:${p.messageId}` : '';
+      const attemptKey = identity || `${msg.fields.exchange}:${msg.fields.routingKey}:${msg.fields.deliveryTag}`;
+      const prior = deliveryAttempts.get(attemptKey) || 0;
+      const count = Math.max(deaths + 1, prior + 1, msg.fields.redelivered ? 2 : 1);
+      deliveryAttempts.set(attemptKey, count);
       const input = { body: decodeBody(msg.content, type), properties: Object.fromEntries(Object.entries(p.headers || {}).filter(([k]) => !k.startsWith('x-'))), destination: dest, routingKey: msg.fields.routingKey,
-        headers: { messageId: p.messageId, correlationId: p.correlationId, replyTo: p.replyTo, type: p.type, priority: p.priority, deliveryMode: p.deliveryMode === 2 ? 'persistent' : 'non-persistent', timestamp: p.timestamp ? new Date(p.timestamp * 1000).toISOString() : undefined, expiration: p.expiration, contentType: p.contentType, redelivered: msg.fields.redelivered, deliveryCount: deaths + 1 } };
-      await handle(c, cfg, input, { ack: () => ch.ack(msg), requeue: () => ch.nack(msg, false, true), reject: () => ch.nack(msg, false, false), hold }, deaths + 1, p.messageId ? `rabbitmq:${dest}:${p.messageId}` : '');
+        headers: { messageId: p.messageId, correlationId: p.correlationId, replyTo: p.replyTo, type: p.type, priority: p.priority, deliveryMode: p.deliveryMode === 2 ? 'persistent' : 'non-persistent', timestamp: p.timestamp ? new Date(p.timestamp * 1000).toISOString() : undefined, expiration: p.expiration, contentType: p.contentType, redelivered: msg.fields.redelivered, deliveryCount: count } };
+      await handle(c, cfg, input, {
+        ack: () => { deliveryAttempts.delete(attemptKey); ch.ack(msg); },
+        requeue: () => ch.nack(msg, false, true),
+        reject: () => { deliveryAttempts.delete(attemptKey); ch.nack(msg, false, false); },
+        hold,
+      }, count, identity);
     }, { noAck: auto });
     c.status('ok', `Consuming ${cfg.destinationType === 'topic' ? 'topic' : 'queue'} ${dest}`);
     return async () => { stopHolds(c); await ch.close().catch(() => {}); await conn.close().catch(() => {}); };
   }
 
-  const { conn, rhea } = amqpConnect(r, secret);
+  const { conn, rhea } = amqpConnect(r, secret, true, `listener-${c.flowId}-${c.node.id}`);
   const source: any = { address: amqpAddress(r, cfg.destinationType, dest) };
   if (cfg.selector) source.filter = rhea.filter.selector(cfg.selector);
   if (cfg.durableName && cfg.destinationType === 'topic') { source.durable = 2; source.expiry_policy = 'never'; }
@@ -463,7 +602,7 @@ registerListener('busSubscribe', async c => {
     const raw = m.body && typeof m.body === 'object' && m.body.typecode === 0x75 ? m.body.content : m.body;
     const count = (m.delivery_count ?? 0) + 1;
     const input = { body: decodeBody(raw, type), properties: m.application_properties || {}, destination: dest,
-      headers: { messageId: m.message_id, correlationId: m.correlation_id, replyTo: m.reply_to, type: m.subject, priority: m.priority, deliveryMode: m.durable ? 'persistent' : 'non-persistent', timestamp: m.creation_time ? new Date(m.creation_time).toISOString() : undefined, expiration: m.absolute_expiry_time, contentType: m.content_type, redelivered: count > 1, deliveryCount: count } };
+      headers: { messageId: m.message_id, correlationId: m.correlation_id, replyTo: logicalJmsDestination(m.reply_to), type: m.subject, priority: m.priority, deliveryMode: m.durable ? 'persistent' : 'non-persistent', timestamp: m.creation_time ? new Date(m.creation_time).toISOString() : undefined, expiration: m.absolute_expiry_time, contentType: m.content_type, redelivered: count > 1, deliveryCount: count } };
     await handle(c, cfg, input, {
       ack: () => ctx.delivery.accept(),
       // A failed run counts as a failed delivery (the broker's redelivery limit applies); a copy
@@ -475,7 +614,26 @@ registerListener('busSubscribe', async c => {
   });
   conn.on('connection_open', () => c.status('ok', `Receiving from ${source.address}${cfg.selector ? ` where ${cfg.selector}` : ''}`));
   conn.on('disconnected', (ctx: any) => c.status('error', `Disconnected: ${ctx?.error?.message || 'broker not reachable'}; reconnecting`));
-  return () => { stopHolds(c); try { if (conn.options) conn.options.reconnect = false; conn.close(); } catch { /* ignore */ } };
+  // Do not let the listener registry announce "Listening" merely because the
+  // asynchronous connection attempt was started. Deployment/rebuild completes
+  // only after ActiveMQ has accepted the receiver link, so an immediately
+  // arriving message cannot sit queued behind a listener that is not ready yet.
+  await new Promise<void>((res, rej) => {
+    const done = (error?: Error) => {
+      clearTimeout(timer);
+      receiver.removeListener('receiver_open', opened);
+      conn.removeListener('connection_error', failed);
+      conn.removeListener('disconnected', failed);
+      error ? rej(error) : res();
+    };
+    const opened = () => done();
+    const failed = (ctx: any) => done(new Error(ctx?.connection?.error?.description || ctx?.error?.message || 'AMQP broker not reachable'));
+    const timer = setTimeout(() => done(new Error('AMQP receiver did not open within 15 seconds')), 15000);
+    receiver.once('receiver_open', opened);
+    conn.once('connection_error', failed);
+    conn.once('disconnected', failed);
+  });
+  return async () => { stopHolds(c); await closeAmqpConnection(conn); };
 });
 
 /** Test connection: connects to the broker and disconnects. */
@@ -488,11 +646,12 @@ export async function testBroker(r: Resource, secret: Secret): Promise<string> {
   }
   if (r.kind === 'rabbitmq') {
     const amqplib = require('amqplib');
-    const conn = await within(amqplib.connect(rabbitUrl(r, secret)), 'RabbitMQ') as any;
+    const o = rabbitConnection(r, secret);
+    const conn = await within(amqplib.connect(o.url, o.socket), 'RabbitMQ') as any;
     await conn.close().catch(() => {});
     return `Connected to RabbitMQ at ${new URL(r.config.url || 'amqp://localhost:5672/').host}`;
   }
-  const { container, conn } = amqpConnect(r, secret, false);
+  const { container, conn } = amqpConnect(r, secret, false, `test-${crypto.randomUUID()}`);
   try {
     await within(new Promise<void>((res, rej) => {
       container.once('connection_open', () => res());
@@ -500,7 +659,7 @@ export async function testBroker(r: Resource, secret: Secret): Promise<string> {
       container.once('disconnected', (ctx: any) => rej(new Error(ctx?.error?.message || 'disconnected')));
     }), 'AMQP');
     return `Connected to ${r.config.host}:${Number(r.config.port) || 5672} (AMQP 1.0)`;
-  } finally { try { conn.close(); } catch { /* closed */ } }
+  } finally { await closeAmqpConnection(conn); }
 }
 
 // Publish message also returns the broker, connection and time it was sent.

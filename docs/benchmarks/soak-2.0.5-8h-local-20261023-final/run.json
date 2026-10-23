@@ -1,0 +1,9 @@
+{
+  "startedAt": "2026-10-23T07:30:01+05:30",
+  "expectedLoadEnd": "2026-10-23T15:30:01+05:30",
+  "executionSession": 96889,
+  "monitorAutomation": "sutraflow-2-0-5-first-hour-soak-watch",
+  "monitorUntil": "2026-10-23T08:30:01+05:30",
+  "status": "running",
+  "output": "C:\\Users\\kunwa\\Documents\\LocalGitHub\\SutraFlow\\docs\\benchmarks\\soak-2.0.5-8h-local-20261023-final"
+}

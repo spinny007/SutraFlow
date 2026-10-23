@@ -246,7 +246,7 @@ header.top img{width:58px;height:58px}
 h1{margin:0;font-size:2.4em;font-weight:800;line-height:1.1;letter-spacing:-.02em}
 .sub1{color:var(--muted);margin:0 0 18px}
 .layout{display:flex;gap:26px;align-items:flex-start}
-nav.toc{flex:0 0 270px;position:sticky;top:16px;max-height:calc(100vh - 32px);overflow:auto;border:1px solid var(--line);border-radius:16px;padding:14px 16px;background:color-mix(in srgb,var(--card) 85%,transparent);backdrop-filter:saturate(180%) blur(20px);box-shadow:0 8px 30px rgba(0,0,0,.06);font-size:.92em}
+nav.toc{flex:0 0 270px;position:sticky;top:16px;align-self:flex-start;max-height:calc(100vh - 32px);overflow:auto;overscroll-behavior:contain;border:1px solid var(--line);border-radius:16px;padding:14px 16px;background:color-mix(in srgb,var(--card) 85%,transparent);backdrop-filter:saturate(180%) blur(20px);box-shadow:0 8px 30px rgba(0,0,0,.06);font-size:.92em;z-index:20}
 nav.toc ol{margin:0 0 6px 18px;padding:0}nav.toc li{margin:2px 0}nav.toc ol.sub{font-size:.92em;margin-left:14px}nav.toc .n{color:var(--muted);font-size:.85em}
 #gsearch{margin:-14px -16px 12px;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--line);border-radius:16px 16px 0 0}
 #gsearch.dock{position:fixed;left:50%;bottom:18px;top:auto;transform:translateX(-50%);width:min(560px,calc(100vw - 32px));margin:0;border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.18);z-index:20}
@@ -282,7 +282,7 @@ figcaption{color:var(--muted);font-size:.88em;padding:8px 4px 0}
 #gtop.on{opacity:1;pointer-events:auto}
 footer{margin-top:60px;color:var(--muted);font-size:.88em;text-align:center}
 mark{background:rgba(255,204,0,.45);color:inherit;border-radius:3px}
-@media (max-width:900px){.layout{display:block}nav.toc{position:static;max-height:none;margin-bottom:20px}.wrap{padding:18px 16px 60px}h1{font-size:1.8em}table.t{min-width:640px}}
+@media (max-width:900px){.layout{display:block}nav.toc{position:sticky;top:8px;max-height:min(42vh,360px);margin-bottom:20px;background:var(--card);box-shadow:0 8px 24px rgba(0,0,0,.18)}.wrap{padding:18px 16px 60px}h1{font-size:1.8em}table.t{min-width:640px}}
 </style>
 </head>
 <body>
