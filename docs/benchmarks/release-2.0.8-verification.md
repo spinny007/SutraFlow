@@ -1,6 +1,6 @@
 # SutraFlow 2.0.8 engineering verification
 
-2026-10-24, Windows, local PostgreSQL and MySQL. Working-tree changes only: no Git commit/tag, package publication or deployment is part of this verification. Functional regression is not third-party certification, exhaustive standards conformance, a load benchmark or a new soak.
+2026-10-24, Windows, local PostgreSQL and MySQL. This records the initial code certification; the subsequently requested package build and local deployment are recorded in [the deployment record](release-2.0.8-deployment.md). No Git commit/tag or public package publication was made. Functional regression is not third-party certification, exhaustive standards conformance, a load benchmark or a new soak.
 
 ## Expanded messaging certification
 
@@ -102,5 +102,5 @@ Existing focused regressions additionally exercise strict JSON/XML file reads, u
 - JSON sample contracts are strict shapes, but JSON Schema follows its authored rules: an optional property stays optional and undeclared properties remain allowed unless its schema forbids them. Use explicit JSON Schema for those policies.
 - XSD support remains XSD 1.0, with the documented isolated-worker bounds; XSD 1.1, remote schema fetching and DTD/entities are not supported. Large CSV streaming is unchanged. File-trigger failures retain their existing readError handling contract.
 - Documentation shows declared defaults and stored configuration; it does not evaluate properties or retrieve vault contents. Known credential keys/headers, URL userinfo and private-key PEMs are redacted, but arbitrary secrets embedded in free-text scripts cannot be reliably inferred. Keep credentials in the vault and review exported documents.
-- The current 4800/4810 installations have not been restarted/deployed by this task. No new release archives or soak were created.
+- During initial certification, 4800/4810 were not changed. The later user-authorized package build and deployment to both ports are recorded separately; no new soak was run.
 - SQL Server/Oracle and other unprovided real-service endpoints are not newly certified. The 24-hour separate-machine PostgreSQL soak, Linux Docker image and public Let's Encrypt staging gates remain in the backlog. Multi-user AI conversation/job ownership is also still pending; passing messaging tests does not resolve it.
