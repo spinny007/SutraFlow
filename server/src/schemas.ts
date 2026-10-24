@@ -87,6 +87,11 @@ export function schemaTree(ref: string | undefined | null): SNode | null {
   const [id, rootSel] = String(ref).split('::');
   const s = getSchema(id);
   if (!s) return null;
+  return schemaTreeFromRow(s, rootSel);
+}
+
+/** Build a draft's tree without saving it or changing process-global schema caches. */
+export function schemaTreeFromRow(s: Pick<SchemaRow, 'kind' | 'text' | 'name' | 'root'>, rootSel?: string): SNode | null {
   if (s.kind === 'json') return jsonTree(parseJsonText(s.text), s.name);
   if (s.kind === 'xsd') {
     const { roots, build } = xsdRoots(s.text);

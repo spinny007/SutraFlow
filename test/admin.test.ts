@@ -53,6 +53,11 @@ test('Sutras, test runs, secrets and meta through the API', async () => {
   assert.deepEqual(run.outputs.Map, { b: 10 });
   const sample = (await call('GET', `/api/flows/${f.id}/sample`)).json();
   assert.deepEqual(sample.outputs.Map, { b: 10 });
+  const { q } = await import('../server/src/db.js');
+  q.run('update runs set source = ? where id = ?', 'api', runId);
+  assert.deepEqual((await call('GET', `/api/flows/${f.id}/sample`)).json().outputs, {}, 'production outputs must not become designer sample data');
+  q.run('update runs set source = ? where id = ?', 'debug', runId);
+  assert.deepEqual((await call('GET', `/api/flows/${f.id}/sample`)).json().outputs.Map, { b: 10 });
 
   assert.equal((await call('PUT', '/api/secrets/API_TOKEN', { value: 'top-secret-value' })).statusCode, 200);
   const list = await call('GET', '/api/secrets');

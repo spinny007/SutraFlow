@@ -1,42 +1,34 @@
-# SutraFlow 2.0.8 release notes
+# SutraFlow 2.0.9 release notes
 
 Prepared 2026-10-24. Copyright (c) 2026-27 Surya Partap Singh, [MixAgile.com](https://mixagile.com). AGPL-3.0-only; a commercial licence is available.
 
-## What is new
-
-- Publish message and Queue / topic trigger support JSON, XML, text, map and bytes. XML preserves exact text, namespaces and attributes; malformed explicit formats fail through the normal workflow/acknowledgement policy. DTD/entities are not accepted. An XML queue sample demonstrates publish-before-confirm.
-- Exactly one starter is required per Sutra, including direct engine calls. Legacy multi-starter deployments do not register new gateway, scheduler or listener entry points; split them into separate Sutras and share processing with Call Sutra.
-- Database connections expose a trusted CA for PostgreSQL, MySQL and SQL Server TLS, with certificate verification enabled by default. Oracle accepts a DBA-provided connect string. Host/port are configurable; SQLite remains file-based. Separate-machine and additional vendor certification remain explicit gates.
-- Real remote PostgreSQL 17.2 and MariaDB 11.8.9 connections passed TLS-verified bound queries and rollback checks. The test record distinguishes client TLS from the managed PostgreSQL pool's unencrypted backend hop; it does not certify that provider's internal network.
-- Messaging interoperability: 66 native scenario executions across ActiveMQ/RabbitMQ plain and strict mTLS plus hosted Kafka TLS/SASL and mTLS; four broker REST checks pass, including all generated REST samples. This is internal functional certification, not a broker performance benchmark or replacement for the pending 24-hour soak.
-- Consistent checkbox defaults in engine execution and gateway/listener settings; omitted Boolean values no longer disagree with the editor. Legacy non-Boolean aliases remain unchanged.
-- Strict checkbox properties: true/on/yes/1 enables, false/off/no/0 disables (case-insensitive). Missing, empty or invalid values fail configuration instead of becoming truthy strings. The editor explains property-controlled checkboxes.
-- Explicit schema-validation switches for JSON/XML parse, render and typed maps, default Off. On requires an existing contract of the correct kind, enforced at runtime and checked before deployment. Manual typed targets retain independent type checks.
-- JSON sample contracts require all shown properties and reject undeclared properties recursively. Use JSON Schema to express optional fields and allowed extras; its authored constraints remain authoritative. XSD 1.0 validation remains authoritative for XML.
-- Mapping previews report contract violations as errors rather than advisory warnings.
-- Process documentation lists every activity field, defaults, inactive fields, full mappings, stored configuration and execution settings. Property references remain expressions; known credential keys and Authorization rows are redacted without resolving vault values.
-- The user guide explains strict behavior, checkbox property values and upgrade implications. Architecture documentation describes the shared settings boundary.
-
 ## Fixes
 
-| What you would have seen | Cause | Now |
-|---|---|---|
-| Validation appeared checked but invalid Parse/Render JSON or XML output succeeded. | The editor displayed a default not stored in the node, while execution read only stored values. | Shared defaults agree; validation is explicitly opt-in and checked switches enforce the contract. |
-| Checked validation with no schema succeeded silently. | The shared validator returned no errors for an empty schema reference. | On without a contract fails; deployment reports missing or wrong-kind contracts. |
-| A sample with zone allowed an object containing scores instead. | Sample validation allowed absent and additional fields. | A validated sample is a strict recursive shape; JSON Schema provides explicit optional/extra-field rules. |
-| A property containing arbitrary text enabled a checkbox. | Generic string truthiness was used. | Only documented Boolean tokens are accepted; invalid or missing properties fail. |
-| Generated process docs omitted defaults and mapping rules. | Only explicit, visible values were listed; mappings became an Input-tab note. | Full configuration is listed, with defaults/inactive fields labelled and known credentials redacted. |
+| Fix | What changes for users |
+| --- | --- |
+| Output trees hid actual fields when the schema differed from the payload. | Every activity's shared Output view now derives fields and types from actual emitted data after a test. Before testing it shows the design schema only. A schema-only zone no longer conceals an actual scores field. |
+| Repeating scalars displayed only their first item. | Small arrays show item count and values, such as `2 items: [2,5]`. Object-list previews identify first-item children; raw output remains available. |
+| Designer reused previous run values. | Opening a flow no longer fetches historical outputs as samples. Only an explicitly started Test/Debug session supplies previews. Flow edits, schema reloads, flow switching and Clear test data clear those values; server run history is not deleted. |
+| Sample lookup could return production output. | The explicit sample API selects only test/debug runs, never production runs. |
+| Mapping sources were labelled previous step. | Sources show activity name and type, including named earlier activities. Other branches carry an availability warning; browsing does not synchronize parallel execution. |
+| Stopping a test was hard to discover and left values visible. | Stop test is visible for active Test/Debug, including paused and waiting runs. It confirms terminal cancellation before clearing previews, keeps controls on failure and retains cancellation handles after edits. Completed tests have Clear test data. Previously committed external side effects are not rolled back. |
 
-## Upgrade
+## Samples and documentation
 
-No database migration. Inspect older drafts: 2.0.7 could show a checked default without storing an enabled flag. Omitted validation switches now show Off; explicit true remains On and fails without a matching contract. Schema-backed samples explicitly enable validation. Existing imported drafts are not rewritten. Retest after editing; old run output does not certify the latest draft.
+- Added **Sample: Renamed fields to XML**: JSON `zone:[2,5]` maps to XML User/Score elements 2 and 5. Payload, imported source schema, mapping and serialized result are regression-checked.
+- Existing typed JSON/XML examples remain available. Imported or customized schemas and flows are not overwritten.
+- The user guide explains schema versus actual values, different source/target field names, test-session lifetime and parallel-branch availability.
+- Both shared-schema editors provide read-only change impact analysis: directly affected saved activities, structural changes and newly broken source references. No mappings are silently rewritten. Deployed snapshots and transitive dependencies require separate review; runtime tests remain necessary.
+- Generated HTML/Markdown process, project, CLI and package documentation includes activity name (type), named schema kind/root, named connection kind and explicit missing references, without exporting connection credentials.
+- `npm run test:samples` gates the complete catalogue's schema references/starter contracts and executes the existing connection-free mapping/validation suites. It caught and corrected a Queue/topic trigger design-shape omission; external service samples keep separate certification gates.
+- Installation and deployment examples are version-neutral, keeping engine releases distinct from application package versions.
 
-Strict sample validation is intentionally tighter. Use JSON Schema for optional fields and extra-property policies. Keep credentials in the vault, not free-text scripts, and review generated documentation before sharing it.
+## Verification scope
 
-## Verification
+Fresh 2.0.9 regression: **414 passed, 0 failed, 26 skipped** (440 total). Server, web and test typechecks, build, generated documentation and browser smoke checks pass. Separate live runs passed 13 database checks, 24 local ActiveMQ/RabbitMQ checks, 24 strict mutual-TLS proxy checks, 9 Kafka SASL/TLS checks and 4 REST checks including Kafka subscribe/commit/close. The dependency audit reports zero known vulnerabilities.
 
-Full build/regression: **447 tests, 440 passed, 0 failed, 7 skipped**. Hosted Kafka and the four REST checks skipped in that combined invocation pass separately. Messaging adds 66 native scenario executions across connection modes and 4/4 REST checks; real external PostgreSQL/MariaDB connector and engine queries pass. Audit: 0 vulnerabilities. The 24-hour separate-machine soak, Linux Docker image and public ACME staging gate remain deferred, not passed.
+Kafka native client-certificate testing passed all nine functional scenario assertions, but the full process timed out during teardown; a focused listener/lifecycle rerun passed and exited cleanly. This caveat is retained, not counted as a clean full-suite exit. These are scoped internal functional checks, not third-party protocol certification or a soak/throughput benchmark. See the [verification record](docs/releases/2.0.9-verification.md) for evidence and limitations. Packaging and installation verification are recorded separately; no Git commit/tag or publication is performed.
 
-Results are recorded in [the 2.0.8 engineering record](docs/benchmarks/release-2.0.8-verification.md). This is not third-party certification or a new long-duration soak. Packaging/deployment, commit/tag and publication are separate actions; no Git commit is made by this change.
+Windows/Linux release archives and checksums were generated. On 2026-10-24, the packaged runtime was deployed to 4800 and Laragon 4810; both report 2.0.9 and ready, with persisted project/configuration inventories verified unchanged and recoverable backups retained. Fresh dependency installations audited with zero known vulnerabilities.
 
-Previous release: [2.0.7](docs/releases/2.0.7.md).
+Previous release: [2.0.8](docs/releases/2.0.8.md).

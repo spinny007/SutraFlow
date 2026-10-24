@@ -50,7 +50,7 @@ export function shapeAt(expr: unknown, scope: { input: SNode | null; nodes: Reco
   return cur ?? null;
 }
 
-export function designSchemas(doc: FlowDoc): Record<string, NodeDesign> {
+export function designSchemas(doc: FlowDoc, lookup = { tree: schemaTree, warnings: schemaWarnings }): Record<string, NodeDesign> {
   const out: Record<string, NodeDesign> = {};
   const byName: Record<string, SNode | null> = {};
   const done = new Set<string>();
@@ -63,7 +63,7 @@ export function designSchemas(doc: FlowDoc): Record<string, NodeDesign> {
       if (!pending.has(n.id)) continue;
       const ps = preds(n.id);
       if (ps.some(e => !done.has(e.from)) && guard <= doc.nodes.length) continue;
-      out[n.id] = designNode(doc, n, ps.map(e => ({ edge: e, from: doc.nodes.find(x => x.id === e.from)! })), out, byName);
+      out[n.id] = designNode(doc, n, ps.map(e => ({ edge: e, from: doc.nodes.find(x => x.id === e.from)! })), out, byName, lookup);
       byName[n.name] = out[n.id].out;
       done.add(n.id);
       pending.delete(n.id);
@@ -78,7 +78,7 @@ function portShape(d: NodeDesign | undefined, port: string, fromName: string): S
   return d.ports?.[port] ?? d.out;
 }
 
-function designNode(doc: FlowDoc, n: FlowNode, ins: { edge: { port: string }; from: FlowNode }[], all: Record<string, NodeDesign>, byName: Record<string, SNode | null>): NodeDesign {
+function designNode(doc: FlowDoc, n: FlowNode, ins: { edge: { port: string }; from: FlowNode }[], all: Record<string, NodeDesign>, byName: Record<string, SNode | null>, lookup: { tree: typeof schemaTree; warnings: typeof schemaWarnings }): NodeDesign {
   const act = engine.activity(n.type);
   const cfg = n.config || {};
   const errors: string[] = [], warnings: string[] = [];
@@ -88,7 +88,7 @@ function designNode(doc: FlowDoc, n: FlowNode, ins: { edge: { port: string }; fr
 
   const inputTrees: Record<string, SNode> = {};
   const safeSchema = (ref: string | undefined) => {
-    try { for (const notice of schemaWarnings(ref)) if (!warnings.includes(notice)) warnings.push(notice); return schemaTree(ref); } catch (e: any) { warnings.push(e.message); return null; }
+    try { for (const notice of lookup.warnings(ref)) if (!warnings.includes(notice)) warnings.push(notice); return lookup.tree(ref); } catch (e: any) { warnings.push(e.message); return null; }
   };
   const h: SchemaHelpers = {
     schema: safeSchema,

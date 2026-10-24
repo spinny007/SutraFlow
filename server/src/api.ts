@@ -558,14 +558,14 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.get('/api/projects/:id/documentation', async (req: any, reply) => {
     const p = projects.requireProject(req.params.id);
     const list = flows.listFlows(req.params.id).map(f => ({ id: f.id, doc: flows.getFlow(f.id)!.doc, version: f.deployed?.version, deployed: !!f.deployed, folder: f.folder }));
-    return docReply(reply, projectDocumentation({ name: p.name, description: p.description, variables: p.config.variables }, list, { resources: docResources(p.id), made: version }), p.name, req.query?.format);
+    return docReply(reply, projectDocumentation({ name: p.name, description: p.description, variables: p.config.variables }, list, { resources: docResources(p.id), schemas: schemas.listSchemas(p.id), made: version }), p.name, req.query?.format);
   });
   app.get('/api/flows/:id/documentation', async (req: any, reply) => {
     const f = flows.getFlow(req.params.id);
     if (!f) throw new HttpError(404, 'Sutra not found');
     const pid = f.project_id || null;
     const others = pid ? flows.listFlows(pid).map(x => ({ id: x.id, name: x.name })) : [];
-    return docReply(reply, sutraDocumentation({ id: f.id, doc: f.doc, version: f.deployed?.version, deployed: !!f.deployed }, { resources: pid ? docResources(pid) : [], sutras: others, made: version }), f.doc.name, req.query?.format);
+    return docReply(reply, sutraDocumentation({ id: f.id, doc: f.doc, version: f.deployed?.version, deployed: !!f.deployed }, { resources: pid ? docResources(pid) : [], schemas: pid ? schemas.listSchemas(pid) : [], sutras: others, made: version }), f.doc.name, req.query?.format);
   });
   /** Sample projects shipped in samples/ (npm run samples): whole projects as release zips, with their files. */
   const sampleIndex = () => { try { return JSON.parse(fs.readFileSync(path.join(rootDir, 'samples', 'index.json'), 'utf8')) as { file: string; name: string; description: string; sutras: string[]; bytes: number }[]; } catch { return []; } };
@@ -697,6 +697,10 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.delete('/api/schemas/:id', async (req: any) => { try { return { ok: true, ...deleteItem('schema', req.params.id) }; } catch (e: any) { throw bad(e.message); } });
   app.post('/api/schemas/:id/rename', async (req: any) => { try { return renameItem('schema', req.params.id, req.body?.name); } catch (e: any) { throw bad(e.message); } });
   app.get('/api/schemas/:id/tree', async (req: any) => schemas.schemaTree(req.params.id + (req.query?.root ? '::' + req.query.root : '')));
+  app.post('/api/schemas/:id/impact', async (req: any) => {
+    try { return (await import('./schema-impact.js')).schemaImpact(req.params.id, req.body || {}); }
+    catch (e: any) { throw bad(e.message); }
+  });
 
   /** Design-time shapes of every step (Process Data, Activity Input trees, Output fields). */
   app.post('/api/design/schemas', async (req: any) => designSchemas(flows.normalizeDoc(req.body?.doc)));
@@ -817,9 +821,9 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     return { runId, warnings: v.warnings };
   });
 
-  /** Latest run outputs of a flow, used by the mapper as sample data. */
+  /** Explicit test/debug sample lookup only; never promote production output to design samples. */
   app.get('/api/flows/:id/sample', async (req: any) => {
-    const r = q.get<any>(`select id from runs where flow_id = ? order by started_at desc limit 1`, req.params.id);
+    const r = q.get<any>(`select id from runs where flow_id = ? and source in ('test', 'debug') order by started_at desc limit 1`, req.params.id);
     if (!r) return { outputs: {}, runId: null };
     const d = runDetail(r.id);
     return { runId: d.id, outputs: d.outputs, vars: d.vars, triggerNode: d.triggerNode };

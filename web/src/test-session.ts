@@ -1,0 +1,18 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 2.0.9
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+export const testIsActive = (status: string) => ['running', 'waiting', 'paused', 'queued'].includes(status);
+
+/** Only clear the browser's session after the engine confirms a terminal run state. */
+export async function stopTestSession(id: string, transport: { post(url: string): Promise<unknown>; get(url: string): Promise<{ status: string }> }) {
+  await transport.post(`/api/runs/${encodeURIComponent(id)}/cancel`);
+  const run = await transport.get(`/api/runs/${encodeURIComponent(id)}`);
+  if (testIsActive(run.status)) throw new Error('The engine has not confirmed test cancellation yet. Test controls have been retained; try Stop test again.');
+  return run.status;
+}

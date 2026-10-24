@@ -322,6 +322,17 @@ export const busActivities: Activity[] = [
       headers: { messageId: '', correlationId: '', replyTo: '', type: '', priority: 4, deliveryMode: 'persistent', timestamp: '', expiration: '', redelivered: false, deliveryCount: 1, contentType: '' },
       key: '', partition: 0, offset: '',
     },
+    outputSchema: (cfg, h) => {
+      // A design sample is an explicit fixture, not a cached production message.
+      // Keep unknown body fields open when no fixture was supplied.
+      let sample: any;
+      try { sample = JSON.parse(String(cfg.testMessage || '{}')); } catch { sample = {}; }
+      if (!sample || typeof sample !== 'object' || Array.isArray(sample)) sample = {};
+      const headers = { messageId: '', correlationId: '', replyTo: '', type: '', priority: 4, deliveryMode: 'persistent', timestamp: '', expiration: '', redelivered: false, deliveryCount: 1, contentType: '', ...(sample.headers || {}) };
+      const tree = h.infer({ bodyText: '', bodyError: '', properties: {}, destination: '', key: '', partition: 0, offset: '', ...sample, headers }, 'message');
+      if (!Object.prototype.hasOwnProperty.call(sample, 'body')) tree.children?.push({ name: 'body', type: 'any' });
+      return tree;
+    },
     execute: c => {
       const input = c.input ?? JSON.parse(c.raw('testMessage') || '{}');
       if (input.bodyError) throw new Error(input.bodyError);

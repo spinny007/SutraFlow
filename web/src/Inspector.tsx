@@ -7,13 +7,14 @@
  * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
  * SPDX-License-Identifier: AGPL-3.0-only
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { missingInNode, variablesUsed } from './vars';
 import { MissingVariables } from './Project';
 import { post } from './api';
 import { FieldList, VarPicker, insertAtCaret, visible } from './Fields';
 import { ConditionDataBrowser, Mapper, inferShape } from './Mapper';
 import { XmlOutput } from './XmlOutput';
+import { observedShape, repeatedValueSummary } from './mapping-values';
 import { famOf, Json, since, useCatalog, useToast } from './ui';
 import { ACTIVE, portsOf, type FlowDoc, type FlowEdge, type FlowNode, type NodeDesign, type ProcessVariable, type RunDetail, type SNode } from './types';
 
@@ -25,7 +26,6 @@ interface Props {
   sel: { kind: 'node' | 'edge'; id: string } | null;
   selNode?: FlowNode;
   run: RunDetail | null;
-  sample: { outputs: Record<string, any>; vars?: Record<string, any> };
   design: Record<string, NodeDesign>;
   tab: InspectorTab;
   setTab(t: InspectorTab): void;
@@ -75,7 +75,7 @@ export function Inspector(p: Props) {
           <div className="fld"><label htmlFor="econd">Condition <VarPicker target="econd" onInsert={insertCondition} /></label>
             <input id="econd" type="text" className="code" spellCheck={false} value={e?.condition || ''} onChange={ev => setEdge({ condition: ev.target.value })} />
             <div className="hint"><code>{'{input.x}'}</code> is {a?.name}'s output; <code>{'{nodes.Name.x}'}</code>, <code>{'{vars.x}'}</code>, <code>{'{gv.X}'}</code> and <code>{'{ev.X}'}</code> work too. Examples: <code>{'={input.amount} > {gv.LIMIT}'}</code>, <code>{"=upper-case({input.country}) = 'IN'"}</code>, <code>{'=count({input.rows}) = 0'}</code>.</div>
-            {a && <ConditionDataBrowser from={a} doc={p.doc} design={p.design} run={p.run} outputs={p.run?.outputs && Object.keys(p.run.outputs).length ? p.run.outputs : p.sample.outputs} localVars={p.sample.vars} onPick={path => insertCondition(`{${path}}`)} />}
+            {a && <ConditionDataBrowser from={a} doc={p.doc} design={p.design} run={p.run} outputs={p.run?.outputs || {}} localVars={p.run?.vars} onPick={path => insertCondition(`{${path}}`)} />}
           </div>
         )}
         {sameOutput.length > 1 && <p className="muted xs">{sameOutput.length} connections leave {a?.name} ({e?.port}): {sameOutput.map(x => x.label || (x.when === 'when' ? x.condition : x.when) || 'always').join(' · ')}</p>}
@@ -107,7 +107,7 @@ function NodeVariables({ node }: { node: FlowNode }) {
   return <MissingVariables names={miss.map(m => m.name)} via={Object.fromEntries(miss.filter(m => m.via).map(m => [m.name, m.via]))} />;
 }
 
-const runOutputs = (p: Props) => (p.run && !ACTIVE.includes(p.run.status) ? p.run.outputs : p.run?.outputs && Object.keys(p.run.outputs).length ? p.run.outputs : p.sample.outputs);
+const runOutputs = (p: Props) => p.run?.outputs || {};
 
 function Overview({ flowId, doc, setDoc, run, onDelete }: Props) {
   const { meta } = useCatalog();
@@ -163,6 +163,12 @@ function General(p: Props & { node: FlowNode }) {
   const { meta, projectId, resources, secrets } = useCatalog();
   const [preview, setPreview] = useState<any>(null);
   const [previewing, setPreviewing] = useState(false);
+  const previewEpoch = useRef(0);
+  useEffect(() => {
+    previewEpoch.current++;
+    setPreview(null); setPreviewing(false);
+    return () => { previewEpoch.current++; };
+  }, [node.id, node.config, p.run?.id, projectId, resources]);
   const a = meta.activities.find(x => x.type === node.type);
   if (!a) return <div className="errbox">Unknown activity type {node.type}</div>;
   // Mappable inputs (templates, formulas, structured mappings) are edited in the Input tab.
@@ -173,16 +179,18 @@ function General(p: Props & { node: FlowNode }) {
   const warnings = p.design[node.id]?.warnings || [];
   const canPreview = node.type === 'dbQuery' || node.type === 'databricksSql';
   const testQuery = async () => {
+    const epoch = ++previewEpoch.current;
     setPreviewing(true); setPreview(null);
-    const outputs = p.run?.outputs && Object.keys(p.run.outputs).length ? p.run.outputs : p.sample.outputs;
+    const outputs = p.run?.outputs || {};
     const taskInput = [...(p.run?.tasks || [])].reverse().find(t => t.node_id === node.id)?.input;
     const incoming = p.doc.edges.find(e => e.to === node.id);
     const previous = incoming ? p.doc.nodes.find(n => n.id === incoming.from) : undefined;
     const input = taskInput ?? (previous ? outputs[previous.name] : undefined) ?? {};
     try {
-      setPreview(await post('/api/design/query-preview', { projectId, node, scope: { input, nodes: outputs, vars: p.run?.vars || p.sample.vars || {}, trigger: {} } }));
-    } catch (e: any) { setPreview({ error: e.message }); }
-    finally { setPreviewing(false); }
+      const result = await post('/api/design/query-preview', { projectId, node, scope: { input, nodes: outputs, vars: p.run?.vars || {}, trigger: {} } });
+      if (epoch === previewEpoch.current) setPreview(result);
+    } catch (e: any) { if (epoch === previewEpoch.current) setPreview({ error: e.message }); }
+    finally { if (epoch === previewEpoch.current) setPreviewing(false); }
   };
   return (
     <>
@@ -287,12 +295,12 @@ function StepSettings({ node, updateNode, breakpoints, toggleBreakpoint }: Props
 
 /** Output fields of an activity: shape before a run, values after; "not run" when the last run skipped it. */
 function OutputTree({ shape, value, ran }: { shape: SNode | null; value: any; ran: boolean }) {
-  const s = shape ?? (value !== undefined ? inferShape(value, 'output') : null);
+  const s = ran ? observedShape(value) : shape;
   if (!s) return <p className="muted">No output fields.</p>;
   const Node = ({ n, v, depth }: { n: SNode; v: any; depth: number }) => {
     const shown = Array.isArray(v) ? v[0] : v;
     const leaf = !n.children?.length;
-    const text = !ran ? '' : leaf ? (shown === undefined ? '(empty)' : typeof shown === 'object' ? JSON.stringify(shown) : String(shown)) : Array.isArray(v) ? `${v.length} item${v.length === 1 ? '' : 's'}` : '';
+    const text = !ran ? '' : repeatedValueSummary(v, leaf) ?? (leaf ? (shown === undefined ? '(empty)' : typeof shown === 'object' ? JSON.stringify(shown) : String(shown)) : '');
     return (
       <>
         <div className="orow" style={{ paddingLeft: depth * 14 }}>

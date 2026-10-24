@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { Agent, request } from 'undici';
 import { testEnv } from './helpers.js';
+import { readTestPem } from './pem-fixtures.js';
 
 const require = createRequire(import.meta.url);
 const enabled = process.env.SUTRA_BROKER_REST_TEST === '1';
@@ -74,9 +75,9 @@ test('Kafka REST publishes and completes create-subscribe-poll-commit-close life
   const topic = `sutraflow-rest-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
   const group = `${topic}-group`; const instance = `${topic}-consumer`;
   const brokers = process.env.SUTRA_KAFKA_BROKERS!.split(',').map(x => x.trim()).filter(Boolean);
-  const kafkaCa = process.env.SUTRA_KAFKA_CA_FILE ? fs.readFileSync(process.env.SUTRA_KAFKA_CA_FILE, 'utf8') : undefined;
-  const clientCert = process.env.SUTRA_KAFKA_CLIENT_CERT_FILE ? fs.readFileSync(process.env.SUTRA_KAFKA_CLIENT_CERT_FILE, 'utf8') : '';
-  const clientKey = process.env.SUTRA_KAFKA_CLIENT_KEY_FILE ? fs.readFileSync(process.env.SUTRA_KAFKA_CLIENT_KEY_FILE, 'utf8') : '';
+  const kafkaCa = readTestPem('SUTRA_KAFKA_CA_FILE') || undefined;
+  const clientCert = readTestPem('SUTRA_KAFKA_CLIENT_CERT_FILE');
+  const clientKey = readTestPem('SUTRA_KAFKA_CLIENT_KEY_FILE');
   const { Kafka, logLevel } = require('kafkajs');
   const ssl = { rejectUnauthorized: true, ...(kafkaCa ? { ca: [kafkaCa] } : {}), ...(clientCert && clientKey ? { cert: [clientCert], key: clientKey } : {}) };
   const saslPassword = process.env.SUTRA_KAFKA_PASSWORD || '';
@@ -136,7 +137,7 @@ test('generated RabbitMQ, ActiveMQ and Kafka REST sample Sutras execute', { skip
     if (kafkaEnabled) {
       topic = `sutraflow-rest-sample-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
       const brokers = process.env.SUTRA_KAFKA_BROKERS!.split(',').map(x => x.trim()).filter(Boolean);
-      const kafkaCa = process.env.SUTRA_KAFKA_CA_FILE ? fs.readFileSync(process.env.SUTRA_KAFKA_CA_FILE, 'utf8') : undefined;
+      const kafkaCa = readTestPem('SUTRA_KAFKA_CA_FILE') || undefined;
       const { Kafka, logLevel } = require('kafkajs');
       const kafka = new Kafka({ clientId: topic, brokers, ssl: { rejectUnauthorized: true, ...(kafkaCa ? { ca: [kafkaCa] } : {}) }, logLevel: logLevel.NOTHING,
         sasl: process.env.SUTRA_KAFKA_PASSWORD ? { mechanism: process.env.SUTRA_KAFKA_SASL || 'plain', username: process.env.SUTRA_KAFKA_USER || '', password: process.env.SUTRA_KAFKA_PASSWORD } : undefined });

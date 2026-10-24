@@ -17,6 +17,7 @@ import {
 import { del, get, post, put } from './api';
 import { famOf, Modal, useCatalog, useToast } from './ui';
 import { importSamplesWithCatalog } from './sample-import';
+import { stopTestSession, testIsActive } from './test-session';
 import { ACTIVE, portsOf, type ActivityMeta, type FlowDoc, type FlowNode, type FlowSummary, type Meta, type NodeDesign, type Project, type Resource, type RunDetail } from './types';
 import { TEMPLATES } from './templates';
 import { Inspector, type InspectorTab } from './Inspector';
@@ -106,7 +107,7 @@ export function uniqueName(doc: FlowDoc, base: string, except?: string) {
 }
 
 function DesignerInner() {
-  const { meta, projectId, project, resources, reload: reloadCatalog } = useCatalog();
+  const { meta, projectId, project, resources, schemas, reload: reloadCatalog } = useCatalog();
   const toast = useToast();
   const rf = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
@@ -115,7 +116,11 @@ function DesignerInner() {
   const [doc, setDoc] = useState<FlowDoc | null>(null);
   const [sel, setSel] = useState<{ kind: 'node' | 'edge'; id: string } | null>(null);
   const [run, setRun] = useState<RunDetail | null>(null);
-  const [sample, setSample] = useState<{ outputs: Record<string, any>; vars?: Record<string, any> }>({ outputs: {} });
+  const testSession = useRef(0);
+  const [activeTest, setActiveTest] = useState<{ id: string; name: string } | null>(null);
+  const [startingTest, setStartingTest] = useState(false);
+  const [stoppingTest, setStoppingTest] = useState(false);
+  const startLock = useRef(false);
   const [dialog, setDialog] = useState<null | 'new' | 'deploy' | 'delete'>(null);
   const [newName, setNewName] = useState('');
   const [leftTab, setLeftTab] = useState<'project' | 'palette' | 'git'>(() => { try { return (localStorage.getItem('sutra.left') as any) || 'palette'; } catch { return 'palette'; } });
@@ -149,6 +154,8 @@ function DesignerInner() {
 
   // Load the selected flow.
   useEffect(() => {
+    testSession.current++;
+    setRun(null);
     if (!flowId) { setDoc(null); return; }
     try { localStorage.setItem('sutra.flow', flowId); } catch { /* ignore */ }
     let off = false;
@@ -158,7 +165,6 @@ function DesignerInner() {
       hist.current = { past: [], future: [], at: 0 }; setHistTick(t => t + 1);
       requestAnimationFrame(() => rf.fitView({ padding: 0.2, maxZoom: 1.1 }));
     }).catch(e => toast(e.message, true));
-    get(`/api/flows/${flowId}/sample`).then(s => !off && setSample(s)).catch(() => {});
     return () => { off = true; };
   }, [flowId, rf, toast]);
 
@@ -180,6 +186,8 @@ function DesignerInner() {
   const hist = useRef<{ past: FlowDoc[]; future: FlowDoc[]; at: number }>({ past: [], future: [], at: 0 });
   const [, setHistTick] = useState(0);
   const apply = useCallback((next: FlowDoc) => {
+    testSession.current++;
+    setRun(null);
     docRef.current = next;
     setDoc(next);
     setSaving('dirty');
@@ -230,9 +238,23 @@ function DesignerInner() {
       post('/api/design/schemas', { doc }).then(setDesign).catch(() => {});
     }, 350);
     return () => window.clearTimeout(t);
-  }, [doc]);
+  }, [doc, schemas]);
+
+  // Schema/catalog changes invalidate the designer's explicit test session too.
+  useEffect(() => { testSession.current++; setRun(null); }, [schemas]);
 
   // ---------- run status on the canvas ----------
+  // Keep cancellation controls even when an edit clears the preview session.
+  useEffect(() => {
+    if (!activeTest) return;
+    let off = false;
+    const timer = window.setInterval(() => {
+      get<RunDetail>(`/api/runs/${activeTest.id}`).then(r => {
+        if (!off && !testIsActive(r.status)) setActiveTest(t => t?.id === activeTest.id ? null : t);
+      }).catch(() => {});
+    }, 1000);
+    return () => { off = true; window.clearInterval(timer); };
+  }, [activeTest]);
   const statusByNode = useMemo(() => {
     const m: Record<string, { status: string; count: number }> = {};
     for (const t of run?.tasks || []) m[t.node_id] = { status: t.status === 'error' ? 'failed' : t.status, count: (m[t.node_id]?.count || 0) + 1 };
@@ -241,16 +263,19 @@ function DesignerInner() {
 
   useEffect(() => {
     if (!run || !ACTIVE.includes(run.status)) return;
+    const session = testSession.current;
+    let off = false;
     const t = window.setTimeout(() => {
       get<RunDetail>(`/api/runs/${run.id}`).then(r => {
+        if (off || session !== testSession.current) return;
         setRun(r);
         if (!ACTIVE.includes(r.status)) {
-          setSample({ outputs: r.outputs, vars: r.vars });
+          setActiveTest(t => t?.id === r.id ? null : t);
           toast(r.status === 'done' ? `Test run finished in ${r.steps} steps` : `Test run ${r.status}${r.error ? `: ${r.error}` : ''}`, r.status !== 'done');
         }
       }).catch(() => {});
     }, run.status === 'waiting' ? 1500 : run.status === 'paused' ? 700 : 350);
-    return () => window.clearTimeout(t);
+    return () => { off = true; window.clearTimeout(t); };
   }, [run, toast]);
 
   // ---------- React Flow wiring ----------
@@ -357,16 +382,37 @@ function DesignerInner() {
 
   // ---------- actions ----------
   const testRun = async (triggerNodeId?: string, debug = false) => {
-    if (!doc || !flowId) return;
+    if (!doc || !flowId || activeTest || startLock.current) return;
+    startLock.current = true; setStartingTest(true);
+    const session = ++testSession.current;
+    setRun(null);
     await saveNow(doc);
     try {
       const sTrig = sel?.kind === 'node' && actOf(doc.nodes.find(n => n.id === sel.id)?.type || '')?.trigger ? sel.id : undefined;
       const r = await post(`/api/flows/${flowId}/test`, { doc, triggerNodeId: triggerNodeId || sTrig, debug: debug ? { stepping: true, breakpoints } : undefined });
+      setActiveTest({ id: r.runId, name: doc.name });
       if (r.warnings?.length) toast(r.warnings.join('\n'));
-      setRun(await get(`/api/runs/${r.runId}`));
+      const detail = await get<RunDetail>(`/api/runs/${r.runId}`);
+      if (!testIsActive(detail.status)) setActiveTest(t => t?.id === detail.id ? null : t);
+      if (session === testSession.current) setRun(detail);
     } catch (e: any) { toast(e.message, true); }
+    finally { startLock.current = false; setStartingTest(false); }
   };
-  const debugAct = (action: 'step' | 'continue' | 'pause') => run && post(`/api/runs/${run.id}/debug`, { action }).then(() => get<RunDetail>(`/api/runs/${run.id}`)).then(setRun).catch(e => toast(e.message, true));
+  const stopTest = async () => {
+    if (!activeTest || stoppingTest) return;
+    setStoppingTest(true);
+    try {
+      const status = await stopTestSession(activeTest.id, { post, get });
+      testSession.current++; setRun(null); setActiveTest(null);
+      toast(status === 'cancelled' ? 'Test stopped; preview values cleared.' : 'Test already finished; preview values cleared.');
+    } catch (e: any) { toast(e.message, true); }
+    finally { setStoppingTest(false); }
+  };
+  const debugAct = (action: 'step' | 'continue' | 'pause') => {
+    if (!run || stoppingTest) return;
+    const session = testSession.current;
+    post(`/api/runs/${run.id}/debug`, { action }).then(() => get<RunDetail>(`/api/runs/${run.id}`)).then(r => { if (session === testSession.current) setRun(r); }).catch(e => toast(e.message, true));
+  };
   const createFlow = async (tplId: string) => {
     const t = TEMPLATES.find(x => x.id === tplId)!;
     const d = structuredClone(t.doc);
@@ -442,20 +488,21 @@ function DesignerInner() {
             </select>
             <button className="btn" onClick={() => setDialog('new')}>+ New Sutra</button>
             {doc && <>
-              <button className="btn go" onClick={() => testRun()} title="Ctrl+Enter">▶ Test</button>
-              <button className="btn" onClick={() => testRun(undefined, true)} title="Run one activity at a time; stops at breakpoints">🐞 Debug</button>
+              <button className="btn go" disabled={!!activeTest || startingTest || stoppingTest} onClick={() => testRun()} title="Ctrl+Enter">{startingTest ? 'Starting test…' : '▶ Test'}</button>
+              <button className="btn" disabled={!!activeTest || startingTest || stoppingTest} onClick={() => testRun(undefined, true)} title="Run one activity at a time; stops at breakpoints">🐞 Debug</button>
               {run?.debug && ACTIVE.includes(run.status) && <>
                 <button className="btn" onClick={() => debugAct('step')} title="Run the next activity">⤼ Step</button>
                 <button className="btn" onClick={() => debugAct('continue')} title="Run until the next breakpoint">▶ Continue</button>
                 <button className="btn" onClick={() => debugAct('pause')} title="Pause before the next activity">⏸ Pause</button>
               </>}
-              {run && ACTIVE.includes(run.status) && <button className="btn danger" onClick={() => post(`/api/runs/${run.id}/cancel`).then(() => get(`/api/runs/${run.id}`)).then(setRun)}>■ Stop</button>}
+              <button className="btn danger" disabled={!activeTest || stoppingTest} onClick={stopTest} title={activeTest ? `Cancel test of ${activeTest.name}; abort supported in-flight work and clear preview values after confirmation. Completed external side effects are not rolled back.` : 'No active test. Use Clear test data for completed results.'}>{stoppingTest ? 'Stopping test…' : '■ Stop test'}</button>
               <button className="btn" onClick={undo} disabled={!hist.current.past.length} title="Undo (Ctrl+Z)" aria-label="Undo">↶</button>
               <button className="btn" onClick={redo} disabled={!hist.current.future.length} title="Redo (Ctrl+Y)" aria-label="Redo">↷</button>
               <button className="btn primary" onClick={() => setDialog('deploy')}>Deploy</button>
               <span className={`pill${saving === 'saved' ? '' : ' warn'}`}>{saving === 'saved' ? 'Saved' : saving === 'saving' ? 'Saving' : 'Unsaved'}</span>
               {current?.deployed ? <span className="pill ok">Deployed v{current.deployed.version}</span> : <span className="pill">Draft only</span>}
               {run && <span className={`pill${run.status === 'done' ? ' ok' : run.status === 'failed' ? ' err' : ' warn'}`}>{run.debug ? 'Debug' : 'Test run'}: {run.status === 'paused' ? `paused before ${doc.nodes.find(n => n.id === run.tasks.find(t => t.status === 'paused')?.node_id)?.name ?? 'next activity'}` : run.status}</span>}
+              {run && !ACTIVE.includes(run.status) && <button className="btn" onClick={() => { testSession.current++; setRun(null); }} title="Remove this test session's values from the designer; run history is unchanged">Clear test data</button>}
             </>}
           </div>
           {doc ? (
@@ -477,10 +524,10 @@ function DesignerInner() {
         {explorerSel ? <ExplorerEditor sel={explorerSel} setSel={setExplorerSel} /> : doc && flowId ? (
           <Inspector
             key={flowId}
-            flowId={flowId} doc={doc} sel={sel} selNode={selNode} run={run} sample={sample}
+            flowId={flowId} doc={doc} sel={sel} selNode={selNode} run={run}
             design={design} tab={tab} setTab={setTab} breakpoints={breakpoints} toggleBreakpoint={toggleBreakpoint}
             setDoc={update} updateNode={updateNode} renameNode={renameNode} removeSel={removeSel} duplicate={duplicate}
-            onDecided={() => run && get(`/api/runs/${run.id}`).then(setRun)} onTest={id => testRun(id)} onDelete={removeFlow}
+            onDecided={() => { if (!run) return; const session = testSession.current; get<RunDetail>(`/api/runs/${run.id}`).then(r => { if (session === testSession.current) setRun(r); }).catch(e => toast(e.message, true)); }} onTest={id => testRun(id)} onDelete={removeFlow}
           />
         ) : <aside className="side"><div className="tabbody muted">Select or create a Sutra.</div></aside>}
       </main>

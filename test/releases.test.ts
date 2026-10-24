@@ -71,7 +71,7 @@ test('a release zip holds the package, a deployment config to fill in and a READ
   const p = buildPackage(pid, { version: '1.2.0', note: 'Status service' });
   const z = unzip(buildBundle(p));
   assert.deepEqual([...z.keys()], ['package.sutra', 'deployment-config.json', 'README.txt', 'documentation.html', 'documentation.md']);
-  assert.match(z.get('documentation.md')!.toString(), /## Status[\s\S]*REST service: GET \/status/);
+  assert.match(z.get('documentation.md')!.toString(), /## Status[\s\S]*GET \/status \(REST service\)/);
   const cfg = JSON.parse(z.get('deployment-config.json')!.toString());
   assert.equal(cfg.project, 'Orders');
   assert.deepEqual(cfg.secrets, ['ORDERS_DB']);

@@ -51,12 +51,12 @@ Development and system test servers deploy from the designer. A server with `SUT
 ## 2. The sutra command-line tool
 
 ```
-sutra package  --project "Orders" --version 1.4.0 --note "Faster lookup" --out orders-1.4.0.sutra
-sutra package  --project "Orders" --version 1.4.0 --zip                 # release zip: package + config + README
-sutra package  --from-git <repository | folder> [--ref v1.4.0] --version 1.4.0 --out orders-1.4.0.zip
-sutra check    orders-1.4.0.zip
-sutra deploy   orders-1.4.0.zip [--config prod-config.json] [--keep-others]
-sutra test     orders-1.4.0.sutra [--secret NAME=value] [--secrets-from-env]
+sutra package  --project "Orders" --version YOUR_PROJECT_VERSION --note "Faster lookup" --out orders.sutra
+sutra package  --project "Orders" --version YOUR_PROJECT_VERSION --zip # release zip: package + config + README
+sutra package  --from-git <repository | folder> [--ref YOUR_GIT_REF] --version YOUR_PROJECT_VERSION --out orders.zip
+sutra check    orders.zip
+sutra deploy   orders.zip [--config prod-config.json] [--keep-others]
+sutra test     orders.sutra [--secret NAME=value] [--secrets-from-env]
 sutra history  --project "Orders"
 sutra rollback --project "Orders" [--to <deployment id>]
 sutra secret   set ORDERS_DB_PW --from-env ORDERS_DB_PW
@@ -150,13 +150,13 @@ Laragon's MySQL works as a DB Ops connection (driver mysql, host 127.0.0.1, port
 
 ## 4. Docker
 
-One image serves both roles:
+One image serves both roles. Replace `YOUR_RELEASE_TAG`, `YOUR_PROJECT_VERSION` and `YOUR_GIT_REF` with the chosen engine release, application version and Git reference; these are distinct versioned artifacts:
 
 ```
-docker build -t sutraflow:1.8.1 .
-docker run -p 4800:4800 -p 8080:8080 -v sutra-data:/data sutraflow:1.8.1                    # studio
+docker build -t sutraflow:YOUR_RELEASE_TAG .
+docker run -p 4800:4800 -p 8080:8080 -v sutra-data:/data sutraflow:YOUR_RELEASE_TAG         # studio
 docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=... \
-           -v ./deploy:/deploy:ro -p 8080:8080 -p 8443:8443 sutraflow:1.8.1                  # engine
+           -v ./deploy:/deploy:ro -p 8080:8080 -p 8443:8443 sutraflow:YOUR_RELEASE_TAG       # engine
 ```
 
 - Runs as the non-root `node` user, with `tini` as init so `docker stop` drains running steps.
@@ -164,7 +164,7 @@ docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=...
 - JSON logs on standard output.
 - `docker-compose.yml`: a studio and an engine. `docker-compose.cluster.yml`: PostgreSQL, a studio and two engines.
 
-**Immutable releases**: `FROM sutraflow:1.8.1` + `COPY orders-1.4.0.sutra /deploy/` makes each release one image.
+**Immutable releases**: `FROM sutraflow:YOUR_RELEASE_TAG` + `COPY orders.sutra /deploy/` makes each release one image.
 
 Keep `SUTRA_MASTER_KEY` in your secret store: it decrypts the vault. With it set, the vault survives replacing containers. Without it, the key file in `/data` must be kept.
 

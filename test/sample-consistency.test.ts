@@ -1,0 +1,48 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 2.0.9
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { testEnv } from './helpers.js';
+testEnv(22980);
+const { boot } = await import('../server/src/index.js');
+const { engine } = await import('../server/src/engine/engine.js');
+const { saveProject } = await import('../server/src/projects.js');
+const { addSamples } = await import('../server/src/samples.js');
+const { getFlow } = await import('../server/src/flows.js');
+const { getSchema } = await import('../server/src/schemas.js');
+const { validateStructured } = await import('../server/src/schema-validation.js');
+const { designSchemas } = await import('../server/src/design.js');
+let srv: Awaited<ReturnType<typeof boot>>;
+before(async () => { srv = await boot({ listenAdmin: false, gateway: false }); });
+after(async () => { await srv.stop(); });
+
+test('entire bundled catalogue has project-local schemas and consistent starter payload contracts', async () => {
+  const p = saveProject({ name: 'Sample consistency gate', config: { variables: [] } });
+  const samples = addSamples(p.id);
+  const problems: string[] = [];
+  for (const sample of samples) {
+    const doc = getFlow(sample.id)!.doc;
+    const design = designSchemas(doc);
+    for (const n of doc.nodes) {
+      for (const f of engine.activity(n.type)?.fields || []) {
+        if (f.type !== 'schema' || !n.config[f.k]) continue;
+        const ref = String(n.config[f.k]);
+        const schema = getSchema(ref.split('::')[0]);
+        if (!schema || schema.project_id !== p.id) problems.push(`${doc.name}/${n.name}: unresolved ${f.label}`);
+      }
+      if (n.type === 'start' && n.config.schema && n.config.payload) {
+        const errors = await validateStructured(n.config.schema, JSON.parse(n.config.payload));
+        if (errors.length) problems.push(`${doc.name}/${n.name}: ${errors.join('; ')}`);
+      }
+      for (const warning of design[n.id]?.warnings || []) if (warning.includes('source field is absent')) problems.push(`${doc.name}/${n.name}: ${warning}`);
+    }
+  }
+  assert.deepEqual(problems, [], 'sample payloads, source references and imported contracts must agree');
+});

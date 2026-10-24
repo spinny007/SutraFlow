@@ -11,6 +11,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { testEnv, node, edge } from './helpers.js';
+import { readTestPem } from './pem-fixtures.js';
 
 const require = createRequire(import.meta.url);
 const password = process.env.SUTRA_RABBITMQ_PASSWORD || '';
@@ -22,7 +23,7 @@ if (!enabled) {
   testEnv(22820);
   const url = process.env.SUTRA_RABBITMQ_URL || 'amqp://localhost:5672/';
   const user = process.env.SUTRA_RABBITMQ_USER || 'guest';
-  const read = (name: string) => process.env[name] ? fs.readFileSync(process.env[name]!, 'utf8') : '';
+  const read = readTestPem;
   const caPem = read('SUTRA_RABBITMQ_CA_FILE');
   const clientCertPem = read('SUTRA_RABBITMQ_CLIENT_CERT_FILE');
   const clientKey = read('SUTRA_RABBITMQ_CLIENT_KEY_FILE');

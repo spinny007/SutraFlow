@@ -40,7 +40,7 @@ async function run(document: ReturnType<typeof doc>) {
 
 test('validation catalogue covers new activities, explicit strict reads and described, reusable contracts', () => {
   assert.ok(SAMPLES.some(s => s.id === 'validation'));
-  assert.equal(samples.length, 12, 'ten validation examples plus two manual/typed mapping examples');
+  assert.equal(samples.length, 13, 'ten validation examples plus three manual/typed mapping examples');
   const types = new Set<string>();
   for (const sample of samples) {
     const flow = getFlow(sample.id)!.doc;

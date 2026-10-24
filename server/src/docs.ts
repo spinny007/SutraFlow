@@ -20,6 +20,7 @@ import { booleanSetting } from './settings.js';
  */
 
 export interface DocResource { id: string; name: string; kind: string; config?: Record<string, any> }
+export interface DocSchema { id: string; name: string; kind: string; root?: string | null }
 export interface DocSutra { id?: string; doc: FlowDoc; version?: number; deployed?: boolean; folder?: string }
 export interface DocProject { name: string; description?: string; variables?: { name: string; type: string; value?: unknown; description?: string }[] }
 
@@ -44,9 +45,15 @@ function visible(f: Field, values: Record<string, any>, all: Field[]): boolean {
 }
 
 /** A setting as words: connections by name, secrets by name, lists and tables on one line. */
-function valueText(f: Field, v: unknown, res: Map<string, DocResource>, sutras: Map<string, string>): string {
+function valueText(f: Field, v: unknown, res: Map<string, DocResource>, sutras: Map<string, string>, schemas: Map<string, DocSchema>): string {
   if (v === undefined || v === null || v === '') return '';
-  if (f.type === 'resource') return res.get(String(v))?.name ? `${res.get(String(v))!.name}` : String(v);
+  const [schemaId, selectedRoot] = String(v).split('::');
+  if (['schema', 'resource'].includes(f.type) && typeof v === 'string' && (v.includes('{{') || v.startsWith('='))) return `${v} (resolved at runtime)`;
+  if (f.type === 'schema' || schemas.has(schemaId)) {
+    const schema = schemas.get(schemaId);
+    return schema ? `${schema.name} (${schema.kind.toUpperCase()})${selectedRoot || schema.root ? ` — root ${selectedRoot || schema.root}` : ''}` : `[missing schema: ${String(v)}]`;
+  }
+  if (f.type === 'resource') { const resource = res.get(String(v)); return resource ? `${resource.name} (${resource.kind})` : `[missing connection: ${String(v)}]`; }
   if (f.type === 'process') return sutras.get(String(v)) || String(v);
   if (f.type === 'secret') return `secret ${v}`;
   if (f.type === 'bool') {
@@ -94,9 +101,11 @@ function runOrder(doc: FlowDoc) {
   return [...order, ...doc.nodes.filter(n => !seen.has(n.id))];
 }
 
-function describe(s: DocSutra, resources: DocResource[], allSutras: Map<string, string>): SutraInfo {
+function describe(s: DocSutra, resources: DocResource[], allSutras: Map<string, string>, schemas: DocSchema[] = []): SutraInfo {
   const doc = s.doc;
   const res = new Map(resources.map(r => [r.id, r]));
+  const contracts = new Map(schemas.map(x => [x.id, x]));
+  const title = (n: FlowNode) => `${n.name} (${engine.activity(n.type)?.name || n.type})`;
   const used = new Set<string>();
   const byId = new Map(doc.nodes.map(n => [n.id, n]));
   const steps = runOrder(doc).map(n => {
@@ -106,7 +115,7 @@ function describe(s: DocSutra, resources: DocResource[], allSutras: Map<string, 
     for (const f of fields) {
       const stored = n.config?.[f.k];
       const v = stored === undefined ? f.def : stored;
-      const t = valueText(f, f.type === 'secret' ? v : safeConfig(v, f.k), res, allSutras);
+      const t = valueText(f, f.type === 'secret' ? v : safeConfig(v, f.k), res, allSutras, contracts);
       if (f.type === 'resource' && res.has(String(n.config[f.k]))) used.add(String(n.config[f.k]));
       settings.push([`${f.label}${stored === undefined ? ' (default)' : ''}${visible(f, n.config || {}, fields) ? '' : ' (inactive)'}`, t || '(not set)']);
     }
@@ -119,7 +128,8 @@ function describe(s: DocSutra, resources: DocResource[], allSutras: Map<string, 
     if (st.disabled) settings.push(['Disabled', 'yes: skipped when the Sutra runs']);
     const out = doc.edges.filter(e => e.from === n.id);
     const next = out.map(e => {
-      const to = byId.get(e.to)?.name || e.to;
+      const destination = byId.get(e.to);
+      const to = destination ? title(destination) : e.to;
       const cond = e.when === 'when' && e.condition ? ` when ${e.condition}` : e.when === 'otherwise' ? ' otherwise' : '';
       const port = e.port && e.port !== 'out' ? `${e.port}: ` : '';
       return `${port}${to}${cond}${e.label ? ` (${e.label})` : ''}`;
@@ -127,7 +137,7 @@ function describe(s: DocSutra, resources: DocResource[], allSutras: Map<string, 
     const usesNames = [...new Set(fields.filter(f => f.type === 'resource' && n.config?.[f.k] && res.has(String(n.config[f.k]))).map(f => res.get(String(n.config[f.k]))!.name))];
     return { n, activity: a?.name || n.type, trigger: !!a?.trigger, glyph: a?.glyph || '', settings, next, handled: out.some(e => e.port === 'error'), uses: usesNames };
   });
-  const starts = steps.filter(x => x.trigger).map(x => `${x.activity}: ${x.n.name}${x.settings.length ? ` (${x.settings.slice(0, 3).map(([k, v]) => `${k} ${v}`).join(', ')})` : ''}`);
+  const starts = steps.filter(x => x.trigger).map(x => `${title(x.n)}${x.settings.length ? ` — ${x.settings.slice(0, 3).map(([k, v]) => `${k} ${v}`).join(', ')}` : ''}`);
   return {
     name: doc.name, description: doc.description || '', version: s.version, deployed: s.deployed, folder: s.folder,
     starts: starts.length ? starts : ['Started by hand, by Call Sutra from another Sutra, or by the Run API'],
@@ -184,7 +194,7 @@ ${status ? `<p class="meta">${esc(status)}</p>` : ''}${i.description ? `<p class
 <table><thead><tr><th>#</th><th>Step</th><th>Activity</th><th>What it does</th></tr></thead><tbody>
 ${i.steps.map((s, k) => `<tr><td>${k + 1}</td><td><a href="#${anchor(i.name)}-${k + 1}">${esc(s.n.name)}</a></td><td>${esc(s.glyph)} ${esc(s.activity)}</td><td>${s.n.description ? esc(s.n.description) : '<span class="none">no description</span>'}</td></tr>`).join('\n')}
 </tbody></table>
-${i.steps.map((s, k) => `<div class="step" id="${anchor(i.name)}-${k + 1}"><${h(2)}>${k + 1}. ${esc(s.n.name)} <small>${esc(s.activity)}</small></${h(2)}>
+${i.steps.map((s, k) => `<div class="step" id="${anchor(i.name)}-${k + 1}"><${h(2)}>${k + 1}. ${esc(s.n.name)} <small>(${esc(s.activity)})</small></${h(2)}>
 ${s.n.description ? `<p>${esc(s.n.description)}</p>` : ''}${s.settings.length ? `<table class="kv">${s.settings.map(([a, b]) => `<tr><th>${esc(a)}</th><td>${esc(b)}</td></tr>`).join('')}</table>` : ''}
 <p class="next"><b>Next:</b> ${s.next.length ? esc(s.next.join('; ')) : 'the run ends here'}.${s.handled ? ' <b>Errors:</b> handled by the error branch.' : ''}</p></div>`).join('\n')}
 ${i.connections.length ? `<${h(1)}>Connections</${h(1)}><ul>${i.connections.map(r => `<li>${esc(r.name)} <span class="meta">${esc(r.kind)}</span></li>`).join('')}</ul>` : ''}
@@ -210,15 +220,15 @@ const page = (title: string, body: string, made: string) => `<!doctype html>
 <body>${body}<p class="meta">Made by SutraFlow ${esc(made)} from the Sutras and the descriptions of their steps.</p></body></html>`;
 
 /** Documentation of one Sutra. */
-export function sutraDocumentation(s: DocSutra, o: { resources: DocResource[]; sutras?: { id: string; name: string }[]; made?: string }) {
-  const info = describe(s, o.resources, new Map((o.sutras || []).map(x => [x.id, x.name])));
+export function sutraDocumentation(s: DocSutra, o: { resources: DocResource[]; schemas?: DocSchema[]; sutras?: { id: string; name: string }[]; made?: string }) {
+  const info = describe(s, o.resources, new Map((o.sutras || []).map(x => [x.id, x.name])), o.schemas);
   return { markdown: sutraMarkdown(info), html: page(info.name, sutraHtml(info), o.made || ''), undescribed: info.undescribed };
 }
 
 /** Documentation of a whole project: variables, connections, then every Sutra. */
-export function projectDocumentation(p: DocProject, sutras: DocSutra[], o: { resources: DocResource[]; made?: string; version?: string }) {
+export function projectDocumentation(p: DocProject, sutras: DocSutra[], o: { resources: DocResource[]; schemas?: DocSchema[]; made?: string; version?: string }) {
   const names = new Map(sutras.map(s => [s.id || '', s.doc.name]));
-  const infos = [...sutras].sort((a, b) => `${a.folder || ''}/${a.doc.name}`.localeCompare(`${b.folder || ''}/${b.doc.name}`)).map(s => describe(s, o.resources, names));
+  const infos = [...sutras].sort((a, b) => `${a.folder || ''}/${a.doc.name}`.localeCompare(`${b.folder || ''}/${b.doc.name}`)).map(s => describe(s, o.resources, names, o.schemas));
   const conns = o.resources;
   const vars = p.variables || [];
   const title = `${p.name}${o.version ? ` ${o.version}` : ''}`;
@@ -239,7 +249,7 @@ ${infos.map(i => sutraHtml(i, 2)).join('\n')}`;
 }
 
 /** Documentation of a package (release zips carry it): no server data needed beyond the activities. */
-export function packageDocumentation(p: { name: string; version: string; note?: string; project: { name: string; description?: string; variables?: any[] }; resources: DocResource[]; sutras: { id: string; doc: FlowDoc; version: number; deployed: boolean; folder?: string }[] }, made = '') {
+export function packageDocumentation(p: { name: string; version: string; note?: string; project: { name: string; description?: string; variables?: any[] }; resources: DocResource[]; schemas?: DocSchema[]; sutras: { id: string; doc: FlowDoc; version: number; deployed: boolean; folder?: string }[] }, made = '') {
   const sutras = p.sutras.map(s => ({ id: s.id, doc: s.doc, version: s.version, deployed: s.deployed, folder: s.folder }));
-  return projectDocumentation({ name: p.project.name, description: [p.project.description, p.note].filter(Boolean).join(' '), variables: p.project.variables }, sutras, { resources: p.resources, made, version: p.version });
+  return projectDocumentation({ name: p.project.name, description: [p.project.description, p.note].filter(Boolean).join(' '), variables: p.project.variables }, sutras, { resources: p.resources, schemas: p.schemas, made, version: p.version });
 }

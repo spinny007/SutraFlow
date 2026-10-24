@@ -13,6 +13,7 @@ import { Modal, useCatalog } from './ui';
 import { SchemaPick } from './Fields';
 import { deleteMappingField } from './mapping-fields';
 import { XmlOutput } from './XmlOutput';
+import { SchemaImpact } from './SchemaImpact';
 import type { Field, FlowNode, MappingValue, SNode } from './types';
 
 export function MappingSchemaTools({ node, field, setCfg }: { node: FlowNode; field: Field; setCfg(k: string, v: any): void }) {
@@ -53,6 +54,7 @@ export function MappingSchemaTools({ node, field, setCfg }: { node: FlowNode; fi
       <label className="fld">Schema definition<textarea className="inp code" rows={12} value={form.text} onChange={e => setForm({ ...form, text: e.target.value })} /></label>
       {form.kind === 'xsd' && <label className="fld">Default root element<input className="inp" value={form.root} onChange={e => setForm({ ...form, root: e.target.value })} /></label>}
       {error && <div role="alert" className="errbox">{error}</div>}
+      {form.id && <SchemaImpact id={form.id} kind={form.kind} text={form.text} root={form.root} />}
       <button className="btn go" disabled={busy || !form.name.trim() || !form.text.trim()} onClick={async () => {
         setBusy(true); setError('');
         try {
@@ -97,6 +99,7 @@ export function MappingPreview({ config, scope, format, runLabel }: { config: Re
   const [result, setResult] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
+    setResult(null);
     if (!open) return;
     let active = true;
     const timer = setTimeout(async () => {

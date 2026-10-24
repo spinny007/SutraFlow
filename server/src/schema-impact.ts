@@ -1,0 +1,58 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 2.0.9
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { getSchema, schemaTree, schemaTreeFromRow, schemaWarnings, type SNode, type SchemaRow } from './schemas.js';
+import { designSchemas } from './design.js';
+import { engine } from './engine/engine.js';
+import { getFlow, listFlows } from './flows.js';
+
+export function compareSchemaTrees(before: SNode | null, after: SNode | null) {
+  const flatten = (tree: SNode | null) => {
+    const out = new Map<string, string>();
+    const visit = (n: SNode, path: string) => {
+      out.set(path, JSON.stringify([n.type, !!n.repeats, !!n.required, n.minItems ?? null, n.maxItems ?? null, n.enum ?? null, n.namespace ?? null, !!n.attr]));
+      n.children?.forEach(c => visit(c, path ? `${path}/${c.name}` : c.name));
+    };
+    if (tree) visit(tree, '');
+    return out;
+  };
+  const old = flatten(before), next = flatten(after);
+  return [...new Set([...old.keys(), ...next.keys()])].filter(p => old.get(p) !== next.get(p)).map(path => ({ path: path || '(root)', change: !old.has(path) ? 'added' : !next.has(path) ? 'removed' : 'changed' }));
+}
+
+/** Read-only, project-scoped structural analysis. Not a proof of runtime compatibility. */
+export function schemaImpact(id: string, proposed: { kind?: unknown; text?: unknown; root?: unknown }) {
+  const current = getSchema(id);
+  if (!current) throw new Error('Schema not found');
+  if (typeof proposed.text !== 'string' || Buffer.byteLength(proposed.text) > 1024 * 1024) throw new Error('Proposed schema text is required and must not exceed 1 MB');
+  const kind = proposed.kind ?? current.kind;
+  if (!['json', 'xsd', 'wsdl'].includes(String(kind))) throw new Error('Unsupported schema kind');
+  const draft: SchemaRow = { ...current, kind: kind as SchemaRow['kind'], text: proposed.text, root: typeof proposed.root === 'string' ? proposed.root : current.root };
+  if (draft.kind === 'wsdl' && !/<(\w+:)?definitions[\s>]/.test(draft.text)) throw new Error('Expected a WSDL 1.1 definitions element');
+  const changes = compareSchemaTrees(schemaTreeFromRow(current), schemaTreeFromRow(draft));
+  const matches = (v: unknown): v is string => typeof v === 'string' && (v === id || v.startsWith(id + '::'));
+  const affected = [];
+  for (const summary of listFlows(current.project_id)) {
+    const flow = getFlow(summary.id)!;
+    const uses = flow.doc.nodes.flatMap(n => (engine.activity(n.type)?.fields || []).filter(f => ['schema', 'resource'].includes(f.type) && matches(n.config[f.k])).map(f => ({ nodeId: n.id, activity: `${n.name} (${engine.activity(n.type)?.name || n.type})`, field: f.label, ref: n.config[f.k] as string })));
+    if (!uses.length) continue;
+    const old = designSchemas(flow.doc);
+    const next = designSchemas(flow.doc, {
+      tree: ref => matches(ref) ? schemaTreeFromRow(draft, ref.split('::')[1]) : schemaTree(ref),
+      warnings: ref => matches(ref) ? [] : schemaWarnings(ref),
+    });
+    const diagnostics = flow.doc.nodes.flatMap(n => {
+      const before = new Set([...(old[n.id]?.errors || []), ...(old[n.id]?.warnings || [])]);
+      return [...(next[n.id]?.errors || []).map(message => ({ severity: 'error', message })), ...(next[n.id]?.warnings || []).map(message => ({ severity: 'warning', message }))].filter(d => !before.has(d.message)).map(d => ({ ...d, nodeId: n.id, activity: `${n.name} (${engine.activity(n.type)?.name || n.type})` }));
+    });
+    affected.push({ flowId: flow.id, name: flow.name, deployed: !!flow.deployed, uses, diagnostics });
+  }
+  return { schemaId: id, schemaUpdatedAt: current.updated_at, contentChanged: current.text !== draft.text || current.kind !== draft.kind || current.root !== draft.root, changes, affected,
+    limitations: ['Analyses saved drafts and direct schema references only; unsaved flows, deployed snapshots and transitive XSD dependencies require separate review.', 'Structural diagnostics are not full contract compatibility checks. Patterns, formats, alternatives and other constraints require runtime regression tests. No schemas, flows or run data were changed.'] };
+}

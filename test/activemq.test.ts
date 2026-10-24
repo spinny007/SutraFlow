@@ -14,6 +14,7 @@ import { promisify } from 'node:util';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { testEnv, node, edge } from './helpers.js';
+import { readTestPem } from './pem-fixtures.js';
 
 const password = process.env.SUTRA_ACTIVEMQ_PASSWORD || '';
 const enabled = process.env.SUTRA_ACTIVEMQ_TEST === '1' && !!password;
@@ -29,7 +30,7 @@ if (!enabled) {
   const openWireUrl = process.env.SUTRA_ACTIVEMQ_OPENWIRE_URL || 'tcp://127.0.0.1:61616';
   const activeMqHome = process.env.SUTRA_ACTIVEMQ_HOME || 'C:\\apache-activemq-6.3.2';
   const java = process.env.SUTRA_JAVA || 'java';
-  const read = (name: string) => process.env[name] ? fs.readFileSync(process.env[name]!, 'utf8') : '';
+  const read = readTestPem;
   const caPem = read('SUTRA_ACTIVEMQ_CA_FILE');
   const clientCertPem = read('SUTRA_ACTIVEMQ_CLIENT_CERT_FILE');
   const clientKey = read('SUTRA_ACTIVEMQ_CLIENT_KEY_FILE');

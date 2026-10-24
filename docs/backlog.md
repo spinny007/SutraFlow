@@ -38,7 +38,6 @@ This is the canonical list of work that is intentionally not complete. It separa
 ## Documentation maintenance
 
 - [ ] Keep README, the generated user guide, architecture page and release notes aligned when any item above ships; remove the item here in the same change.
-- [ ] Replace stale version-specific command examples in deployment documentation with the current release or version-neutral examples.
 
 ## Implementation playbook
 

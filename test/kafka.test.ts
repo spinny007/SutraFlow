@@ -11,6 +11,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { testEnv, node, edge } from './helpers.js';
+import { readTestPem } from './pem-fixtures.js';
 
 const require = createRequire(import.meta.url);
 const password = process.env.SUTRA_KAFKA_PASSWORD || '';
@@ -23,7 +24,7 @@ if (!enabled) {
   testEnv(22860);
   const user = process.env.SUTRA_KAFKA_USER || '';
   const sasl = (process.env.SUTRA_KAFKA_SASL || (user ? 'plain' : 'none')) as 'none' | 'plain' | 'scram-sha-256' | 'scram-sha-512';
-  const read = (name: string) => process.env[name] ? fs.readFileSync(process.env[name]!, 'utf8') : '';
+  const read = readTestPem;
   const caPem = read('SUTRA_KAFKA_CA_FILE');
   const clientCertPem = read('SUTRA_KAFKA_CLIENT_CERT_FILE');
   const clientKey = read('SUTRA_KAFKA_CLIENT_KEY_FILE');
@@ -107,14 +108,19 @@ if (!enabled) {
   }
 
   after(async () => {
+    console.info('# Kafka cleanup: stopping listeners');
     for (const id of deployed) flows.undeploy(id);
     await rebuildListeners().catch(() => {});
+    console.info('# Kafka cleanup: closing publishers');
     await closeBusPublishers();
+    console.info('# Kafka cleanup: removing test topic');
     try {
       const { Kafka, logLevel } = require('kafkajs'); const admin = KafkaAdmin(Kafka, logLevel);
       await admin.connect(); await admin.deleteTopics({ topics: [topic] }); await admin.disconnect();
     } catch { /* best-effort hosted-broker cleanup */ }
+    console.info('# Kafka cleanup: stopping isolated server');
     await srv.stop();
+    console.info('# Kafka cleanup: complete');
   });
 
   test('connects through the Kafka resource', async () => {

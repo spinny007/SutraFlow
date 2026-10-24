@@ -106,17 +106,27 @@ test('read-only preview API uses project authorization, bounds samples, and neve
 
 test('both new palettes and documented sample processes execute with expected structured and serialized outputs', async () => {
   const added = addSamples(projectId, ['mappingtyped']);
-  assert.equal(added.length, 2);
+  assert.equal(added.length, 3);
   for (const sample of added) {
     const doc = getFlow(sample.id)!.doc;
     assert.deepEqual(validateDoc(doc, projectId).errors, [], doc.name);
+    if (doc.name.includes('Renamed fields')) {
+      const { designSchemas } = await import('../server/src/design.js');
+      const { validateStructured } = await import('../server/src/schema-validation.js');
+      const starter = doc.nodes.find(n => n.type === 'start')!;
+      const payload = JSON.parse(starter.config.payload);
+      assert.deepEqual(payload.zone, [2, 5]);
+      assert.equal(payload.scores, undefined);
+      assert.deepEqual(await validateStructured(starter.config.schema, payload), []);
+      assert.deepEqual(designSchemas(doc).m.warnings, []);
+    }
     const id = await engine.startRun({ doc, projectId });
     await engine.waitFor(id, 10000);
     const row = q.get<any>('select status,error from runs where id = ?', id);
     assert.equal(row.status, 'done', row.error);
     const output = runState(id)!.outputs;
     if (doc.name.includes('JSON')) assert.deepEqual(JSON.parse(output['Serialize JSON'].text), { id: 'U-7', active: true, scores: [2, 5] });
-    else { assert.match(output['Serialize XML'].text, /xmlns="urn:sutra:sample:user"/); assert.match(output['Serialize XML'].text, /status="active"/); assert.equal((output['Serialize XML'].text.match(/<Score>/g) || []).length, 2); }
+    else { assert.match(output['Serialize XML'].text, /xmlns="urn:sutra:sample:user"/); assert.match(output['Serialize XML'].text, /status="active"/); assert.equal((output['Serialize XML'].text.match(/<Score>/g) || []).length, 2); assert.match(output['Serialize XML'].text, /<Score>2<\/Score>/); assert.match(output['Serialize XML'].text, /<Score>5<\/Score>/); }
   }
 });
 

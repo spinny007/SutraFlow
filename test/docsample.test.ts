@@ -143,7 +143,7 @@ test('documentation is made from the steps and their descriptions', async () => 
   const md = await srv.admin.inject({ method: 'GET', url: `/api/flows/${feed.id}/documentation?format=md`, headers: H });
   assert.equal(md.statusCode, 200);
   assert.match(md.body, /^# Sample: Document feed from a folder/);
-  assert.match(md.body, /## How it starts\n\n- Timer: Every 15 minutes/);
+  assert.match(md.body, /## How it starts\n\n- Every 15 minutes \(Timer\)/);
   assert.match(md.body, /\| 1 \| Every 15 minutes \| Timer \| Starts the feed every 15 minutes/);
   assert.match(md.body, /Called Sutra|Call Sutra/);
   assert.match(md.body, /Sample: Add one document to knowledge/, 'the called Sutra by name, not id');

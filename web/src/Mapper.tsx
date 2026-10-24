@@ -12,6 +12,8 @@ import { get, post } from './api';
 import { visible } from './Fields';
 import { useCatalog } from './ui';
 import { renameMappingField, addMappingField } from './mapping-fields';
+import { mappingSources } from './mapping-sources';
+import { observedShape } from './mapping-values';
 import { MappingSchemaTools, TargetFieldOptions, MappingPreview } from './MappingTools';
 import './mapping-tools.css';
 import type { ActivityMeta, Field, FlowDoc, FlowNode, MapRule, MappingValue, NodeDesign, RunDetail, SNode, SchemaInfo } from './types';
@@ -109,17 +111,7 @@ export function Mapper({ node, act, doc, design, run, outputs, updateNode }: Pro
   }, [node.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ----- left: process data roots -----
-  const ancestors = useMemo(() => {
-    const anc = new Set<string>();
-    const stack = doc.edges.filter(e => e.to === node.id).map(e => e.from);
-    while (stack.length) {
-      const id = stack.pop()!;
-      if (anc.has(id)) continue;
-      anc.add(id);
-      doc.edges.filter(e => e.to === id).forEach(e => stack.push(e.from));
-    }
-    return doc.nodes.filter(n => anc.has(n.id));
-  }, [doc, node.id]);
+  const sourceInfo = useMemo(() => mappingSources(doc, node.id, meta.activities), [doc, node.id, meta.activities]);
 
   const ranHere = run?.tasks.filter(t => t.node_id === node.id).slice(-1)[0];
   const inputValue = ranHere ? ranHere.input : undefined;
@@ -153,10 +145,10 @@ export function Mapper({ node, act, doc, design, run, outputs, updateNode }: Pro
     r.push({ label: '$_sutraContext', path: 'sutra', shape: procShape, value: undefined, state: 'none' });
     if (engineVars.length) r.push({ label: '$_sengineVariables (read only)', path: 'ev', shape: { name: 'ev', type: 'object', children: engineVars.map(v => ({ name: v.name, type: 'string' as const, doc: v.description })) }, value: Object.fromEntries(engineVars.map(v => [v.name, v.value])), state: 'none' });
     if (varShape.children!.length || (runVars && Object.keys(runVars).length)) r.push({ label: '$_sutraVariables', path: 'vars', shape: varShape.children!.length ? varShape : inferShape(runVars, 'vars'), value: runVars, state: run ? 'ran' : 'none' });
-    if (d?.in || inputValue !== undefined) r.push({ label: 'input (previous step)', path: 'input', shape: d?.in ?? inferShape(inputValue, 'input'), value: inputValue, state: ranHere ? 'ran' : run ? 'skipped' : 'none' });
-    for (const n of ancestors) {
+    if (d?.in || inputValue !== undefined) r.push({ label: sourceInfo.inputLabel, path: 'input', shape: ranHere ? observedShape(inputValue, 'input') : d?.in ?? null, value: inputValue, state: ranHere ? 'ran' : run ? 'skipped' : 'none' });
+    for (const { node: n, label } of sourceInfo.sources) {
       const ran = n.name in outputs;
-      r.push({ label: n.name, path: `nodes${seg(n.name)}`, shape: design[n.id]?.out ?? (ran ? inferShape(outputs[n.name], n.name) : null), value: outputs[n.name], state: ran ? 'ran' : run ? 'skipped' : 'none' });
+      r.push({ label, path: `nodes${seg(n.name)}`, shape: ran ? observedShape(outputs[n.name], n.name) : design[n.id]?.out ?? null, value: outputs[n.name], state: ran ? 'ran' : run ? 'skipped' : 'none' });
     }
     const lp = node.settings?.loop;
     if (lp) {
@@ -173,7 +165,7 @@ export function Mapper({ node, act, doc, design, run, outputs, updateNode }: Pro
       r.unshift({ label: '$index', path: 'index', shape: { name: 'index', type: 'integer' }, value: 1, state: 'none' });
     }
     return r;
-  }, [ancestors, outputs, design, d, inputValue, run, ranHere, forEachCtx, gvShape, gvValue, procShape, varShape, runVars, engineVars, node.settings]);
+  }, [sourceInfo, outputs, design, d, inputValue, run, ranHere, forEachCtx, gvShape, gvValue, procShape, varShape, runVars, engineVars, node.settings]);
 
   // ----- values on the right -----
   const getVal = (t: Target): string | MapRule | undefined => {
@@ -362,6 +354,7 @@ export function Mapper({ node, act, doc, design, run, outputs, updateNode }: Pro
       ) : (
         <p className="muted" style={{ fontSize: 12.5, margin: '8px 2px' }}>Drag a field from Sutra Data onto an input, or select an input to write its formula. Lists dropped on a repeating target create a For-Each and map fields with matching names.</p>
       )}
+      {run && <p className="muted" style={{ fontSize: 12.5 }}>These fields and values reflect test run {run.id}; before testing, fields describe the configured schema. Static warnings still check schema references. See Output → Received for actual input. Editing a schema does not change the starter payload; rerun Test after changes. Other-branch outputs require synchronization before use.</p>}
       {d?.errors?.length ? <div className="errbox" style={{ marginTop: 8 }}>{d.errors.join('\n')}</div> : null}
       {d?.warnings?.length ? <div className="warnbox" style={{ marginTop: 8 }}>{d.warnings.join('\n')}</div> : null}
     </div>
@@ -420,13 +413,13 @@ export function ConditionDataBrowser({ from, doc, design, run, outputs, localVar
       || doc.nodes.find(n => meta.activities.find(a => a.type === n.type)?.trigger);
     const inputValue = outputs[from.name];
     const list: { label: string; path: string; shape: SNode | null; value: any }[] = [
-      { label: `Previous activity: ${from.name}`, path: 'input', shape: design[from.id]?.out ?? (inputValue !== undefined ? inferShape(inputValue, 'input') : null), value: inputValue },
+      { label: `${from.name} (${meta.activities.find(a => a.type === from.type)?.name || from.type}) — current input`, path: 'input', shape: from.name in outputs ? observedShape(inputValue, 'input') : design[from.id]?.out ?? null, value: inputValue },
       { label: 'Local variables', path: 'vars', shape: vars, value: run?.vars || localVars },
       { label: 'Project properties', path: 'gv', shape: { name: 'gv', type: 'object', children: projectVars.map(v => ({ name: v.name, type: v.type === 'number' ? 'number' : v.type === 'boolean' ? 'boolean' : 'string', doc: v.description })) }, value: Object.fromEntries(projectVars.map(v => [v.name, v.type === 'secret' ? '••••••' : v.value])) },
     ];
     if (engineVars.length) list.push({ label: 'Engine properties (read only)', path: 'ev', shape: { name: 'ev', type: 'object', children: engineVars.map(v => ({ name: v.name, type: 'string' as const, doc: v.description })) }, value: Object.fromEntries(engineVars.map(v => [v.name, v.value])) });
-    if (trigger) list.push({ label: 'Trigger data', path: 'trigger', shape: design[trigger.id]?.out ?? (outputs[trigger.name] !== undefined ? inferShape(outputs[trigger.name], 'trigger') : null), value: outputs[trigger.name] });
-    for (const n of doc.nodes.filter(n => ancestorIds.has(n.id))) list.push({ label: n.name, path: `nodes${seg(n.name)}`, shape: design[n.id]?.out ?? (outputs[n.name] !== undefined ? inferShape(outputs[n.name], n.name) : null), value: outputs[n.name] });
+    if (trigger) list.push({ label: `${trigger.name} (${meta.activities.find(a => a.type === trigger.type)?.name || trigger.type}) — trigger data`, path: 'trigger', shape: trigger.name in outputs ? observedShape(outputs[trigger.name], 'trigger') : design[trigger.id]?.out ?? null, value: outputs[trigger.name] });
+    for (const n of doc.nodes.filter(n => ancestorIds.has(n.id))) list.push({ label: `${n.name} (${meta.activities.find(a => a.type === n.type)?.name || n.type})`, path: `nodes${seg(n.name)}`, shape: n.name in outputs ? observedShape(outputs[n.name], n.name) : design[n.id]?.out ?? null, value: outputs[n.name] });
     list.push({ label: 'Current time', path: 'now', shape: { name: 'now', type: 'string' }, value: new Date().toISOString() });
     return list;
   }, [design, doc, engineVars, from, localVars, meta.activities, outputs, project?.config.variables, run?.vars]);
@@ -459,7 +452,7 @@ function SourceNode({ label, path, shape, value, state, depth, filter, onToggle,
     e.dataTransfer.setData('text/plain', `{${path}}`);
     e.dataTransfer.effectAllowed = 'copy';
   };
-  const leafValue = kids.length ? (Array.isArray(value) ? `${value.length} item${value.length === 1 ? '' : 's'}` : '') : shown === undefined ? '' : typeof shown === 'object' ? JSON.stringify(shown) : String(shown);
+  const leafValue = Array.isArray(value) ? `${value.length} item${value.length === 1 ? '' : 's'}${kids.length ? '' : ': ' + JSON.stringify(value)}` : kids.length ? '' : shown === undefined ? '' : typeof shown === 'object' ? JSON.stringify(shown) : String(shown);
   return (
     <div className="snode">
       <div className={`srow${depth === 0 ? ' root' : ''}${state === 'skipped' ? ' skipped' : ''}`} data-ref={path} draggable onDragStart={drag} onClick={() => onPick(path)} title={`{${path}}${s?.doc ? '\n' + s.doc : ''}`}>

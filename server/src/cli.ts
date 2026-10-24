@@ -461,6 +461,7 @@ async function main(argv: string[]) {
         const { listFlows, getFlow } = await import('./flows.js');
         const { getProject } = await import('./projects.js');
         const { listResources } = await import('./resources.js');
+        const { listSchemas } = await import('./schemas.js');
         const { sutraDocumentation, projectDocumentation } = await import('./docs.js');
         const { version } = await import('./config.js');
         const id = await projectId(a, null);
@@ -472,8 +473,8 @@ async function main(argv: string[]) {
         if (sutra) {
           const s = list.find(x => x.doc.name.toLowerCase() === sutra.toLowerCase());
           if (!s) throw new Error(`No Sutra named "${sutra}"`);
-          d = sutraDocumentation(s, { resources, sutras: list.map(x => ({ id: x.id, name: x.doc.name })), made: version });
-        } else d = projectDocumentation({ name: p.name, description: p.description, variables: p.config.variables }, list, { resources, made: version });
+          d = sutraDocumentation(s, { resources, schemas: listSchemas(id), sutras: list.map(x => ({ id: x.id, name: x.doc.name })), made: version });
+        } else d = projectDocumentation({ name: p.name, description: p.description, variables: p.config.variables }, list, { resources, schemas: listSchemas(id), made: version });
         text = format === 'md' ? d.markdown : d.html; name = sutra || p.name;
       }
       const file = str(a, 'out') || `${name.replace(/[^\w.-]+/g, '-')}.${format === 'md' ? 'md' : 'html'}`;

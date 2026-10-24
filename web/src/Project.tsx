@@ -13,6 +13,7 @@ import { FieldList } from './Fields';
 import { Modal, useCatalog, useToast } from './ui';
 import { NewProjectDialog } from './NewProject';
 import { ConfirmDelete } from './ConfirmDelete';
+import { SchemaImpact } from './SchemaImpact';
 import { missingInResource, missingText } from './vars';
 import type { FlowSummary, LoggingConfig, ProjectVariable, Resource, SchemaInfo, SNode } from './types';
 
@@ -443,10 +444,11 @@ function SchemaEditor({ sel, setSel }: { sel: Extract<ExplorerSel, { kind: 'sche
         <div className="hint">Or load a file: <input type="file" accept=".json,.xsd,.wsdl,.xml" aria-label="Load schema file" onChange={e => e.target.files?.[0] && loadFile(e.target.files[0])} /></div></div>
       <div className="row"><button className="btn primary" disabled={!form.name.trim() || !form.text.trim()} onClick={save}>Save</button>
         {info && <button className="btn danger" onClick={() => setDeleting(true)}>Delete</button>}</div>
+      {info && <SchemaImpact id={info.id} kind={form.kind} text={form.text} root={form.root} />}
       {deleting && info && <ConfirmDelete title={`Delete ${info.name}`} usageOf={{ projectId, id: info.id }} onClose={() => setDeleting(false)}
         onConfirm={async () => { await del(`/api/schemas/${info.id}`); setDeleting(false); await reload(); setSel(null); toast(`${info.name} deleted`); }}
         what={<p>The {form.kind === 'wsdl' ? 'service descriptor' : 'schema'} <b>{info.name}</b> is deleted.</p>} />}
-      {tree && <><div className="group">Fields</div><SchemaTreeView n={tree} depth={0} /></>}
+      {tree && <><div className="group">Fields (saved schema)</div><SchemaTreeView n={tree} depth={0} /></>}
     </>
   );
 }

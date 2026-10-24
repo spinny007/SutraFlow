@@ -1,0 +1,34 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 2.0.9
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { observedShape, repeatedValueSummary } from '../web/src/mapping-values.js';
+
+test('runtime tree exposes actual scores, never synthesizing the schema-only zone field', () => {
+  const value = { id: 7, status: 'active', scores: [2, 5] };
+  const shape = observedShape(value);
+  assert.deepEqual(shape.children?.map(c => c.name), ['id', 'status', 'scores']);
+  assert.equal(shape.children?.find(c => c.name === 'scores')?.repeats, true);
+  assert.equal(shape.children?.find(c => c.name === 'id')?.type, 'integer');
+  assert.deepEqual(value, { id: 7, status: 'active', scores: [2, 5] });
+});
+test('all runtime payload types are inferred from emitted values without an old-run fallback', () => {
+  for (const [value, type] of [[null, 'null'], [undefined, 'any'], [false, 'boolean'], ['<User/>', 'string'], [1.5, 'number']] as const) assert.equal(observedShape(value).type, type);
+  assert.deepEqual(observedShape({}).children, []);
+  assert.equal(observedShape([]).repeats, true);
+  assert.deepEqual(observedShape([{ a: 1 }, { b: 2 }]).children?.map(c => c.name), ['a', 'b']);
+});
+test('repeating scalar previews show all small values, not a misleading first-item scalar', () => {
+  assert.equal(repeatedValueSummary([2, 5], true), '2 items: [2,5]');
+  assert.equal(repeatedValueSummary([], true), '0 items: []');
+  assert.equal(repeatedValueSummary([false], true), '1 item: [false]');
+  assert.match(repeatedValueSummary([{ id: 1 }, { id: 2 }], false)!, /2 items.*first item/);
+  assert.equal(repeatedValueSummary(2, true), null);
+});
