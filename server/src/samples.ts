@@ -18,6 +18,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getProject, saveProject, projectFilesDir } from './projects.js';
 import { writeSampleDocuments } from './sampledocs.js';
+import { attachSampleSchemas } from './sample-schemas.js';
+import { typedMappingSamples } from './sample-mapping.js';
+import { validationSamples } from './sample-validation.js';
 
 /**
  * Sample Sutras added to a project from "New Sutra": For-Each mapping, loops on an activity,
@@ -31,6 +34,8 @@ const E = (from: string, to: string, port = 'out') => ({ id: `e${++e}`, from, po
 
 /** The samples offered in "New Sutra"; needs = what must be set up before the sample can run; folder = where its Sutras go. */
 export const SAMPLES: { id: string; name: string; desc: string; palettes: string; needs?: string; folder?: string }[] = [
+  { id: 'mappingtyped', name: 'Typed JSON and XML mapping', palettes: 'Data & mapping', desc: 'Shared typed JSON target and a manual XML root, required attribute, namespace and repeating elements; both rendered to text. No external connection required.' },
+  { id: 'validation', name: 'JSON/XML schema validation and strict file reads', palettes: 'Data & mapping, Files, HTTP, Triggers', desc: 'Valid and intentionally invalid contracts, typed mapping, Parse/Render, Validate fields, strict JSON/XML file reads, REST/HTTP and SOAP services. Every activity explains its validation outcome.', needs: 'Writable project VALIDATION_FOLDER for file samples; deploy the REST service before the HTTP client. Services are local demonstrations without authentication.' },
   { id: 'foreach', name: 'For-Each mapping', palettes: 'Data & mapping', desc: 'Invoice lines from order lines: Where, Sort by, position(), and a For-Each grouped by country.' },
   { id: 'loops', name: 'Loop on an activity', palettes: 'Data & mapping, General', desc: 'One activity run per order, and a counter repeated while below 3, like polling a job.' },
   { id: 'subsutra', name: 'Sub-Sutra (Call Sutra and Return)', palettes: 'Flow control', desc: 'A reusable tax Sutra and an invoice Sutra that calls it and logs its result or its failure.' },
@@ -48,7 +53,7 @@ export const SAMPLES: { id: string; name: string; desc: string; palettes: string
   { id: 'scripts', name: 'Scripts: PowerShell and Run program', palettes: 'Scripts', desc: 'A PowerShell disk report that hands JSON to the next step, and a program run with arguments; failures carry the exit code and error output.', needs: 'scripts allowed by an administrator in Admin Console > Server > Runtime' },
   { id: 'timer', name: 'Timer: nightly archive', palettes: 'Triggers, Files, Flow control', desc: 'Every night at 02:00, lists the CSV files in a folder (oldest first) and moves each one to an archive folder.' },
   { id: 'filetrigger', name: 'File trigger: CSV drop folder', palettes: 'Triggers, Files, Data & mapping', desc: 'Starts when a CSV file arrives, sorts its rows, writes a cleaned copy and moves the original to processed/.' },
-  { id: 'textformats', name: 'Parse JSON and CSV text', palettes: 'Data & mapping, Flow control', desc: 'Parses JSON text and CSV text from a message, sorts the rows, and renders them as CSV with a semicolon; a No operation marks a step still to design.' },
+  { id: 'textformats', name: 'Parse JSON and CSV text', palettes: 'Data & mapping, Flow control', desc: 'Parses JSON with a shared schema and renders it through a schema-backed mapping; parses CSV, sorts the rows, and renders CSV with a semicolon. A No operation marks a step still to design.' },
   { id: 'dbmore', name: 'SQL update and stored procedure', palettes: 'DB Ops', desc: 'Updates a row with a bound parameter and fails clearly when no row matched; a second Sutra calls a stored procedure.', needs: 'the Database sample run first; for the procedure, a PostgreSQL, MySQL, SQL Server or Oracle connection' },
   { id: 'soapcall', name: 'Call a SOAP service', palettes: 'SOAP / Web services', desc: 'Calls the GetOrder operation of the "Order SOAP service" starter with a raw envelope and maps the reply; a SOAP fault has its own output.', needs: 'the "SOAP service: orders" starter deployed' },
   { id: 'emailin', name: 'Email trigger: orders by email', palettes: 'Triggers, Email, AI', desc: 'Starts for each new email in a mailbox, pulls the order number and amount out of the text with AI extract, and logs them.', needs: 'an Email (IMAP) connection and an AI provider' },
@@ -91,9 +96,11 @@ export function addSamples(projectId: string, ids?: string[]) {
   const resourcesBefore = new Set(listResources(undefined, projectId).map(r => r.id));
   const name = (base: string) => { let n = base; for (let i = 2; taken.has(n.toLowerCase()); i++) n = `${base} ${i}`; taken.add(n.toLowerCase()); return n; };
   const made: { id: string; sample: string }[] = [];
-  const save = (doc: any) => { const f = saveFlow(undefined, { ...doc, name: name(doc.name) }, projectId); made.push({ id: f.id, sample: current }); return f; };
+  const save = (doc: any) => { attachSampleSchemas(projectId, doc); const f = saveFlow(undefined, { ...doc, name: name(doc.name) }, projectId); made.push({ id: f.id, sample: current }); return f; };
   const conn = (kind: string, cname: string, cfg: Record<string, any>) => listResources(kind, projectId).find(r => r.name === cname) || saveResource({ kind, name: cname, project_id: projectId, config: cfg });
   const gw = `http://127.0.0.1:${getSetting<{ httpPort?: number }>('gateway', {}).httpPort || config.gatewayHttpPort}`;
+  const typedMappings = want('mappingtyped') ? typedMappingSamples().map(save) : [];
+  const validationFlows = want('validation') ? validationSamples(projectId, gw).map(save) : [];
 
   const order = {
     orderId: 'A-1001', customer: 'asha traders', country: 'IN',
@@ -476,17 +483,18 @@ export function addSamples(projectId: string, ids?: string[]) {
   // Parse JSON and CSV text, sort, No operation, Render CSV.
   const textFormats = want('textformats') && save({
     name: 'Sample: Parse JSON and CSV text',
-    description: 'A message carries JSON text and CSV text. Parse JSON and Parse CSV turn them into data; Sort list orders the rows; No operation marks a step still to design; Render CSV writes them with a semicolon separator.',
+    description: 'A message carries JSON text and CSV text. Parse JSON exposes its shared output schema; Render JSON maps the customer and currency into a shared target schema. Parse CSV turns the CSV into rows; Sort list orders them; No operation marks a step still to design; Render CSV writes them with a semicolon separator.',
     nodes: [
       N('s', 'start', 'Message', 60, 220, { payload: JSON.stringify({ json: '{"customer": "Asha Traders", "currency": "INR"}', csv: 'sku,qty,price\nTEA-250,4,120\nPOT-02,1,900\nCUP-12,2,90' }, null, 2) }),
       N('j', 'parseJson', 'Parse JSON', 380, 220, { schema: '', text: '{{input.json}}' }),
+      N('jr', 'renderJson', 'Render JSON', 540, 80, { source: 'mapping', schema: '', pretty: true, mapping: { rules: { customer: { expr: '{input.customer}' }, currency: { expr: '{input.currency}' } } } }),
       N('c', 'parseCsv', 'Parse CSV', 700, 220, { text: '{{trigger.csv}}', delim: ',' }),
       N('o', 'sort', 'By price', 1020, 220, { list: '{{input.rows}}', field: 'price', dir: 'descending' }),
       N('n', 'noop', 'Check stock here later', 1340, 220),
       N('r', 'renderCsv', 'As CSV with ;', 1660, 220, { list: '{{input.items}}', delim: ';' }),
       N('l', 'log', 'Log', 1980, 220, { level: 'info', message: 'For {{nodes.Parse JSON.customer}} ({{nodes.Parse JSON.currency}}):\n{{input.text}}' }),
     ],
-    edges: [E('s', 'j'), E('j', 'c'), E('c', 'o'), E('o', 'n'), E('n', 'r'), E('r', 'l')],
+    edges: [E('s', 'j'), E('j', 'jr'), E('jr', 'c'), E('c', 'o'), E('o', 'n'), E('n', 'r'), E('r', 'l')],
   });
 
   // SQL update (and a stored procedure, which needs a server database).
@@ -1285,7 +1293,7 @@ export function addSamples(projectId: string, ids?: string[]) {
   // Connections made for the samples go to a Samples folder of Resources.
   for (const r of listResources(undefined, projectId)) if (!resourcesBefore.has(r.id) && !r.folder) setItemFolder('resources', r.id, 'Samples');
 
-  return [forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, release, localAi, email, queue, kafkaRest, kafkaRestSubscribe, rabbitRest, activeRest, timer, fileTrig, textFormats, dbUpd, dbProc, soapCall, emailIn, firebase, google, apps, aiMore,
+  return [...typedMappings, ...validationFlows, forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, release, localAi, email, queue, kafkaRest, kafkaRestSubscribe, rabbitRest, activeRest, timer, fileTrig, textFormats, dbUpd, dbProc, soapCall, emailIn, firebase, google, apps, aiMore,
     soapPublic, soapMock, soapMockCall, msCustomers, msStock, msOrders, sqlInstall, sqlService, ...sftp, ...ftp,
     toolOrder, toolStock, desk, ragWeb, ragSp, ragAsk, queueAgent, team, mcpAgent, docOne, docFeed, docApi, docTool, docAgent, adfRunS, adfAlert, dbxNb, dbxSql, pyInline, pyFile, ytPublish, ytReport, twLive, dcBot, tgBot, tgNotify]
     .filter((f): f is NonNullable<typeof f> & { id: string; name: string } => !!f)
@@ -1294,7 +1302,7 @@ export function addSamples(projectId: string, ids?: string[]) {
 
 /** Where each sample's Sutras go: Samples/<topic>. */
 const FOLDERS: Record<string, string[]> = {
-  'Data and mapping': ['foreach', 'loops', 'xml', 'transform', 'textformats'],
+  'Data and mapping': ['mappingtyped', 'validation', 'foreach', 'loops', 'xml', 'transform', 'textformats'],
   'Flow control': ['subsutra', 'trycatch', 'routing', 'conditions', 'counter', 'channels'],
   'REST and microservices': ['rest', 'microservices'],
   'SOAP': ['soapcall', 'soappublic', 'soapmock'],
@@ -1316,7 +1324,7 @@ for (const s of SAMPLES) s.folder = folderOf(s.id);
 
 /** Sample Sutras by folder, to file the ones added before folders existed. A test keeps this list in step with addSamples(). */
 export const SAMPLE_SUTRAS: Record<string, string[]> = {
-  'Samples/Data and mapping': ['For-Each mapping', 'Loop on an activity', 'XML in and out', 'JSONata, JavaScript and HTML', 'Parse JSON and CSV text'],
+  'Samples/Data and mapping': ['Typed JSON mapping', 'Typed XML mapping', 'XML schema-backed mapping', 'JSON schema validation pipeline', 'XML schema validation pipeline', 'JSON schema expected rejection', 'XML schema expected rejection', 'Read JSON file with schema validation', 'Read XML file with schema validation', 'Validated REST service', 'Validated HTTP client', 'Validated SOAP service', 'For-Each mapping', 'Loop on an activity', 'XML in and out', 'JSONata, JavaScript and HTML', 'Parse JSON and CSV text'],
   'Samples/Flow control': ['Calculate tax (called Sutra)', 'Invoice with a sub-Sutra', 'Try and catch with logs', 'Router, Switch and Merge', 'Connection conditions', 'Channel sender', 'Channel listener', 'Counter, Wait and Sutra variables'],
   'Samples/Apps': ['Skill: Write CSV file', 'Skill: Post to Facebook page', 'Firebase order to app', 'Google Drive and Sheets', 'Dropbox YouTube and any API'],
   'Samples/REST and microservices': ['REST API with validation', 'Microservice Customers', 'Microservice Stock', 'Microservice Orders'],

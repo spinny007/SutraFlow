@@ -24,6 +24,7 @@ const flows = await import('../server/src/flows.js');
 const { saveResource } = await import('../server/src/resources.js');
 const { setSecret } = await import('../server/src/secrets.js');
 const { addSamples } = await import('../server/src/samples.js');
+const { listSchemas, schemaTree } = await import('../server/src/schemas.js');
 const { testResource } = await import('../server/src/resourceTest.js');
 const { evalExpression, functionCatalog } = await import('../server/src/expr.js');
 
@@ -196,6 +197,21 @@ test('connections: names, "when" conditions on the previous output, and "otherwi
 
   const bad = flows.validateDoc({ name: 'x', nodes: [s, chk], edges: [edge(s, chk), { ...edge(chk, s), when: 'when' } as any] });
   assert.ok(bad.errors.some(e => /has no condition/.test(e)));
+});
+
+test('sample mappings ship shared schemas and reuse them on repeated import', () => {
+  const project = projects.saveProject({ name: 'Schema samples', config: { variables: [] } });
+  const added = addSamples(project.id, ['foreach', 'xml', 'queue', 'textformats']);
+  for (const flow of added) {
+    for (const n of flows.getFlow(flow.id)!.doc.nodes) {
+      if (!['mapper', 'parseJson', 'parseXml', 'renderXml'].includes(n.type) && !(n.type === 'renderJson' && n.config.source === 'mapping')) continue;
+      assert.ok(n.config.schema, `${flow.name}: ${n.name} has a shared schema`);
+      assert.ok(schemaTree(String(n.config.schema))?.children?.length, `${n.name} has browsable fields`);
+    }
+  }
+  const count = listSchemas(project.id).length;
+  addSamples(project.id, ['foreach', 'xml', 'queue', 'textformats']);
+  assert.equal(listSchemas(project.id).length, count, 'schemas are reused, not duplicated');
 });
 
 test('more samples across the palettes run as tests (REST, files, database, XML, transform, routing, channels, counter)', async () => {

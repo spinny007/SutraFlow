@@ -13,6 +13,7 @@ import { engine } from './engine/engine.js';
 import { ensureDefaultProject, getProject } from './projects.js';
 import { setItemFolder } from './folders.js';
 import type { FlowDoc } from './engine/types.js';
+import { designSchemas } from './design.js';
 
 /**
  * Flows have an editable draft plus immutable published versions. Deploying
@@ -137,6 +138,11 @@ export function validateDoc(doc: FlowDoc, projectId?: string) {
     if ((t.type === 'restService' || t.type === 'soapService') && !t.config.policy) warnings.push(`${t.name}: no API security policy, anyone who can reach the gateway can call it`);
   }
   if (doc.nodes.filter(n => engine.activity(n.type)?.noInput).length > 1) errors.push('A Sutra can have only one Error handler');
+  const designs = designSchemas(doc);
+  for (const n of doc.nodes) if (!n.settings?.disabled) {
+    errors.push(...designs[n.id].errors.map(issue => `${n.name}: ${issue}`).filter(issue => !errors.includes(issue)));
+    warnings.push(...designs[n.id].warnings.map(issue => `${n.name}: ${issue}`).filter(issue => !warnings.includes(issue)));
+  }
   return { errors, warnings };
 }
 

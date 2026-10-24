@@ -17,7 +17,8 @@ import { deployedFlows } from '../flows.js';
 import { effectiveResource, getResource, kvToObject } from '../resources.js';
 import { authorize, corsHeaders, PolicyError, type Caller } from '../security/inbound.js';
 import { xmlParser } from '../security/outbound.js';
-import { checkParsed, checkRaw, limitsOf, MessageRejected, validateMessage } from '../security/validate.js';
+import { checkParsed, checkRaw, limitsOf, MessageRejected } from '../security/validate.js';
+import { validateStructured, validateSoapOperation } from '../schema-validation.js';
 import { decryptMessage, WssError } from '../security/wssin.js';
 import { applyWss } from '../security/wss.js';
 import { getSecret } from '../secrets.js';
@@ -264,7 +265,7 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
     try {
       checkParsed(env.Body, limits);
       if (n.config.validateBody === 'reject invalid' && n.config.bodySchema) {
-        const errs = validateMessage(String(n.config.bodySchema), env.Body[opName], opName);
+        const errs = await validateSoapOperation(String(n.config.bodySchema), env.Body[opName], xml);
         if (errs.length) throw new MessageRejected(`The request does not match the schema: ${errs.join('; ')}`, 400, errs);
       }
     } catch (e: any) {
@@ -315,7 +316,7 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
     body = parseRestBody(raw, ct);
     checkParsed(body, limits);
     if (route.node.config.validateBody === 'reject invalid' && route.node.config.bodySchema) {
-      const errs = validateMessage(String(route.node.config.bodySchema), body);
+      const errs = await validateStructured(String(route.node.config.bodySchema), body, ct.includes('xml') ? raw : undefined);
       if (errs.length) throw new MessageRejected('The request does not match the schema', 400, errs);
     }
   } catch (e: any) {

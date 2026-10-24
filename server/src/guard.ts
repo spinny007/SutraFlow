@@ -102,6 +102,8 @@ export const RULES: Record<string, Rule> = {
   'DELETE /api/schemas/:id': R('design', 'schema'),
   'GET /api/schemas/:id/tree': R('view', 'schema'),
   'POST /api/design/schemas': R('design', undefined, true),
+  'POST /api/design/mapping-preview': R('design', 'bodyProject', true),
+  'POST /api/design/schema-from-sample': R('design', 'bodyProject', true),
   'POST /api/design/query-preview': R('design', 'bodyProject', true),
   'POST /api/expr/eval': R('design', undefined, true),
 

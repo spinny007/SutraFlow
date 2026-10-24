@@ -41,6 +41,8 @@ export interface MappingValue {
   rules: Record<string, MapRule>;
   /** Target fields added by hand when there is no schema ("a/b", "lines[]/sku"). */
   fields?: string[];
+  /** Optional typed definitions for manually designed targets. Rule paths omit []. */
+  definitions?: Record<string, { type?: SNode['type']; repeats?: boolean; required?: boolean; minItems?: number; maxItems?: number; description?: string; namespace?: string }>;
 }
 
 export class MappingError extends Error {
@@ -50,7 +52,7 @@ export class MappingError extends Error {
 /** Tree for a mapping without a schema, from the paths of its fields and rules. */
 export function adhocTree(m: MappingValue | undefined, name = 'root'): SNode {
   const root: SNode = { name, type: 'object', children: [] };
-  const paths = new Set<string>([...(m?.fields || []), ...Object.keys(m?.rules || {})]);
+  const paths = new Set<string>([...(m?.fields || []), ...Object.keys(m?.rules || {}), ...Object.keys(m?.definitions || {})]);
   for (const p of paths) {
     let cur = root;
     p.split('/').filter(Boolean).forEach((rawSeg, i, all) => {
@@ -64,13 +66,20 @@ export function adhocTree(m: MappingValue | undefined, name = 'root'): SNode {
       cur = next;
     });
   }
+  const decorate = (n: SNode, p: string) => {
+    const def = m?.definitions?.[p];
+    if (def) Object.assign(n, { ...def, doc: def.description });
+    if (n.name.startsWith('@_')) n.attr = true;
+    for (const child of n.children || []) decorate(child, p ? `${p}/${child.name}` : child.name);
+  };
+  decorate(root, '');
   return root;
 }
 
 /** Rule keys use plain names; ad-hoc fields may mark lists with []. */
 export const normPath = (p: string) => p.split('/').filter(Boolean).map(s => s.replace(/\[\]$/, '')).join('/');
 
-export function evaluateMapping(tree: SNode, m: MappingValue | undefined, scope: Record<string, any>): any {
+export function evaluateMapping(tree: SNode, m: MappingValue | undefined, scope: Record<string, any>, strict = false): any {
   const rules: Record<string, MapRule> = {};
   for (const [k, v] of Object.entries(m?.rules || {})) rules[normPath(k)] = v;
   const ev = (path: string, src: string, sc: Record<string, any>, itemFields = false) => {
@@ -80,7 +89,7 @@ export function evaluateMapping(tree: SNode, m: MappingValue | undefined, scope:
   const coerce = (node: SNode, v: any) => {
     if (v == null || typeof v === 'object') return v;
     if ((node.type === 'number' || node.type === 'integer') && typeof v === 'string' && v.trim() !== '' && isFinite(toNumber(v))) return toNumber(v);
-    if (node.type === 'boolean' && typeof v === 'string') return truthy(v);
+    if (node.type === 'boolean' && typeof v === 'string') return strict ? /^(true|1)$/i.test(v) ? true : /^(false|0)$/i.test(v) ? false : v : truthy(v);
     if (node.type === 'string' && (typeof v === 'number' || typeof v === 'boolean')) return String(v);
     return v;
   };
@@ -88,8 +97,11 @@ export function evaluateMapping(tree: SNode, m: MappingValue | undefined, scope:
   const single = (node: SNode, path: string, sc: Record<string, any>): any => {
     const r = rules[path];
     if (node.children?.length) {
-      if (r?.expr && !r.forEach) return ev(path, r.expr, sc);
-      const o: Record<string, any> = {};
+      if (r?.expr && !r.forEach) {
+        const value = ev(path, r.expr, sc);
+        return node.namespace && value && typeof value === 'object' && !Array.isArray(value) ? { ...value, [node.name.includes(':') ? `@_xmlns:${node.name.split(':')[0]}` : '@_xmlns']: node.namespace } : value;
+      }
+      const o: Record<string, any> = node.namespace ? { [node.name.includes(':') ? `@_xmlns:${node.name.split(':')[0]}` : '@_xmlns']: node.namespace } : {};
       for (const c of node.children) {
         const v = build(c, path ? `${path}/${c.name}` : c.name, sc);
         if (v !== undefined) o[c.name] = v;
@@ -148,12 +160,15 @@ export function evaluateMapping(tree: SNode, m: MappingValue | undefined, scope:
 
 /** Required target fields with no mapping, inside parts of the tree that are mapped (shown as warnings). */
 export function unmappedRequired(tree: SNode, m: MappingValue | undefined): string[] {
-  const keys = Object.keys(m?.rules || {}).map(normPath);
+  const rules = Object.fromEntries(Object.entries(m?.rules || {}).map(([p, r]) => [normPath(p), r]));
+  const keys = Object.keys(rules).filter(k => rules[k].expr?.trim() || rules[k].forEach?.trim() || rules[k].choose?.length);
   const touched = (p: string) => !p || keys.some(k => k === p || k.startsWith(p + '/'));
   const out: string[] = [];
   const walk = (n: SNode, p: string, parent: string) => {
-    if (m?.rules?.[p]?.expr && n.children?.length) return; // copied as a whole
+    if (rules[p]?.expr?.trim() && n.children?.length) return; // copied as a whole
+    if (p && n.children?.length && !n.required && !touched(p)) return;
     if (n.children?.length) {
+      if (p && n.required && !touched(p)) { out.push(p); return; }
       for (const c of n.children) walk(c, p ? `${p}/${c.name}` : c.name, p);
       return;
     }

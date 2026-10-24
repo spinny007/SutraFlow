@@ -196,11 +196,13 @@ function KvInput({ f, rows, onChange, onFocusField }: { f: Field; rows: { k: str
 }
 
 /** Picks a shared schema of the project; XSDs with several top-level elements list each root. */
-function SchemaPick({ f, id, value, onChange }: { f: Field; id: string; value: string; onChange(v: any): void }) {
+export function SchemaPick({ f, id, value, onChange }: { f: Field; id: string; value: string; onChange(v: any): void }) {
   const { schemas } = useCatalog();
   const kinds = f.schemaKinds || ['json', 'xsd'];
-  const opts = schemas.filter(s => kinds.includes(s.kind)).flatMap(s =>
-    s.kind === 'xsd' && s.roots.length > 1 ? s.roots.map(r => ({ v: `${s.id}::${r}`, l: `${s.name} / ${r}` })) : [{ v: s.id, l: `${s.name} (${s.kind.toUpperCase()})` }]);
+  const opts = schemas.filter(s => kinds.includes(s.kind)).flatMap(s => [
+    { v: s.id, l: `${s.name} (${s.kind.toUpperCase()})` },
+    ...(s.kind === 'xsd' && (s.roots.length > 1 || String(value).startsWith(s.id + '::')) ? s.roots.map(r => ({ v: `${s.id}::${r}`, l: `${s.name} / ${r}` })) : []),
+  ]);
   return (
     <div className="fld"><label htmlFor={id}>{f.label}</label>
       <select id={id} value={value || ''} onChange={e => onChange(e.target.value)}>

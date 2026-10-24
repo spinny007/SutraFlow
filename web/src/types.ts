@@ -90,11 +90,14 @@ export interface SNode {
   doc?: string;
   enum?: string[];
   attr?: boolean;
+  minItems?: number;
+  maxItems?: number;
+  namespace?: string;
 }
 export interface NodeDesign { in: SNode | null; out: SNode | null; ports?: Record<string, SNode>; inputTrees: Record<string, SNode>; errors: string[]; warnings: string[] }
 
 export interface MapRule { expr?: string; forEach?: string; where?: string; groupBy?: string; sortBy?: string; sortDesc?: boolean; ifCond?: string; choose?: { when: string; expr: string }[]; otherwise?: string }
-export interface MappingValue { rules: Record<string, MapRule>; fields?: string[] }
+export interface MappingValue { rules: Record<string, MapRule>; fields?: string[]; definitions?: Record<string, { type?: SNode['type']; repeats?: boolean; required?: boolean; minItems?: number; maxItems?: number; description?: string; namespace?: string }> }
 
 export interface SchemaInfo { id: string; project_id: string; name: string; kind: 'json' | 'xsd' | 'wsdl'; root: string | null; updated_at: string; roots: string[]; folder?: string }
 export interface ProjectVariable { name: string; type: 'string' | 'number' | 'boolean' | 'secret'; value: string; description?: string }

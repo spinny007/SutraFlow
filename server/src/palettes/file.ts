@@ -13,7 +13,7 @@ import path from 'node:path';
 import type { Activity, SchemaHelpers } from '../engine/types.js';
 import type { SNode } from '../schemas.js';
 import { F, when, writeFields, writeMode, appended } from './common.js';
-import { readFields, writeFormatFields, parseContent, contentShape, buildContent, streamRows, STREAM_FORMATS, columnsOf } from './fileformat.js';
+import { readFields, writeFormatFields, parseValidatedContent, contentShape, buildValidatedContent, streamRows, STREAM_FORMATS, columnsOf } from './fileformat.js';
 
 /**
  * File palette. Each activity names a folder (project variables allowed:
@@ -97,7 +97,7 @@ export const fileActivities: Activity[] = [
     execute: async c => {
       const full = safePath(folderOf(c), String(c.v('path') ?? ''));
       const st = await fsp.stat(full);
-      const cfg = legacyRead({ format: c.raw('format'), encoding: c.raw('encoding'), delimiter: c.raw('delimiter'), header: c.raw('header'), skipRows: c.raw('skipRows'), trimValues: c.raw('trimValues'), decimal: c.raw('decimal'), readContent: c.raw('readContent') });
+      const cfg = legacyRead({ strictValidation: c.raw('strictValidation'), schema: c.raw('schema'), format: c.raw('format'), encoding: c.raw('encoding'), delimiter: c.raw('delimiter'), header: c.raw('header'), skipRows: c.raw('skipRows'), trimValues: c.raw('trimValues'), decimal: c.raw('decimal'), readContent: c.raw('readContent') });
       if (cfg.encoding === 'utf8') cfg.encoding = 'utf-8';
       if (cfg.encoding === 'base64') cfg.format = 'base64 (binary)';
       const info = fileInfo(full, st);
@@ -107,7 +107,7 @@ export const fileActivities: Activity[] = [
       }
       const max = (Number(c.raw('maxMb')) || 50) * 1024 * 1024;
       if (st.size > max) throw new Error(`${path.basename(full)} is larger than ${Math.round(max / 1048576)} MB. Stream it in batches (CSV rows or lines), or raise the maximum size.`);
-      return { out: { ...info, ...parseContent(await fsp.readFile(full), cfg, schemaOf(c)) } };
+      return { out: { ...info, ...await parseValidatedContent(await fsp.readFile(full), cfg, schemaOf(c)) } };
     },
   },
   {
@@ -131,7 +131,7 @@ export const fileActivities: Activity[] = [
       const order = c.raw('sort') || 'name';
       files.sort((a, b) => order === 'oldest first' ? a.modifiedAt.localeCompare(b.modifiedAt) : order === 'newest first' ? b.modifiedAt.localeCompare(a.modifiedAt) : order === 'largest first' ? b.size - a.size : a.name.localeCompare(b.name));
       files = files.slice(0, Number(c.raw('max')) || 1000);
-      const cfg = { format: c.raw('format') || 'do not read', encoding: c.raw('encoding'), delimiter: c.raw('delimiter'), header: c.raw('header'), skipRows: c.raw('skipRows'), trimValues: c.raw('trimValues'), decimal: c.raw('decimal') };
+      const cfg = { strictValidation: c.raw('strictValidation'), schema: c.raw('schema'), format: c.raw('format') || 'do not read', encoding: c.raw('encoding'), delimiter: c.raw('delimiter'), header: c.raw('header'), skipRows: c.raw('skipRows'), trimValues: c.raw('trimValues'), decimal: c.raw('decimal') };
       const schema = schemaOf(c);
       const out = [];
       const stream = streaming({ ...cfg, stream: c.raw('stream') });
@@ -143,7 +143,7 @@ export const fileActivities: Activity[] = [
           out.push({ ...info, ...r, streamed: true });
           continue;
         }
-        out.push({ ...fileInfo(f.path, st, root), ...(cfg.format === 'do not read' ? {} : parseContent(await fsp.readFile(f.path), cfg, schema)) });
+        out.push({ ...fileInfo(f.path, st, root), ...(cfg.format === 'do not read' ? {} : await parseValidatedContent(await fsp.readFile(f.path), cfg, schema)) });
       }
       return { port: out.length ? 'out' : 'empty', out: { files: out, count: out.length, folder: root } };
     },
@@ -165,7 +165,7 @@ export const fileActivities: Activity[] = [
       // Older steps: encoding 'base64' meant binary content, 'utf8' meant text.
       const legacy = c.raw('encoding');
       const cc = legacy === 'base64' && !c.raw('format') ? { raw: (k: string) => (k === 'format' ? 'base64 (binary)' : c.raw(k)), v: c.v } : legacy === 'utf8' ? { raw: (k: string) => (k === 'encoding' ? 'utf-8' : c.raw(k)), v: c.v } : c;
-      const data = buildContent(cc, schemaOf(c));
+      const data = await buildValidatedContent(cc, schemaOf(c));
       await fsp.mkdir(path.dirname(full), { recursive: true });
       const mode = writeMode(c.raw);
       const exists = fs.existsSync(full);

@@ -226,6 +226,22 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     output: ['The result, recorded as the run\'s output.'],
   },
   /* ---------------- Data & mapping ---------------- */
+  mapperJson: {
+    scope: ['Building a structured JSON-compatible object with a shared JSON Schema or manually typed fields.', 'Required fields, integer/number/boolean/string/object types and repeating lists with minimum/maximum items.', 'The same formulas, For-Each, Where, Group by, Sort by, If and Choose used by Map data.'],
+    outScope: ['Producing JSON text: use Render JSON after mapping.', 'Manual target definitions are not a complete JSON Schema; select a schema for patterns, ranges and conditional rules.'],
+    use: ['Typed API replies, message bodies and file records.'],
+    other: [['XML elements, attributes and a root', 'mapperXml'], ['Generic or existing mappings', 'mapper'], ['Serialize to JSON text', 'renderJson']],
+    steps: ['Open Input. Select a Target JSON Schema there or in General. Create schema can import a schema definition or infer one from sample JSON; review the proposed types.', 'Without a schema, enter a target path, choose its type and Required/Repeating options, then click + Field. Select a field to edit its description and list bounds.', 'Drag sources onto targets or write formulas. Double-click a manual target or use its pencil button to rename it. Delete target field asks before removing its descendants and formulas; Undo restores the edit.', 'Preview mapped result evaluates only this mapping using the last test input or JSON entered in the preview. It refreshes after edits. Check the displayed run id because sample data can be stale.', 'Resolve required-target and formula errors before deployment. Stale rules and unknown source fields are warnings. Save, test the Sutra, and inspect Output.'],
+    output: ['A structured object, not JSON text. Typed values are checked at runtime; failure follows the error output.'],
+  },
+  mapperXml: {
+    scope: ['Building an XML-shaped object from an XSD or manually defined elements and attributes.', 'One non-repeating root element, required fields, repeating child elements and namespace declarations on object elements.'],
+    outScope: ['Serializing XML text: follow with Render XML.', 'XSD 1.1 or unrestricted network/disk schema dependencies. Selected-schema validation enforces XSD 1.0 choice, groups, facets and occurrences.'],
+    use: ['Preparing XML messages, SOAP payload objects and XML file content.'],
+    other: [['JSON objects and arrays', 'mapperJson'], ['Serialize XML text', 'renderXml']],
+    steps: ['Open Input and select a Target XSD, including its root where there are several roots. Create schema accepts an authored XSD or generates a proposed XSD from sample XML.', 'For a manual target keep or rename the initial Root object. Add Root/id as an integer element or Root/@_status as a string attribute. Attributes cannot repeat or contain objects.', 'Select an object element to set its namespace URI. A name such as ns:User declares xmlns:ns; an unprefixed object declares a default namespace. Schema-backed complex roots use the XSD target namespace.', 'Map child fields or For-Each repeating elements. Preview mapped result shows XML text without executing downstream steps. Then connect Render XML to serialize the mapped object.', 'Test the Typed XML mapping sample for manual fields and XML in and out for shared Order/Invoice XSDs. Review schema-limit warnings; inferred XML schemas do not preserve namespace bindings.'],
+    output: ['A structured object with element keys, @_attribute keys and repeating elements represented as arrays. Namespace declarations are ordinary XML attribute entries.'],
+  },
   mapper: {
     scope: ['Building a new message field by field from earlier steps.', 'A shared schema for the target, or target fields added by hand.', 'Formulas with nested functions, For-Each with Where, Group by and Sort by, If, Choose.'],
     outScope: ['Calling anything: mapping only reshapes data.'],
@@ -235,8 +251,8 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     output: ['The mapped message.'],
   },
   parseJson: {
-    scope: ['JSON text to data, with an optional schema that describes it for mapping.'],
-    outScope: ['Validating against the schema.'],
+    scope: ['JSON text to data, with an optional schema that describes it for mapping.', 'Selected-schema validation, enabled by default, including patterns, formats, types and ranges.'],
+    outScope: ['Inferring business rules absent from the selected schema.'],
     use: ['A text field, file or message that holds JSON.'],
     steps: ['Set the text, for example <code>{{input.body}}</code>.', 'Pick the schema so later steps see the fields.'],
     output: ['The parsed data.'],
@@ -249,8 +265,8 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     output: ['<code>text</code>.'],
   },
   parseXml: {
-    scope: ['XML text to data. Namespace prefixes are removed; attributes start with <code>@_</code>.', 'An XSD that describes the result for mapping.'],
-    outScope: ['Validating against the XSD.'],
+    scope: ['XML text to data. Namespace prefixes are removed after validation; attributes start with <code>@_</code>.', 'Optional XSD 1.0 validation of original XML: namespaces, groups, patterns, enums, types and occurrences.'],
+    outScope: ['XSD 1.1 or loading dependencies from URLs or the server filesystem.'],
     use: ['XML from files, queues or HTTP responses.'],
     steps: ['Set the text.', 'Pick the XSD and, when it has several, the root element.'],
     output: ['The parsed data, with the root element as the first field.'],
@@ -314,10 +330,10 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     output: ['The input, unchanged.'],
   },
   validate: {
-    scope: ['Checking that required fields are present and not empty.'],
-    outScope: ['Schema validation of types and formats.'],
+    scope: ['Checking that required fields are present and not empty.', 'Optional JSON Schema/XSD validation using the same contracts as Map/Parse/Render, including types, patterns and formats.'],
+    outScope: ['Business rules not described by required paths or the selected schema.'],
     use: ['The first step after an API trigger, before any call.'],
-    steps: ['List the required paths, for example <code>params.id</code>.', 'Connect <em>valid</em> and <em>invalid</em>; <em>invalid</em> carries <code>problems</code>.'],
+    steps: ['List the required paths, for example <code>params.id</code>, or remove them for schema-only validation.', 'Optionally select a JSON Schema or XSD and map Data to check. XSD accepts XML text or a root-wrapped XML object.', 'Connect <em>valid</em> and <em>invalid</em>; <em>invalid</em> carries <code>problems</code> and <code>data</code>.'],
     output: ['<em>valid</em>: the input. <em>invalid</em>: the input and <code>problems</code>.'],
   },
   /* ---------------- HTTP ---------------- */

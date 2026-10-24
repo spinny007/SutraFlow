@@ -1,0 +1,43 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 2.0.6
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { renameMappingField } from '../web/src/mapping-fields.js';
+import { adhocTree, evaluateMapping } from '../server/src/mapping.js';
+
+test('rename default target preserves its formula and changes runtime output', () => {
+  const original = { rules: { orderId: { expr: '{input.orderId}' } } };
+  const renamed = renameMappingField(original, 'orderId', 'ID');
+  assert.deepEqual(evaluateMapping(adhocTree(renamed), renamed, { input: { orderId: 'A-12' } }), { ID: 'A-12' });
+  assert.ok(original.rules.orderId);
+});
+
+test('rename object/list carries descendant fields and all rule options', () => {
+  const original = {
+    fields: ['lines[]/sku', 'lines[]/quantity', 'note'],
+    rules: { lines: { forEach: '{input.lines}' }, 'lines/sku': { expr: '{item.sku}' }, 'lines/quantity': { expr: '{item.qty}', ifCond: '1 = 1' } },
+  };
+  const renamed = renameMappingField(original, 'lines', 'items');
+  assert.deepEqual(renamed.fields, ['items[]/sku', 'items[]/quantity', 'note']);
+  assert.deepEqual(renamed.rules['items/quantity'], original.rules['lines/quantity']);
+  assert.deepEqual(evaluateMapping(adhocTree(renamed), renamed, { input: { lines: [{ sku: 'X', qty: 2 }] } }), { items: [{ sku: 'X', quantity: 2 }] });
+  const nested = renameMappingField(renamed, 'items/sku', 'product');
+  assert.deepEqual(nested.fields, ['items[]/product', 'items[]/quantity', 'note']);
+  assert.equal(nested.rules['items/product'].expr, '{item.sku}');
+});
+
+test('rename rejects sibling conflicts and invalid names without losing mappings', () => {
+  const original = { fields: ['ID', 'customer/name', 'customer/code', 'other/name'], rules: { orderId: { expr: '1' } } };
+  for (const name of ['', ' ', 'a/b', 'a.b', 'a[]', '__proto__', 'constructor']) assert.throws(() => renameMappingField(original, 'orderId', name));
+  assert.throws(() => renameMappingField(original, 'orderId', 'ID'), /already exists/);
+  assert.throws(() => renameMappingField(original, 'customer/name', 'code'), /already exists/);
+  assert.equal(renameMappingField(original, 'orderId', 'orderId'), original);
+  assert.ok(renameMappingField(original, 'customer/code', 'ID').fields?.includes('customer/ID'));
+});

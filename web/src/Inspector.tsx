@@ -13,6 +13,7 @@ import { MissingVariables } from './Project';
 import { post } from './api';
 import { FieldList, VarPicker, insertAtCaret, visible } from './Fields';
 import { ConditionDataBrowser, Mapper, inferShape } from './Mapper';
+import { XmlOutput } from './XmlOutput';
 import { famOf, Json, since, useCatalog, useToast } from './ui';
 import { ACTIVE, portsOf, type FlowDoc, type FlowEdge, type FlowNode, type NodeDesign, type ProcessVariable, type RunDetail, type SNode } from './types';
 
@@ -330,6 +331,7 @@ function StepOutput(p: Props & { node: FlowNode }) {
       {t?.port && ports.length > 1 && <p className="muted" style={{ marginTop: 0 }}>Took output <code>{t.port}</code></p>}
       <div className="row" style={{ justifyContent: 'space-between' }}><p className="sub">Output</p>{ran && <button className="btn link" onClick={() => setRaw(r => !r)}>{raw ? 'Show fields' : 'Show JSON'}</button>}</div>
       {raw && ran ? <Json value={t.output} /> : <OutputTree shape={shape} value={ran ? t.output : undefined} ran={ran} />}
+      {ran && <XmlOutput value={t.output} xmlActivity={/xml|soap/i.test(node.type)} />}
       {t && <><p className="sub" style={{ marginTop: 12 }}>Received</p><Json value={t.input} /></>}
       {run && <p className="muted" style={{ fontSize: 12 }}>Run {run.id.slice(0, 8)} of {doc.name}</p>}
     </>

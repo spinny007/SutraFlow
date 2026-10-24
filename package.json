@@ -1,6 +1,6 @@
 {
   "name": "sutraflow",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "description": "SutraFlow: visual integration designer and engine (palettes, mapping, SOAP/WS-Security, REST, exposed secured APIs, TLS/Let's Encrypt).",
   "private": true,
   "license": "AGPL-3.0-only",
@@ -64,7 +64,8 @@
     "undici": "^8.11.2",
     "unpdf": "^1.9.0",
     "ws": "^8.22.0",
-    "xml-crypto": "^6.3.3"
+    "xml-crypto": "^6.3.3",
+    "xmllint-wasm": "5.3.0"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.16",
@@ -93,6 +94,10 @@
     "esbuild@0.28.2": true,
     "ssh2": false,
     "oracledb": false
+  },
+  "overrides": {
+    "@azure/identity": "4.13.0",
+    "@azure/msal-node": { "uuid": "11.1.1" }
   },
   "bin": {
     "sutra": "dist/server/cli.js",

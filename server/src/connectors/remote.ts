@@ -18,7 +18,7 @@ import { requireSecret } from '../secrets.js';
 import { registerListener } from '../listeners.js';
 import { getSetting, setSetting } from '../db.js';
 import { F, when, writeFields, writeMode, appended } from '../palettes/common.js';
-import { readFields, writeFormatFields, parseContent, contentShape, buildContent } from '../palettes/fileformat.js';
+import { readFields, writeFormatFields, parseValidatedContent, contentShape, buildValidatedContent } from '../palettes/fileformat.js';
 import { wildcard, streamFields, streaming, batchShape } from '../palettes/file.js';
 import { streamRows } from '../palettes/fileformat.js';
 import fs from 'node:fs';
@@ -198,7 +198,7 @@ const info = (e: Entry, base: string, host: string) => ({
   extension: path.posix.extname(e.path).slice(1), size: e.size, modifiedAt: e.modifiedAt, server: host,
 });
 const infoShape: SNode[] = ['name', 'path', 'relativePath', 'folder', 'extension', 'modifiedAt', 'server'].map(n => ({ name: n, type: n === 'modifiedAt' ? 'date' : 'string' } as SNode)).concat([{ name: 'size', type: 'integer' }]);
-const readCfg = (c: { raw(k: string): any }) => ({ format: c.raw('format') || 'text', encoding: c.raw('encoding'), delimiter: c.raw('delimiter'), header: c.raw('header'), skipRows: c.raw('skipRows'), trimValues: c.raw('trimValues'), decimal: c.raw('decimal') });
+const readCfg = (c: { raw(k: string): any }) => ({ strictValidation: c.raw('strictValidation'), schema: c.raw('schema'), format: c.raw('format') || 'text', encoding: c.raw('encoding'), delimiter: c.raw('delimiter'), header: c.raw('header'), skipRows: c.raw('skipRows'), trimValues: c.raw('trimValues'), decimal: c.raw('decimal') });
 const schemaOf = (c: { schemaTree(k: string): SNode | null }) => { try { return c.schemaTree('schema'); } catch { return null; } };
 const shape = (h: SchemaHelpers, cfg: Record<string, any>, extra: SNode[] = []): SNode => ({ name: 'out', type: 'object', children: [...extra, ...infoShape, ...contentShape(cfg, h.schema(cfg.schema))] });
 
@@ -255,7 +255,7 @@ export const remoteActivities: Activity[] = [
       files = files.slice(0, Number(c.raw('max')) || 1000);
       const cfg = { ...readCfg(c), format: c.raw('format') || 'do not read' };
       const out = [];
-      for (const f of files) out.push({ ...info(f, x.base, x.host), ...(cfg.format === 'do not read' ? {} : parseContent(await x.get(f.path), cfg, schemaOf(c))) });
+      for (const f of files) out.push({ ...info(f, x.base, x.host), ...(cfg.format === 'do not read' ? {} : await parseValidatedContent(await x.get(f.path), cfg, schemaOf(c))) });
       return { port: out.length ? 'out' : 'empty', out: { files: out, count: out.length, folder: dir } };
     }),
   },
@@ -279,7 +279,7 @@ export const remoteActivities: Activity[] = [
       }
       const max = (Number(c.raw('maxMb')) || 50) * 1048576;
       if (st.size > max) throw new Error(`${st.name} is larger than ${Math.round(max / 1048576)} MB`);
-      return { out: { ...info(st, x.base, x.host), ...parseContent(await x.get(p), readCfg(c), schemaOf(c)) } };
+      return { out: { ...info(st, x.base, x.host), ...await parseValidatedContent(await x.get(p), readCfg(c), schemaOf(c)) } };
     }),
   },
   {
@@ -289,7 +289,7 @@ export const remoteActivities: Activity[] = [
     outputSchema: () => ({ name: 'out', type: 'object', children: [...infoShape, { name: 'action', type: 'string', enum: ['created', 'overwritten', 'appended'] }, { name: 'bytesWritten', type: 'integer' }] }),
     execute: async c => withRemote(resourceOf(c), secretOf(c), async x => {
       const p = remotePath(x.base, String(c.v('path') ?? ''));
-      const data = buildContent(c, schemaOf(c));
+      const data = await buildValidatedContent(c, schemaOf(c));
       await x.mkdirp(path.posix.dirname(p));
       const mode = writeMode(c.raw);
       const exists = await x.exists(p);
@@ -355,7 +355,7 @@ registerListener('remoteTrigger', ctx => {
           if (pending.get(f.path) !== sig) { pending.set(f.path, sig); continue; }
           pending.delete(f.path);
           const max = (Number(cfg.maxMb) || 50) * 1048576;
-          const read = cfg.format && cfg.format !== 'do not read' && f.size <= max ? parseContent(await x.get(f.path), { format: cfg.format, encoding: cfg.encoding, delimiter: cfg.delimiter, header: cfg.header, skipRows: cfg.skipRows, trimValues: cfg.trimValues, decimal: cfg.decimal }, null) : {};
+          const read = cfg.format && cfg.format !== 'do not read' && f.size <= max ? await parseValidatedContent(await x.get(f.path), cfg, null) : {};
           inFlight.add(f.path);
           if (cfg.after === 'leave and remember') { seen.add(`${f.path}|${sig}`); setSetting(key, [...seen].slice(-5000)); }
           ctx.fire({ ...info(f, x.base, x.host), ...read }, (status) => {

@@ -1,0 +1,60 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 2.0.6
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import type { MappingValue } from './types.js';
+
+/** Rename one ad-hoc target and its descendants, not the source expressions. */
+export function renameMappingField(mapping: MappingValue, path: string, name: string): MappingValue {
+  name = name.trim();
+  if (!name || /[/.\[\]]/.test(name) || ['__proto__', 'prototype', 'constructor'].includes(name)) {
+    throw new Error('Use a non-empty field name without dots, slashes or brackets.');
+  }
+  const segments = (p: string) => p.split('/').map(s => s.replace(/\[\]$/, ''));
+  const old = segments(path);
+  const parent = old.slice(0, -1);
+  const paths = [...(mapping.fields || []), ...Object.keys(mapping.rules || {}), ...Object.keys(mapping.definitions || {})];
+  if (name === old.at(-1)) return mapping;
+  if (paths.some(p => {
+    const parts = segments(p);
+    return parent.every((s, i) => parts[i] === s) && parts[parent.length] === name;
+  })) throw new Error(`A target field named "${name}" already exists here.`);
+  const rename = (p: string) => {
+    const parts = p.split('/');
+    if (old.every((s, i) => parts[i]?.replace(/\[\]$/, '') === s)) {
+      const i = old.length - 1;
+      parts[i] = name + (parts[i].endsWith('[]') ? '[]' : '');
+    }
+    return parts.join('/');
+  };
+  return {
+    ...mapping,
+    fields: mapping.fields?.map(rename),
+    rules: Object.fromEntries(Object.entries(mapping.rules || {}).map(([p, rule]) => [rename(p), rule])),
+    definitions: mapping.definitions && Object.fromEntries(Object.entries(mapping.definitions).map(([p, def]) => [rename(p), def])),
+  };
+}
+
+export const normalizedTargetPath = (p: string) => p.split('/').filter(Boolean).map(s => s.replace(/\[\]$/, '')).join('/');
+
+export function deleteMappingField(mapping: MappingValue, path: string): MappingValue {
+  const selected = normalizedTargetPath(path);
+  const keep = (p: string) => { const n = normalizedTargetPath(p); return n !== selected && !n.startsWith(selected + '/'); };
+  return { ...mapping, fields: mapping.fields?.filter(keep), rules: Object.fromEntries(Object.entries(mapping.rules || {}).filter(([p]) => keep(p))),
+    definitions: mapping.definitions && Object.fromEntries(Object.entries(mapping.definitions).filter(([p]) => keep(p))) };
+}
+
+export function addMappingField(mapping: MappingValue, path: string, definition: NonNullable<MappingValue['definitions']>[string], xml = false): MappingValue {
+  path = path.trim().replace(/^\/+|\/+$/g, '').replace(/\./g, '/');
+  if (!path || path.split('/').some(part => !part || ['__proto__', 'constructor', 'prototype'].includes(part.replace(/\[\]$/, '')))) throw new Error('Enter a valid target path.');
+  if (xml && path.split('/').some(part => !/^(?:@_)?[A-Za-z_][\w-]*(?::[A-Za-z_][\w-]*)?(?:\[\])?$/.test(part))) throw new Error('Use valid XML element names, or @_name for an attribute.');
+  const key = normalizedTargetPath(path);
+  const existing = [...(mapping.fields || []), ...Object.keys(mapping.rules || {}), ...Object.keys(mapping.definitions || {})];
+  if (existing.some(p => normalizedTargetPath(p) === key)) throw new Error('That target already exists. Select it to edit its type.');
+  return { ...mapping, fields: [...(mapping.fields || []), path], definitions: { ...mapping.definitions, [key]: definition } };
+}

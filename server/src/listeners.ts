@@ -12,7 +12,7 @@ import { engine } from './engine/engine.js';
 import type { FlowDoc, FlowNode } from './engine/types.js';
 import { deployedFlows } from './flows.js';
 import { listFiles } from './palettes/file.js';
-import { parseContent } from './palettes/fileformat.js';
+import { parseValidatedContent } from './palettes/fileformat.js';
 import { schemaTree } from './schemas.js';
 import { effectiveVariables, engineVariableValues } from './projects.js';
 import { resolveSettings } from './settings.js';
@@ -103,7 +103,7 @@ registerListener('fileTrigger', c => {
   const forget = (p: string) => q.run('delete from file_listener_files where flow_id = ? and node_id = ? and path = ?', c.flowId, c.node.id, p);
   const read = async (p: string): Promise<Record<string, any>> => {
     if (fmt === 'do not read') return {};
-    try { return parseContent(await fsp.readFile(p), { ...cfg, format: fmt }, rowSchema); }
+    try { return await parseValidatedContent(await fsp.readFile(p), { ...cfg, format: fmt }, rowSchema); }
     catch (e: any) { return { readError: e.message }; }
   };
   const tick = async () => {

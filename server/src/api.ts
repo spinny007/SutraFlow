@@ -51,6 +51,9 @@ import { config, version, rootDir } from './config.js';
 import * as projects from './projects.js';
 import * as schemas from './schemas.js';
 import { designSchemas } from './design.js';
+import { previewMapping, schemaFromSample } from './mapping-preview.js';
+import { validateStructured } from './schema-validation.js';
+import { adhocTree } from './mapping.js';
 import { evalExpression, functionCatalog, refsOf, ExprError } from './expr.js';
 import { tailLog, clearLog } from './logger.js';
 import * as oauth from './connectors/oauth.js';
@@ -696,6 +699,25 @@ export async function buildAdmin(): Promise<FastifyInstance> {
 
   /** Design-time shapes of every step (Process Data, Activity Input trees, Output fields). */
   app.post('/api/design/schemas', async (req: any) => designSchemas(flows.normalizeDoc(req.body?.doc)));
+  app.post('/api/design/mapping-preview', async (req: any) => {
+    try {
+      const { config: cfg = {}, scope = {}, format = 'data', projectId } = req.body || {};
+      if (!['data', 'json', 'xml'].includes(format)) throw new Error('Unknown target format');
+      if (JSON.stringify(scope).length > 256 * 1024) throw new Error('Preview data must be at most 256 KB');
+      const stored = cfg.schema ? schemas.getSchema(String(cfg.schema).split('::')[0]) : null;
+      if (cfg.schema && (!stored || stored.project_id !== projectId)) throw new Error('Target schema is missing or belongs to another project');
+      const tree = schemas.schemaTree(cfg.schema) || adhocTree(cfg.mapping);
+      const result = previewMapping(tree, cfg.mapping || { rules: {} }, scope, format, cfg.start === 'input');
+      if (result.ok && cfg.validateSchema !== false && cfg.schema) {
+        result.warnings.push(...await validateStructured(cfg.schema, result.value, format === 'xml' ? result.text : undefined));
+      }
+      return result;
+    } catch (e: any) { return { ok: false, errors: [e.message], warnings: [] }; }
+  });
+  app.post('/api/design/schema-from-sample', async (req: any) => {
+    if (!['json', 'xsd'].includes(req.body?.kind)) throw bad('Choose JSON or XSD');
+    try { return schemaFromSample(req.body.kind, String(req.body.sample || '')); } catch (e: any) { throw bad(e.message); }
+  });
 
   /** Run one read-only SQL activity against its selected connection and return at most ten sample rows. */
   app.post('/api/design/query-preview', async (req: any) => {

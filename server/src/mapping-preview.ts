@@ -1,0 +1,53 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 2.0.7
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { XMLBuilder, XMLParser, XMLValidator } from 'fast-xml-parser';
+import { adhocTree, evaluateMapping, type MappingValue } from './mapping.js';
+import { checkMapping, checkMappedValue } from './mapping-check.js';
+import { inferTree, type SNode } from './schemas.js';
+
+export function previewMapping(tree: SNode, mapping: MappingValue, scope: Record<string, any>, format: 'json' | 'xml' | 'data', startInput = false) {
+  const checks = checkMapping(tree, mapping, format === 'xml');
+  if (checks.errors.length) return { ok: false, ...checks };
+  let value = evaluateMapping(tree, mapping, scope, true);
+  if (startInput && scope.input && typeof scope.input === 'object' && !Array.isArray(scope.input)) value = { ...scope.input, ...value };
+  const warnings = [...checks.warnings, ...checkMappedValue(tree, value)];
+  const text = format === 'xml' ? new XMLBuilder({ ignoreAttributes: false, attributeNamePrefix: '@_', format: true, suppressEmptyNode: true }).build(value) : JSON.stringify(value, null, 2);
+  if (text.length > 1024 * 1024) throw new Error('Preview exceeds 1 MB; use a smaller sample.');
+  return { ok: true, value, text, warnings };
+}
+
+const escapeXml = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+/** Sample inference, not a lossless XML ↔ JSON Schema conversion. Review before saving. */
+export function schemaFromSample(kind: 'json' | 'xsd', sample: string) {
+  if (sample.length > 128 * 1024) throw new Error('Schema sample must be at most 128 KB.');
+  if (kind === 'json') {
+    const value = JSON.parse(sample);
+    const convert = (n: SNode): any => {
+      const content = n.type === 'object' ? { type: 'object', properties: Object.fromEntries((n.children || []).map(c => [c.name, convert(c)])) } : n.type === 'any' ? {} : { type: n.type === 'date' ? 'string' : n.type };
+      return n.repeats ? { type: 'array', items: content } : content;
+    };
+    return { text: JSON.stringify({ $schema: 'https://json-schema.org/draft/2020-12/schema', ...convert(inferTree(value)) }, null, 2) };
+  }
+  if (/<!DOCTYPE|<!ENTITY/i.test(sample)) throw new Error('DTD and entities are not supported in schema samples.');
+  if (XMLValidator.validate(sample) !== true) throw new Error('Sample is not valid XML.');
+  const parsed = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', removeNSPrefix: true }).parse(sample);
+  const roots = Object.keys(parsed).filter(k => !k.startsWith('?'));
+  if (roots.length !== 1) throw new Error('XML sample must have exactly one root.');
+  const root = roots[0];
+  const content = (n: SNode): string => {
+    const many = n.repeats ? ' minOccurs="0" maxOccurs="unbounded"' : '';
+    if (n.type !== 'object') return '<xs:element name="' + escapeXml(n.name) + '" type="xs:' + (n.type === 'number' ? 'decimal' : n.type === 'integer' ? 'integer' : n.type === 'boolean' ? 'boolean' : 'string') + '"' + many + '/>';
+    const children = n.children || [];
+    const attrs = children.filter(c => c.name.startsWith('@_') && !c.name.startsWith('@_xmlns')).map(c => '<xs:attribute name="' + escapeXml(c.name.slice(2)) + '" type="xs:string"/>').join('');
+    const elements = children.filter(c => !c.name.startsWith('@_') && c.name !== '#text').map(content).join('');
+    return '<xs:element name="' + escapeXml(n.name) + '"' + many + '><xs:complexType' + (children.some(c => c.name === '#text') ? ' mixed="true"' : '') + '><xs:sequence>' + elements + '</xs:sequence>' + attrs + '</xs:complexType></xs:element>';
+  };
+  return { root, text: '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">' + content(inferTree(parsed[root], root)) + '</xs:schema>' };
+}

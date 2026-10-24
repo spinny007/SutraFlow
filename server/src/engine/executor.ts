@@ -17,6 +17,7 @@ import { effectiveVariables, engineVariableValues } from '../projects.js';
 import { projectLog, wantsStepData, runOrigin } from '../logger.js';
 import { schemaTree } from '../schemas.js';
 import { adhocTree, evaluateMapping, type MappingValue } from '../mapping.js';
+import { checkMappedValue } from '../mapping-check.js';
 import { resolveSetting } from '../settings.js';
 import { truthy } from '../expr.js';
 import type { Activity, DebugState, FlowDoc, FlowNode, ReplyPayload, StepResult } from './types.js';
@@ -127,7 +128,13 @@ export class Executor {
             const field = activity.fields.find(candidate => candidate.k === key);
             const mapping = node.config?.[key] as MappingValue | undefined;
             const tree = (field?.schemaField && schemaTree(node.config?.[field.schemaField])) || adhocTree(mapping);
-            return evaluateMapping(tree, mapping, scope);
+            const typed = !!mapping?.definitions || node.type === 'mapperJson' || node.type === 'mapperXml';
+            const result = evaluateMapping(tree, mapping, scope, typed);
+            if (typed) {
+              const issues = checkMappedValue(tree, result);
+              if (issues.length) throw new Error(issues.join('; '));
+            }
+            return result;
           },
         });
         const execution = settings.loop === 'for each item' || settings.loop === 'repeat while'

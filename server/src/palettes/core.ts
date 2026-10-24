@@ -15,6 +15,8 @@ import { inferTree, type SNode } from '../schemas.js';
 import { adhocTree, type MappingValue } from '../mapping.js';
 import { F, when, isObj, listOf, parseJsonText, needList, OPS, compare } from './common.js';
 import { truthy } from '../expr.js';
+import { checkMappedValue } from '../mapping-check.js';
+import { validateStructured } from '../schema-validation.js';
 import { engineVariableValues, publicProjectVariableValues } from '../projects.js';
 
 const safeJson = (t: unknown): any => { if (typeof t !== 'string') return t; try { return JSON.parse(t); } catch { return undefined; } };
@@ -329,29 +331,36 @@ const data: Activity[] = [
   },
   {
     type: 'parseJson', palette: 'data', name: 'Parse JSON', glyph: '{}', ports: ['out'], desc: 'Turns JSON text into data; a shared schema describes the result for mapping.',
-    fields: [F('schema', 'Schema', 'schema', '', { schemaKinds: ['json'] }), F('text', 'JSON text', 'textarea', '{{input.body}}', { tpl: true })],
+    fields: [F('schema', 'Schema', 'schema', '', { schemaKinds: ['json'] }), F('validateSchema', 'Validate against schema', 'bool', true), F('text', 'JSON text', 'textarea', '{{input.body}}', { tpl: true })],
     outputSchema: (cfg, h) => h.schema(cfg.schema) || { name: 'out', type: 'any' },
-    execute: c => { const v = c.v('text'); return { out: typeof v === 'string' ? parseJsonText(v, 'Input') : v }; },
+    execute: async c => { const v = c.v('text'); const value = typeof v === 'string' ? parseJsonText(v, 'Input') : v;
+      const issues = c.raw('validateSchema') ? await validateStructured(c.raw('schema'), value) : [];
+      if (issues.length) throw new Error(issues.join('; ')); return { out: value }; },
   },
   {
     type: 'renderJson', palette: 'data', name: 'Render JSON', glyph: '⟨⟩', ports: ['out'], desc: 'Turns data into JSON text: from one value, or mapped field by field to a shared schema.',
     fields: [
       F('source', 'Build from', 'select', 'value', { options: ['value', 'mapping'] }),
       F('value', 'Data', 'text', '{{input}}', { tpl: true, ...when('source', 'value') }),
-      F('schema', 'Schema', 'schema', '', { schemaKinds: ['json'], ...when('source', 'mapping') }),
+      F('schema', 'Schema', 'schema', '', { schemaKinds: ['json'] }),
       F('mapping', 'JSON content', 'mapping', { rules: {} }, { schemaField: 'schema', ...when('source', 'mapping') }),
       F('pretty', 'Pretty print', 'bool', true),
+      F('validateSchema', 'Validate against schema', 'bool', true),
     ],
     outputHint: { text: '' },
-    execute: c => ({ out: { text: JSON.stringify(c.raw('source') === 'mapping' ? c.mapping('mapping') : c.v('value'), null, c.raw('pretty') ? 2 : 0) } }),
+    execute: async c => { const value = c.raw('source') === 'mapping' ? c.mapping('mapping') : c.v('value');
+      const issues = c.raw('validateSchema') ? await validateStructured(c.raw('schema'), value) : [];
+      if (issues.length) throw new Error(issues.join('; ')); return { out: { text: JSON.stringify(value, null, c.raw('pretty') ? 2 : 0) } }; },
   },
   {
     type: 'parseXml', palette: 'data', name: 'Parse XML', glyph: '</>', ports: ['out'], desc: 'Turns XML text into data. Namespace prefixes are removed; attributes start with @_. An XSD describes the result for mapping.',
-    fields: [F('schema', 'Schema (XSD)', 'schema', '', { schemaKinds: ['xsd'] }), F('text', 'XML text', 'textarea', '{{input.body}}', { tpl: true })],
+    fields: [F('schema', 'Schema (XSD)', 'schema', '', { schemaKinds: ['xsd'] }), F('validateSchema', 'Validate against schema', 'bool', true), F('text', 'XML text', 'textarea', '{{input.body}}', { tpl: true })],
     outputSchema: (cfg, h) => h.schema(cfg.schema) || { name: 'out', type: 'any' },
-    execute: c => {
+    execute: async c => {
       const t = String(c.v('text') ?? '');
       if (!t.trim().startsWith('<')) throw new Error('The input is not XML');
+      const issues = c.raw('validateSchema') ? await validateStructured(c.raw('schema'), null, t) : [];
+      if (issues.length) throw new Error(issues.join('; '));
       return { out: xmlParser.parse(t) };
     },
   },
@@ -361,18 +370,21 @@ const data: Activity[] = [
       F('source', 'Build from', 'select', 'value', { options: ['value', 'mapping'] }),
       F('root', 'Root element', 'text', 'Order', when('source', 'value')),
       F('value', 'Data', 'text', '{{input}}', { tpl: true, ...when('source', 'value') }),
-      F('schema', 'Schema (XSD)', 'schema', '', { schemaKinds: ['xsd'], ...when('source', 'mapping') }),
+      F('schema', 'Schema (XSD)', 'schema', '', { schemaKinds: ['xsd'] }),
       F('mapping', 'XML content', 'mapping', { rules: {} }, { schemaField: 'schema', ...when('source', 'mapping') }),
       F('declaration', 'Add <?xml?> declaration', 'bool', true),
+      F('validateSchema', 'Validate against schema', 'bool', true),
     ],
     outputHint: { text: '' },
-    execute: c => {
+    execute: async c => {
       let doc: any;
       if (c.raw('source') === 'mapping') {
         doc = c.mapping('mapping');
         if (!isObj(doc) || Object.keys(doc).length !== 1) throw new Error('The mapped XML must have exactly one root element. Pick an XSD with a root element, or add one top-level target field.');
       } else doc = { [c.raw('root') || 'root']: c.v('value') };
       const body = xmlBuilder.build(doc);
+      const issues = c.raw('validateSchema') ? await validateStructured(c.raw('schema'), doc, body) : [];
+      if (issues.length) throw new Error(issues.join('; '));
       return { out: { text: (c.raw('declaration') ? '<?xml version="1.0" encoding="UTF-8"?>\n' : '') + body } };
     },
   },
@@ -455,19 +467,39 @@ const general: Activity[] = [
   },
   {
     type: 'validate', palette: 'general', name: 'Validate fields', glyph: '☑', ports: ['valid', 'invalid'],
-    desc: 'Checks that required fields are present. Invalid input goes to the invalid branch with a list of problems.',
-    fields: [F('required', 'Required fields', 'list', ['orderId']), F('source', 'Data to check', 'text', '{{input}}', { tpl: true })],
+    desc: 'Checks required fields and an optional JSON Schema or XSD. Invalid input goes to the invalid branch with a list of problems.',
+    fields: [F('required', 'Required fields', 'list', ['orderId']), F('source', 'Data to check', 'text', '{{input}}', { tpl: true }), F('schema', 'Schema', 'schema', '', { help: 'Optional. JSON Schema checks structured data; XSD checks XML text or an XML-shaped object.' })],
     outputHint: { valid: true, problems: [] },
     passThrough: true,
-    execute: c => {
+    execute: async c => {
       const src = c.v('source');
       const problems = listOf(c.raw('required')).filter(p => { const v = getPath(src, p); return v == null || v === ''; }).map(p => `${p} is required`);
+      if (c.raw('schema')) problems.push(...await validateStructured(c.raw('schema'), src, typeof src === 'string' && src.trim().startsWith('<') ? src : undefined));
       return { port: problems.length ? 'invalid' : 'valid', out: problems.length ? { valid: false, problems, data: src } : src };
     },
   },
 ];
 
-export const coreActivities: Activity[] = [...triggers, ...flow, ...data, ...general];
+const mappingActivities: Activity[] = (['json', 'xml'] as const).map(format => ({
+  ...data[0], type: format === 'json' ? 'mapperJson' : 'mapperXml',
+  name: format === 'json' ? 'Map JSON Data' : 'Map XML Data', glyph: format === 'json' ? '{}' : '</>',
+  desc: `Builds structured ${format.toUpperCase()} data with typed targets, formulas and repeating fields. Select a shared ${format === 'json' ? 'JSON Schema' : 'XSD'} or define fields in Input. Use Render ${format.toUpperCase()} to produce text.`,
+  fields: [
+    F('schema', format === 'json' ? 'Target JSON Schema' : 'Target XSD', 'schema', '', { schemaKinds: [format === 'json' ? 'json' : 'xsd'] }),
+    F('validateSchema', 'Validate against schema', 'bool', true, { help: 'JSON Schema uses AJV. XML Schema uses isolated libxml2 WebAssembly (XSD 1.0); no Java or native installation. Unsupported schema dependencies fail explicitly.' }),
+    F('mapping', 'Target', 'mapping', format === 'xml' ? { fields: ['Root'], definitions: { Root: { type: 'object', required: true } }, rules: {} } : { rules: {} }, { schemaField: 'schema' }),
+  ],
+  execute: async c => {
+    const value = c.mapping('mapping');
+    const tree = c.schemaTree('schema') || adhocTree(c.raw('mapping'));
+    const issues = checkMappedValue(tree, value);
+    if (c.raw('validateSchema')) issues.push(...await validateStructured(c.raw('schema'), value));
+    if (format === 'xml' && (Object.keys(value).length !== 1 || tree.children?.[0]?.attr || tree.children?.[0]?.repeats)) issues.push('XML target must have exactly one non-repeating root element');
+    if (issues.length) throw new Error(issues.join('; '));
+    return { out: value };
+  },
+}));
+export const coreActivities: Activity[] = [...triggers, ...flow, ...data, ...mappingActivities, ...general];
 
 /** What a Human approval or Ask a person step waits with: its people, rule, details and times. */
 export function approvalWait(c: ExecCtx, base: { kind: 'approval'; message: string; question?: boolean }) {

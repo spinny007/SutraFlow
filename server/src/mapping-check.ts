@@ -1,0 +1,63 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 2.0.7
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { compile } from './expr.js';
+import { normPath, unmappedRequired, type MappingValue } from './mapping.js';
+import type { SNode } from './schemas.js';
+
+export function checkMapping(tree: SNode, mapping: MappingValue | undefined, xml = false) {
+  const errors: string[] = [], warnings: string[] = [];
+  const paths = new Set<string>();
+  const walk = (n: SNode, path: string) => {
+    if (path) paths.add(path);
+    if (xml && path && !/^(?:@_)?[A-Za-z_][\w.-]*(?::[A-Za-z_][\w.-]*)?$/.test(n.name) && n.name !== '#text') errors.push(`${path}: invalid XML name`);
+    if (n.attr && (n.repeats || n.type === 'object')) errors.push(`${path}: XML attributes cannot be objects or lists`);
+    if (n.namespace && n.type !== 'object') errors.push(`${path}: declare a namespace on an object element`);
+    for (const k of ['minItems', 'maxItems'] as const) if (n[k] !== undefined && (!Number.isInteger(n[k]) || n[k]! < 0 || !n.repeats)) errors.push(`${path}: ${k} must be a non-negative integer on a repeating field`);
+    if (n.minItems !== undefined && n.maxItems !== undefined && n.minItems > n.maxItems) errors.push(`${path}: minimum items exceeds maximum items`);
+    for (const c of n.children || []) walk(c, path ? `${path}/${c.name}` : c.name);
+  };
+  walk(tree, '');
+  for (const path of unmappedRequired(tree, mapping)) errors.push(`${path}: required target is not mapped`);
+  for (const [path, rule] of Object.entries(mapping?.rules || {})) {
+    if (!paths.has(normPath(path))) warnings.push(`${path}: stale mapping; target no longer exists in the selected schema`);
+    for (const [key, src] of Object.entries(rule)) {
+      if (typeof src !== 'string' || !src.trim()) continue;
+      try { compile(src.replace(/^=/, ''), ['where', 'groupBy', 'sortBy'].includes(key)); }
+      catch (e: any) { errors.push(`${path} ${key}: ${e.message}`); }
+    }
+    for (const branch of rule.choose || []) for (const key of ['when', 'expr'] as const) {
+      try { compile(branch[key]); } catch (e: any) { errors.push(`${path} Choose ${key}: ${e.message}`); }
+    }
+  }
+  if (xml && (tree.children?.length !== 1 || tree.children[0].attr || tree.children[0].repeats)) errors.push('XML target must contain exactly one non-repeating root element');
+  return { errors, warnings };
+}
+
+/** Checks the mapped sample/runtime value; never calls an activity or external service. */
+export function checkMappedValue(tree: SNode, value: any): string[] {
+  const issues: string[] = [];
+  const walk = (n: SNode, v: any, path: string) => {
+    if (v === undefined) { if (n.required) issues.push(`${path}: required value is missing`); return; }
+    if (n.repeats) {
+      if (!Array.isArray(v)) { issues.push(`${path}: expected a list`); return; }
+      if (n.minItems !== undefined && v.length < n.minItems) issues.push(`${path}: fewer than ${n.minItems} items`);
+      if (n.maxItems !== undefined && v.length > n.maxItems) issues.push(`${path}: more than ${n.maxItems} items`);
+      v.forEach((item, i) => walk({ ...n, repeats: false }, item, `${path}[${i}]`)); return;
+    }
+    const valid = n.type === 'any' || (n.type === 'null' ? v === null : n.type === 'object' ? v !== null && typeof v === 'object' && !Array.isArray(v)
+      : n.type === 'integer' ? Number.isInteger(v) : n.type === 'number' ? typeof v === 'number' && Number.isFinite(v)
+      : n.type === 'date' ? typeof v === 'string' && !Number.isNaN(Date.parse(v)) : typeof v === n.type);
+    if (!valid) { issues.push(`${path || 'target'}: expected ${n.type}`); return; }
+    if (n.enum && !n.enum.includes(String(v))) issues.push(`${path}: value is not one of the allowed values`);
+    if (v && typeof v === 'object') for (const child of n.children || []) walk(child, v[child.name], path ? `${path}/${child.name}` : child.name);
+  };
+  walk(tree, value, '');
+  return issues;
+}

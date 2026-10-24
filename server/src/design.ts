@@ -9,9 +9,11 @@
  */
 import { engine } from './engine/engine.js';
 import type { FlowDoc, FlowNode, SchemaHelpers } from './engine/types.js';
-import { inferTree, schemaTree, type SNode } from './schemas.js';
-import { adhocTree, unmappedRequired, type MappingValue } from './mapping.js';
+import { inferTree, schemaTree, schemaWarnings, type SNode } from './schemas.js';
+import { adhocTree, type MappingValue } from './mapping.js';
 import { parsePath } from './values.js';
+import { checkMapping } from './mapping-check.js';
+import { refsOf } from './expr.js';
 
 /**
  * Design-time data shapes: what each step receives and produces before anything
@@ -86,7 +88,7 @@ function designNode(doc: FlowDoc, n: FlowNode, ins: { edge: { port: string }; fr
 
   const inputTrees: Record<string, SNode> = {};
   const safeSchema = (ref: string | undefined) => {
-    try { return schemaTree(ref); } catch (e: any) { warnings.push(e.message); return null; }
+    try { for (const notice of schemaWarnings(ref)) if (!warnings.includes(notice)) warnings.push(notice); return schemaTree(ref); } catch (e: any) { warnings.push(e.message); return null; }
   };
   const h: SchemaHelpers = {
     schema: safeSchema,
@@ -96,10 +98,30 @@ function designNode(doc: FlowDoc, n: FlowNode, ins: { edge: { port: string }; fr
   };
   for (const f of act?.fields || []) {
     if (f.type !== 'mapping') continue;
+    const holds = (condition: { k: string; in: any[] }) => condition.in.includes(cfg[condition.k] ?? act?.fields.find(x => x.k === condition.k)?.def);
+    if (f.showIf && !holds(f.showIf)) continue;
+    if (f.showIfAny && !f.showIfAny.some(holds)) continue;
     const tree = h.mappingTree(cfg, f.k, f.schemaField || '');
     inputTrees[f.k] = tree;
-    const missing = unmappedRequired(tree, cfg[f.k]);
-    if (missing.length) warnings.push(`Required field${missing.length > 1 ? 's' : ''} not mapped: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? '…' : ''}`);
+    const check = checkMapping(tree, cfg[f.k], n.type === 'mapperXml' || n.type === 'renderXml');
+    errors.push(...check.errors); warnings.push(...check.warnings);
+    for (const rule of Object.values<any>(cfg[f.k]?.rules || {})) for (const expression of [rule.expr, rule.forEach, rule.ifCond, ...(rule.choose || []).flatMap((b: any) => [b.when, b.expr])]) {
+      if (!expression) continue;
+      for (const ref of refsOf(expression)) {
+        const parts = parsePath(ref);
+        let source: SNode | null | undefined;
+        if (parts[0] === 'input') { source = input; parts.shift(); }
+        else if (parts[0] === 'nodes') { source = byName[parts[1]]; parts.splice(0, 2); }
+        else continue;
+        for (const part of parts) {
+          if (!source || source.type === 'any' || !source.children) break;
+          if (source.repeats && /^\d+$/.test(part)) continue;
+          const child: SNode | undefined = source.children.find(c => c.name === part);
+          if (!child) { const message = `${ref}: source field is absent from the known input schema; dynamic run data may still provide it`; if (!warnings.includes(message)) warnings.push(message); break; }
+          source = child;
+        }
+      }
+    }
   }
 
   let outShape: SNode | null | undefined;

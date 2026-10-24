@@ -82,14 +82,17 @@ test('REST bodies are checked against a JSON Schema, a JSON sample and an XSD be
   assert.equal((await post('/v/xml', good, 'application/xml')).status, 200);
   assert.equal((await post('/v/xml', '<Order currency="EUR"><Id>A-1</Id><Qty>2</Qty><Status>open</Status><Line><Sku>X</Sku></Line></Order>', 'application/xml')).status, 200, 'one element of a repeated kind');
   const xb = await (await post('/v/xml', '<Order><Id>A-1</Id><Id>A-2</Id><Qty>two</Qty><Status>lost</Status><Colour>red</Colour></Order>', 'application/xml')).json();
-  assert.deepEqual(xb.errors.sort(), [
-    'Order.@currency is required', 'Order.Colour is not allowed here', 'Order.Id appears more than once', 'Order.Qty must be a whole number', 'Order.Status must be one of: open, paid',
-  ]);
+  assert.match(xb.errors.join(';'), /currency.*required/);
+  assert.match(xb.errors.join(';'), /not expected/);
+  // XSD validators can stop at the first invalid sequence particle. Exercise facets separately.
+  for (const bad of [good.replace('<Qty>2</Qty>', '<Qty>two</Qty>'), good.replace('paid', 'lost'), good.replace('</Order>', '<Colour>red</Colour></Order>')]) {
+    assert.equal((await post('/v/xml', bad, 'application/xml')).status, 400);
+  }
   assert.match((await (await post('/v/xml', '<Invoice/>', 'application/xml')).json()).errors[0], /root element must be Order/);
 });
 
 test('SOAP operations are checked against their XSD element; a bad request gets a Client fault', async () => {
-  const xsd = schemas.saveSchema({ project_id: 'p-val', name: 'OrderOps', kind: 'xsd', text: XSD });
+  const xsd = schemas.saveSchema({ project_id: 'p-val', name: 'OrderOps', kind: 'xsd', text: XSD.replace('<xs:schema ', '<xs:schema targetNamespace="urn:sutra:orders" elementFormDefault="qualified" ') });
   const t = node('soapService', 'Checked WS', { serviceName: 'OrderService', namespace: 'urn:sutra:orders', path: '/soap/checked', operations: 'GetOrder', soapVersion: '1.1', bodySchema: xsd.id, validateBody: 'reject invalid' });
   const reply = node('soapReply', 'Reply', { kind: 'response', body: '{"OrderId": "{{input.body.OrderId}}"}' });
   deployFlow('Checked SOAP', [t, reply], [edge(t, reply, 'GetOrder')]);
@@ -101,9 +104,11 @@ test('SOAP operations are checked against their XSD element; a bad request gets 
   assert.equal(bad.status, 400);
   const fault = await bad.text();
   assert.match(fault, /<faultcode>soap:Client<\/faultcode>/);
-  assert.match(fault, /GetOrder\.OrderId is required/);
-  assert.match(fault, /GetOrder\.Detail must be true or false/);
-  assert.match(fault, /GetOrder\.Extra is not allowed here/);
+  assert.match(fault, /OrderId/);
+  for (const inner of ['<o:OrderId>A-1</o:OrderId><o:Detail>maybe</o:Detail>', '<o:OrderId>A-1</o:OrderId><o:Extra/>']) {
+    assert.equal((await post('/soap/checked', env1(inner), 'text/xml')).status, 400);
+  }
+  assert.equal((await post('/soap/checked', env1('<o:OrderId>A-1</o:OrderId>').replace('urn:sutra:orders', 'urn:wrong'), 'text/xml')).status, 400, 'namespace mismatches are rejected');
 });
 
 test('threat protection: depth before parsing, DOCTYPE, fields, list items, text length and body size', async () => {

@@ -11,7 +11,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { get, post } from './api';
 import { visible } from './Fields';
 import { useCatalog } from './ui';
-import type { ActivityMeta, Field, FlowDoc, FlowNode, MapRule, MappingValue, NodeDesign, RunDetail, SNode } from './types';
+import { renameMappingField, addMappingField } from './mapping-fields';
+import { MappingSchemaTools, TargetFieldOptions, MappingPreview } from './MappingTools';
+import './mapping-tools.css';
+import type { ActivityMeta, Field, FlowDoc, FlowNode, MapRule, MappingValue, NodeDesign, RunDetail, SNode, SchemaInfo } from './types';
 
 /**
  * Input mapping: Process Data (left) → Activity Input (right), with
@@ -20,6 +23,7 @@ import type { ActivityMeta, Field, FlowDoc, FlowNode, MapRule, MappingValue, Nod
  */
 
 export const PATH_MIME = 'application/x-sutra-path';
+const catalogSchemaIsXml = (ref: unknown, schemas: SchemaInfo[]) => schemas.some(s => s.id === String(ref || '').split('::')[0] && s.kind === 'xsd');
 
 // ---------- helpers ----------
 const getAt = (v: any, parts: string[]) => {
@@ -75,7 +79,7 @@ interface Props {
 }
 
 export function Mapper({ node, act, doc, design, run, outputs, updateNode }: Props) {
-  const { meta, project } = useCatalog();
+  const { meta, project, schemas } = useCatalog();
   const [sel, setSelRaw] = useState<string | null>(null);
   /** Process Data field clicked to show where it is used. */
   const [focusSrc, setFocusSrc] = useState<string | null>(null);
@@ -332,6 +336,8 @@ export function Mapper({ node, act, doc, design, run, outputs, updateNode }: Pro
   }, [recompute]);
 
   const scope = useMemo(() => buildScope(roots, run, outputs, inputValue), [roots, run, outputs, inputValue]);
+  const mappingField = act.fields.find(f => f.type === 'mapping' && visible(f, node.config, act.fields));
+  const isXml = node.type === 'mapperXml' || node.type === 'renderXml' || (mappingField?.schemaField && catalogSchemaIsXml(node.config[mappingField.schemaField], schemas));
 
   return (
     <div className="mapper">
@@ -347,6 +353,10 @@ export function Mapper({ node, act, doc, design, run, outputs, updateNode }: Pro
           <TargetTree act={act} node={node} design={d} sel={sel} setSel={setSel} getVal={getVal} dropOn={dropOn} setCfg={setCfg} autoMap={autoMap} onToggle={recompute} />
         </div>
       </div>
+      {selected?.kind === 'map' && !node.config[act.fields.find(f => f.k === selected.fieldKey)?.schemaField || ''] && <TargetFieldOptions
+        key={`${node.id}:${selected.path}`} path={selected.path} shape={selected.snode} mapping={node.config[selected.fieldKey] || { rules: {} }} xml={!!isXml} onChange={v => setCfg(selected.fieldKey, v)} />}
+      {mappingField && <MappingPreview key={`${node.id}:${mappingField.k}`} config={{ ...node.config, schema: node.config[mappingField.schemaField || ''], mapping: node.config[mappingField.k] }} scope={scope}
+        format={isXml ? 'xml' : node.type === 'mapperJson' || node.type === 'renderJson' ? 'json' : 'data'} runLabel={run ? `${run.id} (${run.startedAt})` : undefined} />}
       {selected ? (
         <FormulaEditor key={selected.id} t={selected} value={getVal(selected)} setVal={v => setVal(selected, v)} scope={scope} functions={meta.functions} relativize={p => relativize(selected, p)} />
       ) : (
@@ -377,7 +387,7 @@ function buildScope(roots: { path: string; value: any }[], run: RunDetail | null
   const gv = roots.find(r => r.path === 'gv')?.value;
   const item = roots.find(r => r.path === 'item')?.value;
   return {
-    input, nodes: outputs, vars: run?.vars || {}, gv, item, index: 1,
+    input, nodes: outputs, vars: run?.vars || {}, gv, ev: roots.find(r => r.path === 'ev')?.value, item, index: 1,
     sutra: run ? { id: run.id, name: run.flowName, version: run.version, startedAt: run.startedAt, source: run.source } : {},
     process: run ? { id: run.id, name: run.flowName, flow: run.flowName, version: run.version, startedAt: run.startedAt, source: run.source } : {},
     trigger: run ? outputs[run.doc.nodes.find(n => n.id === run.triggerNode)?.name || ''] : undefined,
@@ -507,6 +517,13 @@ function TargetTree({ act, node, design, sel, setSel, getVal, dropOn, setCfg, au
 }) {
   const [closed, setClosed] = useState<Record<string, boolean>>({});
   const [newPath, setNewPath] = useState<Record<string, string>>({});
+  const [fieldType, setFieldType] = useState<SNode['type']>('string');
+  const [fieldRequired, setFieldRequired] = useState(false);
+  const [fieldRepeated, setFieldRepeated] = useState(false);
+  const [addError, setAddError] = useState('');
+  const { schemas } = useCatalog();
+  const [editing, setEditing] = useState<{ id: string; name: string; error?: string } | null>(null);
+  useEffect(() => { setEditing(null); }, [node.id]);
   const row = (t: Target, label: ReactNode, depth: number, extra?: ReactNode, sn?: SNode) => {
     const v = getVal(t);
     const r = t.kind === 'map' ? (v as MapRule | undefined) : undefined;
@@ -532,36 +549,72 @@ Group by ${r.groupBy}` : ''}`}>For-Each{r.where ? ' · where' : ''}{r.groupBy ? 
     if (!visible(f, node.config, act.fields)) continue;
     if (f.type === 'mapping') {
       const tree = design?.inputTrees?.[f.k];
-      const m = (node.config[f.k] || { rules: {} }) as { rules: Record<string, MapRule>; fields?: string[] };
+      const m = (node.config[f.k] || { rules: {} }) as MappingValue;
       const schemaKey = f.schemaField;
+      const xml = node.type === 'mapperXml' || node.type === 'renderXml' || catalogSchemaIsXml(node.config[schemaKey || ''], schemas);
+      const schemaField = act.fields.find(candidate => candidate.k === schemaKey);
+      if (schemaField) out.push(<MappingSchemaTools key={`schema:${f.k}`} node={node} field={schemaField} setCfg={setCfg} />);
+      const paths = new Set<string>();
+      const collect = (n: SNode, p = '') => { for (const c of n.children || []) { const cp = p ? `${p}/${c.name}` : c.name; paths.add(cp); collect(c, cp); } };
+      if (tree) collect(tree);
+      const stale = Object.keys(m.rules || {}).filter(p => !paths.has(p.replace(/\[\]/g, '')));
       out.push(
         <div key={`g:${f.k}`} className="tgroup">
-          <span className="nm">{f.label}</span>
+          <span className="nm">{f.label} · {xml ? 'XML' : node.type === 'mapperJson' || node.type === 'renderJson' ? 'JSON' : 'Generic structured data'}</span>
           <span className="muted" style={{ fontSize: 11 }}>{schemaKey && node.config[schemaKey] ? 'from schema' : 'fields added here'}</span>
           {tree && <button className="btn small" onClick={() => { const n = autoMap(f.k, tree); if (!n) alert('No fields with matching names in the previous step'); }}>Auto map</button>}
         </div>,
       );
+      if (stale.length && node.config[schemaKey || '']) out.push(<div className="warnbox" key={`stale:${f.k}`}>Stale targets: {stale.join(', ')}. <button className="btn small" onClick={() => {
+        if (confirm('Remove these stale target mappings? ' + stale.join(', ') + '. Undo restores them.')) setCfg(f.k, { ...m, rules: Object.fromEntries(Object.entries(m.rules).filter(([p]) => !stale.includes(p))) });
+      }}>Remove stale mappings</button></div>);
       const walk = (n: SNode, p: string, depth: number) => {
         for (const c of n.children || []) {
           const cp = p ? `${p}/${c.name}` : c.name;
           const has = !!c.children?.length;
           const key = `${f.k}:${cp}`;
-          out.push(row({ kind: 'map', id: `m:${f.k}:${cp}`, fieldKey: f.k, path: cp, snode: c }, c.name, depth,
+          const id = `m:${f.k}:${cp}`;
+          const manual = !(schemaKey && node.config[schemaKey]);
+          const beginRename = () => { setSel(id); setEditing({ id, name: c.name }); };
+          const commitRename = () => {
+            if (!editing || editing.id !== id) return;
+            try {
+              setCfg(f.k, renameMappingField(m, cp, editing.name));
+              setSel(`m:${f.k}:${p ? p + '/' : ''}${editing.name.trim()}`);
+              setEditing(null);
+            } catch (error) { setEditing({ ...editing, error: (error as Error).message }); }
+          };
+          const label = manual ? editing?.id === id ? <span onClick={e => e.stopPropagation()}>
+            <input autoFocus className="kvkey" aria-label="Rename target field" value={editing.name}
+              onChange={e => setEditing({ id, name: e.target.value })}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commitRename(); } if (e.key === 'Escape') setEditing(null); }} />
+            <button className="btn small" onClick={commitRename}>Save</button>
+            <button className="btn small" onClick={() => setEditing(null)}>Cancel</button>
+            {editing.error && <span role="alert">{editing.error}</span>}
+          </span> : <span onDoubleClick={beginRename} title="Double-click to rename this target field">{c.name} <button className="tw" aria-label={`Rename target field ${cp}`} onClick={e => { e.stopPropagation(); beginRename(); }}>✎</button></span> : c.name;
+          out.push(row({ kind: 'map', id, fieldKey: f.k, path: cp, snode: c }, label, depth,
             has ? <button className="tw" aria-label={closed[key] ? 'Expand' : 'Collapse'} onClick={e => { e.stopPropagation(); setClosed(s => ({ ...s, [key]: !s[key] })); requestAnimationFrame(onToggle); }}>{closed[key] ? '▸' : '▾'}</button> : undefined, c));
           if (has && !closed[key]) walk(c, cp, depth + 1);
         }
       };
       if (tree) walk(tree, '', 1);
       if (!(schemaKey && node.config[schemaKey])) {
+        const addField = () => {
+          try {
+            const next = addMappingField(m, newPath[f.k] || '', { type: fieldType, required: fieldRequired, repeats: fieldRepeated || /\[\]$/.test(newPath[f.k] || '') }, xml);
+            setCfg(f.k, next); setNewPath(s => ({ ...s, [f.k]: '' })); setAddError('');
+          } catch (error: any) { setAddError(error.message); }
+        };
         out.push(
           <div key={`add:${f.k}`} className="tadd">
-            <input className="inp code" placeholder="customer/name or lines[]/sku" aria-label="New target field path" value={newPath[f.k] || ''} onChange={e => setNewPath(s => ({ ...s, [f.k]: e.target.value }))}
-              onKeyDown={e => { if (e.key === 'Enter') (e.currentTarget.nextSibling as HTMLButtonElement)?.click(); }} />
-            <button className="btn small" disabled={!newPath[f.k]?.trim()} onClick={() => {
-              const p = newPath[f.k].trim().replace(/^\/+|\/+$/g, '').replace(/\./g, '/');
-              setCfg(f.k, { ...m, rules: m.rules || {}, fields: [...new Set([...(m.fields || []), p])] });
-              setNewPath(s => ({ ...s, [f.k]: '' }));
-            }}>+ Field</button>
+            <input className="inp code" placeholder={xml ? 'Root/Child or Root/@_attribute' : 'customer/name or lines[]/sku'} aria-label="New target field path" value={newPath[f.k] || ''} onChange={e => setNewPath(s => ({ ...s, [f.k]: e.target.value }))}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addField(); } }} />
+            <label>Type <select aria-label="New target field type" value={fieldType} onChange={e => setFieldType(e.target.value as SNode['type'])}>{['string', 'integer', 'number', 'boolean', 'date', 'object', 'any', 'null'].map(t => <option key={t}>{t}</option>)}</select></label>
+            <label><input type="checkbox" checked={fieldRequired} onChange={e => setFieldRequired(e.target.checked)} />Required</label>
+            <label><input type="checkbox" checked={fieldRepeated} onChange={e => setFieldRepeated(e.target.checked)} />Repeating</label>
+            <button className="btn small" disabled={!newPath[f.k]?.trim()} onClick={addField}>+ Field</button>
+            {xml && <span className="hint">One root element. Use @_name for attributes; define namespace URIs on object elements.</span>}
+            {addError && <span role="alert" className="errbox">{addError}</span>}
           </div>,
         );
       }

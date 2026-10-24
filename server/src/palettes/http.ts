@@ -13,6 +13,7 @@ import { applyAuth, dispatcherFor, httpCall, joinUrl, tlsFromConnection } from '
 import { guarded } from '../security/breaker.js';
 import { F, when, isObj } from './common.js';
 import { XMLBuilder } from 'fast-xml-parser';
+import { validateStructured } from '../schema-validation.js';
 
 const xmlOut = new XMLBuilder({ ignoreAttributes: false, attributeNamePrefix: '@_', suppressEmptyNode: true });
 
@@ -30,12 +31,12 @@ export const httpActivities: Activity[] = [
       F('query', 'Query parameters', 'kv', [], { tpl: true }),
       F('headers', 'Headers', 'kv', [{ k: 'Accept', v: 'application/json' }], { tpl: true, help: 'Values may use {{secret.NAME}}; secret values are masked in run history.' }),
       F('bodyType', 'Body', 'select', 'json', { options: ['none', 'json', 'xml', 'text', 'form', 'mapped JSON', 'mapped XML'], ...when('method', 'POST', 'PUT', 'PATCH', 'DELETE'), help: 'Mapped: build the body field by field against a shared schema in the Input tab.' }),
-      F('bodySchema', 'Body schema', 'schema', '', when('bodyType', 'mapped JSON', 'mapped XML')),
+      F('bodySchema', 'Body schema', 'schema', '', { ...when('bodyType', 'json', 'xml', 'mapped JSON', 'mapped XML'), help: 'Optional. Validate the completed request before sending.' }),
       F('bodyMapping', 'Request body', 'mapping', { rules: {} }, { schemaField: 'bodySchema', ...when('bodyType', 'mapped JSON', 'mapped XML') }),
       F('body', 'Body content', 'code', '{\n  "orderId": "{{input.orderId}}"\n}', { tpl: true, help: 'For JSON, write JSON with {{ }} references, or one reference such as {{nodes.Map order}}.', ...when('bodyType', 'json', 'xml', 'text') }),
       F('form', 'Form fields', 'kv', [], { tpl: true, ...when('bodyType', 'form') }),
       F('parse', 'Read response as', 'select', 'auto', { options: ['auto', 'json', 'xml', 'text'] }),
-      F('responseSchema', 'Response body schema', 'schema', '', { help: 'Optional. Describes the response body for mapping in later steps.' }),
+      F('responseSchema', 'Response body schema', 'schema', '', { help: 'Optional. Validates the received response and describes it for later mapping.' }),
       F('failOn', 'Fail when status is', 'select', '4xx or 5xx', { options: ['4xx or 5xx', '5xx only', 'never'] }),
     ],
     outputHint: { status: 200, headers: {}, body: {}, ms: 0, method: '', url: '' },
@@ -89,6 +90,11 @@ export const httpActivities: Activity[] = [
         headers['content-type'] ||= 'application/x-www-form-urlencoded';
       }
 
+      if (body !== undefined && c.raw('bodySchema') && ['json', 'xml', 'mapped JSON', 'mapped XML'].includes(bt)) {
+        const xml = bt.toLowerCase().includes('xml');
+        const errors = await validateStructured(c.raw('bodySchema'), xml ? undefined : JSON.parse(body), xml ? body : undefined);
+        if (errors.length) throw new Error('HTTP request does not match the schema: ' + errors.join('; '));
+      }
       if (auth.sign) put(auth.sign({ method, url: url.toString(), body: body ?? '' }));
       const timeoutMs = Number(conn?.config.timeoutMs) || 30000;
       const r = await guarded(conn, () => httpCall({ method, url: url.toString(), headers, body, dispatcher, timeoutMs, signal: c.signal, parse: c.raw('parse') || 'auto' }), x => x.status >= 500);
@@ -98,6 +104,10 @@ export const httpActivities: Activity[] = [
         throw new Error(`${method} ${url.origin}${url.pathname} returned ${r.status}: ${detail}`);
       }
       const shown = Object.fromEntries(Object.entries(r.headers).filter(([k]) => !REDACT.has(k)));
+      if (c.raw('responseSchema')) {
+        const errors = await validateStructured(c.raw('responseSchema'), r.body, r.text.trim().startsWith('<') ? r.text : undefined);
+        if (errors.length) throw new Error('HTTP response does not match the schema: ' + errors.join('; '));
+      }
       return { out: { status: r.status, headers: shown, body: r.body, ms: r.ms, method, url: `${url.origin}${url.pathname}` } };
     },
   },
@@ -109,11 +119,11 @@ export const httpActivities: Activity[] = [
       F('contentType', 'Content type', 'select', 'application/json', { options: ['application/json', 'application/xml', 'text/plain', 'text/csv', 'text/html'] }),
       F('bodySource', 'Build body from', 'select', 'template', { options: ['template', 'mapping'] }),
       F('body', 'Body', 'code', '{\n  "ok": true,\n  "orderId": "{{input.orderId}}"\n}', { tpl: true, ...when('bodySource', 'template') }),
-      F('bodySchema', 'Body schema', 'schema', '', when('bodySource', 'mapping')),
+      F('bodySchema', 'Body schema', 'schema', '', { help: 'Optional. Validates JSON/XML before replying, for templates and mappings.' }),
       F('bodyMapping', 'Response body', 'mapping', { rules: {} }, { schemaField: 'bodySchema', ...when('bodySource', 'mapping') }),
       F('headers', 'Headers', 'kv', [], { tpl: true }),
     ],
-    execute: c => {
+    execute: async c => {
       const ct = c.raw('contentType') || 'application/json';
       let body = c.raw('bodySource') === 'mapping' ? c.mapping('bodyMapping') : c.v('body');
       if (ct.includes('json') && typeof body === 'string') {
@@ -122,6 +132,10 @@ export const httpActivities: Activity[] = [
       const status = Number(c.v('status')) || 200;
       if (status < 100 || status > 599) throw new Error(`Status ${status} is not a valid HTTP status`);
       const headers = kvToObject(c.raw('headers'), v => String(c.resolve(v) ?? ''));
+      if (c.raw('bodySchema')) {
+        const errors = await validateStructured(c.raw('bodySchema'), body, ct.includes('xml') ? typeof body === 'string' ? body : xmlOut.build(body) : undefined);
+        if (errors.length) throw new Error('HTTP reply does not match the schema: ' + errors.join('; '));
+      }
       c.reply({ status, headers, body, contentType: ct });
       return { out: { status, body: isObj(body) || Array.isArray(body) ? body : String(body ?? '') } };
     },

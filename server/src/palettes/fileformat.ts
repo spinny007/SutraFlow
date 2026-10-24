@@ -12,8 +12,9 @@ import { XMLBuilder } from 'fast-xml-parser';
 import type { Field } from '../engine/types.js';
 import { xmlParser } from '../security/outbound.js';
 import { toNumber } from '../values.js';
-import type { SNode } from '../schemas.js';
+import { getSchema, type SNode } from '../schemas.js';
 import { F, isObj } from './common.js';
+import { validateStructured } from '../schema-validation.js';
 
 /**
  * File content: encodings and formats shared by the file activities and triggers.
@@ -40,7 +41,8 @@ export function readFields(opts: { allowNone?: boolean; formatKey?: string } = {
     F('skipRows', 'Skip rows at the start', 'number', 0, sw(fk, 'CSV rows', 'lines')),
     F('trimValues', 'Trim spaces around values', 'bool', true, sw(fk, 'CSV rows')),
     F('decimal', 'Decimal separator', 'select', '.', { options: ['.', ','], help: 'Use , for European files such as 12,5.', ...sw(fk, 'CSV rows') }),
-    F('schema', 'Row / data schema', 'schema', '', { help: 'Optional. CSV: column names and types (without a header row, columns are taken in schema order). JSON/XML: describes the data for mapping.', ...sw(fk, 'CSV rows', 'JSON', 'XML') }),
+    F('strictValidation', 'Strict schema validation', 'bool', false, { help: 'JSON/XML only. Check to validate each file against the selected JSON Schema or XSD. Unchecked: the schema only describes fields for mapping.', ...sw(fk, 'JSON', 'XML') }),
+    F('schema', 'Row / data schema', 'schema', '', { help: 'CSV: column names and types. JSON/XML: describes the data for mapping; required when Strict schema validation is checked. Choose JSON Schema for JSON or XSD for XML.', ...sw(fk, 'CSV rows', 'JSON', 'XML') }),
   ];
 }
 
@@ -53,7 +55,7 @@ export function writeFormatFields(): Field[] {
     F('xmlRoot', 'Root element', 'text', 'root', sw('format', 'XML')),
     F('delimiter', 'Column separator', 'select', ',', { options: [',', ';', '|', 'tab'], ...sw('format', 'CSV from rows') }),
     F('header', 'Write a header row', 'bool', true, sw('format', 'CSV from rows')),
-    F('schema', 'Row schema', 'schema', '', { help: 'Optional: column order and names for CSV.', ...sw('format', 'CSV from rows') }),
+    F('schema', 'Row / data schema', 'schema', '', { help: 'Optional: CSV column order; JSON Schema or XSD validates structured content before writing.', ...sw('format', 'CSV from rows', 'JSON', 'XML') }),
     F('encoding', 'File encoding', 'select', 'utf-8', { options: WRITE_ENCODINGS, ...sw('format', 'text', 'CSV from rows', 'lines from rows', 'JSON', 'XML') }),
     F('lineEnding', 'Line ending', 'select', 'LF', { options: ['LF', 'CRLF'], ...sw('format', 'CSV from rows', 'lines from rows') }),
   ];
@@ -265,6 +267,32 @@ export function parseContent(buf: Buffer, cfg: Record<string, any>, schema: SNod
     return { data: xmlParser.parse(text), encoding };
   }
   throw new Error(`Unknown format ${fmt}`);
+}
+
+/** Validate structured files before exposing their parsed value to the next activity. */
+export async function parseValidatedContent(buf: Buffer, cfg: Record<string, any>, schema: SNode | null, formatKey = 'format') {
+  const result = parseContent(buf, cfg, schema, formatKey);
+  const fmt = cfg[formatKey];
+  if (cfg.strictValidation === true && (fmt === 'JSON' || fmt === 'XML')) {
+    if (!cfg.schema) throw new Error('Strict file validation requires a JSON Schema for JSON or an XSD for XML.');
+    const selected = getSchema(String(cfg.schema).split('::')[0]);
+    if (selected && selected.kind !== (fmt === 'JSON' ? 'json' : 'xsd')) throw new Error('Strict file validation requires ' + (fmt === 'JSON' ? 'a JSON Schema for JSON.' : 'an XSD for XML.'));
+    const errors = await validateStructured(cfg.schema, result.data, fmt === 'XML' ? decode(buf, cfg.encoding) : undefined);
+    if (errors.length) throw new Error('File content does not match the schema: ' + errors.join('; '));
+  }
+  return result;
+}
+
+/** Build and check before the caller opens/truncates a local or remote destination. */
+export async function buildValidatedContent(c: { raw(k: string): any; v(k: string): any }, schema: SNode | null): Promise<Buffer> {
+  const content = buildContent(c, schema);
+  const fmt = c.raw('format');
+  if (c.raw('schema') && (fmt === 'JSON' || fmt === 'XML')) {
+    const text = decode(content, c.raw('encoding'));
+    const errors = await validateStructured(c.raw('schema'), fmt === 'JSON' ? JSON.parse(text) : undefined, fmt === 'XML' ? text : undefined);
+    if (errors.length) throw new Error('File content does not match the schema: ' + errors.join('; '));
+  }
+  return content;
 }
 
 /** Output shape of read content, for mapping before a run. */

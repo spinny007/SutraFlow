@@ -31,6 +31,9 @@ export interface SNode {
   enum?: string[];
   /** XML attribute (key "@_name" in parsed and rendered XML). */
   attr?: boolean;
+  minItems?: number;
+  maxItems?: number;
+  namespace?: string;
 }
 
 export type SchemaKind = 'json' | 'xsd' | 'wsdl';
@@ -117,8 +120,14 @@ function fromJsonSchema(s: any, rootDoc: any, name: string, depth: number): SNod
     return target ? { ...fromJsonSchema(target, rootDoc, name, depth + 1), doc: s.description || target.description } : { name, type: 'any', doc: `Unresolved ${s.$ref}` };
   }
   if (Array.isArray(s.allOf)) {
-    const parts = s.allOf.map((x: any) => fromJsonSchema(x, rootDoc, name, depth + 1));
-    return { name, type: 'object', children: parts.flatMap((p: SNode) => p.children || []), doc: s.description };
+    const { allOf, ...own } = s;
+    const parts = [fromJsonSchema(own, rootDoc, name, depth + 1), ...allOf.map((x: any) => fromJsonSchema(x, rootDoc, name, depth + 1))];
+    const children = new Map<string, SNode>();
+    for (const part of parts) for (const child of part.children || []) {
+      const prior = children.get(child.name);
+      children.set(child.name, { ...prior, ...child, required: prior?.required || child.required || s.required?.includes(child.name) });
+    }
+    return { name, type: 'object', children: [...children.values()], doc: s.description };
   }
   const alt = s.oneOf || s.anyOf;
   if (Array.isArray(alt)) {
@@ -129,7 +138,7 @@ function fromJsonSchema(s: any, rootDoc: any, name: string, depth: number): SNod
   if (!type) type = s.properties ? 'object' : s.items ? 'array' : 'any';
   if (type === 'array') {
     const item = fromJsonSchema(s.items || {}, rootDoc, name, depth + 1);
-    return { ...item, name, repeats: true, doc: s.description || item.doc };
+    return { ...item, name, repeats: true, minItems: s.minItems, maxItems: s.maxItems, doc: s.description || item.doc };
   }
   if (type === 'object') {
     const req: string[] = Array.isArray(s.required) ? s.required : [];
@@ -214,7 +223,7 @@ export function xsdRoots(text: string) {
     for (const key of ['sequence', 'all', 'choice']) {
       for (const p of c[key] || []) {
         const many = p.maxOccurs === 'unbounded' || Number(p.maxOccurs) > 1;
-        for (const e of p.element || []) out.push(element(e, depth + 1, many));
+        for (const e of p.element || []) out.push({ ...element(e, depth + 1, many), ...(key === 'choice' ? { required: false } : {}) });
         for (const g of p.group || []) out.push(...particles(groups.get(local(g.ref)), depth + 1));
         out.push(...particles(p, depth + 1).filter(x => !out.some(o => o.name === x.name)));
       }
@@ -263,9 +272,27 @@ export function xsdRoots(text: string) {
     build: (root: string) => {
       const e = elements.get(root);
       if (!e) throw new Error(`Element ${root} is not a top-level element of this XSD`);
-      return element(e, 0);
+      const result = element(e, 0);
+      if (schema.targetNamespace && result.type === 'object') result.namespace = schema.targetNamespace;
+      return result;
     },
   };
+}
+
+/** Explicit mapper limits: this tree is not a complete JSON Schema/XSD validator. */
+export function schemaWarnings(ref: string | undefined): string[] {
+  if (!ref) return [];
+  const schema = getSchema(String(ref).split('::')[0]);
+  if (!schema) return ['Selected shared schema is missing'];
+  const warnings: string[] = [];
+  if (schema.kind === 'json') {
+    const text = schema.text;
+    if (/"(?:oneOf|anyOf|not|if|then|else|dependentSchemas|patternProperties|prefixItems)"\s*:/.test(text)) warnings.push('This JSON Schema has conditional, alternative or dynamic fields; the mapper shows an approximate shape. Selected-schema runtime validation checks the completed value.');
+  } else if (schema.kind === 'xsd') {
+    if (/<(?:\w+:)?(?:choice|any|anyAttribute|import|include)\b/.test(schema.text)) warnings.push('The mapping tree approximates XSD alternatives/wildcards; selected-schema runtime validation enforces XSD 1.0. Imports/includes require matching project-local XSD resources.');
+    if (/<(?:\w+:)?group\b[^>]*(?:minOccurs|maxOccurs)/.test(schema.text)) warnings.push('XSD group-level occurrence constraints are not fully represented; review repeating fields.');
+  }
+  return warnings;
 }
 
 /** Finds a node by '/'-separated path in a tree (used by the mapper). */
