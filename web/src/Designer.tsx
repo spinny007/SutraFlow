@@ -16,6 +16,7 @@ import {
 } from '@xyflow/react';
 import { del, get, post, put } from './api';
 import { famOf, Modal, useCatalog, useToast } from './ui';
+import { importSamplesWithCatalog } from './sample-import';
 import { ACTIVE, portsOf, type ActivityMeta, type FlowDoc, type FlowNode, type FlowSummary, type Meta, type NodeDesign, type Project, type Resource, type RunDetail } from './types';
 import { TEMPLATES } from './templates';
 import { Inspector, type InspectorTab } from './Inspector';
@@ -105,7 +106,7 @@ export function uniqueName(doc: FlowDoc, base: string, except?: string) {
 }
 
 function DesignerInner() {
-  const { meta, projectId, project, resources } = useCatalog();
+  const { meta, projectId, project, resources, reload: reloadCatalog } = useCatalog();
   const toast = useToast();
   const rf = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
@@ -382,8 +383,10 @@ function DesignerInner() {
     setNewName('');
   };
   const addSamples = async (ids: string[]) => {
-    const added = await post<{ id: string; name: string }[]>(`/api/projects/${encodeURIComponent(projectId)}/samples`, { ids });
-    await refreshFlows();
+    const added = await importSamplesWithCatalog(
+      () => post<{ id: string; name: string }[]>(`/api/projects/${encodeURIComponent(projectId)}/samples`, { ids }),
+      refreshFlows, reloadCatalog,
+    );
     if (added[0]) setFlowId(added[0].id);
     setDialog(null);
     toast(`Added ${added.length} sample Sutras: ${added.map(a => a.name).join(', ')}`);

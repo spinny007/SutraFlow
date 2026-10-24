@@ -24,6 +24,7 @@ Prepared 2026-10-24. Copyright (c) 2026-27 Surya Partap Singh, [MixAgile.com](ht
 | Schema allOf could hide properties declared beside it. | The shape builder returned only allOf branches. | Own and reusable object properties and required flags are combined. |
 | Sample mapping targets looked inconsistent. | Samples relied on implicit rule-derived targets. | Relevant new imports include browsable shared schemas and explicit manual-target demonstrations. |
 | A schema change left unused target formulas without an explanation. | Stale target paths were not checked. | Designer warnings and confirmed stale-rule cleanup identify and remove unused rules. |
+| A newly imported sample showed missing schemas and zero schemas/resources until the page was reloaded. | Import refreshed the flow list but left the shared project catalog stale. | Sample import waits for both flow and shared catalog refresh before opening the first sample. Existing imported schemas need no reimport. |
 | Selecting a schema described fields but did not enforce all constraints at related data boundaries. | Shape inference and instance validation were separate, inconsistently used paths. | Related structured activities share JSON Schema/XSD validation; outgoing invalid content is rejected before file writes or business HTTP requests. |
 
 ## Upgrade and verification

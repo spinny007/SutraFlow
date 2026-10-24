@@ -235,6 +235,7 @@ const FILES: Group[] = [
       ['web/src/Fields.tsx', 'Field editors (text, select, secret, resource, schema, Sutra picker) that accept drops from the data tree.'],
       ['web/src/Mapper.tsx', 'Input mapping: Process Data on the left, Activity Input on the right with lines between them, the formula editor with function browser, preview, For-Each, If and Choose.'],
       ['web/src/MappingTools.tsx', 'Input-tab schema selection/create/edit, typed manual-field options, explicit delete confirmation and bounded whole-result preview. Shared schema edits list affected Sutras.'],
+      ['web/src/sample-import.ts', 'Sample-import completion barrier: refresh flows and the shared project catalog before selecting a created flow, so new schemas/resources/properties are immediately available.'],
       ['web/src/XmlOutput.tsx', 'Bounded, read-only XML output/preview tree: nested elements, attributes, text and repeated siblings.'],
       ['web/src/mapping-fields.ts', 'Immutable add, rename and subtree deletion operations preserving formulas, typed definitions and repeating-path markers. Designer history owns undo/redo.'],
       ['web/src/mapping-tools.css', 'Layout for Input-tab schemas, typed target controls and preview.'],
