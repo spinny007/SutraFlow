@@ -18,7 +18,21 @@ import { resolve } from './template.js';
  */
 const DYNAMIC = (v: unknown) => typeof v === 'string' && (v.startsWith('=') || v.includes('{{'));
 
+/** Boolean properties must never treat an arbitrary non-empty string as On. */
+export function booleanSetting(value: unknown, label = 'Checkbox'): boolean {
+  if (typeof value === 'boolean') return value;
+  if (value === 1 || value === 0) return value === 1;
+  if (typeof value === 'string') {
+    if (/^(true|on|yes|1)$/i.test(value.trim())) return true;
+    if (/^(false|off|no|0)$/i.test(value.trim())) return false;
+  }
+  throw new Error(`${label}: use true/on/yes/1 for On or false/off/no/0 for Off; the property is missing or not boolean.`);
+}
+
 export function resolveSetting(f: Field | undefined, value: unknown, scope: Record<string, any>): any {
+  // Checkbox defaults are semantic. Keep legacy non-Boolean aliases/fallbacks intact.
+  if (value === undefined && f?.type === 'bool' && f.def !== undefined) value = f.def;
+  if (f?.type === 'bool') return booleanSetting(DYNAMIC(value) ? resolve(value, scope) : value, f.label);
   if (!f || f.tpl || (!['text', 'number', 'bool', 'list', 'select', 'kv'].includes(f.type) && !f.vars)) return value;
   if (f.type === 'kv' && Array.isArray(value)) return value.map(row => row && typeof row === 'object'
     ? { ...row, v: DYNAMIC(row.v) ? resolve(row.v, scope) : row.v }
@@ -26,13 +40,12 @@ export function resolveSetting(f: Field | undefined, value: unknown, scope: Reco
   if (Array.isArray(value)) return value.map(x => (DYNAMIC(x) ? resolve(x, scope) : x));
   if (!DYNAMIC(value)) return value;
   const r = resolve(value, scope);
-  if (f.type === 'bool') return typeof r === 'string' ? !/^(|0|false|no|off)$/i.test(r.trim()) : !!r;
   return f.type === 'number' ? Number(r) : r;
 }
 
 export function resolveSettings(fields: Field[], config: Record<string, any>, scope: Record<string, any>) {
   const out: Record<string, any> = { ...config };
-  for (const f of fields) if (f.k in out) out[f.k] = resolveSetting(f, out[f.k], scope);
+  for (const f of fields) if (f.k in out || (f.type === 'bool' && f.def !== undefined)) out[f.k] = resolveSetting(f, out[f.k], scope);
   return out;
 }
 

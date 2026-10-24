@@ -272,6 +272,8 @@ export class Engine {
   // ---------- starting runs ----------
 
   async startRun(o: StartOptions): Promise<string> {
+    const starters = o.doc.nodes.filter(n => this.activities.get(n.type)?.trigger);
+    if (starters.length > 1) throw new Error(`A Sutra must have exactly one starter activity; found ${starters.length}: ${starters.map(n => n.name).join(', ')}. Use separate Sutras and Call Sutra to share processing.`);
     // Runs of Sutras tuned to run in memory go to the in-memory engine, and the other way round.
     if (!this.parent && this.inMemory(o)) return this.memory.startRun(o);
     if (this.parent && !this.inMemory(o)) return this.parent.startRun(o);

@@ -14,6 +14,7 @@ import path from 'node:path';
 import { q, tx, now, getSetting, setSetting } from './db.js';
 import { config } from './config.js';
 import { getSecret } from './secrets.js';
+import { booleanSetting } from './settings.js';
 
 /**
  * A project groups processes (flows), shared resources, shared schemas, project
@@ -80,6 +81,7 @@ export function saveProject(p: { id?: string; name: string; description?: string
   for (const v of cfg.variables) {
     if (!VAR_NAME.test(v.name)) throw new Error(`Variable name "${v.name}" must start with a letter or _ and use letters, digits and _`);
     if (seen.has(v.name)) throw new Error(`Variable ${v.name} is defined twice`);
+    if (v.type === 'boolean' && !v.value.includes('${env:')) booleanSetting(v.value, `Project property ${v.name}`);
     seen.add(v.name);
   }
   const name = String(p.name || prev?.name || 'Project').trim();
@@ -278,7 +280,7 @@ export function effectiveVariables(projectId: string | null | undefined): Effect
     let raw = substituteEnv(ops.variables[v.name] ?? v.value);
     if (typeof raw === 'string' && raw.includes('${files}')) raw = raw.split('${files}').join(projectFilesDir(p.name));
     if (v.type === 'number') values[v.name] = Number(raw);
-    else if (v.type === 'boolean') values[v.name] = ['true', '1', 'yes'].includes(String(raw).toLowerCase());
+    else if (v.type === 'boolean') values[v.name] = booleanSetting(raw, `Project property ${v.name}`);
     else if (v.type === 'secret') {
       const s = raw ? getSecret(raw) : undefined;
       if (s !== undefined) { values[v.name] = s; secrets.push(s); } else values[v.name] = undefined;

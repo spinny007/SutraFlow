@@ -15,7 +15,7 @@ import { requireResource, kvToObject, type Resource } from '../resources.js';
 import { config } from '../config.js';
 import { getSecret } from '../secrets.js';
 import { F } from '../palettes/common.js';
-import { resolveAdminText } from '../settings.js';
+import { resolveAdminText, booleanSetting } from '../settings.js';
 import { resolve, asText } from '../template.js';
 
 const require = createRequire(import.meta.url);
@@ -168,11 +168,17 @@ export function inlineRunData(text: unknown, scope: Record<string, any>, taken: 
 
 const toRows = (rows: any[], fields?: { name: string }[]): DbResult => ({ rows, rowCount: rows.length, columns: fields?.map(f => f.name) ?? (rows[0] ? Object.keys(rows[0]) : []) });
 
+/** Private-CA remote databases retain peer verification by default. No host is forced local. */
+export function databaseTlsOptions(c: Record<string, any>) {
+  if (!booleanSetting(c.ssl ?? false, 'Database TLS')) return undefined;
+  return { rejectUnauthorized: booleanSetting(c.verifyTls ?? true, 'Verify database certificate'), ...(String(c.caPem || '').trim() ? { ca: String(c.caPem).trim() } : {}) };
+}
+
 async function open(r: Resource, secret: (n: string, w?: string) => string): Promise<Conn> {
   const c = r.config;
   const driver = c.driver as Driver;
   const pass = () => (c.passwordSecret ? secret(c.passwordSecret, 'Database password') : undefined);
-  const ssl = c.ssl ? { rejectUnauthorized: c.verifyTls !== false } : undefined;
+  const ssl = databaseTlsOptions(c);
   const max = Number(c.poolMax) || 10;
   switch (driver) {
     case 'postgres': {
@@ -188,7 +194,7 @@ async function open(r: Resource, secret: (n: string, w?: string) => string): Pro
     }
     case 'mysql': {
       const mysql = require('mysql2/promise');
-      const pool = mysql.createPool({ host: c.host, port: Number(c.port) || 3306, database: c.database, user: c.user, password: pass(), ssl, connectionLimit: max, dateStrings: true });
+      const pool = mysql.createPool({ host: c.host, port: Number(c.port) || 3306, database: c.database, user: c.user, password: pass(), ssl: ssl ? { ...ssl, verifyIdentity: ssl.rejectUnauthorized } : undefined, connectionLimit: max, dateStrings: true });
       const run = async (cl: any, sql: string, p: Record<string, any>): Promise<DbResult> => {
         const b = bindFor(driver, sql, p);
         // Prepared statements first; some statements (CREATE or DROP PROCEDURE, ...) are not allowed in
@@ -210,7 +216,7 @@ async function open(r: Resource, secret: (n: string, w?: string) => string): Pro
     }
     case 'mssql': {
       const sql = require('mssql');
-      const pool = await new sql.ConnectionPool({ server: c.host, port: Number(c.port) || 1433, database: c.database, user: c.user, password: pass(), pool: { max }, options: { encrypt: !!c.ssl, trustServerCertificate: c.verifyTls === false } }).connect();
+      const pool = await new sql.ConnectionPool({ server: c.host, port: Number(c.port) || 1433, database: c.database, user: c.user, password: pass(), pool: { max }, options: { encrypt: !!ssl, trustServerCertificate: ssl?.rejectUnauthorized === false, ...(ssl?.ca ? { cryptoCredentialsDetails: { ca: ssl.ca } } : {}) } }).connect();
       const run = async (req: any, s: string, p: Record<string, any>): Promise<DbResult> => {
         const b = bindFor(driver, s, p);
         for (const n of namedParams(s)) req.input(n.name, p[n.name]);
@@ -226,7 +232,7 @@ async function open(r: Resource, secret: (n: string, w?: string) => string): Pro
     }
     case 'oracle': {
       const oracledb = require('oracledb');
-      const pool = await oracledb.createPool({ user: c.user, password: pass(), connectString: `${c.host}:${Number(c.port) || 1521}/${c.database}`, poolMax: max });
+      const pool = await oracledb.createPool({ user: c.user, password: pass(), connectString: String(c.connectString || '').trim() || `${c.host}:${Number(c.port) || 1521}/${c.database}`, poolMax: max });
       const run = async (conn: any, s: string, p: Record<string, any>, commit: boolean): Promise<DbResult> => {
         const b = bindFor(driver, s, p);
         const res = await conn.execute(b.sql, b.values, { outFormat: oracledb.OUT_FORMAT_OBJECT, autoCommit: commit });

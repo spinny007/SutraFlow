@@ -251,7 +251,7 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     output: ['The mapped message.'],
   },
   parseJson: {
-    scope: ['JSON text to data, with an optional schema that describes it for mapping.', 'Selected-schema validation, enabled by default, including patterns, formats, types and ranges.'],
+    scope: ['JSON text to data, with an optional schema that describes it for mapping.', 'Selected-schema validation is explicitly enabled with the checkbox (default Off). On requires a contract and enforces patterns, formats, types and ranges; JSON samples are strict shapes.'],
     outScope: ['Inferring business rules absent from the selected schema.'],
     use: ['A text field, file or message that holds JSON.'],
     steps: ['Set the text, for example <code>{{input.body}}</code>.', 'Pick the schema so later steps see the fields.'],
@@ -477,12 +477,12 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     outScope: ['Waiting for a reply on a reply queue.'],
     use: ['Handing work to another system, publishing events.'],
     other: [['Receive messages', 'busSubscribe']],
-    steps: ['Choose the broker and its connection.', 'Choose queue or topic and the destination, for example <code>{{gv.ORDER_QUEUE}}</code>.', 'Choose the message type and the body.', 'Set delivery mode (persistent for work that must not be lost) and any headers and properties.'],
+    steps: ['Choose the broker and its connection.', 'Choose queue or topic and the destination, for example <code>{{gv.ORDER_QUEUE}}</code>.', 'Choose JSON, XML, text, map or bytes. XML must be serialized text (use Render XML); it is preserved exactly with application/xml. Map requires an object and bytes requires canonical base64.', 'Set delivery mode (persistent for work that must not be lost) and any headers and properties.'],
     output: ['<code>destination</code>, <code>messageId</code> and the broker\'s confirmation.'],
   },
   busSubscribe: {
     scope: ['A queue/topic process starter for Kafka, RabbitMQ and ActiveMQ / AMQP 1.0; selectors, durable subscriptions and Kafka consumer groups.', 'Acknowledgement: auto (on receipt), client (after the run succeeds) or explicit ([[busConfirm]]).', 'Only the elected leader owns the subscription. Client and explicit modes retain a durable message identity across leader changes.', 'On failure: requeue, or reject after a delivery limit so the broker can dead-letter it; concurrency.'],
-    outScope: ['Exactly-once external side effects: keep them idempotent. Kafka has a durable offset identity; RabbitMQ and AMQP messages are recognised by their message id or by the <em>Duplicate key</em> you choose.'],
+    outScope: ['Exactly-once external side effects: keep them idempotent. Kafka has a durable offset identity; RabbitMQ and AMQP messages are recognised by their message id or by the <em>Duplicate key</em> you choose.', 'Select JSON/XML/text/map/bytes to match the wire payload. XML remains exact text; Parse XML with an XSD validates its contract. Malformed explicit formats fail before downstream processing and follow acknowledgement/retry settings. Auto mode cannot recover a delivery already acknowledged on receipt.'],
     use: ['Processing work from a queue, reacting to events.'],
     steps: ['Choose the broker, connection and destination.', 'Choose the acknowledgement mode: <em>client</em> suits most Sutras; use <em>explicit</em> only for a deliberate commit point; use <em>auto</em> only when message loss is acceptable.', 'Leave <em>Avoid duplicate runs</em> on; for RabbitMQ or AMQP, make the publisher assign a unique message id, or set <em>Duplicate key</em> (for example <code>{{body.orderId}}</code>).', 'Choose requeue or reject, set a finite delivery limit where appropriate, and configure the broker dead-letter destination.', 'Choose how many messages run at once.', 'Write a test message so you can test without a broker.', 'Deploy; the elected leader subscribes while the deployed version is active.'],
     output: ['<code>body</code>, <code>headers</code> (JMS headers), <code>properties</code>, <code>destination</code>, <code>redelivered</code>.'],

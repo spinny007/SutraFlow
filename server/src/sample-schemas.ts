@@ -55,6 +55,10 @@ export function attachSampleSchemas(projectId: string, doc: FlowDoc) {
       cfg.source = 'mapping';
       cfg.mapping = { rules: { Invoice: { expr: '{input}' } } };
     }
+    if (node.type === 'renderJson' && !cfg.schema && cfg.source === 'value' && cfg.value === '{{input}}') {
+      const previous = doc.nodes.find(n => doc.edges.some(e => e.to === node.id && e.from === n.id) && ['mapper', 'mapperJson'].includes(n.type));
+      if (previous?.config.schema) cfg.schema = previous.config.schema;
+    }
     if (cfg.schema && ['mapperJson', 'mapperXml', 'parseJson', 'parseXml', 'renderJson', 'renderXml'].includes(node.type)) {
       cfg.validateSchema ??= true;
       node.description = (node.description ? node.description + '\n' : '') + 'Validate against schema is enabled: a contract violation follows the red error output before downstream processing.';

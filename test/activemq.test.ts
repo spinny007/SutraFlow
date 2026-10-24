@@ -21,7 +21,7 @@ const enabled = process.env.SUTRA_ACTIVEMQ_TEST === '1' && !!password;
 if (!enabled) {
   test('ActiveMQ Classic real-broker activity matrix', { skip: 'set SUTRA_ACTIVEMQ_TEST=1 and SUTRA_ACTIVEMQ_PASSWORD' }, () => {});
 } else {
-  testEnv(19910);
+  testEnv(22810);
   const host = process.env.SUTRA_ACTIVEMQ_HOST || '127.0.0.1';
   const port = Number(process.env.SUTRA_ACTIVEMQ_PORT || 5673);
   const user = process.env.SUTRA_ACTIVEMQ_USER || 'admin';
@@ -185,9 +185,10 @@ if (!enabled) {
     await undeploy(flowId);
   });
 
-  test('JSON, text, map and bytes bodies round-trip through Sutra activities', async () => {
+  test('JSON, XML, text, map and bytes bodies round-trip through Sutra activities', async () => {
     const cases = [
       { type: 'JSON', sent: { id: 1, ok: true }, expected: { id: 1, ok: true } },
+      { type: 'XML', sent: '<o:Order xmlns:o="urn:orders" id="A-100">東京</o:Order>', expected: '<o:Order xmlns:o="urn:orders" id="A-100">東京</o:Order>' },
       { type: 'text', sent: 'hello ActiveMQ', expected: 'hello ActiveMQ' },
       { type: 'map', sent: { id: 2, name: 'map' }, expected: { id: 2, name: 'map' } },
       { type: 'bytes', sent: Buffer.from([0, 1, 2, 250]).toString('base64'), expected: Buffer.from([0, 1, 2, 250]).toString('base64') },
@@ -201,6 +202,35 @@ if (!enabled) {
       await until(`${c.type} body`, () => runs(flowId).some(r => r.status === 'done'));
       assert.deepEqual(output(runs(flowId)[0].id).body, c.expected);
       await undeploy(flowId);
+    }
+  });
+
+  test('generated XML queue sample forwards exact XML before confirming its delivery', async () => {
+    const {addSamples}=await import('../server/src/samples.js');
+    const made=addSamples(projectId,['queue']);const sample=made.find(f=>f.name==='Sample: XML queue in and out')!;
+    const doc=flows.getFlow(sample.id)!.doc;
+    const inbound=destination('queue','sample.xml.in'),outbound=destination('queue','sample.xml.out');
+    for(const n of doc.nodes) if(n.type==='busSubscribe'||n.type==='busPublish')Object.assign(n.config,{broker:'amqp1',amqpConn:connectionId,destination:n.type==='busSubscribe'?inbound:outbound});
+    const collected=await deploy('XML sample result',[trigger('In',outbound,{messageType:'XML'})],[]);
+    const flowId=await deploy('XML sample forwarder',doc.nodes,doc.edges);
+    const body='<o:Order xmlns:o="urn:orders" id="sample-100">東京 &amp; Delhi</o:Order>';
+    await publish(inbound,body,{messageType:'XML',body:'{{input}}'});
+    await until('sample forward and confirm',()=>runs(flowId)[0]?.status==='done'&&runs(collected)[0]?.status==='done');
+    assert.equal(output(runs(collected)[0].id).body,body);
+    assert.ok(output(runs(flowId)[0].id,'Confirm XML'));
+    await undeploy(flowId);await undeploy(collected);
+  });
+
+  test('malformed JSON and XML fail before processing and respect the retry ceiling', async () => {
+    for (const [messageType, body] of [['JSON','not JSON'],['XML','<broken>']]) {
+      const dest=destination('queue',`invalid.${messageType}`);
+      const t=trigger('In',dest,{messageType,ackMode:'client',maxRedeliveries:2,onFailure:'requeue'});
+      const log=node('log','Business',{message:'must not execute'});
+      const flowId=await deploy(`Invalid ${messageType}`,[t,log],[edge(t,log)]);
+      await publish(dest,body,{messageType:'text',body:'{{input}}'});
+      await until('two malformed attempts',()=>runs(flowId).length===2&&runs(flowId).every(r=>r.status==='failed'));
+      for(const run of runs(flowId)){ assert.match(run.error,/Invalid.*message/i);assert.equal(output(run.id,'Business'),undefined); }
+      await sleep(1200);assert.equal(runs(flowId).length,2);await undeploy(flowId);
     }
   });
 

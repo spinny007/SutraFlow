@@ -15,6 +15,7 @@ import { toNumber } from '../values.js';
 import { getSchema, type SNode } from '../schemas.js';
 import { F, isObj } from './common.js';
 import { validateStructured } from '../schema-validation.js';
+import { booleanSetting } from '../settings.js';
 
 /**
  * File content: encodings and formats shared by the file activities and triggers.
@@ -273,7 +274,7 @@ export function parseContent(buf: Buffer, cfg: Record<string, any>, schema: SNod
 export async function parseValidatedContent(buf: Buffer, cfg: Record<string, any>, schema: SNode | null, formatKey = 'format') {
   const result = parseContent(buf, cfg, schema, formatKey);
   const fmt = cfg[formatKey];
-  if (cfg.strictValidation === true && (fmt === 'JSON' || fmt === 'XML')) {
+  if (booleanSetting(cfg.strictValidation ?? false, 'Strict schema validation') && (fmt === 'JSON' || fmt === 'XML')) {
     if (!cfg.schema) throw new Error('Strict file validation requires a JSON Schema for JSON or an XSD for XML.');
     const selected = getSchema(String(cfg.schema).split('::')[0]);
     if (selected && selected.kind !== (fmt === 'JSON' ? 'json' : 'xsd')) throw new Error('Strict file validation requires ' + (fmt === 'JSON' ? 'a JSON Schema for JSON.' : 'an XSD for XML.'));
@@ -289,7 +290,7 @@ export async function buildValidatedContent(c: { raw(k: string): any; v(k: strin
   const fmt = c.raw('format');
   if (c.raw('schema') && (fmt === 'JSON' || fmt === 'XML')) {
     const text = decode(content, c.raw('encoding'));
-    const errors = await validateStructured(c.raw('schema'), fmt === 'JSON' ? JSON.parse(text) : undefined, fmt === 'XML' ? text : undefined);
+    const errors = await validateStructured(c.raw('schema'), fmt === 'JSON' ? JSON.parse(text) : undefined, fmt === 'XML' ? text : undefined, fmt === 'JSON' ? 'json' : 'xsd');
     if (errors.length) throw new Error('File content does not match the schema: ' + errors.join('; '));
   }
   return content;

@@ -14,7 +14,7 @@ import { testEnv } from './helpers.js';
 
 const require = createRequire(import.meta.url);
 const enabled = process.env.SUTRA_BROKER_REST_TEST === '1';
-if (enabled) testEnv(19913);
+if (enabled) testEnv(22840);
 const basic = (user: string, password: string) => `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`;
 const json = async (url: string, init: any = {}) => {
   const r = await request(url, init);

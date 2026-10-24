@@ -35,7 +35,7 @@ const slug = (s: unknown) => String(s || '').trim().toLowerCase().replace(/[^a-z
 export const mcpToolName = (a: AgentEntry) => `ask_${a.name.replace(/-/g, '_')}`.slice(0, 64);
 
 export function rebuildAgents(mcpPath: (p: unknown) => string) {
-  agents = deployedFlows().flatMap(d => d.doc.nodes.filter(n => n.type === 'agentChannel' && slug(n.config.agentName)).map(n => {
+  agents = deployedFlows().filter(d => d.doc.nodes.filter(n => engine.activity(n.type)?.trigger).length === 1).flatMap(d => d.doc.nodes.filter(n => n.type === 'agentChannel' && slug(n.config.agentName)).map(n => {
     const srv = n.config.mcp && n.config.mcpServer ? effectiveResource(n.config.mcpServer) : undefined;
     return {
       name: slug(n.config.agentName), title: String(n.config.title || n.config.agentName), description: String(n.config.description || ''),

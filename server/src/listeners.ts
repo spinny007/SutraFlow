@@ -51,6 +51,10 @@ export function rebuildListeners(): Promise<void> {
 async function rebuild() {
   await stopListeners();
   for (const d of deployedFlows()) {
+    if (d.doc.nodes.filter(n => engine.activity(n.type)?.trigger).length > 1) {
+      for (const n of d.doc.nodes.filter(n => starters.has(n.type))) listenerStatus.set(`${d.flowId}:${n.id}`, { flow: d.doc.name, step: n.name, type: n.type, state: 'error', message: 'A Sutra must have exactly one starter activity; split this process before deploying.', at: new Date().toISOString() });
+      continue; // Do not receive/auto-ack messages for an invalid older deployment.
+    }
     for (const n of d.doc.nodes) {
       const start = starters.get(n.type);
       if (!start) continue;

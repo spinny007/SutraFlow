@@ -19,7 +19,7 @@
  *                     values, and nothing undeclared for an XSD).
  */
 import { createRequire } from 'node:module';
-import { getSchema, jsonTree, xsdRoots, type SNode } from '../schemas.js';
+import { getSchema, looksLikeSchema, xsdRoots, type SNode } from '../schemas.js';
 
 const require = createRequire(import.meta.url);
 // ajv ships CommonJS; formats add date-time, email, uri and the like.
@@ -125,20 +125,20 @@ const cache = new Map<string, { at: number; stamp: string; check: Check }>();
 /**
  * The check for a schema reference ("schemaId" or "schemaId::RootElement"): for an XSD with several
  * top-level elements, the element named like the message root (or like the SOAP operation).
- * Cached for 5 s (a changed schema applies on every engine within that time).
+ * Compiled checks are reused only while the persisted schema text is unchanged.
  */
 function checkFor(ref: string, element?: string): Check | null {
   const key = `${ref}|${element || ''}`;
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < 5000) return hit.check;
   const [id, rootSel] = String(ref).split('::');
   const s = getSchema(id);
   if (!s) return null;
-  if (hit && hit.stamp === s.updated_at) { hit.at = Date.now(); return hit.check; }
+  const stamp = `${s.updated_at}\0${s.text}`;
+  if (hit && hit.stamp === stamp) return hit.check;
   let check: Check;
   if (s.kind === 'json') {
     const doc = JSON.parse(s.text);
-    const isSchema = doc && typeof doc === 'object' && !Array.isArray(doc) && (doc.$schema || doc.type || doc.properties || doc.$ref || doc.allOf || doc.oneOf || doc.anyOf);
+    const isSchema = looksLikeSchema(doc);
     if (isSchema) {
       const draft = String(doc.$schema || '');
       const ajv = new (/2020-12/.test(draft) ? Ajv2020 : /2019-09/.test(draft) ? Ajv2019 : AjvDraft7)({ allErrors: true, strict: false, validateFormats: true });
@@ -147,9 +147,18 @@ function checkFor(ref: string, element?: string): Check | null {
       check = body => (validate(body) ? [] : (validate.errors || []).slice(0, MAX_ERRORS).map((e: any) =>
         `${e.instancePath ? `body${e.instancePath.replace(/\//g, '.')}` : 'body'}: ${e.message}${e.params?.additionalProperty ? ` (${e.params.additionalProperty})` : ''}${e.params?.allowedValues ? ` (${e.params.allowedValues.join(', ')})` : ''}`));
     } else {
-      // A JSON sample: the types of the fields it shows; fields it does not show are allowed.
-      const tree = jsonTree(doc, 'body');
-      check = body => { const errs: string[] = []; walkTree(tree, body, 'body', errs, false, false); return errs; };
+      // Strict sample contract: every demonstrated property is required, no undeclared properties.
+      const fromSample = (v: any): any => {
+        if (v === null) return { type: 'null' };
+        if (Array.isArray(v)) {
+          const variants = [...new Map(v.map(x => { const shape = fromSample(x); return [JSON.stringify(shape), shape]; })).values()];
+          return { type: 'array', items: variants.length > 1 ? { anyOf: variants } : variants[0] || {} };
+        }
+        if (typeof v === 'object') return { type: 'object', required: Object.keys(v), properties: Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fromSample(x)])), additionalProperties: false };
+        return { type: typeof v === 'number' && Number.isInteger(v) ? 'integer' : typeof v };
+      };
+      const validate = new Ajv2020({ allErrors: true, strict: false }).compile(fromSample(doc));
+      check = body => validate(body) ? [] : (validate.errors || []).slice(0, MAX_ERRORS).map((e: any) => `body${e.instancePath || ''}: ${e.message}${e.params?.additionalProperty ? ` (${e.params.additionalProperty})` : ''}`);
     }
   } else if (s.kind === 'xsd') {
     const { roots, build } = xsdRoots(s.text);
@@ -173,7 +182,7 @@ function checkFor(ref: string, element?: string): Check | null {
       return errs;
     };
   } else return null;
-  cache.set(key, { at: Date.now(), stamp: s.updated_at, check });
+  cache.set(key, { at: Date.now(), stamp, check });
   return check;
 }
 

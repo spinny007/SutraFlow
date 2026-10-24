@@ -1,0 +1,45 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 2.0.8
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import dns from 'node:dns';
+import { testEnv, node, edge } from './helpers.js';
+const enabled=process.env.SUTRA_REMOTE_DB_TEST==='1';
+test('external PostgreSQL and MySQL TLS connectors execute bound engine queries and rollback', {skip:enabled?false:'set SUTRA_REMOTE_DB_TEST=1 and remote database environment variables'},async t=>{
+ testEnv(22940); dns.setDefaultResultOrder('ipv4first');
+ const {boot}=await import('../server/src/index.js');
+ const {engine,runState}=await import('../server/src/engine/engine.js');
+ const {q}=await import('../server/src/db.js');
+ const {saveProject,saveEngineVariables}=await import('../server/src/projects.js');
+ const {saveResource,effectiveResource}=await import('../server/src/resources.js');
+ const {setSecret,requireSecret}=await import('../server/src/secrets.js');
+ const {dbConnection}=await import('../server/src/connectors/db.js');
+ const srv=await boot({listenAdmin:false});
+ try{
+  const configs:{driver:string;host:string;port:number;database:string;user:string;password:string}[]=[];
+  if(process.env.SUTRA_TEST_REMOTE_PG_URL){const u=new URL(process.env.SUTRA_TEST_REMOTE_PG_URL);configs.push({driver:'postgres',host:u.hostname,port:Number(u.port)||5432,database:u.pathname.slice(1),user:decodeURIComponent(u.username),password:decodeURIComponent(u.password)});}
+  if(process.env.SUTRA_TEST_REMOTE_MYSQL_HOST)configs.push({driver:'mysql',host:process.env.SUTRA_TEST_REMOTE_MYSQL_HOST,port:Number(process.env.SUTRA_TEST_REMOTE_MYSQL_PORT)||3306,database:process.env.SUTRA_TEST_REMOTE_MYSQL_DATABASE!,user:process.env.SUTRA_TEST_REMOTE_MYSQL_USER!,password:process.env.SUTRA_TEST_REMOTE_MYSQL_PASSWORD!});
+  assert.ok(configs.length,'Provide at least one remote endpoint');
+  for(const config of configs)await t.test(config.driver,async()=>{
+   const secret=`REMOTE_${config.driver.toUpperCase()}_PASSWORD`;setSecret(secret,config.password);
+   const project=saveProject({name:`Remote ${config.driver}`,config:{variables:[{name:'DB_HOST',type:'string',value:config.host},{name:'DB_PORT',type:'string',value:String(config.port)},{name:'DB_TLS',type:'boolean',value:'On'}]}});
+   saveEngineVariables([{name:'DB_PORT',value:String(config.port)}]);
+   const resource=saveResource({kind:'database',name:'Remote TLS database',project_id:project.id,config:{driver:config.driver,host:'{{gv.DB_HOST}}',port:'{{ev.DB_PORT}}',database:config.database,user:config.user,passwordSecret:secret,ssl:'{{gv.DB_TLS}}',verifyTls:true,poolMax:1}});
+   const conn=await dbConnection(effectiveResource(resource.id)!,requireSecret);
+   const marker="A-100' OR '1'='1";
+   const sql=config.driver==='postgres'?'select :value::text as value':'select :value as value';
+   assert.equal((await conn.query(sql,{value:marker})).rows[0].value,marker);
+   await assert.rejects(()=>conn.transaction(async query=>{assert.equal(Number((await query('select :n as n',{n:208})).rows[0].n),208);throw new Error('intentional rollback');}),/intentional rollback/);
+   const start=node('start','Start',{payload:'{}'}),query=node('dbQuery','Remote query',{connection:resource.id,sql,params:[{k:'value',v:'{{input.value}}'}]});
+   const id=await engine.startRun({projectId:project.id,doc:{name:'Remote bound query',nodes:[start,query],edges:[edge(start,query)]},input:{value:marker}});
+   await engine.waitFor(id,30000);const run=q.get<any>('select status,error from runs where id = ?',id);assert.equal(run.status,'done',run.error);assert.equal(runState(id)?.outputs?.['Remote query']?.rows[0].value,marker);
+  });
+ }finally{await srv.stop();}
+});

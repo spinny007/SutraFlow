@@ -10,6 +10,7 @@
 import { engine } from './engine/engine.js';
 import type { Field, FlowDoc, FlowNode } from './engine/types.js';
 import { variablesUsed } from './flows.js';
+import { booleanSetting } from './settings.js';
 
 /**
  * Documentation made from Sutras: what starts each one, its steps in run order with the
@@ -48,13 +49,31 @@ function valueText(f: Field, v: unknown, res: Map<string, DocResource>, sutras: 
   if (f.type === 'resource') return res.get(String(v))?.name ? `${res.get(String(v))!.name}` : String(v);
   if (f.type === 'process') return sutras.get(String(v)) || String(v);
   if (f.type === 'secret') return `secret ${v}`;
-  if (f.type === 'bool') return v ? 'yes' : 'no';
-  if (f.type === 'kv' && Array.isArray(v)) return v.filter((r: any) => r?.k).map((r: any) => `${r.k} = ${typeof r.v === 'string' ? r.v : JSON.stringify(r.v)}`).join('; ');
-  if (f.type === 'mapping') return 'mapped (see the Input tab)';
+  if (f.type === 'bool') {
+    if (typeof v === 'string' && (v.includes('{{') || v.startsWith('='))) return `${v} (property-controlled: true/on/yes/1 = On; false/off/no/0 = Off)`;
+    try { return booleanSetting(v, f.label) ? 'On' : 'Off'; } catch { return `${String(v)} (invalid boolean)`; }
+  }
+  if (f.type === 'kv' && Array.isArray(v)) return JSON.stringify(v);
+  if (f.type === 'mapping') return JSON.stringify(v);
   if (Array.isArray(v)) return v.map(x => (typeof x === 'string' ? x : JSON.stringify(x))).join(', ');
   if (typeof v === 'object') return JSON.stringify(v);
   const s = String(v);
-  return s.length > 400 ? `${s.slice(0, 400)}…` : s;
+  return s;
+}
+
+/** Documentation never resolves properties/vault references or publishes inline credentials. */
+function safeConfig(value: any, key = ''): any {
+  if (/(?:password|private.?key|access.?token|refresh.?token|authorization|client.?secret|api.?key|credential)/i.test(key)) return '[redacted]';
+  if (Array.isArray(value)) return value.map(v => safeConfig(v));
+  if (value && typeof value === 'object') {
+    if (typeof value.k === 'string' && /password|authorization|token|secret|api.?key/i.test(value.k)) return { ...value, v: '[redacted]' };
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, safeConfig(v, k)]));
+  }
+  if (typeof value === 'string') {
+    if (/-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/.test(value)) return '[redacted private key]';
+    return value.replace(/(\w+:\/\/)[^\s/:@]+:[^\s/@]+@/g, '$1[redacted]@');
+  }
+  return value;
 }
 
 /** Steps in the order a run reaches them: from the triggers (or steps nothing leads to), breadth first. */
@@ -82,14 +101,17 @@ function describe(s: DocSutra, resources: DocResource[], allSutras: Map<string, 
   const byId = new Map(doc.nodes.map(n => [n.id, n]));
   const steps = runOrder(doc).map(n => {
     const a = engine.activity(n.type);
-    const fields = (a?.fields || []).filter(f => visible(f, n.config || {}, a!.fields));
+    const fields = a?.fields || [];
     const settings: [string, string][] = [];
     for (const f of fields) {
-      const t = valueText(f, n.config?.[f.k] ?? undefined, res, allSutras);
-      if (!t) continue;
+      const stored = n.config?.[f.k];
+      const v = stored === undefined ? f.def : stored;
+      const t = valueText(f, f.type === 'secret' ? v : safeConfig(v, f.k), res, allSutras);
       if (f.type === 'resource' && res.has(String(n.config[f.k]))) used.add(String(n.config[f.k]));
-      settings.push([f.label, t]);
+      settings.push([`${f.label}${stored === undefined ? ' (default)' : ''}${visible(f, n.config || {}, fields) ? '' : ' (inactive)'}`, t || '(not set)']);
     }
+    for (const [key, value] of Object.entries(n.config || {})) if (!fields.some(f => f.k === key)) settings.push([`${key} (stored configuration)`, JSON.stringify(safeConfig(value, key)) ?? '(not set)']);
+    if (n.settings) settings.push(['Execution settings (stored)', JSON.stringify(safeConfig(n.settings))]);
     const st = n.settings || {};
     if (st.retries) settings.push(['Retries', `${st.retries}${st.retryDelayMs ? `, ${st.retryDelayMs} ms apart` : ''}`]);
     if (st.timeoutMs) settings.push(['Time limit', `${st.timeoutMs} ms`]);

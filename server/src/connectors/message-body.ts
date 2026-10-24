@@ -1,0 +1,69 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 2.0.8
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { XMLValidator } from 'fast-xml-parser';
+import { DOMParser } from '@xmldom/xmldom';
+
+export const MESSAGE_TYPES = ['JSON', 'XML', 'text', 'map', 'bytes'];
+function kind(value: string | undefined) {
+  const k = String(value || 'JSON').toLowerCase();
+  if (!['json', 'xml', 'text', 'map', 'bytes'].includes(k)) throw new Error('Unknown message type: choose JSON, XML, text, map or bytes.');
+  return k;
+}
+function xml(text: unknown): string {
+  if (typeof text !== 'string') throw new Error('XML message body must be XML text; use Render XML for structured data.');
+  if (/<!DOCTYPE|<!ENTITY/i.test(text)) throw new Error('XML message DTD/entity declarations are not allowed.');
+  const checked = XMLValidator.validate(text);
+  if (checked !== true) throw new Error(`Invalid XML message: ${checked.err.msg}`);
+  const errors: string[] = [];
+  const doc = new DOMParser({ errorHandler: { warning: m => errors.push(m), error: m => errors.push(m), fatalError: m => errors.push(m) } }).parseFromString(text, 'application/xml');
+  const roots = Array.from(doc.childNodes).filter(n => n.nodeType === 1);
+  if (errors.length || roots.length !== 1 || /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/u.test(text)) throw new Error('Invalid XML message: expected one well-formed document without undeclared entities or invalid characters.');
+  return text;
+}
+function map(value: any) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Buffer.isBuffer(value)) throw new Error('Map message body must be an object of named fields.');
+  return value;
+}
+/** Protocol-neutral encoding; XML stays exact text, including namespaces and attributes. */
+export function encodeMessage(body: unknown, type?: string): { buf: Buffer; contentType: string } {
+  switch (kind(type)) {
+    case 'bytes': {
+      if (Buffer.isBuffer(body) || body instanceof Uint8Array) return { buf: Buffer.from(body), contentType: 'application/octet-stream' };
+      const value = String(body ?? '');
+      if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) throw new Error('Bytes message body must be canonical base64 (or binary bytes).');
+      if (Buffer.from(value, 'base64').toString('base64') !== value) throw new Error('Bytes message body must be canonical base64 (or binary bytes).');
+      return { buf: Buffer.from(value, 'base64'), contentType: 'application/octet-stream' };
+    }
+    case 'xml': return { buf: Buffer.from(xml(body)), contentType: 'application/xml' };
+    case 'text': return { buf: Buffer.from(typeof body === 'string' ? body : JSON.stringify(body ?? '')), contentType: 'text/plain' };
+    case 'map': return { buf: Buffer.from(JSON.stringify(map(body))), contentType: 'application/json' };
+    default: return { buf: Buffer.from(JSON.stringify(body ?? null)), contentType: 'application/json' };
+  }
+}
+/** Decode explicit formats, never silently treat malformed JSON as text. */
+export function decodeMessage(raw: unknown, type?: string): unknown {
+  const k = kind(type);
+  const bytes = Buffer.isBuffer(raw) ? raw : raw instanceof Uint8Array ? Buffer.from(raw) : null;
+  if (k === 'bytes') return (bytes || Buffer.from(String(raw ?? ''))).toString('base64');
+  const text = bytes ? bytes.toString('utf8') : typeof raw === 'string' ? raw : null;
+  if (k === 'xml') return xml(text);
+  if (k === 'text') return text ?? JSON.stringify(raw ?? null);
+  let value = raw;
+  if (text !== null) {
+    try { value = JSON.parse(text); } catch { throw new Error(`Invalid ${k === 'map' ? 'map JSON' : 'JSON'} message; choose text for unstructured messages.`); }
+  }
+  return k === 'map' ? map(value) : value;
+}
+/** Decode failures enter the normal failed-run/ack policy, not an unhandled broker callback. */
+export function receivedMessage(raw: unknown, type?: string): { body: unknown; bodyText?: string; bodyError?: string } {
+  const bodyText = String(type).toLowerCase() === 'bytes' ? undefined : Buffer.isBuffer(raw) || raw instanceof Uint8Array ? Buffer.from(raw).toString('utf8') : typeof raw === 'string' ? raw : undefined;
+  try { return { body: decodeMessage(raw, type), ...(bodyText === undefined ? {} : { bodyText }) }; }
+  catch (e: any) { return { body: null, ...(bodyText === undefined ? {} : { bodyText }), bodyError: e.message }; }
+}

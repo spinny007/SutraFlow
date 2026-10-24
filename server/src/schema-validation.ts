@@ -26,10 +26,11 @@ async function acquire() {
 function release() { const next = waiting.shift(); if (next) next(); else active--; }
 
 /** Standards validator; schemas are loaded only from the same project, never from a URL or disk. */
-export async function validateStructured(ref: string | undefined, value: any, rawXml?: string): Promise<string[]> {
-  if (!ref) return [];
+export async function validateStructured(ref: string | undefined, value: any, rawXml?: string, expectedKind?: 'json' | 'xsd'): Promise<string[]> {
+  if (!ref) return ['Validation is enabled: select a JSON Schema/sample or XSD, or turn validation Off.'];
   const schema = getSchema(String(ref).split('::')[0]);
   if (!schema) return ['Selected schema no longer exists'];
+  if (expectedKind && schema.kind !== expectedKind) return [`Validation requires ${expectedKind === 'json' ? 'a JSON Schema/sample' : 'an XSD'} for this activity.`];
   if (schema.kind === 'json') return validateMessage(ref, value);
   if (schema.kind !== 'xsd') return ['Choose a JSON Schema or XSD'];
   const xml = rawXml ?? builder.build(value);

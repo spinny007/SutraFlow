@@ -105,8 +105,15 @@ export function schemaRoots(id: string): string[] {
 
 // ---------- JSON Schema and samples ----------
 
-const looksLikeSchema = (v: any) => v && typeof v === 'object' && !Array.isArray(v) &&
-  (typeof v.$schema === 'string' || (typeof v.type === 'string' && (v.properties || v.items)) || (v.properties && typeof v.properties === 'object'));
+export const looksLikeSchema = (v: any): boolean => {
+  if (typeof v === 'boolean') return true;
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
+  const types = ['object', 'array', 'string', 'number', 'integer', 'boolean', 'null'];
+  if (typeof v.type === 'string' && types.includes(v.type)) return true;
+  if (Array.isArray(v.type) && v.type.every((t: any) => types.includes(t))) return true;
+  if (v.items !== undefined && (typeof v.items === 'boolean' || (v.items && typeof v.items === 'object' && !Array.isArray(v.items)))) return true;
+  return ['$schema', '$ref', '$defs', 'properties', 'allOf', 'oneOf', 'anyOf', 'not', 'if', 'required', 'enum', 'const', 'additionalProperties', 'pattern', 'minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'maxItems'].some(k => Object.hasOwn(v, k));
+};
 
 export function jsonTree(doc: any, name = 'root'): SNode {
   return looksLikeSchema(doc) ? fromJsonSchema(doc, doc, name, 0) : inferTree(doc, name);

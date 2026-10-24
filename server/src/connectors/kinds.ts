@@ -53,6 +53,8 @@ export const CONNECTOR_KINDS: ResourceKind[] = [
       F('file', 'Database file', 'text', 'data/app.sqlite', { help: 'Relative to the data folder.', ...when('driver', 'sqlite') }),
       F('ssl', 'Encrypt connection (TLS)', 'bool', false, when('driver', 'postgres', 'mysql', 'mssql')),
       F('verifyTls', 'Verify server certificate', 'bool', true, when('ssl', true)),
+      F('caPem', 'Trusted database CA certificates (PEM)', 'code', '', { ...when('ssl', true), help: 'Private CA for PostgreSQL, MySQL or SQL Server TLS. Leave empty for system trust. Verification also checks the database server hostname; use the certificate hostname, not an unrelated alias.' }),
+      F('connectString', 'Oracle connect string (optional)', 'text', '', { ...when('driver', 'oracle'), help: 'Overrides Host/Port/Service. Use an Oracle Easy Connect/TCPS address or descriptor supplied by your DBA; Oracle TLS/wallet prerequisites are driver-specific. May use Project/Engine properties.' }),
       F('poolMax', 'Connection pool size', 'number', 10, when('driver', 'postgres', 'mysql', 'mssql', 'oracle')),
     ],
   },

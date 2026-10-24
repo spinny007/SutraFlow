@@ -1,0 +1,83 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 2.0.8
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { testEnv, node, edge } from './helpers.js';
+import { encodeMessage, decodeMessage, receivedMessage, MESSAGE_TYPES } from '../server/src/connectors/message-body.js';
+testEnv(22930);
+const { boot } = await import('../server/src/index.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
+const { validateDoc, saveFlow, deploy } = await import('../server/src/flows.js');
+const { setSutraTuning } = await import('../server/src/tuning.js');
+const { rebuildRoutes, listRoutes } = await import('../server/src/gateway/gateway.js');
+const { rebuildListeners, listenerStatus } = await import('../server/src/listeners.js');
+const { databaseTlsOptions } = await import('../server/src/connectors/db.js');
+const { q } = await import('../server/src/db.js');
+let srv: Awaited<ReturnType<typeof boot>>;
+before(async () => { srv = await boot({listenAdmin:false}); });
+after(async () => { await srv.stop(); });
+
+test('all five message formats round-trip without losing XML namespaces or binary bytes', () => {
+ const xml = '<?xml version="1.0"?><o:Order xmlns:o="urn:orders" id="A-100"><o:name>東京 &amp; Delhi</o:name></o:Order>';
+ const cases: [string,any,string][] = [['JSON',{id:7,optional:null},'application/json'],['XML',xml,'application/xml'],['text','plain ☀ text','text/plain'],['map',{id:7,name:'map'},'application/json'],['bytes',Buffer.from([0,128,255]).toString('base64'),'application/octet-stream']];
+ assert.equal(MESSAGE_TYPES.length,5);
+ for(const [type,body,mime] of cases){ const encoded=encodeMessage(body,type); assert.equal(encoded.contentType,mime); assert.deepEqual(decodeMessage(encoded.buf,type),body); assert.equal(receivedMessage(encoded.buf,type).bodyError,undefined); }
+ for(const primitive of [null,true,1,'value',[1,'two']]) assert.deepEqual(decodeMessage(encodeMessage(primitive,'JSON').buf,'JSON'),primitive);
+ assert.deepEqual(decodeMessage({native:'AMQP map'},'map'),{native:'AMQP map'});
+});
+
+test('invalid explicit message formats fail closed and retain a safe failed-run envelope', () => {
+ for(const [type,raw] of [['JSON','not JSON'],['XML','<Order>'],['XML','<!DOCTYPE x><x/>'],['XML','<a/><b/>'],['XML','<a>&undeclared;</a>'],['XML','<a>\u0001</a>'],['map','[]'],['unknown','x']]) {
+   const r=receivedMessage(Buffer.from(raw),type); assert.equal(r.body,null); assert.ok(r.bodyError); assert.equal(r.bodyText,raw);
+ }
+ assert.throws(()=>encodeMessage({Order:{}},'XML'),/Render XML/);
+ assert.throws(()=>encodeMessage('invalid base64!','bytes'),/base64/);
+ assert.throws(()=>encodeMessage('AB==','bytes'),/canonical base64/);
+ assert.throws(()=>encodeMessage([],'map'),/object/);
+});
+
+test('malformed receiver payload fails in the engine before business processing', async () => {
+ const t=node('busSubscribe','Receive',{broker:'amqp',messageType:'XML'}), next=node('log','Business',{message:'must not execute'});
+ const id=await engine.startRun({doc:{name:'Malformed XML',nodes:[t,next],edges:[edge(t,next)]},input:receivedMessage(Buffer.from('<broken>'),'XML')});
+ await engine.waitFor(id,10000);
+ const row=q.get<any>('select status,error from runs where id = ?',id);
+ assert.equal(row.status,'failed'); assert.match(row.error,/Invalid XML/);
+ assert.equal(runState(id)?.outputs?.Business,undefined);
+ // Manual designer/test envelopes must not bypass XML validation either.
+ const manual=await engine.startRun({doc:{name:'Malformed sample XML',nodes:[t,next],edges:[edge(t,next)]},input:{body:'<broken>'}});
+ await engine.waitFor(manual,10000);
+ assert.equal(q.get<any>('select status from runs where id = ?',manual).status,'failed');
+ assert.equal(runState(manual)?.outputs?.Business,undefined);
+});
+
+test('multiple starters are rejected by designer validation and direct engine calls', async () => {
+ const a=node('start','Manual'),b=node('timer','Timer');
+ const doc={name:'Two starters',nodes:[a,b],edges:[]};
+ assert.match(validateDoc(doc).errors.join(';'),/exactly one starter/);
+ await assert.rejects(()=>engine.startRun({doc,triggerNodeId:a.id}),/exactly one starter/);
+ assert.doesNotMatch(validateDoc({name:'One starter',nodes:[a],edges:[]}).errors.join(';'),/exactly one starter/);
+ const memory=saveFlow(undefined,{name:'Memory starter guard',nodes:[a],edges:[]});deploy(memory.id);setSutraTuning(memory.id,{execution:'in memory'});
+ await assert.rejects(()=>engine.startRun({doc,flowId:memory.id,source:'api',triggerNodeId:a.id}),/exactly one starter/);
+ // Simulate a legacy published multi-starter flow without weakening today's Deploy check.
+ const rest=node('restService','REST',{path:'/message208/legacy',method:'POST'});
+ const legacy=saveFlow(undefined,{name:'Legacy multi-starter',nodes:[rest],edges:[]});deploy(legacy.id);
+ const broker=node('busSubscribe','Broker',{broker:'amqp1',destination:'must-not-subscribe'});
+ q.run('update flow_versions set doc = ? where flow_id = ?',JSON.stringify({name:'Legacy multi-starter',nodes:[rest,broker],edges:[]}),legacy.id);
+ rebuildRoutes();await rebuildListeners();
+ assert.ok(!listRoutes().some(r=>r.flowId===legacy.id),'no legacy route is registered');
+ assert.match(listenerStatus.get(`${legacy.id}:${broker.id}`)?.message||'',/starter/);
+});
+
+test('database TLS respects strict Boolean tokens and the trusted custom CA', () => {
+ assert.equal(databaseTlsOptions({ssl:'Off'}),undefined);
+ assert.deepEqual(databaseTlsOptions({ssl:'On',caPem:'  test CA  '}),{rejectUnauthorized:true,ca:'test CA'});
+ assert.deepEqual(databaseTlsOptions({ssl:true,verifyTls:'Off'}),{rejectUnauthorized:false});
+ assert.throws(()=>databaseTlsOptions({ssl:'maybe'}),/On.*Off/);
+});

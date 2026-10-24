@@ -22,6 +22,10 @@ export function rebuildSchedules() {
   jobs = [];
   schedulerErrors.length = 0;
   for (const d of deployedFlows()) {
+    if (d.doc.nodes.filter(n => engine.activity(n.type)?.trigger).length > 1) {
+      schedulerErrors.push(`${d.doc.name}: a Sutra must have exactly one starter activity`);
+      continue;
+    }
     for (const n of d.doc.nodes.filter(x => x.type === 'timer')) {
       const act = engine.activity(n.type);
       const cfg = act ? resolveSettings(act.fields, n.config, { gv: effectiveVariables(d.projectId).values, ev: engineVariableValues() }) : n.config;

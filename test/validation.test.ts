@@ -74,9 +74,11 @@ test('REST bodies are checked against a JSON Schema, a JSON sample and an XSD be
   assert.match((await (await post('/v/json', '{"qty":1}')).json()).errors[0], /required property 'id'/);
   assert.equal((await post('/v/loose', '{"anything": true}')).status, 200, 'not enforced when validation is off');
 
-  assert.equal((await post('/v/sample', '{"id":"A-9","qty":5,"more":"allowed"}')).status, 200);
+  assert.equal((await post('/v/sample', '{"id":"A-9","qty":5,"lines":[{"sku":"X"}]}')).status, 200);
+  assert.equal((await post('/v/sample', '{"id":"A-9","qty":5,"more":"not allowed"}')).status, 400, 'strict samples require shown fields and reject extras');
   const sb = await (await post('/v/sample', '{"id":"A-9","qty":"five","lines":{"sku":"X"}}')).json();
-  assert.deepEqual(sb.errors.sort(), ['body.lines must be a list', 'body.qty must be a whole number']);
+  assert.ok(sb.errors.some((e: string) => /lines.*array/.test(e)), sb.errors.join(';'));
+  assert.ok(sb.errors.some((e: string) => /qty.*integer/.test(e)), sb.errors.join(';'));
 
   const good = '<?xml version="1.0"?><Order currency="EUR"><Id>A-1</Id><Qty>2</Qty><Status>paid</Status><Line><Sku>X</Sku></Line><Line><Sku>Y</Sku></Line></Order>';
   assert.equal((await post('/v/xml', good, 'application/xml')).status, 200);

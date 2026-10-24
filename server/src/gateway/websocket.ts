@@ -157,10 +157,10 @@ function opened(ws: WebSocket, route: WsRoute, caller: Caller, client: Conn['cli
         checkRaw(text, 'json', limits);
         try { message = JSON.parse(text); } catch { throw new MessageRejected('The message is not valid JSON'); }
         checkParsed(message, limits);
-        if (cfg.validateBody === 'reject invalid' && cfg.bodySchema) {
-          const errs = validateMessage(String(cfg.bodySchema), message);
-          if (errs.length) throw new MessageRejected('The message does not match the schema', 400, errs);
-        }
+      }
+      if (cfg.validateBody === 'reject invalid') {
+        const errs = validateMessage(String(cfg.bodySchema || ''), message);
+        if (errs.length) throw new MessageRejected('The message does not match the schema', 400, errs);
       }
     } catch (e: any) {
       send(c, { error: e.message, ...(e.errors?.length ? { errors: e.errors } : {}) });

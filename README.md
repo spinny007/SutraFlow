@@ -2,14 +2,14 @@
 
 **A visual integration designer and engine.** Drag activities onto a canvas, map data between steps, test and debug, and deploy *Sutras* (integration processes) that run as REST, SOAP and MCP services, on schedules, or on events: files, queues, mail, cloud drives, chat messages and more.
 
-![Version](https://img.shields.io/badge/version-2.0.7-2f6fd8)
+![Version](https://img.shields.io/badge/version-2.0.8-2f6fd8)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Commercial licence available](https://img.shields.io/badge/commercial%20licence-available-orange)](COMMERCIAL-LICENSE.md)
 ![Node.js](https://img.shields.io/badge/node-%E2%89%A5%2022.13-339933?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-7-3178c6?logo=typescript&logoColor=white)
 ![Database](https://img.shields.io/badge/database-SQLite%20%7C%20PostgreSQL-4169e1?logo=postgresql&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Docker-555)
-![Tests](https://img.shields.io/badge/tests-402-success)
+![Tests](https://img.shields.io/badge/tests-414-success)
 
 ![The SutraFlow designer: palettes, canvas and the step inspector](docs/guide-images/designer.jpg)
 
@@ -245,7 +245,7 @@ $env:SUTRA_TEST_OPENSSL = 'C:/laragon/bin/git/mingw64/bin/openssl.exe'
 npm test
 ``` The pgvector storage path is covered with a protocol-compatible test server; run an additional deployment test against the intended PostgreSQL/pgvector version before relying on it in production.
 
-Tested against stand-in services that answer like the real ones, but not yet against the real services: SQL Server, Oracle, IMAP, Let's Encrypt, Qdrant, Chroma, Pinecone, and the Google, Microsoft, Dropbox, YouTube, Twitch, Discord, Telegram, Facebook, Azure Data Factory and Databricks APIs. The v2.0.6 gate certifies RabbitMQ 4.4 over AMQP 0-9-1 and ActiveMQ Classic 6.3 over AMQP 1.0, including two-way Java OpenWire/JMS interoperability, plus hosted Aiven Kafka with TLS+SASL PLAIN and mutual TLS. The native matrices passed 56 scenario executions across the connection modes. Four REST integration checks also passed, including execution of every generated broker REST sample. See the [messaging certification record](docs/sutraflow-architecture.html#messaging-certification) for tested configurations and limits.
+Tested against stand-in services that answer like the real ones, but not yet against the real services: SQL Server, Oracle, IMAP, Let's Encrypt, Qdrant, Chroma, Pinecone, and the Google, Microsoft, Dropbox, YouTube, Twitch, Discord, Telegram, Facebook, Azure Data Factory and Databricks APIs. The v2.0.8 gate covers RabbitMQ 4.4 over AMQP 0-9-1 and ActiveMQ Classic 6.3 over AMQP 1.0, including two-way Java OpenWire/JMS interoperability, plus hosted Aiven Kafka with TLS+SASL PLAIN and mutual TLS. The native matrices passed 66 scenario executions, including JSON/XML/text/map/bytes and malformed-payload retry limits. Four REST checks passed, including every generated broker REST sample. External PostgreSQL 17.2 and MariaDB 11.8.9 also passed TLS-verified connector and engine SQL-query checks; these do not replace the pending 24-hour separate-machine soak. See the [messaging certification record](docs/sutraflow-architecture.html#messaging-certification) for tested configurations and limits.
 
 ## Known limitations
 

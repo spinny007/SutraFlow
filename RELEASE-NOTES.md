@@ -1,36 +1,42 @@
-# SutraFlow 2.0.7 release notes
+# SutraFlow 2.0.8 release notes
 
-Prepared 2026-10-24. Copyright (c) 2026-27 Surya Partap Singh, [MixAgile.com](https://mixagile.com). AGPL-3.0-only; a commercial licence is available, see `COMMERCIAL-LICENSE.md`.
+Prepared 2026-10-24. Copyright (c) 2026-27 Surya Partap Singh, [MixAgile.com](https://mixagile.com). AGPL-3.0-only; a commercial licence is available.
 
 ## What is new
 
-- **Map JSON Data and Map XML Data** share the established mapping evaluator. Both produce structured data; Render JSON/XML produces text. Generic Map data remains available for existing workflows.
-- **Typed manual targets** include scalar/object types, required/repeating flags, item-count bounds, descriptions and XML object-element namespaces. XML exposes a root and @_attribute paths explicitly.
-- **Input-tab schema tools** select/create/edit shared schemas without leaving mapping. Sample JSON/XML can generate a proposed schema; shared-schema edits show affected saved Sutras.
-- **Safe target editing** supports double-click/pencil rename and confirmed subtree deletion while preserving other mappings, with designer undo/redo and normal persistence.
-- **Validation and whole-result preview** catch invalid formulas, unmapped required targets and malformed XML targets; warn about stale mappings and uncertain source fields. Preview is project-authorized, bounded, read-only and labelled with its sample source.
-- **Shared contract validation** applies JSON Schema (AJV) and XSD 1.0 (isolated libxml2 WebAssembly) to typed maps, parse/render, Validate fields, structured local/FTP/SFTP files and HTTP boundaries. REST/SOAP retain opt-in request rejection; SOAP checks operation namespaces. XML output and previews have a read-only tree view.
-- **Opt-in strict file reads**: JSON/XML readers validate only when Strict schema validation is checked (default off) and a matching JSON Schema/XSD is selected. Otherwise the schema describes mapping fields without enforcing its constraints.
-- **Executable described samples** include typed JSON and manual XML with attributes, namespace and repeated elements. Other relevant bundled mapping and parse/render samples carry shared schema contracts. Existing imported drafts are not rewritten on upgrade.
-- **Ten validation examples** cover schema-backed XML mapping, JSON/XML pipelines, expected rejection branches, strict JSON/XML file reads, an HTTP client and REST/SOAP services. New regression tests execute the samples and check strict-read modes and no-run-on-invalid gateway boundaries.
-- **Documentation** defines each new activity, configuration, output versus serialization, schema ownership and the limits of mapping checks. Functional verification is not full JSON Schema/XSD standards certification.
+- Publish message and Queue / topic trigger support JSON, XML, text, map and bytes. XML preserves exact text, namespaces and attributes; malformed explicit formats fail through the normal workflow/acknowledgement policy. DTD/entities are not accepted. An XML queue sample demonstrates publish-before-confirm.
+- Exactly one starter is required per Sutra, including direct engine calls. Legacy multi-starter deployments do not register new gateway, scheduler or listener entry points; split them into separate Sutras and share processing with Call Sutra.
+- Database connections expose a trusted CA for PostgreSQL, MySQL and SQL Server TLS, with certificate verification enabled by default. Oracle accepts a DBA-provided connect string. Host/port are configurable; SQLite remains file-based. Separate-machine and additional vendor certification remain explicit gates.
+- Real remote PostgreSQL 17.2 and MariaDB 11.8.9 connections passed TLS-verified bound queries and rollback checks. The test record distinguishes client TLS from the managed PostgreSQL pool's unencrypted backend hop; it does not certify that provider's internal network.
+- Messaging interoperability: 66 native scenario executions across ActiveMQ/RabbitMQ plain and strict mTLS plus hosted Kafka TLS/SASL and mTLS; four broker REST checks pass, including all generated REST samples. This is internal functional certification, not a broker performance benchmark or replacement for the pending 24-hour soak.
+- Consistent checkbox defaults in engine execution and gateway/listener settings; omitted Boolean values no longer disagree with the editor. Legacy non-Boolean aliases remain unchanged.
+- Strict checkbox properties: true/on/yes/1 enables, false/off/no/0 disables (case-insensitive). Missing, empty or invalid values fail configuration instead of becoming truthy strings. The editor explains property-controlled checkboxes.
+- Explicit schema-validation switches for JSON/XML parse, render and typed maps, default Off. On requires an existing contract of the correct kind, enforced at runtime and checked before deployment. Manual typed targets retain independent type checks.
+- JSON sample contracts require all shown properties and reject undeclared properties recursively. Use JSON Schema to express optional fields and allowed extras; its authored constraints remain authoritative. XSD 1.0 validation remains authoritative for XML.
+- Mapping previews report contract violations as errors rather than advisory warnings.
+- Process documentation lists every activity field, defaults, inactive fields, full mappings, stored configuration and execution settings. Property references remain expressions; known credential keys and Authorization rows are redacted without resolving vault values.
+- The user guide explains strict behavior, checkbox property values and upgrade implications. Architecture documentation describes the shared settings boundary.
 
 ## Fixes
 
 | What you would have seen | Cause | Now |
 |---|---|---|
-| Default orderId could not be renamed in Input. | Target labels had no editing action. | Manual targets support double-click/pencil rename without losing formulas or child definitions. |
-| A manually added target could not be deleted cleanly. | No subtree editing operation existed. | Confirmed deletion removes the selected target, children and their rules/definitions; Undo restores them. |
-| Schema allOf could hide properties declared beside it. | The shape builder returned only allOf branches. | Own and reusable object properties and required flags are combined. |
-| Sample mapping targets looked inconsistent. | Samples relied on implicit rule-derived targets. | Relevant new imports include browsable shared schemas and explicit manual-target demonstrations. |
-| A schema change left unused target formulas without an explanation. | Stale target paths were not checked. | Designer warnings and confirmed stale-rule cleanup identify and remove unused rules. |
-| A newly imported sample showed missing schemas and zero schemas/resources until the page was reloaded. | Import refreshed the flow list but left the shared project catalog stale. | Sample import waits for both flow and shared catalog refresh before opening the first sample. Existing imported schemas need no reimport. |
-| Selecting a schema described fields but did not enforce all constraints at related data boundaries. | Shape inference and instance validation were separate, inconsistently used paths. | Related structured activities share JSON Schema/XSD validation; outgoing invalid content is rejected before file writes or business HTTP requests. |
+| Validation appeared checked but invalid Parse/Render JSON or XML output succeeded. | The editor displayed a default not stored in the node, while execution read only stored values. | Shared defaults agree; validation is explicitly opt-in and checked switches enforce the contract. |
+| Checked validation with no schema succeeded silently. | The shared validator returned no errors for an empty schema reference. | On without a contract fails; deployment reports missing or wrong-kind contracts. |
+| A sample with zone allowed an object containing scores instead. | Sample validation allowed absent and additional fields. | A validated sample is a strict recursive shape; JSON Schema provides explicit optional/extra-field rules. |
+| A property containing arbitrary text enabled a checkbox. | Generic string truthiness was used. | Only documented Boolean tokens are accepted; invalid or missing properties fail. |
+| Generated process docs omitted defaults and mapping rules. | Only explicit, visible values were listed; mappings became an Input-tab note. | Full configuration is listed, with defaults/inactive fields labelled and known credentials redacted. |
 
-## Upgrade and verification
+## Upgrade
 
-No database migration is required; mapping configuration is stored in workflow JSON. Install 2.0.7 on all engines before deploying workflows using its new activity identifiers. Existing published workflows retain their identifiers.
+No database migration. Inspect older drafts: 2.0.7 could show a checked default without storing an enabled flag. Omitted validation switches now show Off; explicit true remains On and fails without a matching contract. Schema-backed samples explicitly enable validation. Existing imported drafts are not rewritten. Retest after editing; old run output does not certify the latest draft.
 
-Exact results and limitations: [2.0.7 verification record](docs/benchmarks/release-2.0.7-verification.md). Packages and deployment must follow the passing verification gate. This source change does not publish an npm package, Git commit/tag or GitHub release.
+Strict sample validation is intentionally tighter. Use JSON Schema for optional fields and extra-property policies. Keep credentials in the vault, not free-text scripts, and review generated documentation before sharing it.
 
-Previous release: [2.0.6 notes](docs/releases/2.0.6.md).
+## Verification
+
+Full build/regression: **447 tests, 440 passed, 0 failed, 7 skipped**. Hosted Kafka and the four REST checks skipped in that combined invocation pass separately. Messaging adds 66 native scenario executions across connection modes and 4/4 REST checks; real external PostgreSQL/MariaDB connector and engine queries pass. Audit: 0 vulnerabilities. The 24-hour separate-machine soak, Linux Docker image and public ACME staging gate remain deferred, not passed.
+
+Results are recorded in [the 2.0.8 engineering record](docs/benchmarks/release-2.0.8-verification.md). This is not third-party certification or a new long-duration soak. Packaging/deployment, commit/tag and publication are separate actions; no Git commit is made by this change.
+
+Previous release: [2.0.7](docs/releases/2.0.7.md).

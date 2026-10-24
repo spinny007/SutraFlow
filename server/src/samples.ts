@@ -89,6 +89,7 @@ export const SAMPLES: { id: string; name: string; desc: string; palettes: string
 ];
 
 export function addSamples(projectId: string, ids?: string[]) {
+  const D = (n: FlowNode, description: string): FlowNode => ({ ...n, description });
   // want() also notes which sample is being built, so save() knows the folder of the Sutras it makes.
   let current = '';
   const want = (id: string) => { current = id; return !ids?.length || ids.includes(id); };
@@ -684,6 +685,17 @@ export function addSamples(projectId: string, ids?: string[]) {
     edges: [E('t', 'm'), E('m', 'p'), E('p', 'c')],
   });
 
+  const xmlQueue = want('queue') && save({
+    name: 'Sample: XML queue in and out',
+    description: 'Receives and republishes exact XML text, preserving namespaces, attributes and Unicode. Select the same broker and connector on both message activities; configure xml.orders.in and xml.orders.out. Explicit confirmation happens only after the outgoing broker accepts the XML. Invalid XML fails the receiver run and follows its retry ceiling; DTD/entities are refused. Add Parse XML with an XSD contract before business processing when document validation is required. The starter test envelope avoids subscribing, but publishing still needs the configured broker.',
+    nodes: [
+      D(N('t','busSubscribe','XML orders in',60,200,{broker:'amqp1',amqpConn:'',rabbitConn:'',kafkaConn:'',destinationType:'queue',destination:'xml.orders.in',messageType:'XML',ackMode:'explicit',deduplicate:'on',withoutId:'process',onFailure:'requeue',maxRedeliveries:5,concurrency:1,testMessage:JSON.stringify({body:'<o:Order xmlns:o="urn:orders" id="A-100"><o:quantity>2</o:quantity></o:Order>',headers:{messageId:'sample-xml-A-100'}})}),'Receives XML as exact text. Use Parse XML and an XSD to enforce a document contract.'),
+      D(N('p','busPublish','XML orders out',380,200,{broker:'amqp1',amqpConn:'',rabbitConn:'',kafkaConn:'',destinationType:'queue',destination:'xml.orders.out',messageType:'XML',body:'{{input.body}}',deliveryMode:'persistent',correlationId:'{{trigger.headers.messageId}}',acks:'all'}),'Publishes the unchanged XML with application/xml. Waits for broker acceptance, not downstream business completion.'),
+      D(N('c','busConfirm','Confirm XML',700,200,{action:'confirm'}),'Acknowledges the input only after publishing succeeds. An error before confirmation follows the receiver failure policy.'),
+    ],
+    edges:[E('t','p'),E('p','c')],
+  });
+
   // Broker REST APIs are useful to HTTP-only clients, but do not replace native queue/topic triggers.
   const brokerRest = want('brokerrest');
   const kafkaRestHttp = brokerRest && conn('httpConnection', 'Sample Kafka REST', {
@@ -1037,7 +1049,6 @@ export function addSamples(projectId: string, ids?: string[]) {
       }
     }
   }
-  const D = (n: FlowNode, description: string): FlowNode => ({ ...n, description });
   const docOne = aiDocs && save({
     name: 'Sample: Add one document to knowledge',
     description: 'Called once per file by "Sample: Document feed from a folder": reads the file, takes its text and adds it to the knowledge base under its path in the folder. A file whose text has not changed since the last feed is skipped, so no vectors are made again. Files of other types are left alone; a file that cannot be read is logged and the feed goes on.',
@@ -1293,7 +1304,7 @@ export function addSamples(projectId: string, ids?: string[]) {
   // Connections made for the samples go to a Samples folder of Resources.
   for (const r of listResources(undefined, projectId)) if (!resourcesBefore.has(r.id) && !r.folder) setItemFolder('resources', r.id, 'Samples');
 
-  return [...typedMappings, ...validationFlows, forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, release, localAi, email, queue, kafkaRest, kafkaRestSubscribe, rabbitRest, activeRest, timer, fileTrig, textFormats, dbUpd, dbProc, soapCall, emailIn, firebase, google, apps, aiMore,
+  return [...typedMappings, ...validationFlows, forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, release, localAi, email, queue, xmlQueue, kafkaRest, kafkaRestSubscribe, rabbitRest, activeRest, timer, fileTrig, textFormats, dbUpd, dbProc, soapCall, emailIn, firebase, google, apps, aiMore,
     soapPublic, soapMock, soapMockCall, msCustomers, msStock, msOrders, sqlInstall, sqlService, ...sftp, ...ftp,
     toolOrder, toolStock, desk, ragWeb, ragSp, ragAsk, queueAgent, team, mcpAgent, docOne, docFeed, docApi, docTool, docAgent, adfRunS, adfAlert, dbxNb, dbxSql, pyInline, pyFile, ytPublish, ytReport, twLive, dcBot, tgBot, tgNotify]
     .filter((f): f is NonNullable<typeof f> & { id: string; name: string } => !!f)
@@ -1333,7 +1344,7 @@ export const SAMPLE_SUTRAS: Record<string, string[]> = {
   'Samples/Operations': ['Scripts', 'Release pipeline'],
   'Samples/AI': ['Local AI with Ollama', 'AI translate extract route and reply'],
   'Samples/Email': ['Email a report', 'Email trigger orders by email'],
-  'Samples/Queues': ['Queue in and out', 'Kafka REST publish', 'Kafka REST subscribe', 'RabbitMQ HTTP publish and fetch', 'ActiveMQ REST publish and fetch'],
+  'Samples/Queues': ['Queue in and out', 'XML queue in and out', 'Kafka REST publish', 'Kafka REST subscribe', 'RabbitMQ HTTP publish and fetch', 'ActiveMQ REST publish and fetch'],
   'Samples/SOAP': ['Call a SOAP service', 'Call a public SOAP service', 'Mock SOAP weather service', 'Call the mock SOAP service'],
   'Samples/SFTP and FTP': ['SFTP upload list read archive', 'SFTP file trigger', 'FTP upload list read archive', 'FTP file trigger'],
   'Samples/AI agents': ['AI tool order status', 'AI tool stock check', 'Order desk agent', 'Knowledge feed from web pages', 'Knowledge feed from SharePoint', 'Policy assistant', 'Agent fed by a queue', 'Supervisor agent', 'Agent with outside MCP tools', 'Add one document to knowledge', 'Document feed from a folder', 'Document questions API', 'AI tool search documents', 'Document assistant'],

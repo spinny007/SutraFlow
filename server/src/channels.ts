@@ -24,6 +24,7 @@ export async function publishChannel(projectId: string | null | undefined, chann
   const want = norm(channel);
   for (const d of deployedFlows()) {
     if ((d.projectId || '') !== (projectId || '')) continue;
+    if (d.doc.nodes.filter(n => engine.activity(n.type)?.trigger).length !== 1) continue;
     for (const n of d.doc.nodes) {
       if (n.type !== 'channelTrigger') continue;
       const act = engine.activity(n.type);

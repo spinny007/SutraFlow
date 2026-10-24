@@ -1,0 +1,44 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 2.0.8
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+// Opt-in strict mTLS transport fixture forwarding to local real brokers.
+// This certifies client transport configuration, not native broker keystores.
+import tls from 'node:tls';
+import net from 'node:net';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import selfsigned from 'selfsigned';
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sutra-broker-tls-'));
+const cert=await selfsigned.generate([{name:'commonName',value:'localhost'}],{days:1,keySize:2048,extensions:[{name:'basicConstraints',cA:true},{name:'keyUsage',keyCertSign:true,digitalSignature:true,keyEncipherment:true},{name:'extKeyUsage',serverAuth:true,clientAuth:true},{name:'subjectAltName',altNames:[{type:2,value:'localhost'},{type:7,ip:'127.0.0.1'}]}]});
+const certPath=path.join(dir,'cert.pem'),keyPath=path.join(dir,'key.pem');
+fs.writeFileSync(certPath,cert.cert,{mode:0o600});fs.writeFileSync(keyPath,cert.private,{mode:0o600});
+const servers=[],sockets=new Set();
+async function proxy(target){
+ const server=tls.createServer({key:cert.private,cert:cert.cert,ca:cert.cert,requestCert:true,rejectUnauthorized:true},client=>{
+   const upstream=net.connect(target,'127.0.0.1');
+   for(const socket of [client,upstream]){sockets.add(socket);socket.on('close',()=>sockets.delete(socket));}
+   client.on('error',()=>upstream.destroy());upstream.on('error',()=>client.destroy());
+   client.on('close',()=>upstream.destroy());upstream.on('close',()=>client.destroy());
+   client.pipe(upstream).pipe(client);
+ });
+ server.on('tlsClientError',()=>{});servers.push(server);
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));return server.address().port;
+}
+try {
+ const rabbit=await proxy(5672),active=await proxy(5673);
+ const env={...process.env,SUTRA_RABBITMQ_TEST:'1',SUTRA_RABBITMQ_URL:`amqps://localhost:${rabbit}/`,SUTRA_RABBITMQ_CA_FILE:certPath,SUTRA_RABBITMQ_CLIENT_CERT_FILE:certPath,SUTRA_RABBITMQ_CLIENT_KEY_FILE:keyPath,SUTRA_ACTIVEMQ_TEST:'1',SUTRA_ACTIVEMQ_HOST:'localhost',SUTRA_ACTIVEMQ_PORT:String(active),SUTRA_ACTIVEMQ_TLS:'1',SUTRA_ACTIVEMQ_CA_FILE:certPath,SUTRA_ACTIVEMQ_CLIENT_CERT_FILE:certPath,SUTRA_ACTIVEMQ_CLIENT_KEY_FILE:keyPath};
+ const child=spawn(process.execPath,['--disable-warning=ExperimentalWarning','--import','tsx','--test','--test-concurrency=1','test/activemq.test.ts','test/rabbitmq.test.ts'],{env,stdio:'inherit',windowsHide:true});
+ process.exitCode=await new Promise(resolve=>{child.once('exit',code=>resolve(code??1));child.once('error',()=>resolve(1));});
+}finally{
+ for(const socket of sockets)socket.destroy();
+ await Promise.all(servers.map(s=>new Promise(resolve=>s.close(resolve))));
+ fs.rmSync(dir,{recursive:true,force:true}); // Exact directory created above, never a user path.
+}

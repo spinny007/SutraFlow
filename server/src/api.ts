@@ -53,6 +53,7 @@ import * as schemas from './schemas.js';
 import { designSchemas } from './design.js';
 import { previewMapping, schemaFromSample } from './mapping-preview.js';
 import { validateStructured } from './schema-validation.js';
+import { resolveSetting } from './settings.js';
 import { adhocTree } from './mapping.js';
 import { evalExpression, functionCatalog, refsOf, ExprError } from './expr.js';
 import { tailLog, clearLog } from './logger.js';
@@ -707,9 +708,10 @@ export async function buildAdmin(): Promise<FastifyInstance> {
       const stored = cfg.schema ? schemas.getSchema(String(cfg.schema).split('::')[0]) : null;
       if (cfg.schema && (!stored || stored.project_id !== projectId)) throw new Error('Target schema is missing or belongs to another project');
       const tree = schemas.schemaTree(cfg.schema) || adhocTree(cfg.mapping);
-      const result = previewMapping(tree, cfg.mapping || { rules: {} }, scope, format, cfg.start === 'input');
-      if (result.ok && cfg.validateSchema !== false && cfg.schema) {
-        result.warnings.push(...await validateStructured(cfg.schema, result.value, format === 'xml' ? result.text : undefined));
+      const result = { errors: [] as string[], ...previewMapping(tree, cfg.mapping || { rules: {} }, scope, format, cfg.start === 'input') };
+      if (result.ok && resolveSetting({ k: 'validateSchema', label: 'Validate against schema', type: 'bool', def: false }, cfg.validateSchema, { ...scope, gv: projectId ? projects.effectiveVariables(projectId).values : {}, ev: projects.engineVariableValues() })) {
+        result.errors.push(...await validateStructured(cfg.schema, result.value, format === 'xml' ? result.text : undefined, format === 'xml' ? 'xsd' : format === 'json' ? 'json' : undefined));
+        result.ok = result.errors.length === 0;
       }
       return result;
     } catch (e: any) { return { ok: false, errors: [e.message], warnings: [] }; }

@@ -20,7 +20,7 @@ const enabled = process.env.SUTRA_KAFKA_TEST === '1' && brokers.length > 0;
 if (!enabled) {
   test('Kafka real-broker activity matrix', { skip: 'set SUTRA_KAFKA_TEST=1 and SUTRA_KAFKA_BROKERS' }, () => {});
 } else {
-  testEnv(19912);
+  testEnv(22860);
   const user = process.env.SUTRA_KAFKA_USER || '';
   const sasl = (process.env.SUTRA_KAFKA_SASL || (user ? 'plain' : 'none')) as 'none' | 'plain' | 'scram-sha-256' | 'scram-sha-512';
   const read = (name: string) => process.env[name] ? fs.readFileSync(process.env[name]!, 'utf8') : '';
@@ -132,6 +132,26 @@ if (!enabled) {
     assert.equal(first.headers.replyTo, 'reply.orders'); assert.equal(first.headers.type, 'order'); assert.equal(first.properties.region, 'south');
     assert.equal(typeof first.partition, 'number'); assert.match(first.offset, /^\d+$/);
     await undeploy(flowId);
+  });
+
+  test('JSON, XML, text, map and bytes round-trip through Kafka activities', async () => {
+    for (const [messageType,body] of [['JSON',{id:7}],['XML','<o:Order xmlns:o="urn:orders" id="K-100">東京</o:Order>'],['text','hello Kafka'],['map',{name:'map'}],['bytes',Buffer.from([0,128,255]).toString('base64')]] as const) {
+      const t=trigger('In',{messageType}); const flowId=await deploy(`Kafka ${messageType}`,[t],[]);
+      await publish(body,{messageType,key:'format'});
+      await until(`${messageType} body`,()=>runs(flowId)[0]?.status==='done');
+      assert.deepEqual(output(runs(flowId)[0].id).body,body); await undeploy(flowId);
+    }
+  });
+
+  test('malformed JSON and XML fail before processing and commit at the retry ceiling', async () => {
+    for(const [messageType,body]of [['JSON','not JSON'],['XML','<broken>']]){
+      const t=trigger('In',{messageType,maxRedeliveries:2});const log=node('log','Business',{message:'must not execute'});
+      const flowId=await deploy(`Invalid ${messageType}`,[t,log],[edge(t,log)]);
+      await publish(body,{messageType:'text',key:'invalid'});
+      await until('two malformed attempts',()=>runs(flowId).length===2&&runs(flowId).every(r=>r.status==='failed'),45000);
+      for(const run of runs(flowId)){assert.match(run.error,/Invalid.*message/i);assert.equal(output(run.id,'Business'),undefined);}
+      await sleep(6000);assert.equal(runs(flowId).length,2);await undeploy(flowId);
+    }
   });
 
   test('client acknowledgement retries a failure and commits at the configured ceiling', async () => {

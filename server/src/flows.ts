@@ -14,6 +14,8 @@ import { ensureDefaultProject, getProject } from './projects.js';
 import { setItemFolder } from './folders.js';
 import type { FlowDoc } from './engine/types.js';
 import { designSchemas } from './design.js';
+import { booleanSetting } from './settings.js';
+import { getSchema } from './schemas.js';
 
 /**
  * Flows have an editable draft plus immutable published versions. Deploying
@@ -117,6 +119,7 @@ export function validateDoc(doc: FlowDoc, projectId?: string) {
   }
   const triggers = doc.nodes.filter(n => engine.activity(n.type)?.trigger);
   if (!triggers.length) errors.push('The Sutra has no trigger step');
+  if (triggers.length > 1) errors.push(`A Sutra must have exactly one starter activity; found ${triggers.length}: ${triggers.map(n => n.name).join(', ')}. Use separate Sutras and Call Sutra to share processing.`);
   for (const e of doc.edges) {
     const from = doc.nodes.find(n => n.id === e.from)!;
     if (!engine.portsOf(from).includes(e.port)) warnings.push(`${from.name} has no output "${e.port}"; that connection never fires`);
@@ -140,6 +143,19 @@ export function validateDoc(doc: FlowDoc, projectId?: string) {
   if (doc.nodes.filter(n => engine.activity(n.type)?.noInput).length > 1) errors.push('A Sutra can have only one Error handler');
   const designs = designSchemas(doc);
   for (const n of doc.nodes) if (!n.settings?.disabled) {
+    if (n.config.validateBody === 'reject invalid' && !getSchema(String(n.config.bodySchema || '').split('::')[0])) errors.push(`${n.name}: request/message validation requires an existing body schema.`);
+    for (const key of ['validateSchema', 'strictValidation']) {
+      const flag = n.config[key];
+      if (flag === undefined || (typeof flag === 'string' && (flag.includes('{{') || flag.startsWith('=')))) continue;
+      try {
+        if (booleanSetting(flag, key)) {
+          const selected = n.config.schema && getSchema(String(n.config.schema).split('::')[0]);
+          if (!selected) errors.push(`${n.name}: validation is On but the selected schema is missing.`);
+          const expected = /Xml$/.test(n.type) || n.config.format === 'XML' ? 'xsd' : /Json$/.test(n.type) || n.config.format === 'JSON' ? 'json' : undefined;
+          if (selected && expected && selected.kind !== expected) errors.push(`${n.name}: validation requires a ${expected === 'json' ? 'JSON' : 'XSD'} schema.`);
+        }
+      } catch (e: any) { errors.push(`${n.name}: ${e.message}`); }
+    }
     errors.push(...designs[n.id].errors.map(issue => `${n.name}: ${issue}`).filter(issue => !errors.includes(issue)));
     warnings.push(...designs[n.id].warnings.map(issue => `${n.name}: ${issue}`).filter(issue => !warnings.includes(issue)));
   }

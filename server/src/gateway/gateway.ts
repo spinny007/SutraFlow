@@ -71,6 +71,7 @@ export const mcpPath = (p: unknown) => '/' + String(p || 'mcp').trim().replace(/
 export function rebuildRoutes() {
   const out: Route[] = [];
   for (const d of deployedFlows()) {
+    if (d.doc.nodes.filter(n => engine.activity(n.type)?.trigger).length > 1) continue;
     for (const n of d.doc.nodes) {
       if (n.type !== 'restService' && n.type !== 'soapService' && n.type !== 'wsService') continue;
       const act = engine.activity(n.type);
@@ -89,7 +90,7 @@ export function rebuildRoutes() {
     const m = path.match(r.re)!;
     return { route: r as WsRoute, params: Object.fromEntries(r.keys.map((k, i) => [k, m[i + 1]])) };
   });
-  mcpTools = deployedFlows().flatMap(d => d.doc.nodes.filter(n => n.type === 'mcpTool').map(node => {
+  mcpTools = deployedFlows().filter(d => d.doc.nodes.filter(n => engine.activity(n.type)?.trigger).length === 1).flatMap(d => d.doc.nodes.filter(n => n.type === 'mcpTool').map(node => {
     const srv = node.config.server ? effectiveResource(node.config.server) : undefined;
     return { endpoint: srv ? mcpPath(srv.config.path) : '/mcp', serverId: srv?.id || '', flowId: d.flowId, projectId: d.projectId, version: d.version, doc: d.doc, node };
   }));
@@ -264,8 +265,8 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
     if (missingOp) { gw.error = missingOp; return fault(403, 'soap:Client', missingOp, v12); }
     try {
       checkParsed(env.Body, limits);
-      if (n.config.validateBody === 'reject invalid' && n.config.bodySchema) {
-        const errs = await validateSoapOperation(String(n.config.bodySchema), env.Body[opName], xml);
+      if (n.config.validateBody === 'reject invalid') {
+        const errs = await validateSoapOperation(String(n.config.bodySchema || ''), env.Body[opName], xml);
         if (errs.length) throw new MessageRejected(`The request does not match the schema: ${errs.join('; ')}`, 400, errs);
       }
     } catch (e: any) {
@@ -315,8 +316,8 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
     checkRaw(raw, ct.includes('json') ? 'json' : ct.includes('xml') ? 'xml' : 'other', limits);
     body = parseRestBody(raw, ct);
     checkParsed(body, limits);
-    if (route.node.config.validateBody === 'reject invalid' && route.node.config.bodySchema) {
-      const errs = await validateStructured(String(route.node.config.bodySchema), body, ct.includes('xml') ? raw : undefined);
+    if (route.node.config.validateBody === 'reject invalid') {
+      const errs = await validateStructured(route.node.config.bodySchema, body, ct.includes('xml') ? raw : undefined);
       if (errs.length) throw new MessageRejected('The request does not match the schema', 400, errs);
     }
   } catch (e: any) {

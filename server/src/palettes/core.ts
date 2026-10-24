@@ -331,10 +331,10 @@ const data: Activity[] = [
   },
   {
     type: 'parseJson', palette: 'data', name: 'Parse JSON', glyph: '{}', ports: ['out'], desc: 'Turns JSON text into data; a shared schema describes the result for mapping.',
-    fields: [F('schema', 'Schema', 'schema', '', { schemaKinds: ['json'] }), F('validateSchema', 'Validate against schema', 'bool', true), F('text', 'JSON text', 'textarea', '{{input.body}}', { tpl: true })],
+    fields: [F('schema', 'Schema', 'schema', '', { schemaKinds: ['json'] }), F('validateSchema', 'Validate against schema', 'bool', false, { help: 'On requires a selected contract. JSON samples require every shown field and reject extra fields; use JSON Schema for optional fields.' }), F('text', 'JSON text', 'textarea', '{{input.body}}', { tpl: true })],
     outputSchema: (cfg, h) => h.schema(cfg.schema) || { name: 'out', type: 'any' },
     execute: async c => { const v = c.v('text'); const value = typeof v === 'string' ? parseJsonText(v, 'Input') : v;
-      const issues = c.raw('validateSchema') ? await validateStructured(c.raw('schema'), value) : [];
+      const issues = c.raw('validateSchema') ? await validateStructured(c.raw('schema'), value, undefined, 'json') : [];
       if (issues.length) throw new Error(issues.join('; ')); return { out: value }; },
   },
   {
@@ -345,21 +345,21 @@ const data: Activity[] = [
       F('schema', 'Schema', 'schema', '', { schemaKinds: ['json'] }),
       F('mapping', 'JSON content', 'mapping', { rules: {} }, { schemaField: 'schema', ...when('source', 'mapping') }),
       F('pretty', 'Pretty print', 'bool', true),
-      F('validateSchema', 'Validate against schema', 'bool', true),
+      F('validateSchema', 'Validate against schema', 'bool', false, { help: 'On requires a selected JSON contract; it validates the value, not the serialized text. Samples are strict shapes; JSON Schema defines optional fields and allowed extras.' }),
     ],
     outputHint: { text: '' },
     execute: async c => { const value = c.raw('source') === 'mapping' ? c.mapping('mapping') : c.v('value');
-      const issues = c.raw('validateSchema') ? await validateStructured(c.raw('schema'), value) : [];
+      const issues = c.raw('validateSchema') ? await validateStructured(c.raw('schema'), value, undefined, 'json') : [];
       if (issues.length) throw new Error(issues.join('; ')); return { out: { text: JSON.stringify(value, null, c.raw('pretty') ? 2 : 0) } }; },
   },
   {
     type: 'parseXml', palette: 'data', name: 'Parse XML', glyph: '</>', ports: ['out'], desc: 'Turns XML text into data. Namespace prefixes are removed; attributes start with @_. An XSD describes the result for mapping.',
-    fields: [F('schema', 'Schema (XSD)', 'schema', '', { schemaKinds: ['xsd'] }), F('validateSchema', 'Validate against schema', 'bool', true), F('text', 'XML text', 'textarea', '{{input.body}}', { tpl: true })],
+    fields: [F('schema', 'Schema (XSD)', 'schema', '', { schemaKinds: ['xsd'] }), F('validateSchema', 'Validate against schema', 'bool', false, { help: 'On requires a selected XSD and enforces it before parsing.' }), F('text', 'XML text', 'textarea', '{{input.body}}', { tpl: true })],
     outputSchema: (cfg, h) => h.schema(cfg.schema) || { name: 'out', type: 'any' },
     execute: async c => {
       const t = String(c.v('text') ?? '');
       if (!t.trim().startsWith('<')) throw new Error('The input is not XML');
-      const issues = c.raw('validateSchema') ? await validateStructured(c.raw('schema'), null, t) : [];
+      const issues = c.raw('validateSchema') ? await validateStructured(c.raw('schema'), null, t, 'xsd') : [];
       if (issues.length) throw new Error(issues.join('; '));
       return { out: xmlParser.parse(t) };
     },
@@ -373,7 +373,7 @@ const data: Activity[] = [
       F('schema', 'Schema (XSD)', 'schema', '', { schemaKinds: ['xsd'] }),
       F('mapping', 'XML content', 'mapping', { rules: {} }, { schemaField: 'schema', ...when('source', 'mapping') }),
       F('declaration', 'Add <?xml?> declaration', 'bool', true),
-      F('validateSchema', 'Validate against schema', 'bool', true),
+      F('validateSchema', 'Validate against schema', 'bool', false, { help: 'On requires a selected XSD and validates the exact serialized XML before returning text.' }),
     ],
     outputHint: { text: '' },
     execute: async c => {
@@ -383,7 +383,7 @@ const data: Activity[] = [
         if (!isObj(doc) || Object.keys(doc).length !== 1) throw new Error('The mapped XML must have exactly one root element. Pick an XSD with a root element, or add one top-level target field.');
       } else doc = { [c.raw('root') || 'root']: c.v('value') };
       const body = xmlBuilder.build(doc);
-      const issues = c.raw('validateSchema') ? await validateStructured(c.raw('schema'), doc, body) : [];
+      const issues = c.raw('validateSchema') ? await validateStructured(c.raw('schema'), doc, body, 'xsd') : [];
       if (issues.length) throw new Error(issues.join('; '));
       return { out: { text: (c.raw('declaration') ? '<?xml version="1.0" encoding="UTF-8"?>\n' : '') + body } };
     },
@@ -486,14 +486,14 @@ const mappingActivities: Activity[] = (['json', 'xml'] as const).map(format => (
   desc: `Builds structured ${format.toUpperCase()} data with typed targets, formulas and repeating fields. Select a shared ${format === 'json' ? 'JSON Schema' : 'XSD'} or define fields in Input. Use Render ${format.toUpperCase()} to produce text.`,
   fields: [
     F('schema', format === 'json' ? 'Target JSON Schema' : 'Target XSD', 'schema', '', { schemaKinds: [format === 'json' ? 'json' : 'xsd'] }),
-    F('validateSchema', 'Validate against schema', 'bool', true, { help: 'JSON Schema uses AJV. XML Schema uses isolated libxml2 WebAssembly (XSD 1.0); no Java or native installation. Unsupported schema dependencies fail explicitly.' }),
+    F('validateSchema', 'Validate against schema', 'bool', false, { help: 'On requires a selected contract. JSON Schema uses AJV; JSON samples are strict shapes. XML uses isolated libxml2 XSD 1.0. Manual targets are type-checked independently.' }),
     F('mapping', 'Target', 'mapping', format === 'xml' ? { fields: ['Root'], definitions: { Root: { type: 'object', required: true } }, rules: {} } : { rules: {} }, { schemaField: 'schema' }),
   ],
   execute: async c => {
     const value = c.mapping('mapping');
     const tree = c.schemaTree('schema') || adhocTree(c.raw('mapping'));
     const issues = checkMappedValue(tree, value);
-    if (c.raw('validateSchema')) issues.push(...await validateStructured(c.raw('schema'), value));
+    if (c.raw('validateSchema')) issues.push(...await validateStructured(c.raw('schema'), value, undefined, format === 'json' ? 'json' : 'xsd'));
     if (format === 'xml' && (Object.keys(value).length !== 1 || tree.children?.[0]?.attr || tree.children?.[0]?.repeats)) issues.push('XML target must have exactly one non-repeating root element');
     if (issues.length) throw new Error(issues.join('; '));
     return { out: value };

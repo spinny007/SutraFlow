@@ -19,7 +19,7 @@ const enabled = process.env.SUTRA_RABBITMQ_TEST === '1' && !!password;
 if (!enabled) {
   test('RabbitMQ real-broker activity matrix', { skip: 'set SUTRA_RABBITMQ_TEST=1 and SUTRA_RABBITMQ_PASSWORD' }, () => {});
 } else {
-  testEnv(19911);
+  testEnv(22820);
   const url = process.env.SUTRA_RABBITMQ_URL || 'amqp://localhost:5672/';
   const user = process.env.SUTRA_RABBITMQ_USER || 'guest';
   const read = (name: string) => process.env[name] ? fs.readFileSync(process.env[name]!, 'utf8') : '';
@@ -143,8 +143,8 @@ if (!enabled) {
     await undeploy(flowId);
   });
 
-  test('JSON, text, map and bytes bodies round-trip', async () => {
-    for (const [kind, body] of [['JSON', { n: 7 }], ['text', 'hello'], ['map', { a: 1, b: 'two' }], ['bytes', Buffer.from('binary').toString('base64')]] as const) {
+  test('JSON, XML, text, map and bytes bodies round-trip', async () => {
+    for (const [kind, body] of [['JSON', { n: 7 }], ['XML', '<o:Order xmlns:o="urn:orders" id="A-100">東京</o:Order>'], ['text', 'hello'], ['map', { a: 1, b: 'two' }], ['bytes', Buffer.from('binary').toString('base64')]] as const) {
       const dest = destination(`body.${kind}`);
       const t = trigger('In', dest, { messageType: kind });
       const flowId = await deploy(`RabbitMQ ${kind}`, [t], []);
@@ -152,6 +152,19 @@ if (!enabled) {
       await until(`${kind} body`, () => runs(flowId)[0]?.status === 'done');
       assert.deepEqual(output(runs(flowId)[0].id).body, body);
       await undeploy(flowId);
+    }
+  });
+
+  test('malformed JSON and XML fail before processing and respect the retry ceiling', async () => {
+    for(const [messageType,body] of [['JSON','not JSON'],['XML','<broken>']]){
+      const dest=destination(`invalid.${messageType}`);
+      const t=trigger('In',dest,{messageType,ackMode:'client',maxRedeliveries:2});
+      const log=node('log','Business',{message:'must not execute'});
+      const flowId=await deploy(`Invalid ${messageType}`,[t,log],[edge(t,log)]);
+      await publish(dest,body,{messageType:'text',body:'{{input}}'});
+      await until('two malformed attempts',()=>runs(flowId).length===2&&runs(flowId).every(r=>r.status==='failed'));
+      for(const run of runs(flowId)){assert.match(run.error,/Invalid.*message/i);assert.equal(output(run.id,'Business'),undefined);}
+      await sleep(700);assert.equal(runs(flowId).length,2);await undeploy(flowId);
     }
   });
 

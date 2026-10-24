@@ -94,9 +94,11 @@ function FieldInput({ f, value, onChange, resources, secrets, onFocusField }: {
         </select>{f.help && <div className="hint">{f.help}</div>}</div>;
     case 'bool': {
       const dyn = typeof value === 'string' && (value.startsWith('=') || value.includes('{{'));
-      return dyn
-        ? <div className="fld"><label htmlFor={id}>{f.label}<VarPicker target={id} onInsert={onChange} /></label><div className="row"><input id={id} type="text" className="code" value={value} onChange={e => onChange(e.target.value)} /><button type="button" className="btn small" onClick={() => onChange(false)}>Use fixed value</button></div>{f.help && <div className="hint">{f.help}</div>}</div>
-        : <div className="fld"><span className="lbl">{f.label}<VarPicker target={id} onInsert={onChange} /></span><label className="check"><input type="checkbox" checked={!!value} onChange={e => onChange(e.target.checked)} /> {value ? 'On' : 'Off'}</label>{f.help && <div className="hint">{f.help}</div>}</div>;
+      const fixedOn = typeof value === 'string' ? /^(true|on|yes|1)$/i.test(value.trim()) : value === true || value === 1;
+      const invalidLiteral = typeof value === 'string' && !/^(true|false|on|off|yes|no|1|0)$/i.test(value.trim());
+      return dyn || invalidLiteral
+        ? <div className="fld"><label htmlFor={id}>{f.label}<VarPicker target={id} onInsert={onChange} /></label><div className="row"><input id={id} type="text" className="code" value={value} onChange={e => onChange(e.target.value)} /><button type="button" className="btn small" onClick={() => onChange(false)}>Use fixed value</button></div><div className="hint">Property-controlled: true/on/yes/1 = On; false/off/no/0 = Off. Missing or other values are errors.</div>{f.help && <div className="hint">{f.help}</div>}</div>
+        : <div className="fld"><span className="lbl">{f.label}<VarPicker target={id} onInsert={onChange} /></span><label className="check"><input type="checkbox" checked={fixedOn} onChange={e => onChange(e.target.checked)} /> {fixedOn ? 'On' : 'Off'}</label>{f.help && <div className="hint">{f.help}</div>}</div>;
     }
     case 'number': {
       // A number, or a variable / formula such as {{gv.TIMEOUT}}.

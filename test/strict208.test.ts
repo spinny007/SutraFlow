@@ -1,0 +1,128 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 2.0.8
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import WebSocket from 'ws';
+import { testEnv, node, edge } from './helpers.js';
+const env = testEnv(22920);
+const { boot } = await import('../server/src/index.js');
+const { engine, runState } = await import('../server/src/engine/engine.js');
+const { q } = await import('../server/src/db.js');
+const { saveProject, effectiveVariables } = await import('../server/src/projects.js');
+const { saveSchema } = await import('../server/src/schemas.js');
+const { validateStructured } = await import('../server/src/schema-validation.js');
+const { booleanSetting, resolveSetting, resolveSettings } = await import('../server/src/settings.js');
+const { validateDoc } = await import('../server/src/flows.js');
+const { saveFlow, deploy } = await import('../server/src/flows.js');
+const { rebuildRoutes } = await import('../server/src/gateway/gateway.js');
+const { sutraDocumentation } = await import('../server/src/docs.js');
+let srv: Awaited<ReturnType<typeof boot>>, pid: string, json: string, xml: string;
+before(async () => {
+  srv = await boot({listenAdmin:false});
+  pid = saveProject({name:'Strict 208',config:{variables:[{name:'STRICT',type:'boolean',value:'true'}]}}).id;
+  json=saveSchema({project_id:pid,name:'Required zone',kind:'json',text:JSON.stringify({type:'object',required:['zone'],properties:{zone:{type:'integer'}},additionalProperties:false})}).id;
+  xml=saveSchema({project_id:pid,name:'Required XML zone',kind:'xsd',root:'User',text:'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="User"><xs:complexType><xs:sequence><xs:element name="zone" type="xs:integer"/></xs:sequence></xs:complexType></xs:element></xs:schema>'}).id;
+});
+after(async()=>{await srv.stop();});
+async function run(type:string,config:Record<string,any>){
+ const s=node('start','Start',{payload:'{"id":7}'}),n=node(type,'Contract',config);
+ const doc={name:`Strict ${type}`,nodes:[s,n],edges:[edge(s,n)]};
+ const id=await engine.startRun({projectId:pid,doc}); await engine.waitFor(id,10000);
+ return {row:q.get<any>('select status,error from runs where id = ?',id),state:runState(id)!,doc};
+}
+test('checkbox defaults and literal/property Boolean tokens have one strict interpretation',()=>{
+ const f={k:'flag',label:'Flag',type:'bool' as const,def:true};
+ assert.equal(resolveSetting(f,undefined,{}),true);
+ assert.equal(resolveSettings([f],{},{}).flag,true);
+ for(const value of [true,1,'true','ON','yes','1']) assert.equal(booleanSetting(value),true);
+ for(const value of [false,0,'false','OFF','no','0']) assert.equal(booleanSetting(value),false);
+ for(const value of [undefined,null,'',2,'banana',{},[]]) assert.throws(()=>booleanSetting(value),/On.*Off/);
+ assert.equal(resolveSetting(f,'{{gv.FLAG}}',{gv:{FLAG:'Off'}}),false);
+ assert.equal(resolveSetting(f,'{{ev.FLAG}}',{ev:{FLAG:'On'}}),true);
+ assert.throws(()=>resolveSetting(f,'{{gv.MISSING}}',{gv:{}}),/missing|boolean/);
+ const p=saveProject({name:'Boolean property On',config:{variables:[{name:'FLAG',type:'boolean',value:'On'}]}});
+ assert.equal(effectiveVariables(p.id).values.FLAG,true);
+ assert.throws(()=>saveProject({name:'Invalid Boolean property',config:{variables:[{name:'FLAG',type:'boolean',value:'banana'}]}}),/Project property FLAG/);
+});
+test('all JSON/XML parsers, renderers and typed mappers reject On without a schema in engine and Deploy',async()=>{
+ for(const [type,config] of [
+  ['parseJson',{text:'{}'}],['renderJson',{source:'value',value:{}}],
+  ['parseXml',{text:'<User/>'}],['renderXml',{source:'value',root:'User',value:{}}],
+  ['mapperJson',{mapping:{rules:{}}}],['mapperXml',{mapping:{fields:['User'],rules:{User:{expr:'{input}'}}}}],
+ ] as [string,Record<string,any>][]){
+  const r=await run(type,{...config,validateSchema:true});
+  assert.equal(r.row.status,'failed',`${type}: ${r.row.error}`);
+  assert.match(r.row.error,/schema|contract/i);
+  assert.match(validateDoc(r.doc,pid).errors.join(';'),/schema.*missing/i);
+ }
+ // Simulate old published 2.0.7 configurations which bypassed today's Deploy checks.
+ for(const type of ['restService','soapService','wsService']){
+  const input=node(type,`Legacy ${type}`,{path:`/strict208/${type}`,method:'POST',format:'text',operations:'Check',namespace:'urn:strict208',validateBody:'off'});
+  const doc={name:`Legacy ${type}`,nodes:[input],edges:[]};
+  const f=saveFlow(undefined,doc,pid);deploy(f.id);
+  input.config.validateBody='reject invalid';
+  assert.match(validateDoc(doc,pid).errors.join(';'),/body schema/);
+  q.run('update flow_versions set doc = ? where flow_id = ?',JSON.stringify(doc),f.id);rebuildRoutes();
+  const before=q.get<any>('select count(*) as n from runs where flow_id = ?',f.id).n;
+  if(type==='wsService'){
+   const ws=new WebSocket(env.http.replace('http','ws')+'/strict208/wsService');
+   await new Promise<void>((resolve,reject)=>{ws.once('open',resolve);ws.once('error',reject);});
+   try{
+    const response=new Promise<string>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('No WebSocket validation reply')),5000);ws.once('message',data=>{clearTimeout(timer);resolve(data.toString());});});
+    ws.send('text must not bypass checked validation');assert.match(await response,/schema/i);
+   }finally{ws.close();}
+  }else{
+   const soap=type==='soapService';
+   const response=await fetch(env.http+`/strict208/${type}`,{method:'POST',headers:{'content-type':soap?'text/xml':'application/json'},body:soap?'<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><Check xmlns="urn:strict208"/></s:Body></s:Envelope>':'{}'});
+   assert.equal(response.status,400,type);assert.match(await response.text(),/schema|validation/i);
+  }
+  assert.equal(q.get<any>('select count(*) as n from runs where flow_id = ?',f.id).n,before,`${type}: rejected data must start no run`);
+ }
+});
+test('XML/JSON checked validation rejects missing fields, wrong-kind contracts and invalid GV flags; Off stays Off',async()=>{
+ for(const [type,config,schema]of [
+  ['parseJson',{text:'{"scores":[2,5]}'},json],['renderJson',{source:'value',value:{scores:[2,5]}},json],
+  ['parseXml',{text:'<User><scores>2</scores></User>'},xml],['renderXml',{source:'value',root:'User',value:{scores:2}},xml],
+ ] as [string,Record<string,any>,string][]){
+  assert.equal((await run(type,{...config,schema,validateSchema:'{{gv.STRICT}}'})).row.status,'failed',type);
+  assert.equal((await run(type,{...config,schema,validateSchema:'Off'})).row.status,'done',type);
+  assert.equal((await run(type,{...config,schema})).row.status,'done',`${type}: omitted flag must match displayed Off`);
+  assert.equal((await run(type,{...config,schema,validateSchema:'{{gv.MISSING}}'})).row.status,'failed',type);
+  assert.equal((await run(type,{...config,schema:schema===json?xml:json,validateSchema:true})).row.status,'failed',type);
+ }
+});
+test('strict JSON samples require fields and reject undeclared/nested fields and wrong types',async()=>{
+ const ref=saveSchema({project_id:pid,name:'Zone sample',kind:'json',text:'{"id":7,"zone":[2,5],"details":{"active":true}}'}).id;
+ assert.deepEqual(await validateStructured(ref,{id:7,zone:[2],details:{active:true}}),[]);
+ for(const value of [{id:7,scores:[2],details:{active:true}},{id:'U-7',zone:[2],details:{active:true}},{id:7,zone:[2],details:{active:true,extra:1}}]) assert.ok((await validateStructured(ref,value)).length);
+ assert.ok((await validateStructured('',{})).length);
+ const nullable=saveSchema({project_id:pid,name:'Nullable mixed sample',kind:'json',text:'{"value":null,"items":[1,"text"]}'});
+ assert.deepEqual(await validateStructured(nullable.id,{value:null,items:[3,'other']}),[]);
+ assert.ok((await validateStructured(nullable.id,{value:false,items:[true]})).length);
+ saveSchema({...nullable,root:nullable.root ?? undefined,text:'{"zone":1}'});
+ assert.ok((await validateStructured(nullable.id,{value:null,items:[3,'other']})).length,'saved schema edits invalidate the compiled validator immediately');
+});
+test('process documentation includes defaults, inactive settings, full mapping rules and property expressions without credentials',()=>{
+ const s=node('start','Start',{payload:'{}'});
+ const n=node('renderJson','Render',{source:'value',value:'x'.repeat(500),validateSchema:'{{gv.STRICT}}',mapping:{rules:{zone:{expr:'{input.zone}'}}},password:'NEVER-PUBLISH',headers:[{k:'Authorization',v:'Bearer NEVER-PUBLISH'}]});
+ const d=sutraDocumentation({doc:{name:'Configuration evidence',nodes:[s,n],edges:[edge(s,n)]}},{resources:[]});
+ for(const output of [d.markdown,d.html]){
+  assert.match(output,/default/);assert.match(output,/inactive/);assert.match(output,/input.zone/);assert.match(output,/gv.STRICT/);assert.match(output,/property-controlled/);assert.ok(output.includes('x'.repeat(500)));assert.ok(!output.includes('NEVER-PUBLISH'));assert.match(output,/redacted/);
+ }
+});
+test('keyword-only and Boolean JSON Schemas are validation contracts, not sample payloads',async()=>{
+ for(const [text,value,valid]of [
+  ['{"required":["zone"]}',{},false],['{"enum":["on","off"]}','other',false],
+  ['false',{},false],['true',{any:'value'},true],['{"type":"string"}',7,false],
+ ] as [string,any,boolean][]){
+  const ref=saveSchema({project_id:pid,name:'Schema '+text,kind:'json',text});
+  assert.equal((await validateStructured(ref.id,value)).length===0,valid,text);
+ }
+});

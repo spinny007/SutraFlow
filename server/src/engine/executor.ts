@@ -79,7 +79,13 @@ export class Executor {
     const timeoutMs = Number(settings.timeoutMs) > 0 ? Number(settings.timeoutMs) : activity.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const triggerName = run.doc.nodes.find(n => n.id === run.row.trigger_node)?.name;
     const outputs = await this.ports.outputsOf(db, run);
-    const globals = effectiveVariables(run.row.project_id);
+    let globals: ReturnType<typeof effectiveVariables>;
+    try { globals = effectiveVariables(run.row.project_id); }
+    catch (error) {
+      this.ports.controller(task.id);
+      await this.ports.fail(task, run.doc, node, error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
     globals.secrets.forEach(value => revealed.add(value));
     const runInfo = { id: task.run_id, name: run.doc.name, flow: run.doc.name, sutraId: run.row.flow_id, flowId: run.row.flow_id, version: run.row.version, project: run.row.project_id, startedAt: run.row.started_at, source: run.row.source, step: node.name, attempt: task.attempt };
     const scope: Record<string, any> = {

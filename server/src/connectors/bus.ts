@@ -16,6 +16,7 @@ import { registerListener, type ListenerContext } from '../listeners.js';
 import { F, when } from '../palettes/common.js';
 import { q } from '../db.js';
 import { resolve } from '../template.js';
+import { encodeMessage, receivedMessage, MESSAGE_TYPES } from './message-body.js';
 
 const require = createRequire(import.meta.url);
 
@@ -201,9 +202,7 @@ export async function closeBusPublishers() {
 }
 
 function bodyBytes(body: unknown, type: string): { buf: Buffer; contentType: string } {
-  if (type === 'bytes') return { buf: Buffer.from(String(body ?? ''), 'base64'), contentType: 'application/octet-stream' };
-  if (type === 'text') return { buf: Buffer.from(typeof body === 'string' ? body : JSON.stringify(body)), contentType: 'text/plain' };
-  return { buf: Buffer.from(JSON.stringify(body ?? null)), contentType: 'application/json' };
+  return encodeMessage(body, type);
 }
 
 // ---------- explicit acknowledgement (Confirm message) ----------
@@ -225,7 +224,7 @@ export const busActivities: Activity[] = [
       ...brokerFields,
       F('destination', 'Queue / topic name', 'text', '{{gv.ORDERS_QUEUE}}', { tpl: true, help: 'Mappable, or a project variable such as {{gv.ORDERS_QUEUE}}.' }),
       F('exchange', 'Exchange (RabbitMQ)', 'text', '', { tpl: true, ...when('broker', 'rabbitmq'), help: 'Empty: queue = default exchange; topic = amq.topic.' }),
-      F('messageType', 'Message type', 'select', 'JSON', { options: ['JSON', 'text', 'map', 'bytes'], help: 'map = an object of fields (JMS MapMessage style); bytes = base64 content.' }),
+      F('messageType', 'Message type', 'select', 'JSON', { options: MESSAGE_TYPES, help: 'XML = serialized XML text (use Render XML); JSON = any JSON value; map = an object of fields (JMS MapMessage style); bytes = base64 content. XML is sent as application/xml.' }),
       F('body', 'Message body', 'code', '{{input}}', { tpl: true }),
       F('deliveryMode', 'Delivery mode', 'select', 'persistent', { options: ['persistent', 'non-persistent'], group: 'Headers' }),
       F('priority', 'Priority (0-9)', 'number', 4, { group: 'Headers' }),
@@ -246,14 +245,14 @@ export const busActivities: Activity[] = [
       // Older steps used topic / routingKey / address / format / headers.
       const dest = String(c.v('destination') ?? '') || String(c.v('topic') ?? c.v('routingKey') ?? c.v('address') ?? '');
       if (!dest) throw new Error('Queue / topic name is empty');
-      const type = c.raw('messageType') || (c.raw('format') === 'text' ? 'text' : 'JSON');
+      const type = cfg.messageType === undefined && cfg.format ? (cfg.format === 'text' ? 'text' : 'JSON') : c.raw('messageType');
       const { buf, contentType } = bodyBytes(c.v('body'), type);
-      const props = { ...kvToObject(c.raw('headers'), v => String(c.resolve(v) ?? '')), ...kvToObject(c.raw('properties'), v => String(c.resolve(v) ?? '')) };
+      const props = { ...kvToObject(c.raw('headers'), v => String(c.resolve(v) ?? '')), ...kvToObject(cfg.properties === undefined && cfg.headers !== undefined ? [] : c.raw('properties'), v => String(c.resolve(v) ?? '')) };
       const messageId = String(c.v('messageId') || '') || crypto.randomUUID();
       const correlationId = String(c.v('correlationId') || '') || undefined;
       const replyTo = String(c.v('replyTo') || '') || undefined;
       const jmsType = String(c.v('jmsType') || '') || undefined;
-      const persistent = (c.raw('deliveryMode') || (c.raw('persistent') === false ? 'non-persistent' : 'persistent')) === 'persistent';
+      const persistent = cfg.deliveryMode === undefined && cfg.persistent !== undefined ? c.raw('persistent') !== false : c.raw('deliveryMode') === 'persistent';
       const priority = Math.max(0, Math.min(9, Number(c.raw('priority') ?? 4)));
       const ttl = Math.max(0, Number(c.raw('timeToLive')) || 0);
       const pub = await publisher(b, r, c.secret);
@@ -283,7 +282,7 @@ export const busActivities: Activity[] = [
         const send = () => {
           const d = sender.send({
             message_id: messageId, correlation_id: correlationId, reply_to: replyTo, subject: jmsType, durable: persistent, priority,
-            ttl: ttl || undefined, content_type: contentType, body: type === 'bytes' ? require('rhea').message.data_section(buf) : buf.toString(),
+            ttl: ttl || undefined, content_type: contentType, body: String(type).toLowerCase() === 'bytes' ? require('rhea').message.data_section(buf) : buf.toString(),
             application_properties: props,
           });
           const onAcc = (ctx: any) => { if (ctx.delivery === d) { cleanup(); res(); } };
@@ -308,7 +307,7 @@ export const busActivities: Activity[] = [
       F('groupId', 'Consumer group (Kafka)', 'text', 'sutraflow-orders', when('broker', 'kafka')),
       F('fromBeginning', 'Read from the beginning (new group)', 'bool', false, when('broker', 'kafka')),
       F('declare', 'Create the queue if missing (durable)', 'bool', false, when('broker', 'rabbitmq')),
-      F('messageType', 'Message type', 'select', 'JSON', { options: ['JSON', 'text', 'map', 'bytes'] }),
+      F('messageType', 'Message type', 'select', 'JSON', { options: MESSAGE_TYPES, help: 'XML is preserved as exact text in body; use Parse XML next for structured fields and XSD validation. bodyText retains received text. Invalid JSON/XML/map bodies fail the trigger step and follow the configured acknowledgement/failure policy.' }),
       F('ackMode', 'Acknowledge', 'select', 'client', { options: ['auto', 'client', 'explicit'], help: 'auto: on receipt. client: when the Sutra succeeds. explicit: with a Confirm message activity in the Sutra.' }),
       F('deduplicate', 'Avoid duplicate runs', 'select', 'on', { options: ['on', 'off'], help: 'On remembers each message by the Kafka topic/partition/offset, or the RabbitMQ / AMQP message id, so a message delivered again (after a leader change or a reconnect) never starts a second run. While the first run is still going, the copy is held unacknowledged and settled when that run ends.' }),
       F('duplicateKey', 'Duplicate key', 'text', '', { ...when('deduplicate', 'on'), help: 'For messages without a message id (many RabbitMQ publishers send none): a value that is unique per message, for example {{body.orderId}} or {{headers.correlationId}}. Empty = message id only.' }),
@@ -319,11 +318,18 @@ export const busActivities: Activity[] = [
       F('testMessage', 'Test message (JSON)', 'code', '{\n  "body": { "orderId": "A-1001" },\n  "headers": { "messageId": "m-1", "type": "order", "priority": 4, "deliveryMode": "persistent" },\n  "properties": { "source": "erp" }\n}'),
     ],
     outputHint: {
-      body: {}, properties: {}, destination: '',
+      body: {}, bodyText: '', bodyError: '', properties: {}, destination: '',
       headers: { messageId: '', correlationId: '', replyTo: '', type: '', priority: 4, deliveryMode: 'persistent', timestamp: '', expiration: '', redelivered: false, deliveryCount: 1, contentType: '' },
       key: '', partition: 0, offset: '',
     },
-    execute: c => ({ out: c.input ?? JSON.parse(c.raw('testMessage') || '{}') }),
+    execute: c => {
+      const input = c.input ?? JSON.parse(c.raw('testMessage') || '{}');
+      if (input.bodyError) throw new Error(input.bodyError);
+      // Designer sample envelopes are already decoded JSON values. Still enforce the
+      // selected XML/map/binary representation, just as on a real wire delivery.
+      if (input && Object.prototype.hasOwnProperty.call(input, 'body')) encodeMessage(input.body, c.raw('messageType') || (c.node.config.format === 'text' ? 'text' : 'JSON'));
+      return { out: input };
+    },
   },
   {
     type: 'busConfirm', palette: 'bus', name: 'Confirm message', glyph: '✓', ports: ['out'],
@@ -351,15 +357,6 @@ export const busActivities: Activity[] = [
 ];
 
 // ---------- subscriber listener ----------
-function decodeBody(raw: unknown, type: string) {
-  if (raw == null) return null;
-  const buf = Buffer.isBuffer(raw) ? raw : raw instanceof Uint8Array ? Buffer.from(raw) : null;
-  if (type === 'bytes') return (buf || Buffer.from(String(raw))).toString('base64');
-  const s = buf ? buf.toString('utf8') : typeof raw === 'string' ? raw : null;
-  if (s === null) return raw; // already structured (AMQP map/list body)
-  if (type === 'text') return s;
-  try { return JSON.parse(s); } catch { return s; }
-}
 
 /** Timings of held duplicate deliveries; tests shorten them. */
 export const busTiming = { holdPollMs: 2000 };
@@ -529,7 +526,7 @@ registerListener('busSubscribe', async c => {
         const { messageId, correlationId, replyTo, type: jt, contentType, ...props } = headers as Record<string, string>;
         const attemptKey = `${topic}:${partition}:${message.offset}`;
         const count = (deliveryAttempts.get(attemptKey) || 0) + 1;
-        const input = { body: decodeBody(message.value, type), properties: props, destination: topic, key: message.key?.toString(), partition, offset: message.offset,
+        const input = { ...receivedMessage(message.value, type), properties: props, destination: topic, key: message.key?.toString(), partition, offset: message.offset,
           headers: { messageId, correlationId, replyTo, type: jt, contentType, timestamp: new Date(Number(message.timestamp)).toISOString(), redelivered: count > 1, deliveryCount: count } };
         let requeued: string | false = false;
         const commit = () => consumer.commitOffsets([{ topic, partition, offset: (BigInt(message.offset) + 1n).toString() }]);
@@ -579,7 +576,7 @@ registerListener('busSubscribe', async c => {
       const prior = deliveryAttempts.get(attemptKey) || 0;
       const count = Math.max(deaths + 1, prior + 1, msg.fields.redelivered ? 2 : 1);
       deliveryAttempts.set(attemptKey, count);
-      const input = { body: decodeBody(msg.content, type), properties: Object.fromEntries(Object.entries(p.headers || {}).filter(([k]) => !k.startsWith('x-'))), destination: dest, routingKey: msg.fields.routingKey,
+      const input = { ...receivedMessage(msg.content, type), properties: Object.fromEntries(Object.entries(p.headers || {}).filter(([k]) => !k.startsWith('x-'))), destination: dest, routingKey: msg.fields.routingKey,
         headers: { messageId: p.messageId, correlationId: p.correlationId, replyTo: p.replyTo, type: p.type, priority: p.priority, deliveryMode: p.deliveryMode === 2 ? 'persistent' : 'non-persistent', timestamp: p.timestamp ? new Date(p.timestamp * 1000).toISOString() : undefined, expiration: p.expiration, contentType: p.contentType, redelivered: msg.fields.redelivered, deliveryCount: count } };
       await handle(c, cfg, input, {
         ack: () => { deliveryAttempts.delete(attemptKey); ch.ack(msg); },
@@ -601,7 +598,7 @@ registerListener('busSubscribe', async c => {
     const m = ctx.message;
     const raw = m.body && typeof m.body === 'object' && m.body.typecode === 0x75 ? m.body.content : m.body;
     const count = (m.delivery_count ?? 0) + 1;
-    const input = { body: decodeBody(raw, type), properties: m.application_properties || {}, destination: dest,
+    const input = { ...receivedMessage(raw, type), properties: m.application_properties || {}, destination: dest,
       headers: { messageId: m.message_id, correlationId: m.correlation_id, replyTo: logicalJmsDestination(m.reply_to), type: m.subject, priority: m.priority, deliveryMode: m.durable ? 'persistent' : 'non-persistent', timestamp: m.creation_time ? new Date(m.creation_time).toISOString() : undefined, expiration: m.absolute_expiry_time, contentType: m.content_type, redelivered: count > 1, deliveryCount: count } };
     await handle(c, cfg, input, {
       ack: () => ctx.delivery.accept(),
