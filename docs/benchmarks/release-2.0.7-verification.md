@@ -11,7 +11,7 @@ Verified on 2026-10-24 (Asia/Calcutta), Windows, against the uncommitted 2.0.7 w
 | Offline vendor integrity gate | Passed |
 | npm audit | 0 vulnerabilities at verification time |
 | New sample regression file | 5 passed, 0 failed |
-| Full regression with local PostgreSQL and MySQL | 409 tests: 400 passed, 0 failed, 9 skipped; 267.436 seconds |
+| Full regression with local PostgreSQL and MySQL | 411 tests: 402 passed, 0 failed, 9 skipped; 301.364 seconds (including sample-import catalog correction) |
 
 The full gate builds the runtime first and runs the normal suite with real PostgreSQL/MySQL integration enabled. PGlite is secondary compatibility coverage, not a substitute for those databases. Subsequent packaging and local deployment checks are recorded below. No commit/tag, hosted messaging retest or new long-duration soak is included.
 
@@ -19,7 +19,7 @@ An earlier full run caught missing entries in the legacy sample-folder migration
 
 The nine skips are seven optional installed/hosted broker and broker-REST checks (their explicit environment switches/credentials were not supplied to this run), the standalone password-protected PostgreSQL SSL/bin-folder fixture, and the Linux Docker image build. They are not counted as passing. The normal real PostgreSQL/MySQL integration checks did execute.
 
-Full local transcript: `regression-2.0.7-samples-final.log` in the Codex task workspace. SHA-256: `774f164ab5daed68a639c8610578eef05317639749098d837fd6b807ef50bd65`.
+Full local transcript: `regression-2.0.7-import-refresh.log` in the Codex task workspace. SHA-256: `0913c98d3973ab4c38316bda55585ca7a05495228a5c1b992e6b040efde8b77b`.
 
 ## Bundled examples executed
 
@@ -90,8 +90,8 @@ After the passing gate, the Windows ZIP and Linux tarball were built with 212 ru
 
 | Archive | SHA-256 |
 |---|---|
-| sutraflow-2.0.7-windows.zip | 5c365313e28fb4487db96a92327b95f222b7d3b7b58b358d8fbece5947705401 |
-| sutraflow-2.0.7-linux.tar.gz | ede2bcb67752e8cf23abea9e112da84d851d31943cd45e26a1fb206bec0d2ca1 |
+| sutraflow-2.0.7-windows.zip | d0aef55483ca226d8eb40a1276eb93e13610f7087238725e9493d7de29ab6023 |
+| sutraflow-2.0.7-linux.tar.gz | 686beaa2ce3a119200dee361e4a058f222dab3ea624089a9852090deaafd10b9 |
 
 A clean Windows archive extraction installed production dependencies with Node 22.23.2, passed npm audit with zero findings, and accepted valid/rejected invalid XSD data using the packaged WASM validator. The Linux archive checksum and readable file manifest were checked; no Linux-host execution is claimed by this Windows deployment check.
 
@@ -103,3 +103,11 @@ Both existing local installations were gracefully drained and upgraded from that
 Both report version 2.0.7 and readiness true. Designer, Admin Console, user guide and architecture routes returned HTTP 200. Authenticated catalog checks confirmed the new mappers, default-off strict file-read fields and validation sample set. Each installation's actual XSD dependency accepted valid/rejected invalid XML under Node 22.23.2; vendor resolution stays inside its installation. All shipped file hashes match the archive (except the intentionally retained development package.json on 4800), and environment/token/key hashes are unchanged.
 
 Previous runtime/dependency directories, configuration snapshots and database backups are retained in the private local upgrade workspace `upgrade-2.0.7-260bdd28`. No user workflow/sample drafts were overwritten and no Git commit/push was made.
+
+### Sample-import catalog correction
+
+A reported missing-schema view was traced to Designer refreshing only its flow list after importing samples. The server had created schema records, but the browser's shared catalog was stale. `web/src/sample-import.ts` now waits for both flow and catalog reload before publishing the import result. Two additional regressions check completion ordering and failure propagation.
+
+Browser verification used a new empty project in the isolated 4827 instance: import of the typed sample set immediately displayed three schemas, and Map JSON Data selected its target schema without a page reload. Evidence: `sample-import-schema-refresh.png` in the Codex workspace. No schema recovery/reimport or edits to the user's existing drafts were performed.
+
+The corrected archives above supersede the initial 2.0.7 archives, which are retained privately under `import-refresh/previous-archives`. Package differences were applied to 4800 and 4810 after the passing full regression. Checks required byte-identical backend files and dependency manifests before the no-restart UI correction; both live web entry points then matched the corrected archive and readiness remained true. Existing pages must be refreshed once to load the new JavaScript; future sample imports refresh the catalog automatically.
