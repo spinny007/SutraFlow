@@ -139,12 +139,22 @@ if (process.argv.includes('--offline')) {
     const mods = [];
     const walkMods = rel => {
       const full = path.join(stage, rel);
-      const st = fs.lstatSync(full);
-      if (st.isSymbolicLink()) return;
+      const link = fs.lstatSync(full);
+      if (link.isSymbolicLink()) {
+        // npm can link file: runtime vendors. An offline archive must contain their
+        // actual files, not omit the dependency or retain a machine-specific link.
+        const real = fs.realpathSync(full);
+        if (!shippedVendors.some(v => fs.realpathSync(path.join(stage, v)) === real)) return;
+      }
+      const st = fs.statSync(full);
       if (st.isDirectory()) { for (const n of fs.readdirSync(full).sort()) walkMods(`${rel}/${n}`); return; }
       mods.push([`${top}/${rel}`, fs.readFileSync(full)]);
     };
     walkMods('node_modules');
+    for (const vendor of shippedVendors) {
+      const name = vendor.slice('vendor/'.length);
+      if (!mods.some(([file]) => file === `${top}/node_modules/${name}/package.json`)) fail(`Offline archive is missing runtime vendor ${name}`);
+    }
     const all = [...entries, ...mods];
     const plat = `${process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux'}-${process.arch}`;
     if (process.platform === 'win32') write(`${top}-${plat}-offline.zip`, zipFiles(all));

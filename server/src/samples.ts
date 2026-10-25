@@ -20,6 +20,7 @@ import { getProject, saveProject, projectFilesDir } from './projects.js';
 import { writeSampleDocuments } from './sampledocs.js';
 import { attachSampleSchemas } from './sample-schemas.js';
 import { typedMappingSamples } from './sample-mapping.js';
+import { mongoSamples } from './sample-mongodb.js';
 import { validationSamples } from './sample-validation.js';
 
 /**
@@ -34,6 +35,7 @@ const E = (from: string, to: string, port = 'out') => ({ id: `e${++e}`, from, po
 
 /** The samples offered in "New Sutra"; needs = what must be set up before the sample can run; folder = where its Sutras go. */
 export const SAMPLES: { id: string; name: string; desc: string; palettes: string; needs?: string; folder?: string }[] = [
+  { id: 'mongodb', name: 'MongoDB document lifecycle (M0-tested baseline)', palettes: 'MongoDB', desc: 'Insert, list collections, find, array-filter/update, aggregate and delete a run-scoped document, with a strict starter contract and activity descriptions.', needs: 'A MongoDB connection with separate credentials or encrypted complete URI, and permitted server network access.' },
   { id: 'mappingtyped', name: 'Typed JSON and XML mapping', palettes: 'Data & mapping', desc: 'Shared typed JSON target and a manual XML root, required attribute, namespace and repeating elements; both rendered to text. No external connection required.' },
   { id: 'validation', name: 'JSON/XML schema validation and strict file reads', palettes: 'Data & mapping, Files, HTTP, Triggers', desc: 'Valid and intentionally invalid contracts, typed mapping, Parse/Render, Validate fields, strict JSON/XML file reads, REST/HTTP and SOAP services. Every activity explains its validation outcome.', needs: 'Writable project VALIDATION_FOLDER for file samples; deploy the REST service before the HTTP client. Services are local demonstrations without authentication.' },
   { id: 'foreach', name: 'For-Each mapping', palettes: 'Data & mapping', desc: 'Invoice lines from order lines: Where, Sort by, position(), and a For-Each grouped by country.' },
@@ -101,6 +103,13 @@ export function addSamples(projectId: string, ids?: string[]) {
   const conn = (kind: string, cname: string, cfg: Record<string, any>) => listResources(kind, projectId).find(r => r.name === cname) || saveResource({ kind, name: cname, project_id: projectId, config: cfg });
   const gw = `http://127.0.0.1:${getSetting<{ httpPort?: number }>('gateway', {}).httpPort || config.gatewayHttpPort}`;
   const typedMappings = want('mappingtyped') ? typedMappingSamples().map(save) : [];
+  const wantMongo = want('mongodb');
+  if (wantMongo) {
+    const p = getProject(projectId)!;
+    if (!p.config.variables.some(v => v.name === 'MONGODB_URI')) saveProject({ id: p.id, name: p.name, config: { variables: [...p.config.variables, { name: 'MONGODB_URI', type: 'secret', value: 'MONGODB_URI', description: 'Encrypted complete MongoDB URI. Enter its value in this Secret property, then select it on the sample connection.' }] } });
+  }
+  const mongoFlows = wantMongo ? mongoSamples(conn('mongodb', 'Sample MongoDB M0', { authMode: 'URI secret', uriSecret: '{{gv.MONGODB_URI}}', database: 'sutraflow_test', maxPoolSize: 5, timeoutMs: 15000 }).id).map(save) : [];
+  typedMappings.push(...mongoFlows);
   const validationFlows = want('validation') ? validationSamples(projectId, gw).map(save) : [];
 
   const order = {
@@ -1320,6 +1329,7 @@ const FOLDERS: Record<string, string[]> = {
   'Files': ['csv', 'folder', 'filetrigger', 'timer'],
   'SFTP and FTP': ['sftp', 'ftp'],
   'SQL': ['database', 'dbmore', 'sqlinstall'],
+  'MongoDB': ['mongodb'],
   'AI': ['localai', 'aimore'],
   'Email': ['email', 'emailin'],
   'Apps': ['firebase', 'google', 'apps', 'skills'],
@@ -1341,6 +1351,7 @@ export const SAMPLE_SUTRAS: Record<string, string[]> = {
   'Samples/REST and microservices': ['REST API with validation', 'Microservice Customers', 'Microservice Stock', 'Microservice Orders'],
   'Samples/Files': ['CSV import and totals', 'Folder of files', 'Timer nightly archive', 'File trigger CSV drop folder'],
   'Samples/SQL': ['Database (SQLite)', 'SQL update', 'Stored procedure', 'SQL install script', 'Procedure as a microservice'],
+  'Samples/MongoDB': ['MongoDB M0 document lifecycle'],
   'Samples/Operations': ['Scripts', 'Release pipeline'],
   'Samples/AI': ['Local AI with Ollama', 'AI translate extract route and reply'],
   'Samples/Email': ['Email a report', 'Email trigger orders by email'],

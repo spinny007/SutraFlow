@@ -12,8 +12,8 @@ import type { AsyncStore, TxQ } from '../asyncdb.js';
 import { restrictedReason } from '../git/restricted.js';
 import { now } from '../db.js';
 import { resolve, resolveDeep } from '../template.js';
-import { getSecret, maskSecrets } from '../secrets.js';
-import { effectiveVariables, engineVariableValues } from '../projects.js';
+import { getSecret, maskSecrets, missingSecretError } from '../secrets.js';
+import { effectiveVariables, engineVariableValues, engineSecretValues } from '../projects.js';
 import { projectLog, wantsStepData, runOrigin } from '../logger.js';
 import { schemaTree } from '../schemas.js';
 import { adhocTree, evaluateMapping, type MappingValue } from '../mapping.js';
@@ -87,6 +87,7 @@ export class Executor {
       return;
     }
     globals.secrets.forEach(value => revealed.add(value));
+    engineSecretValues().forEach(value => revealed.add(value));
     const runInfo = { id: task.run_id, name: run.doc.name, flow: run.doc.name, sutraId: run.row.flow_id, flowId: run.row.flow_id, version: run.row.version, project: run.row.project_id, startedAt: run.row.started_at, source: run.row.source, step: node.name, attempt: task.attempt };
     const scope: Record<string, any> = {
       input, nodes: outputs, vars: run.state.vars, gv: globals.values, ev: engineVariableValues(),
@@ -95,7 +96,7 @@ export class Executor {
       secret: new Proxy({}, { get: (_, name) => {
         if (typeof name !== 'string') return undefined;
         const value = getSecret(name);
-        if (value === undefined) throw new Error(`Secret "${name}" does not exist`);
+        if (value === undefined) throw missingSecretError(String(name));
         revealed.add(value);
         return value;
       } }),
@@ -121,7 +122,7 @@ export class Executor {
           secret: (name, what = 'Secret') => {
             if (!name) throw new Error(`${what} is not set`);
             const value = getSecret(name);
-            if (value === undefined) throw new Error(`${what}: secret "${name}" does not exist. Add it under Resources > Secrets.`);
+            if (value === undefined) throw missingSecretError(name, what);
             revealed.add(value);
             return value;
           },
@@ -129,11 +130,11 @@ export class Executor {
           emit: async (port, output) => { await this.ports.emitNow(task, node, port, maskSecrets(output, revealed)); clock.restart(); },
           setVar: (key, value) => { varsSet[key] = value; },
           projectId: run.row.project_id,
-          schemaTree: key => schemaTree(node.config?.[key]),
+          schemaTree: key => schemaTree(resolve(node.config?.[key], scope)),
           mapping: key => {
             const field = activity.fields.find(candidate => candidate.k === key);
             const mapping = node.config?.[key] as MappingValue | undefined;
-            const tree = (field?.schemaField && schemaTree(node.config?.[field.schemaField])) || adhocTree(mapping);
+            const tree = (field?.schemaField && schemaTree(resolve(node.config?.[field.schemaField], scope))) || adhocTree(mapping);
             const typed = !!mapping?.definitions || node.type === 'mapperJson' || node.type === 'mapperXml';
             const result = evaluateMapping(tree, mapping, scope, typed);
             if (typed) {

@@ -71,7 +71,7 @@ export function Resources() {
               {edit && edit.kind === k.kind && (
                 <div className="card">
                   <div className="fld"><label htmlFor="rname">Name</label><input id="rname" type="text" value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} /></div>
-                  <FieldList fields={k.fields} values={edit.config} onChange={(fk, v) => setEdit({ ...edit, config: { ...edit.config, [fk]: v } })} resources={resources} secrets={secrets} />
+                  <FieldList key={edit.id || edit.name} inlineCredentials fields={k.fields} values={edit.config} onChange={(fk, v) => setEdit({ ...edit, config: { ...edit.config, [fk]: v } })} resources={resources} secrets={secrets} />
                   <div className="row"><button className="btn primary" onClick={save}>Save</button>{edit.id && <button className="btn danger" onClick={remove}>Delete</button>}</div>
                 </div>
               )}

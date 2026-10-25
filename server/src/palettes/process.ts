@@ -12,6 +12,7 @@ import { getFlow, versionDoc } from '../flows.js';
 import { q, now } from '../db.js';
 import { publishChannel } from '../channels.js';
 import { F, when, parseJsonText } from './common.js';
+import { enforceContract } from '../contracts.js';
 
 const safeJson = (t: unknown): any => { if (typeof t !== 'string') return t; try { return JSON.parse(t); } catch { return undefined; } };
 
@@ -31,12 +32,19 @@ export const processActivities: Activity[] = [
       F('wait', 'Wait for the result', 'bool', true, { help: 'Off: start it and continue at once (fire and forget).' }),
       F('source', 'Input from', 'select', 'value', { options: ['value', 'mapping'] }),
       F('input', 'Input', 'text', '{{input}}', { tpl: true, ...when('source', 'value') }),
-      F('inputSchema', 'Input schema', 'schema', '', { help: 'Usually the called Sutra\'s payload schema.', ...when('source', 'mapping') }),
+      F('inputSchema', 'Input schema', 'schema', '', { help: 'Usually the called Sutra\'s payload schema; descriptive unless strict input validation is On.' }),
+      F('validateInput', 'Strict input validation', 'bool', false),
       F('inputMapping', 'Input', 'mapping', { rules: {} }, { schemaField: 'inputSchema', ...when('source', 'mapping') }),
       F('resultSchema', 'Result schema', 'schema', '', { help: 'Optional. Describes the result for mapping in later steps.' }),
+      F('validateResult', 'Strict result validation', 'bool', false, { help: 'Requires Wait for result and a selected result contract.' }),
     ],
     outputSchema: (cfg, h) => (cfg.wait === false ? h.infer({ runId: '', process: '', started: true }) : h.schema(cfg.resultSchema) || { name: 'out', type: 'any' }),
-    execute: c => {
+    execute: async c => {
+      if (c.phase === 'resume' && c.resumed) {
+        if (c.resumed.status !== 'done') throw new Error(`Called Sutra failed: ${c.resumed.error || c.resumed.status}`);
+        await enforceContract(c.resolve(c.raw('resultSchema')), c.resumed.result, { projectId: c.projectId, subject: `${c.node.name} result` });
+        return { out: c.resumed.result };
+      }
       const flowId = String(c.raw('process') || '');
       if (!flowId) throw new Error('Choose the Sutra to call');
       const f = getFlow(flowId);
@@ -51,7 +59,10 @@ export const processActivities: Activity[] = [
         version = f.deployed.version;
       }
       const input = c.raw('source') === 'mapping' ? c.mapping('inputMapping') : c.v('input');
-      return { call: { doc, flowId, version, projectId: f.project_id, input, wait: c.raw('wait') !== false, name: f.name } };
+      if (c.raw('validateInput')) await enforceContract(c.resolve(c.raw('inputSchema')), input, { projectId: c.projectId, subject: `${c.node.name} input` });
+      const wait = c.raw('wait') !== false;
+      if (c.raw('validateResult') && !wait) throw new Error('Strict result validation requires Wait for the result.');
+      return { call: { doc, flowId, version, projectId: f.project_id, input, wait, resume: wait && c.raw('validateResult'), name: f.name } };
     },
   },
   {
@@ -60,11 +71,13 @@ export const processActivities: Activity[] = [
     fields: [
       F('source', 'Result from', 'select', 'value', { options: ['value', 'mapping'] }),
       F('value', 'Result', 'text', '{{input}}', { tpl: true, ...when('source', 'value') }),
-      F('schema', 'Result schema', 'schema', '', when('source', 'mapping')),
+      F('schema', 'Result schema', 'schema', ''),
+      F('validateSchema', 'Strict result validation', 'bool', false),
       F('mapping', 'Result', 'mapping', { rules: {} }, { schemaField: 'schema', ...when('source', 'mapping') }),
     ],
-    execute: c => {
+    execute: async c => {
       const v = c.raw('source') === 'mapping' ? c.mapping('mapping') : c.v('value');
+      if (c.raw('validateSchema')) await enforceContract(c.resolve(c.raw('schema')), v, { projectId: c.projectId, subject: `${c.node.name} result` });
       return { out: v, result: v, stop: { status: 'done' } };
     },
   },
@@ -88,13 +101,17 @@ export const processActivities: Activity[] = [
     fields: [
       F('channel', 'Channel', 'text', 'orders', { help: 'May use {{gv.CHANNEL}}.' }),
       F('message', 'Message', 'text', '{{input}}', { tpl: true }),
+      F('schema', 'Message schema', 'schema', ''),
+      F('validateSchema', 'Strict message validation', 'bool', false),
       F('required', 'Fail when no Sutra listens', 'bool', false),
     ],
     outputHint: { channel: '', delivered: 0, runIds: [''] },
     execute: async c => {
       const channel = String(c.raw('channel') || '').trim();
       if (!channel) throw new Error('Channel is not set');
-      const runIds = await publishChannel(c.projectId, channel, c.v('message'));
+      const message = c.v('message');
+      if (c.raw('validateSchema')) await enforceContract(c.resolve(c.raw('schema')), message, { projectId: c.projectId, subject: `${c.node.name} message` });
+      const runIds = await publishChannel(c.projectId, channel, message);
       if (!runIds.length && c.raw('required')) throw new Error(`No deployed Sutra listens on channel "${channel}"`);
       return { out: { channel, delivered: runIds.length, runIds } };
     },
@@ -105,10 +122,15 @@ export const processActivities: Activity[] = [
     fields: [
       F('channel', 'Channel', 'text', 'orders', { help: 'May use {{gv.CHANNEL}}.' }),
       F('schema', 'Message schema', 'schema', '', { help: 'Optional. Describes the message for mapping.' }),
+      F('validateSchema', 'Strict message validation', 'bool', false),
       F('testMessage', 'Test message (JSON)', 'code', '{\n  "orderId": "A-1001"\n}'),
     ],
     outputSchema: (cfg, h) => h.schema(cfg.schema) || h.infer(safeJson(cfg.testMessage) ?? {}),
-    execute: c => ({ out: c.input ?? parseJsonText(c.raw('testMessage'), 'Test message') ?? {} }),
+    execute: async c => {
+      const value = c.input ?? parseJsonText(c.raw('testMessage'), 'Test message') ?? {};
+      if (c.raw('validateSchema')) await enforceContract(c.resolve(c.raw('schema')), value, { projectId: c.projectId, subject: `${c.node.name} message` });
+      return { out: value };
+    },
   },
   {
     type: 'counter', palette: 'general', name: 'Counter', glyph: '#', ports: ['out'],

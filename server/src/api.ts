@@ -521,6 +521,10 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.post('/api/projects', async (req: any) => projects.saveProject({ name: req.body?.name, description: req.body?.description }));
   app.get('/api/projects/:id', async (req: any) => projects.requireProject(req.params.id));
   app.put('/api/projects/:id', async (req: any) => { projects.requireProject(req.params.id); return projects.saveProject({ ...req.body, id: req.params.id }); });
+  app.put('/api/projects/:id/variables/:name/secret', async (req: any) => {
+    if (!access.can(caller(req), 'secrets')) throw new HttpError(403, 'Manage secrets permission is required.');
+    return projects.storeProjectSecret(req.params.id, req.params.name, req.body?.secretValue, req.body?.create === true, req.body?.onlyCreate === true);
+  });
   app.delete('/api/projects/:id', async (req: any) => { projects.deleteProject(req.params.id); return { ok: true }; });
   app.get('/api/projects/:id/ops', async (req: any) => projects.getOps(req.params.id));
   app.put('/api/projects/:id/ops', async (req: any) => projects.setOps(req.params.id, req.body || {}));

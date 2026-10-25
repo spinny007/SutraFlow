@@ -38,6 +38,13 @@ const { sampleDocuments } = await import('../server/src/sampledocs.js');
 /** The sample projects: name, file, what it shows, the samples it holds, and files it brings. */
 const SAMPLE_PROJECTS = [
   {
+    file: 'mongodb-m0-document-lifecycle.zip',
+    name: 'MongoDB M0 document lifecycle',
+    description: 'All six native MongoDB activities in one safe run-scoped lifecycle: insert, list collections, find-one/count/distinct, array-filter/update, read-only aggregation and precise deletion. Includes its strict starter schema and a credential-free connection; configure separate credentials or the MONGODB_URI vault secret before running.',
+    samples: ['mongodb'],
+    files: () => [] as [string, Buffer][],
+  },
+  {
     file: 'ai-document-assistant.zip',
     name: 'AI document assistant',
     description: 'RAG over a folder of documents: every 15 minutes the PDF, Word, PowerPoint and Markdown files of the documents folder are read into a knowledge base (changed files again, deleted ones removed), and the documents answer as a REST API, an MCP tool for AI assistants such as Claude, and a chat agent. Sample documents of a tea shop are included.',

@@ -141,7 +141,7 @@ function checkFor(ref: string, element?: string): Check | null {
     const isSchema = looksLikeSchema(doc);
     if (isSchema) {
       const draft = String(doc.$schema || '');
-      const ajv = new (/2020-12/.test(draft) ? Ajv2020 : /2019-09/.test(draft) ? Ajv2019 : AjvDraft7)({ allErrors: true, strict: false, validateFormats: true });
+      const ajv = new (/2020-12/.test(draft) ? Ajv2020 : /2019-09/.test(draft) ? Ajv2019 : AjvDraft7)({ allErrors: true, strict: false, strictSchema: true, validateFormats: true });
       addFormats(ajv);
       const validate = ajv.compile(doc);
       check = body => (validate(body) ? [] : (validate.errors || []).slice(0, MAX_ERRORS).map((e: any) =>

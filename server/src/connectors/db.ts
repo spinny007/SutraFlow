@@ -13,7 +13,7 @@ import { DatabaseSync } from 'node:sqlite';
 import type { Activity, ExecCtx } from '../engine/types.js';
 import { requireResource, kvToObject, type Resource } from '../resources.js';
 import { config } from '../config.js';
-import { getSecret } from '../secrets.js';
+import { getSecret, missingSecretError } from '../secrets.js';
 import { F } from '../palettes/common.js';
 import { resolveAdminText, booleanSetting } from '../settings.js';
 import { resolve, asText } from '../template.js';
@@ -338,7 +338,7 @@ export async function previewDatabaseQuery(connectionId: string, sqlText: unknow
   else previewSql = `SELECT * FROM (${text}) AS sutra_preview LIMIT ${n}`;
   const secret = (name: string, what?: string) => {
     const value = getSecret(name);
-    if (value === undefined) throw new Error(`${what || 'Secret'}: secret "${name}" does not exist`);
+    if (value === undefined) throw missingSecretError(name, what);
     return value;
   };
   const result = await (await dbConnection(resource, secret)).query(previewSql, { ...p, ...bound.params });

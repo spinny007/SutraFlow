@@ -75,7 +75,7 @@ test('a WebSocket service answers each message on its connection, in order, and 
 test('WebSocket security: the policy at connect (key in a header or the query), origins, scopes and message checks', async () => {
   setSecret('WS_KEY', 'ws-key-123456');
   const pol = saveResource({ kind: 'inboundPolicy', name: 'WS keys', config: { auth: 'apiKey', apiKeyHeader: 'X-API-Key', apiKeySecrets: ['WS_KEY'], requireHttps: false, rateLimitPerMinute: 0, corsOrigins: ['https://app.example'], maxDepth: 4 } });
-  const schema = (await import('../server/src/schemas.js')).saveSchema({ project_id: 'p-ws', name: 'Sub', kind: 'json', text: JSON.stringify({ type: 'object', required: ['op'], properties: { op: { enum: ['subscribe', 'ping'] } } }) });
+  const schema = (await import('../server/src/schemas.js')).saveSchema({ project_id: (await import('../server/src/projects.js')).ensureDefaultProject(), name: 'Sub', kind: 'json', text: JSON.stringify({ type: 'object', required: ['op'], properties: { op: { enum: ['subscribe', 'ping'] } } }) });
   const t = node('wsService', 'Secured', { path: '/ws/secure', policy: pol.id, bodySchema: schema.id, validateBody: 'reject invalid' });
   const s = node('wsSend', 'Ok', { message: '{"ok": "{{input.message.op}}", "caller": "{{input.auth.subject}}"}' });
   deploy('WS secure', [t, s], [{ ...edge(t, s), port: 'message' }]);

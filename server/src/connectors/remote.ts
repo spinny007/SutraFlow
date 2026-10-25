@@ -232,7 +232,12 @@ export const remoteActivities: Activity[] = [
       F('testEvent', 'Test event (JSON)', 'code', '{\n  "name": "orders.csv",\n  "path": "/data/inbox/orders.csv",\n  "relativePath": "inbox/orders.csv",\n  "size": 120,\n  "server": "sftp.example.com",\n  "rows": [{ "id": "A-1", "amount": 300 }]\n}'),
     ],
     outputSchema: (cfg, h) => shape(h, cfg),
-    execute: c => ({ out: c.input ?? JSON.parse(c.raw('testEvent') || '{}') }),
+    execute: async c => {
+      const value = c.input ?? JSON.parse(c.raw('testEvent') || '{}');
+      const { validateFileEvent } = await import('../palettes/fileformat.js');
+      await validateFileEvent(c, value);
+      return { out: value };
+    },
   },
   {
     type: 'remoteList', palette: 'remote', name: 'List remote files', glyph: '☰', ports: ['out', 'empty'], timeoutMs: 600000,

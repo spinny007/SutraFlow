@@ -172,6 +172,8 @@ export interface Activity {
   glyph: string;
   desc: string;
   trigger?: boolean;
+  /** Validate selected starter input before creating a run (also used by Test/Debug/Run API). */
+  validateStart?(context: { node: FlowNode; input: any; scope: Record<string, any>; projectId: string | null }): Promise<void>;
   /** Output ports; a function when they depend on config. */
   ports: string[] | ((cfg: Record<string, any>) => string[]);
   fields: Field[];

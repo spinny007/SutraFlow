@@ -7,13 +7,14 @@
  * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
  * SPDX-License-Identifier: AGPL-3.0-only
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { del, get, post, put } from './api';
-import { FieldList } from './Fields';
+import { FieldList, InlineCredential } from './Fields';
 import { Modal, useCatalog, useToast } from './ui';
 import { NewProjectDialog } from './NewProject';
 import { ConfirmDelete } from './ConfirmDelete';
 import { SchemaImpact } from './SchemaImpact';
+import { prepareVariableSave, type VariableDraft, type SecretDraftStore } from './variable-drafts';
 import { missingInResource, missingText } from './vars';
 import type { FlowSummary, LoggingConfig, ProjectVariable, Resource, SchemaInfo, SNode } from './types';
 
@@ -299,11 +300,12 @@ export function MissingVariables({ names, via }: { names: string[]; via?: Record
 
 /** Right-hand panel for project items. */
 export function ExplorerEditor({ sel, setSel }: { sel: ExplorerSel; setSel(s: ExplorerSel | null): void }) {
+  const { projectId } = useCatalog();
   return (
     <aside className="side"><div className="tabbody">
       {(sel.kind === 'resource' || sel.kind === 'newResource') && <ResourceEditor key={sel.kind === 'resource' ? sel.id : 'new' + sel.resourceKind} sel={sel} setSel={setSel} />}
       {(sel.kind === 'schema' || sel.kind === 'newSchema') && <SchemaEditor key={sel.kind === 'schema' ? sel.id : 'new' + sel.schemaKind} sel={sel} setSel={setSel} />}
-      {sel.kind === 'variables' && <VariablesEditor />}
+      {sel.kind === 'variables' && <VariablesEditor key={projectId} />}
       {sel.kind === 'ops' && <OpsEditor />}
       {sel.kind === 'logging' && <LoggingEditor />}
       {sel.kind === 'log' && <ProjectLog />}
@@ -349,7 +351,7 @@ function ResourceEditor({ sel, setSel }: { sel: Extract<ExplorerSel, { kind: 're
       <div className="phead rhead"><span className="kicon" aria-hidden>{k.icon || '⚙'}</span><div><h2>{r.name || k.name}</h2><p><b>{k.name}</b> · {k.desc}</p></div></div>
       <div className="fld"><label htmlFor="rname">Name</label><input id="rname" type="text" value={r.name} autoFocus={!r.id} onChange={e => setR({ ...r, name: e.target.value })} /><div className="hint">Your name for it: shown in activity settings and used as its key in the deployment config. Settings marked {'{x}'} take project variables.</div></div>
       <MissingVariables names={missingInResource(r, project)} />
-      <FieldList fields={k.fields} values={r.config} onChange={(fk, v) => { setR({ ...r, config: { ...r.config, [fk]: v } }); setTest(null); }} resources={resources} secrets={secrets} />
+      <FieldList key={r.id || r.name} inlineCredentials fields={k.fields} values={r.config} onChange={(fk, v) => { setR({ ...r, config: { ...r.config, [fk]: v } }); setTest(null); }} resources={resources} secrets={secrets} />
       {test && test !== 'running' && <div className={test.ok ? 'okbox' : 'errbox'} role="status"><b>{test.ok ? 'Connection works.' : 'Connection failed.'}</b> {test.message}{test.ms ? <span className="muted"> ({test.ms} ms)</span> : null}</div>}
       <div className="row">
         <button className="btn primary" onClick={save}>Save</button>
@@ -468,29 +470,41 @@ export function SchemaTreeView({ n, depth }: { n: SNode; depth: number }) {
 function VariablesEditor() {
   const { project, secrets, reload } = useCatalog();
   const toast = useToast();
-  const [vars, setVars] = useState<ProjectVariable[]>(() => structuredClone(project?.config.variables || []));
+  const [vars, setVars] = useState<VariableDraft[]>(() => structuredClone(project?.config.variables || []).map((v, editKey) => ({ ...v, editKey })));
+  const nextKey = useRef(vars.length), stores = useRef(new Map<number, SecretDraftStore>());
+  const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
+  const [saving, setSaving] = useState(false);
   const set = (i: number, k: keyof ProjectVariable, v: string) => setVars(vs => vs.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
   const save = async () => {
-    try { await put(`/api/projects/${project!.id}`, { name: project!.name, config: { variables: vars } }); await reload(); toast('Variables saved'); }
+    if (saving) return;
+    setSaving(true);
+    try { const variables = await prepareVariableSave(vars, stores.current); await put(`/api/projects/${project!.id}`, { name: project!.name, config: { variables } }); setVars(rows => rows.map((row, i) => ({ ...row, value: variables[i].value }))); await reload(); toast('Variables saved'); }
     catch (e: any) { toast(e.message, true); }
+    finally { setSaving(false); }
   };
   return (
     <>
       <div className="phead"><div><h2>Project variables</h2><p>Shared by every Sutra in {project?.name} as <code>{'{gv.NAME}'}</code> ($_projectVariables). The deployment config can override them per environment. Secret variables name a vault secret and are masked in run history.</p></div></div>
-      <table className="t"><thead><tr><th>Name</th><th>Type</th><th>Default value</th><th /></tr></thead><tbody>
+      <p className="hint">Use + to expand a variable and − to collapse it. Save encrypts pending Secret values and saves their references; stored values remain masked.</p>
+      <fieldset className="project-variable-fields" disabled={saving}>
+      <div className="project-variable-list">
         {vars.map((v, i) => (
-          <tr key={i}>
-            <td><input className="inp code" aria-label={`Variable ${i + 1} name`} value={v.name} onChange={e => set(i, 'name', e.target.value)} /></td>
-            <td><select className="inp" aria-label={`Variable ${i + 1} type`} value={v.type} onChange={e => set(i, 'type', e.target.value)}>{['string', 'number', 'boolean', 'secret'].map(t => <option key={t}>{t}</option>)}</select></td>
-            <td>{v.type === 'secret'
-              ? <select className="inp" aria-label={`Variable ${i + 1} secret`} value={v.value} onChange={e => set(i, 'value', e.target.value)}><option value="">(none)</option>{secrets.map(s => <option key={s.name}>{s.name}</option>)}</select>
+          <div className="project-variable-card" key={v.editKey}>
+            <button type="button" className="project-variable-toggle" aria-expanded={expanded.has(v.editKey)} aria-controls={`variable-body-${v.editKey}`} onClick={() => setExpanded(previous => { const next = new Set(previous); if (next.has(v.editKey)) next.delete(v.editKey); else next.add(v.editKey); return next; })}><span aria-hidden="true">{expanded.has(v.editKey) ? '−' : '+'}</span><span className="code">{v.name || '(new variable)'}</span><span className="muted">{v.type}{v.type === 'secret' ? (v.value ? (secrets.some(s => s.name === v.value) ? ' · stored' : ' · reference set') : ' · not set') : ''}</span></button>
+            <div className="project-variable-body" id={`variable-body-${v.editKey}`} hidden={!expanded.has(v.editKey)}>
+            <label>Name<input className="inp code" aria-label={`Variable ${i + 1} name`} value={v.name} onChange={e => set(i, 'name', e.target.value)} /></label>
+            <label>Type<select className="inp" aria-label={`Variable ${i + 1} type`} value={v.type} onChange={e => setVars(vs => vs.map((x, j) => j === i ? { ...x, type: e.target.value as ProjectVariable['type'], value: '' } : x))}>{['string', 'number', 'boolean', 'secret'].map(t => <option key={t}>{t}</option>)}</select></label>
+            <div className="project-variable-value"><div className="muted">Default value</div>{v.type === 'secret'
+              ? <><div className="inp" aria-label={`Variable ${i + 1} secret`}>{v.value ? '•••••• (reference set)' : '(not set)'}</div><InlineCredential propertyName={v.name} label={v.name || 'secret property'} registerStore={store => { stores.current.set(v.editKey, store); return () => { stores.current.delete(v.editKey); }; }} onStored={ref => set(i, 'value', ref)} /></>
               : <input className="inp code" aria-label={`Variable ${i + 1} value`} value={v.value} onChange={e => set(i, 'value', e.target.value)} />}
-              <input className="inp" style={{ marginTop: 4, fontSize: 12 }} placeholder="Description" aria-label={`Variable ${i + 1} description`} value={v.description || ''} onChange={e => set(i, 'description', e.target.value)} /></td>
-            <td><button className="x" aria-label="Remove variable" onClick={() => setVars(vs => vs.filter((_, j) => j !== i))}>✕</button></td>
-          </tr>
+              <input className="inp" style={{ marginTop: 4, fontSize: 12 }} placeholder="Description" aria-label={`Variable ${i + 1} description`} value={v.description || ''} onChange={e => set(i, 'description', e.target.value)} /></div>
+            </div>
+            <button className="x" aria-label={`Remove variable ${v.name || i + 1}`} onClick={() => setVars(vs => vs.filter((_, j) => j !== i))}>✕</button>
+          </div>
         ))}
-      </tbody></table>
-      <div className="row" style={{ marginTop: 8 }}><button className="btn small" onClick={() => setVars(vs => [...vs, { name: '', type: 'string', value: '' }])}>+ Variable</button><button className="btn primary" onClick={save}>Save</button></div>
+      </div>
+      <div className="row" style={{ marginTop: 8 }}><button className="btn small" onClick={() => { const editKey = nextKey.current++; setVars(vs => [...vs, { name: '', type: 'string', value: '', editKey }]); setExpanded(previous => new Set([...previous, editKey])); }}>+ Variable</button><button className="btn primary" onClick={save}>{saving ? 'Saving…' : 'Save'}</button></div>
+      </fieldset>
     </>
   );
 }

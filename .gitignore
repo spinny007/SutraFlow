@@ -5,3 +5,9 @@ data/
 .env
 sutraflow.env
 release/
+docs/releases/2.0.10-usability-deployment.md
+docs/releases/2.0.10-usability-build.md
+docs/releases/2.0.10-deployment.md
+docs/releases/2.0.10-secret-editor-correction.md
+docs/releases/2.0.10-verification.md
+docs/releases/2.0.10-named-secrets-dns.md

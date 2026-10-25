@@ -9,7 +9,7 @@
  */
 import type { FlowDoc, FlowNode } from './engine/types.js';
 export function typedMappingSamples(): FlowDoc[] {
-  const node = (id: string, type: string, name: string, x: number, config: Record<string, any>): FlowNode => ({ id, type, name, x, y: 180, config, description: name + ': typed mapping demonstration; see the Input tab and mapped-result preview.' });
+  const node = (id: string, type: string, name: string, x: number, config: Record<string, any>): FlowNode => ({ id, type, name, x, y: 180, config: type === 'start' ? { ...config, validateSchema: true } : config, description: name + ': typed mapping demonstration; see the Input tab and mapped-result preview.' });
   const edges = [{ id: 'sm', from: 's', port: 'out', to: 'm' }, { id: 'mr', from: 'm', port: 'out', to: 'r' }];
   const samples: FlowDoc[] = [{
     name: 'Sample: Typed JSON mapping',

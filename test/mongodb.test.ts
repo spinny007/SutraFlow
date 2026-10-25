@@ -1,0 +1,148 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 2.0.10
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available; see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import dns from 'node:dns';
+import { parseEnv } from 'node:util';
+import { BSON } from 'mongodb';
+import { testEnv, node, edge } from './helpers.js';
+testEnv(23130);
+const { mongoCandidates, mongoConnection, closeMongoPools, mongoDocument, mongoPublic } = await import('../server/src/connectors/mongodb.js');
+test('MongoDB BSON types round-trip, invalid documents fail and every exposed activity has a sample', async () => {
+  const input = { _id: { $oid: '507f1f77bcf86cd799439011' }, n: { $numberLong: '9007199254740993' }, money: { $numberDecimal: '12.30' }, file: { $binary: { base64: 'YWJj', subType: '00' } } };
+  assert.deepEqual(mongoPublic(mongoDocument(input, 'Document')), input);
+  assert.throws(() => mongoDocument('[]', 'Document'), /document object/);
+  const { mongoSamples } = await import('../server/src/sample-mongodb.js');
+  const steps = mongoSamples('sample-connection').flatMap(flow => flow.nodes);
+  for (const activity of mongoCandidates) assert.ok(steps.some(step => step.type === activity.type), `${activity.type} needs an executable sample`);
+  assert.deepEqual(new Set(steps.filter(step => step.type === 'mongoFind').map(step => step.config.operation)), new Set(['findOne', 'count', 'distinct']));
+});
+test('Atlas M0 activities use isolated seeded data, strict boundaries and real engine execution', { skip: process.env.SUTRA_MONGO_TEST !== '1' ? 'set SUTRA_MONGO_TEST=1 and SUTRA_MONGO_TEST_ENV_FILE' : false }, async t => {
+  if (process.env.SUTRA_MONGO_TEST_DNS) dns.promises.setServers(process.env.SUTRA_MONGO_TEST_DNS.split(','));
+  const env = parseEnv(fs.readFileSync(process.env.SUTRA_MONGO_TEST_ENV_FILE!, 'utf8'));
+  assert.ok(env.MONGODB_URI && env.MONGODB_USERNAME && env.MONGODB_PASSWORD, 'MongoDB test file needs URI, username and password');
+  const uri = env.MONGODB_URI!.replace(/<(?:db_)?password>/g, encodeURIComponent(env.MONGODB_PASSWORD!)).replace(/<username>/g, encodeURIComponent(env.MONGODB_USERNAME!));
+  // Existing files may keep credentials separately; normalize only inside this test process.
+  const u = new URL(uri); if (!u.username) u.username = env.MONGODB_USERNAME!; if (!u.password) u.password = env.MONGODB_PASSWORD!;
+  const { boot } = await import('../server/src/index.js');
+  const { engine, runState } = await import('../server/src/engine/engine.js');
+  const { q } = await import('../server/src/db.js');
+  const { saveProject, getProject } = await import('../server/src/projects.js');
+  const { setSecret } = await import('../server/src/secrets.js');
+  const { saveResource, effectiveResource } = await import('../server/src/resources.js');
+  const { saveSchema } = await import('../server/src/schemas.js');
+  const server = await boot({ listenAdmin: false, gateway: false }); engine.register(mongoCandidates);
+  const variables = [{ name: 'MONGO_DB', type: 'string' as const, value: 'sutraflow_test' }, { name: 'STRICT', type: 'boolean' as const, value: 'On' }];
+  const projectId = saveProject({ name: 'M0 certification', config: { variables } }).id;
+  setSecret('M0_TEST_URI', u.href);
+  const resource = saveResource({ kind: 'mongodb', name: 'Atlas M0 test', project_id: projectId, config: { uriSecret: 'M0_TEST_URI', database: '{{gv.MONGO_DB}}', maxPoolSize: 3, timeoutMs: 15000 } });
+  saveProject({ id: projectId, name: 'M0 certification', config: { variables: [...variables, { name: 'MONGO_CONNECTION', type: 'string', value: resource.id }] } });
+  const collection = `sutra_210_${Date.now()}_${process.pid}`;
+  const { db } = await mongoConnection(effectiveResource(resource.id)!, () => u.href);
+  const run = async (type: string, cfg: Record<string, any>, input: any = {}) => {
+    const start = node('start', 'Start', { payload: '{}' }), op = node(type, 'Mongo operation', { connection: '{{gv.MONGO_CONNECTION}}', collection, ...cfg });
+    const id = await engine.startRun({ projectId, doc: { name: type, nodes: [start, op], edges: [edge(start, op)] }, input });
+    await engine.waitFor(id, 20000); const row = q.get<any>('select status,error from runs where id=?', id);
+    return { ...row, output: runState(id)?.outputs['Mongo operation'] };
+  };
+  const ok = async (type: string, cfg: Record<string, any>, input?: any) => { const r = await run(type, cfg, input); assert.equal(r.status, 'done', r.error); return r.output; };
+  try {
+    await t.test('seed, find, count, distinct, aggregate and explicit paging', async () => {
+      const result = await ok('mongoInsert', { documents: '{{input}}' }, [{ _id: 'a', status: 'active', amount: 10 }, { _id: 'b', status: 'active', amount: 20 }, { _id: 'c', status: 'idle', amount: 30 }]);
+      assert.equal(result.insertedCount, 3);
+      const found = await ok('mongoFind', { filter: '{}', sort: '{"_id":1}', skip: 1, limit: 1 }); assert.equal(found.documents[0]._id, 'b');
+      assert.equal((await ok('mongoFind', { filter: '{}', operation: 'count' })).count, 3);
+      assert.equal((await ok('mongoFind', { filter: '{}', operation: 'distinct', field: 'status' })).values.length, 2);
+      const agg = await ok('mongoAggregate', { pipeline: '[{"$group":{"_id":"$status","total":{"$sum":"$amount"}}}]' }); assert.equal(agg.count, 2);
+    });
+    await t.test('update, replace, upsert, deletion guards and empty results', async () => {
+      assert.equal((await ok('mongoUpdate', { filter: '{"_id":"a"}', update: '{"$set":{"status":"done"}}' })).modifiedCount, 1);
+      assert.equal((await ok('mongoUpdate', { filter: '{"_id":"b"}', operation: 'replaceOne', update: '{"status":"replaced","amount":5}' })).modifiedCount, 1);
+      assert.equal((await ok('mongoUpdate', { filter: '{"_id":"upsert"}', update: '{"$set":{"status":"new"}}', upsert: true })).upsertedCount, 1);
+      assert.equal((await run('mongoUpdate', { filter: '{}', operation: 'updateMany', update: '{"$set":{"status":"blocked"}}' })).status, 'failed');
+      assert.equal((await ok('mongoUpdate', { filter: '{"_id":{"$in":["a","b"]}}', operation: 'updateMany', update: '{"$set":{"status":"bulk-updated"}}' })).matchedCount, 2);
+      assert.equal((await run('mongoDelete', { filter: '{}', many: true })).status, 'failed');
+      assert.equal((await ok('mongoDelete', { filter: '{"_id":"upsert"}', many: true })).deletedCount, 1);
+      assert.equal((await ok('mongoDelete', { filter: '{"_id":"c"}' })).deletedCount, 1);
+      assert.equal((await ok('mongoFind', { filter: '{"_id":"absent"}' })).count, 0);
+    });
+    await t.test('duplicate keys, strict input/read rejection and no writes on invalid input', async () => {
+      const result = await run('mongoInsert', { documents: '{"_id":"a"}' }); assert.equal(result.status, 'failed'); assert.match(result.error, /duplicate key/);
+      const schema = saveSchema({ project_id: projectId, name: 'Requires zone', kind: 'json', text: '{"type":"object","required":["zone"],"properties":{"zone":{"type":"array","items":{"type":"integer"}}}}' }).id;
+      const before = await db.collection(collection).countDocuments();
+      assert.equal((await run('mongoInsert', { schema, validateSchema: true, documents: '{"_id":"invalid","scores":[2,5]}' })).status, 'failed');
+      assert.equal((await run('mongoInsert', { schema, validateSchema: true, documents: '[{"_id":"batch-valid","zone":[2,5]},{"_id":"batch-invalid","scores":[2,5]}]' })).status, 'failed');
+      assert.equal(await db.collection(collection).countDocuments(), before);
+      assert.equal((await run('mongoFind', { filter: '{}', schema, validateSchema: true })).status, 'failed');
+      assert.equal((await run('mongoFind', { filter: '{"_id":"absent"}', schema: 'missing-contract', validateSchema: true })).status, 'failed', 'empty results must not bypass contract-definition validation');
+      const canonical = saveSchema({ project_id: projectId, name: 'Canonical document', kind: 'json', text: '{"type":"object","required":["_id","amount"],"properties":{"_id":{"type":"string"},"amount":{"type":"object","required":["$numberInt"],"properties":{"$numberInt":{"type":"string","pattern":"^[0-9]+$"}},"additionalProperties":false}}}' }).id;
+      const valid = await ok('mongoFind', { filter: '{"_id":"a"}', schema: canonical, validateSchema: '{{gv.STRICT}}' });
+      assert.deepEqual(valid.documents[0].amount, { $numberInt: '10' });
+      assert.equal((await run('mongoAggregate', { pipeline: '[{"$out":"must_not_exist"}]' })).status, 'failed');
+      assert.equal((await db.listCollections({ name: 'must_not_exist' }).toArray()).length, 0);
+    });
+    await t.test('separate credentials through Secret GV, List Collections, input override and array updates', async () => {
+      setSecret('M0_TEST_PASSWORD', env.MONGODB_PASSWORD!);
+      const address = new URL(u.href); address.username = ''; address.password = '';
+      saveProject({ id: projectId, name: 'M0 certification', config: { variables: [...getProject(projectId)!.config.variables, { name: 'MONGO_PASSWORD', type: 'secret', value: 'M0_TEST_PASSWORD' }, { name: 'MONGO_URI', type: 'secret', value: 'M0_TEST_URI' }] } });
+      const split = saveResource({ name: 'Separate MongoDB credentials', kind: 'mongodb', project_id: projectId, config: { uri: address.href, username: env.MONGODB_USERNAME, passwordSecret: '{{gv.MONGO_PASSWORD}}', authSource: 'admin', database: 'sutraflow_test', timeoutMs: 15000 } });
+      const listed = await ok('mongoListCollections', { connection: split.id, filter: JSON.stringify({ name: collection }) });
+      assert.equal(listed.count, 1); assert.equal(listed.collections[0].name, collection);
+      const overridden = await ok('mongoFind', { connection: split.id, collection: 'must_not_read_this_general_value', collectionInput: '{{input.collection}}', operation: 'count', filter: '{}' }, { collection });
+      assert.equal(overridden.count, await db.collection(collection).countDocuments());
+      assert.equal((await run('mongoFind', { collectionInput: '{{input.collection}}' }, { collection: { invalid: true } })).status, 'failed');
+      const viaUriGV = saveResource({ name: 'Complete URI Secret property', kind: 'mongodb', project_id: projectId, config: { uriSecret: '{{gv.MONGO_URI}}', database: 'sutraflow_test' } });
+      assert.equal((await ok('mongoFind', { connection: viaUriGV.id, operation: 'count' })).count, overridden.count);
+      await ok('mongoInsert', { documents: '{"_id":"array-case","lines":[{"sku":"A","quantity":1},{"sku":"B","quantity":2}]}' });
+      const after = await ok('mongoUpdate', { operation: 'findOneAndUpdate', filter: '{"_id":"array-case"}', update: '{"$set":{"lines.$[line].quantity":9}}', arrayFilters: '[{"line.sku":"B"}]', returnDocument: 'after' });
+      assert.deepEqual(after.document.lines[1].quantity, { $numberInt: '9' }); assert.deepEqual(after.document.lines[0].quantity, { $numberInt: '1' });
+      const before = await ok('mongoUpdate', { operation: 'findOneAndUpdate', filter: '{"_id":"array-case"}', update: '{"$set":{"lines.$[line].quantity":10}}', arrayFilters: '[{"line.sku":"B"}]', returnDocument: 'before' });
+      assert.deepEqual(before.document.lines[1].quantity, { $numberInt: '9' });
+      assert.equal((await ok('mongoUpdate', { operation: 'findOneAndUpdate', filter: '{"_id":"absent-array-case"}', update: '{"$set":{"flag":true}}' })).document, null);
+      assert.equal((await run('mongoUpdate', { operation: 'replaceOne', filter: '{"_id":"array-case"}', update: '{}', arrayFilters: '[{"line.sku":"B"}]' })).status, 'failed');
+      await ok('mongoDelete', { filter: '{"_id":"array-case"}' });
+    });
+    await t.test('M0 candidate capabilities: transaction rollback, change stream and small GridFS', async () => {
+      // Probe prerequisites only; this is not certification of unfinished palette implementations.
+      const session = (await mongoConnection(effectiveResource(resource.id)!, () => u.href)).client.startSession();
+      try { await assert.rejects(session.withTransaction(async () => { await db.collection<any>(collection).insertOne({ _id: 'rolledback' }, { session }); throw new Error('intentional rollback'); }), /intentional rollback/); }
+      finally { await session.endSession(); }
+      assert.equal(await db.collection<any>(collection).countDocuments({ _id: 'rolledback' }), 0);
+      const change = db.collection(collection).watch([{ $match: { operationType: 'insert' } }], { maxAwaitTimeMS: 1000 });
+      try { await change.tryNext(); const next = change.next(); await db.collection<any>(collection).insertOne({ _id: 'event-probe' }); const event = await next; assert.equal(event?.operationType, 'insert'); }
+      finally { await change.close(); }
+      const { GridFSBucket } = await import('mongodb');
+      const bucketName = `${collection}_files`, bucket = new GridFSBucket(db, { bucketName });
+      try {
+        const stream = bucket.openUploadStream('probe.txt'); const complete = new Promise<void>((resolve, reject) => { stream.on('finish', () => resolve()); stream.on('error', reject); }); stream.end(Buffer.from('SutraFlow 2.0.10 M0 probe')); await complete;
+        const chunks: Buffer[] = []; for await (const chunk of bucket.openDownloadStream(stream.id)) chunks.push(chunk);
+        assert.equal(Buffer.concat(chunks).toString(), 'SutraFlow 2.0.10 M0 probe'); await bucket.delete(stream.id);
+      } finally { for (const name of [`${bucketName}.files`, `${bucketName}.chunks`]) if ((await db.listCollections({ name }).toArray()).length) await db.collection(name).drop(); }
+    });
+    await t.test('shipped MongoDB sample imports its starter schema and completes its document lifecycle on M0', async () => {
+      const { addSamples } = await import('../server/src/samples.js');
+      const { getFlow } = await import('../server/src/flows.js');
+      setSecret('MONGODB_URI', u.href);
+      const [sample] = addSamples(projectId, ['mongodb']);
+      const doc = structuredClone(getFlow(sample.id)!.doc);
+      for (const step of doc.nodes) if (step.type.startsWith('mongo')) step.config.collection = collection;
+      for (const step of doc.nodes) if (step.type === 'mongoListCollections') step.config.filter = JSON.stringify({ name: collection });
+      assert.ok(doc.nodes[0].config.schema, 'schema imported');
+      const id = await engine.startRun({ projectId, doc }); await engine.waitFor(id, 20000);
+      const row = q.get<any>('select status,error from runs where id=?', id); assert.equal(row.status, 'done', row.error);
+      assert.equal(runState(id)?.outputs['Delete this run order'].deletedCount, 1);
+      assert.equal(await db.collection<any>(collection).countDocuments({ _id: id }), 0);
+    });
+  } finally {
+    if ((await db.listCollections({ name: collection }).toArray()).length) await db.collection(collection).drop();
+    await closeMongoPools(); await server.stop();
+  }
+});

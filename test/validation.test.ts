@@ -19,6 +19,7 @@ const env = testEnv(20650);
 const { boot } = await import('../server/src/index.js');
 const { saveResource } = await import('../server/src/resources.js');
 const schemas = await import('../server/src/schemas.js');
+const { ensureDefaultProject } = await import('../server/src/projects.js');
 const flows = await import('../server/src/flows.js');
 
 let srv: Awaited<ReturnType<typeof boot>>;
@@ -47,12 +48,12 @@ const XSD = `<?xml version="1.0"?>
 </xs:schema>`;
 
 test('REST bodies are checked against a JSON Schema, a JSON sample and an XSD before a run starts', async () => {
-  const js = schemas.saveSchema({ project_id: 'p-val', name: 'NewOrder', kind: 'json', text: JSON.stringify({
+  const js = schemas.saveSchema({ project_id: ensureDefaultProject(), name: 'NewOrder', kind: 'json', text: JSON.stringify({
     $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object', required: ['id', 'qty'], additionalProperties: false,
     properties: { id: { type: 'string', pattern: '^A-\\d+$' }, qty: { type: 'integer', minimum: 1 }, email: { type: 'string', format: 'email' } },
   }) });
-  const sample = schemas.saveSchema({ project_id: 'p-val', name: 'Sample', kind: 'json', text: '{"id": "A-1", "qty": 2, "lines": [{"sku": "X"}]}' });
-  const xsd = schemas.saveSchema({ project_id: 'p-val', name: 'Orders', kind: 'xsd', text: XSD });
+  const sample = schemas.saveSchema({ project_id: ensureDefaultProject(), name: 'Sample', kind: 'json', text: '{"id": "A-1", "qty": 2, "lines": [{"sku": "X"}]}' });
+  const xsd = schemas.saveSchema({ project_id: ensureDefaultProject(), name: 'Orders', kind: 'xsd', text: XSD });
   const ok = node('httpResponse', 'Reply', { status: '200', contentType: 'application/json', body: '{"ok": true}' });
   for (const [path, ref] of [['/v/json', js.id], ['/v/sample', sample.id], ['/v/xml', `${xsd.id}::Order`]] as const) {
     const t = node('restService', `In ${path}`, { method: 'POST', path, bodySchema: ref, validateBody: 'reject invalid' });
@@ -94,7 +95,7 @@ test('REST bodies are checked against a JSON Schema, a JSON sample and an XSD be
 });
 
 test('SOAP operations are checked against their XSD element; a bad request gets a Client fault', async () => {
-  const xsd = schemas.saveSchema({ project_id: 'p-val', name: 'OrderOps', kind: 'xsd', text: XSD.replace('<xs:schema ', '<xs:schema targetNamespace="urn:sutra:orders" elementFormDefault="qualified" ') });
+  const xsd = schemas.saveSchema({ project_id: ensureDefaultProject(), name: 'OrderOps', kind: 'xsd', text: XSD.replace('<xs:schema ', '<xs:schema targetNamespace="urn:sutra:orders" elementFormDefault="qualified" ') });
   const t = node('soapService', 'Checked WS', { serviceName: 'OrderService', namespace: 'urn:sutra:orders', path: '/soap/checked', operations: 'GetOrder', soapVersion: '1.1', bodySchema: xsd.id, validateBody: 'reject invalid' });
   const reply = node('soapReply', 'Reply', { kind: 'response', body: '{"OrderId": "{{input.body.OrderId}}"}' });
   deployFlow('Checked SOAP', [t, reply], [edge(t, reply, 'GetOrder')]);

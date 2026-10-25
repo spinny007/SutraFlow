@@ -8,6 +8,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 import { openDb, q } from './db.js';
+import { configureProcessDns } from './dns.js';
 import { memTableByName, memPeek, startMemTables, stopMemTables, memoryScheduling } from './memtables.js';
 import { fileSamplesOnce } from './samples.js';
 import { engine } from './engine/engine.js';
@@ -23,6 +24,7 @@ import { setVariableHooks } from './expr.js';
 import { rebuildListeners, stopListeners } from './listeners.js';
 import { closeBusPublishers } from './connectors/bus.js';
 import { closeDbPools } from './connectors/db.js';
+import { closeMongoPools } from './connectors/mongodb.js';
 import { config } from './config.js';
 import { lifecycle, closeServer } from './lifecycle.js';
 import { startCluster, stopCluster, bumpDeployGen, bumpTlsGen, leaveLeadership, cluster } from './cluster.js';
@@ -83,6 +85,7 @@ function deployFolderLocked(dir: string) {
  * or the same without the studio (SUTRA_MODE=engine). Packages in SUTRA_DEPLOY_DIR are deployed first.
  */
 export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gateway?: boolean; exitOnDrain?: boolean } = {}) {
+  configureProcessDns();
   openDb(opts.dbFile);
   ensureBuiltins();
   engine.register(allActivities);
@@ -149,6 +152,7 @@ export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gatew
     if (opts.gateway !== false) await stopGateway();
     await closeBusPublishers();
     await closeDbPools();
+    await closeMongoPools();
     engine.stop();
     stopMemTables();
     await flushTracing();

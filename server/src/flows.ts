@@ -144,12 +144,14 @@ export function validateDoc(doc: FlowDoc, projectId?: string) {
   const designs = designSchemas(doc);
   for (const n of doc.nodes) if (!n.settings?.disabled) {
     if (n.config.validateBody === 'reject invalid' && !getSchema(String(n.config.bodySchema || '').split('::')[0])) errors.push(`${n.name}: request/message validation requires an existing body schema.`);
-    for (const key of ['validateSchema', 'strictValidation']) {
+    for (const key of ['validateSchema', 'strictValidation', 'validateInput', 'validateResult']) {
       const flag = n.config[key];
       if (flag === undefined || (typeof flag === 'string' && (flag.includes('{{') || flag.startsWith('=')))) continue;
       try {
         if (booleanSetting(flag, key)) {
-          const selected = n.config.schema && getSchema(String(n.config.schema).split('::')[0]);
+          const reference = n.config[key === 'validateInput' ? 'inputSchema' : key === 'validateResult' ? 'resultSchema' : 'schema'];
+          if (typeof reference === 'string' && (reference.includes('{{') || reference.startsWith('='))) continue; // Engine enforces the resolved reference at the boundary.
+          const selected = reference && getSchema(String(reference).split('::')[0]);
           if (!selected) errors.push(`${n.name}: validation is On but the selected schema is missing.`);
           const expected = /Xml$/.test(n.type) || n.config.format === 'XML' ? 'xsd' : /Json$/.test(n.type) || n.config.format === 'JSON' ? 'json' : undefined;
           if (selected && expected && selected.kind !== expected) errors.push(`${n.name}: validation requires a ${expected === 'json' ? 'JSON' : 'XSD'} schema.`);

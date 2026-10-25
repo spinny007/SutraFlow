@@ -9,7 +9,8 @@
  */
 import fs from 'node:fs';
 import { XMLBuilder } from 'fast-xml-parser';
-import type { Field } from '../engine/types.js';
+import type { Field, ExecCtx } from '../engine/types.js';
+import { enforceContract } from '../contracts.js';
 import { xmlParser } from '../security/outbound.js';
 import { toNumber } from '../values.js';
 import { getSchema, type SNode } from '../schemas.js';
@@ -274,6 +275,7 @@ export function parseContent(buf: Buffer, cfg: Record<string, any>, schema: SNod
 export async function parseValidatedContent(buf: Buffer, cfg: Record<string, any>, schema: SNode | null, formatKey = 'format') {
   const result = parseContent(buf, cfg, schema, formatKey);
   const fmt = cfg[formatKey];
+  if (booleanSetting(cfg.strictValidation ?? false, 'Strict schema validation') && fmt !== 'JSON' && fmt !== 'XML') throw new Error('Strict file validation requires JSON or XML format; turn it Off for other formats.');
   if (booleanSetting(cfg.strictValidation ?? false, 'Strict schema validation') && (fmt === 'JSON' || fmt === 'XML')) {
     if (!cfg.schema) throw new Error('Strict file validation requires a JSON Schema for JSON or an XSD for XML.');
     const selected = getSchema(String(cfg.schema).split('::')[0]);
@@ -282,6 +284,15 @@ export async function parseValidatedContent(buf: Buffer, cfg: Record<string, any
     if (errors.length) throw new Error('File content does not match the schema: ' + errors.join('; '));
   }
   return result;
+}
+
+/** Parsed file events must not bypass strict validation via test fixtures or error envelopes. */
+export async function validateFileEvent(c: Pick<ExecCtx, 'raw' | 'resolve' | 'projectId' | 'node'>, event: any) {
+  if (!c.raw('strictValidation') || event?.event === 'removed') return;
+  const format = c.raw('format');
+  if (format !== 'JSON' && format !== 'XML') throw new Error('Strict file validation requires JSON or XML format.');
+  if (event?.readError) throw new Error(`Strict file read failed: ${event.readError}`);
+  await enforceContract(c.resolve(c.raw('schema')), event?.data, { projectId: c.projectId, subject: `${c.node.name} file data`, kind: format === 'JSON' ? 'json' : 'xsd' });
 }
 
 /** Build and check before the caller opens/truncates a local or remote destination. */

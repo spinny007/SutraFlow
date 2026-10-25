@@ -1,0 +1,31 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 2.0.10
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available; see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { testEnv } from './helpers.js';
+testEnv(23160);
+const { allActivities } = await import('../server/src/palettes/index.js');
+
+/** A coverage inventory, not a substitute for activity execution/negative tests. */
+const contracts: Record<string, string[]> = {
+  start: ['schema'], restService: ['bodySchema'], soapService: ['bodySchema'],
+  mapper: ['schema'], parseJson: ['schema'], renderJson: ['schema'], parseXml: ['schema'], renderXml: ['schema'], mapperJson: ['schema'], mapperXml: ['schema'], validate: ['schema'],
+  callProcess: ['inputSchema', 'resultSchema'], return: ['schema'], channelPublish: ['schema'], channelTrigger: ['schema'],
+  httpRequest: ['bodySchema', 'responseSchema'], httpResponse: ['bodySchema'], soapInvoke: ['wsdlRef', 'argsSchema', 'responseSchema'], soapReply: ['bodySchema'], wsService: ['bodySchema'],
+  fileTrigger: ['schema'], fileRead: ['schema'], fileList: ['schema'], fileWrite: ['schema'], remoteTrigger: ['schema'], remoteList: ['schema'], remoteRead: ['schema'], remoteWrite: ['schema'],
+  mongoListCollections: ['schema'], mongoInsert: ['schema'], mongoFind: ['schema'], mongoUpdate: ['schema'], mongoDelete: ['schema'], mongoAggregate: ['schema'],
+  aiGuard: ['jsonSchema'], mcpTool: ['inputSchema', 'outputSchema'], mcpReply: ['schema'],
+};
+const normalize = (value: Record<string, string[]>) => Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, fields]) => [key, [...fields].sort()]));
+test('every schema-aware activity/field is inventoried; new contract fields require boundary review', () => {
+  const actual = Object.fromEntries(allActivities.filter(a => a.fields.some(f => f.type === 'schema')).map(a => [a.type, a.fields.filter(f => f.type === 'schema').map(f => f.k)]));
+  assert.deepEqual(normalize(actual), normalize(contracts), 'Review the new schema field, classify hint/input/output/descriptor, and add negative engine tests before updating this inventory.');
+  for (const type of ['start', 'restService', 'soapService', 'wsService']) assert.equal(typeof allActivities.find(a => a.type === type)?.validateStart, 'function', `${type} must validate before run creation`);
+});

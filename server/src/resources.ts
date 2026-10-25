@@ -9,9 +9,10 @@
  */
 import crypto from 'node:crypto';
 import { q, now } from './db.js';
-import { applyResourceOverrides, effectiveVariables, engineVariableValues, settingsCache, onSettingsForget } from './projects.js';
+import { applyResourceOverrides, effectiveVariables, engineVariableValues, secretVariableReferences, settingsCache, onSettingsForget } from './projects.js';
 import { resolveResourceConfig } from './settings.js';
 import { CONNECTOR_KINDS } from './connectors/kinds.js';
+import { MONGODB_KIND, mongoAuthMode } from './connectors/mongodb-kind.js';
 import { AZURE_KINDS } from './connectors/azure.js';
 import { CHAT_KINDS } from './connectors/chat.js';
 import { WS_KINDS } from './connectors/websocket.js';
@@ -245,7 +246,7 @@ export const RESOURCE_KINDS: ResourceKind[] = [
       F('policy', 'API security policy', 'resource', '', { resourceKind: 'inboundPolicy', help: 'Who may use these skills. A tool can set its own policy instead.' }),
     ],
   },
-  ...CONNECTOR_KINDS,
+  ...CONNECTOR_KINDS, MONGODB_KIND,
   ...AZURE_KINDS,
   ...CHAT_KINDS,
   ...WS_KINDS,
@@ -271,7 +272,11 @@ export interface Resource {
   rev?: string;
 }
 
-const rowTo = (r: any): Resource => ({ ...r, config: JSON.parse(r.config) });
+const rowTo = (r: any): Resource => {
+  const config = JSON.parse(r.config);
+  if (r.kind === 'mongodb') config.authMode = mongoAuthMode(config);
+  return { ...r, config };
+};
 
 export function listResources(kind?: string, projectId?: string): Resource[] {
   const where: string[] = [], args: any[] = [];
@@ -306,8 +311,19 @@ function resolveResource(id: string): Resource | undefined {
   const r = getResource(id);
   if (!r) return undefined;
   // Ops overrides, ${env:X}, then {{gv.X}} / = formulas with the project's and engine's variables.
-  const config = resolveResourceConfig(applyResourceOverrides(r), { gv: effectiveVariables(r.project_id).values, ev: engineVariableValues() });
+  const config = resolveConnectionConfig(applyResourceOverrides(r), r.kind, r.project_id);
   return { ...r, config, rev: crypto.createHash('sha1').update(r.id + JSON.stringify(config)).digest('hex').slice(0, 16) };
+}
+
+/** Shared by saved connections and Test connection: secret GV/EV references are resolved once. */
+export function resolveConnectionConfig(config: Record<string, any>, kind: string, projectId?: string | null) {
+  const scope = { gv: effectiveVariables(projectId).values, ev: engineVariableValues() };
+  const resolved = resolveResourceConfig(config, scope), refs = secretVariableReferences(projectId);
+  for (const field of RESOURCE_KINDS.find(k => k.kind === kind)?.fields || []) {
+    if (field.type !== 'secret' || config[field.k] === undefined) continue;
+    resolved[field.k] = resolveResourceConfig({ [field.k]: config[field.k] }, { gv: { ...scope.gv, ...refs.gv }, ev: { ...scope.ev, ...refs.ev } })[field.k];
+  }
+  return resolved;
 }
 
 export function requireResource(id: string, kind: string, what: string): Resource {
@@ -322,7 +338,13 @@ export function saveResource(r: Partial<Resource> & { kind: string; name: string
   const k = RESOURCE_KINDS.find(x => x.kind === r.kind);
   if (!k) throw new Error(`Unknown resource kind ${r.kind}`);
   const config: Record<string, any> = {};
-  for (const f of k.fields) config[f.k] = r.config?.[f.k] ?? f.def ?? '';
+  for (const f of k.fields) config[f.k] = r.config?.[f.k] ?? (r.kind === 'mongodb' && f.k === 'authMode' ? mongoAuthMode(r.config || {}) : f.def) ?? '';
+  if (r.kind === 'mongodb') {
+    if (config.authMode === 'URI secret') config.uri = ''; // Never retain an inactive credential-bearing public URI.
+    else if (typeof config.uri === 'string' && (/^mongodb(?:\+srv)?:\/\/[^/?#]*@/.test(config.uri) || /[?&](?:password|proxyPassword|tlsCertificateKeyFilePassword)=/i.test(config.uri))) {
+      throw new Error('Advanced server URI must not contain credentials. Leave it blank when using Host, or store the complete URI in a Secret GV and choose URI secret.');
+    }
+  }
   const id = r.id || crypto.randomUUID();
   const prev = r.id ? getResource(r.id) : undefined;
   const projectId = r.project_id ?? prev?.project_id ?? null;

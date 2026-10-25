@@ -23,13 +23,56 @@ export interface ActivityText {
 }
 
 export const ACTIVITY_TEXT: Record<string, ActivityText> = {
+  mongoListCollections: {
+    scope: ['List authorized collection names and types in the selected application database, with an optional metadata filter.'],
+    outScope: ['No document reads, database administration or collection creation/dropping. The list is capped at 1000 entries; narrow the filter rather than relying on truncation.'],
+    use: ['Discover collection names before a document operation or drive explicitly bounded collection processing.'],
+    steps: ['Choose the MongoDB connection.', 'Optionally filter metadata, for example {"name":"orders"}.', 'Map collections[].name to a subsequent activity\'s Collection from input field. A supplied input value overrides its General Collection setting.', 'Enable strict metadata validation only with a schema for each {name,type} result.'],
+    output: ['collections: authorized {name,type} entries, sorted by name; count: entries returned. Empty results are valid.'],
+  },
+  mongoInsert: {
+    scope: ['Native Atlas M0 insertion of one document or up to 1000 documents.', 'Verified TLS and a vault-backed connection; acknowledged majority writes.'],
+    outScope: ['A multi-document insert batch is not atomic. A server failure can leave partial writes.', 'No shell, server JavaScript or collection-validator bypass.'],
+    use: ['Write mapped JSON/Extended JSON documents to an Atlas collection.'],
+    steps: ['Choose a MongoDB connection and collection.', 'Map a document or list into Documents. Use Extended JSON for ObjectId, Int64, decimal, date or binary values.', 'Choose ordered behavior. On stops at the first server error; Off can continue and still report a failure.', 'For a contract, select Input document schema and enable Strict schema validation. Every document is validated before any write starts.'],
+    output: ['Acknowledged flag, inserted count and inserted IDs in Extended JSON.'],
+    guide: ['Use a unique business key/idempotency strategy before retrying an uncertain write.', 'The M0 lifecycle sample scopes its document to run.id and deletes only that document.'],
+  },
+  mongoFind: {
+    scope: ['Find, find-one, count and distinct operations on Atlas M0.', 'Structured filters, projection, sort, skip and explicit runtime query limits.'],
+    outScope: ['No raw cursors or driver objects in durable run state.', 'No server-side JavaScript. No automatic total count on ordinary Find.'],
+    use: ['Look up a document, page through matching results or compute a count/distinct list.'],
+    steps: ['Choose the connection, collection and operation.', 'Configure the filter and applicable projection/sort/paging or distinct field.', 'Runtime limit 0 does not change the query limit. Page explicitly to stay within the 10000-document/8 MB durable-output ceiling.', 'Strict validation checks each returned document/value or count against its selected JSON contract, including a definition check when no records match.'],
+    output: ['Find: documents and count returned. Count: count. Distinct: values and count.', 'BSON types use canonical Extended JSON; select a schema for that output representation. Empty matches are a normal result.'],
+  },
+  mongoUpdate: {
+    scope: ['Update-one, update-many, replacement, explicit upsert and find-one-and-update.', 'Array filters can select nested repeated elements for operator updates.'],
+    outScope: ['Validating an operator request is not full-document validation.', 'No implicit collection-validator changes or transaction guarantee.'],
+    use: ['Change selected fields, replace a document or insert when no document matches.'],
+    steps: ['Choose updateOne/updateMany with operators such as $set, or replaceOne with a plain document.', 'Map a structured filter. An empty update-many filter requires Allow empty filter.', 'Enable upsert only when insertion is intended.', 'Strict validation applies to the update/replacement request. Use MongoDB collection validators for final-document constraints; SutraFlow does not pretend a patch schema proves the stored result.'],
+    output: ['Normal updates: acknowledged, matched/modified/upserted counts and upserted ID. A matched but unchanged document can have modifiedCount=0.', 'findOneAndUpdate returns document (canonical Extended JSON or null) and hasDocument. Choose Before or After; an upsert with Before can return null despite inserting. Array filters are not accepted for replacement.'],
+  },
+  mongoDelete: {
+    scope: ['Delete one or all matching documents on Atlas M0 with an acknowledged result.'],
+    outScope: ['No collection/database dropping. No unrestricted empty-filter delete-many by default.'],
+    use: ['Delete a precisely identified document or a deliberately selected group.'],
+    steps: ['Choose the connection and collection.', 'Map a filter; keep Delete all matches Off for one-document deletion.', 'An empty filter with Delete all matches requires a separate allow-all opt-in.', 'Strict validation, when enabled, applies to the filter request before deletion.'],
+    output: ['Acknowledged flag and deletedCount; zero matches return deletedCount=0.'],
+  },
+  mongoAggregate: {
+    scope: ['Read-only by default. M0 baseline permits up to 50 stages without disk spill.', 'General MongoDB connections permit explicit disk-use/output-stage opt-ins when supported by the server; this is not certified by the M0 test record.'],
+    outScope: ['No server-side JavaScript, MapReduce or unsupported diagnostic stages.', 'M0 baseline cannot opt into $out/$merge or disk use. Output stages on a general deployment may write despite returning no documents.'],
+    use: ['Group, filter, project and summarize documents using supported pipeline stages.'],
+    steps: ['Choose the connection and collection.', 'Supply a JSON/Extended JSON pipeline array.', 'Add explicit filtering/paging so results fit the durable-output ceiling.', 'Select a result contract and enable strict validation to check every returned document.'],
+    output: ['Documents in canonical Extended JSON and the number returned. The cursor is closed after completion, failure or cancellation.'],
+  },
   /* ---------------- Triggers ---------------- */
   start: {
-    scope: ['Starting a process from the studio (<em>Test</em>, <em>Debug</em>) or from another system through the Run API.', 'A test payload in JSON, and an optional payload schema that describes it for mapping.'],
+    scope: ['Starting a process from the studio (<em>Test</em>, <em>Debug</em>) or from another system through the Run API.', 'A test payload in JSON and an optional contract: descriptive with strict validation Off, enforced with it On.'],
     outScope: ['Starting on a schedule, a request, a file or a message: use the trigger made for it.'],
     use: ['A process that another process or system starts on demand.', 'Building and testing a process before you choose its real trigger.'],
     other: [['Run on a schedule', 'timer'], ['Expose the process as a REST API', 'restService']],
-    steps: ['Drag <em>Manual start</em> onto an empty canvas (a new flow already has one).', 'In the General tab, write a test payload in JSON.', 'Optionally pick a payload schema, so later steps see its fields in the mapper.'],
+    steps: ['Drag <em>Manual start</em> onto an empty canvas (a new flow already has one).', 'In the General tab, write a test payload in JSON.', 'Select a payload schema and enable Strict schema validation to enforce it. On rejects invalid configured or supplied input before creating a run. Off is descriptive only and preserves legacy behavior.'],
     output: ['The payload: either what the Run API sent, or the test payload.'],
   },
   timer: {

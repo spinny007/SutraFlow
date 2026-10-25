@@ -48,6 +48,8 @@ export function decrypt(e: { iv: string; tag: string; data: string }) {
 }
 
 export const SECRET_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+/** A mistaken secret reference can itself contain a complete credential-bearing URI. */
+export const missingSecretError = (_name: string, what = 'Secret') => new Error(`${what}: the selected stored secret is missing or the reference is invalid (value withheld). Enter an encrypted value in the connection or select a stored secret.`);
 
 export function setSecret(name: string, value: string) {
   if (!SECRET_NAME.test(name)) throw new Error('Secret names use letters, digits and _ and start with a letter or _');
@@ -67,7 +69,7 @@ export function getSecret(name: string): string | undefined {
 export function requireSecret(name: string, what = 'Secret'): string {
   if (!name) throw new Error(`${what} is not set`);
   const v = getSecret(name);
-  if (v === undefined) throw new Error(`${what}: secret "${name}" does not exist. Add it under Resources > Secrets.`);
+  if (v === undefined) throw missingSecretError(name, what);
   return v;
 }
 

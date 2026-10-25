@@ -166,7 +166,7 @@ test('documentation is made from the steps and their descriptions', async () => 
 
 test('the sample project zip imports as a new project with its documents, and its feed runs', async () => {
   const list = (await srv.admin.inject({ method: 'GET', url: '/api/sample-projects', headers: H })).json();
-  assert.equal(list[0].file, 'ai-document-assistant.zip');
+  assert.ok(list.some((entry: { file: string }) => entry.file === 'ai-document-assistant.zip'), 'document assistant remains available regardless of catalogue order');
   const zip = (await srv.admin.inject({ method: 'GET', url: '/api/sample-projects/ai-document-assistant.zip', headers: H })).rawPayload;
   const opened = (await srv.admin.inject({ method: 'POST', url: '/api/packages/open', payload: { zip: zip.toString('base64') }, headers: H })).json();
   assert.deepEqual(opened.files.sort(), ['documents/faq.md', 'documents/returns-policy.pdf', 'documents/shipping-guide.docx', 'documents/tea-catalogue.pptx']);

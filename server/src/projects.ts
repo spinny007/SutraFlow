@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { q, tx, now, getSetting, setSetting } from './db.js';
 import { config } from './config.js';
-import { getSecret } from './secrets.js';
+import { getSecret, setSecret, SECRET_NAME } from './secrets.js';
 import { booleanSetting } from './settings.js';
 
 /**
@@ -70,6 +70,24 @@ export function ensureDefaultProject() {
 }
 
 const VAR_NAME = /^[A-Za-z_][\w]*$/;
+/** A named project Secret owns one encrypted backing entry; clients never choose its internal name. */
+export function storeProjectSecret(projectId: string, name: string, plain: unknown, create = false, onlyCreate = false) {
+  if (!VAR_NAME.test(name) || name.length > 64) throw new Error('Secret property name must use letters, digits and _, start with a letter or _, and contain at most 64 characters.');
+  if (typeof plain !== 'string' || !plain) throw new Error('A non-empty Secret value is required.');
+  return tx(() => {
+    const project = requireProject(projectId), existing = project.config.variables.find(v => v.name === name);
+    if (existing && onlyCreate) throw new Error('A project property with this name already exists. Select it explicitly to update its value.');
+    if (!existing && !create) throw new Error('Secret project property not found.');
+    if (existing && existing.type !== 'secret') throw new Error('The selected project property is not Secret-type.');
+    const digest = crypto.createHash('sha256').update(`${projectId}\0${name}`).digest('hex').slice(0, 32);
+    const secretRef = `gv_${digest}_${name.slice(0, 24)}`;
+    setSecret(secretRef, plain);
+    const variable: ProjectVariable = { ...(existing || { name, description: '' }), type: 'secret', value: secretRef };
+    const variables = existing ? project.config.variables.map(v => v.name === name ? variable : v) : [...project.config.variables, variable];
+    saveProject({ id: project.id, name: project.name, config: { variables } });
+    return { reference: `{{gv.${name}}}`, secretRef };
+  }, `project-secret:${projectId}`);
+}
 export function saveProject(p: { id?: string; name: string; description?: string; config?: Partial<ProjectConfig> }) {
   const id = p.id || crypto.randomUUID();
   const prev = p.id ? getProject(p.id) : undefined;
@@ -81,6 +99,8 @@ export function saveProject(p: { id?: string; name: string; description?: string
   for (const v of cfg.variables) {
     if (!VAR_NAME.test(v.name)) throw new Error(`Variable name "${v.name}" must start with a letter or _ and use letters, digits and _`);
     if (seen.has(v.name)) throw new Error(`Variable ${v.name} is defined twice`);
+    if (!['string', 'number', 'boolean', 'secret'].includes(v.type)) throw new Error('Unknown project property type.');
+    if (v.type === 'secret' && v.value && !v.value.includes('${env:') && !SECRET_NAME.test(v.value)) throw new Error(`Secret property ${v.name}: store an encrypted value and select its reference; plaintext values are not accepted.`);
     if (v.type === 'boolean' && !v.value.includes('${env:')) booleanSetting(v.value, `Project property ${v.name}`);
     seen.add(v.name);
   }
@@ -298,26 +318,39 @@ export function publicProjectVariableValues(projectId: string | null | undefined
 }
 
 // ---------- engine (administrator) variables, shared by all projects ----------
-export interface EngineVariable { name: string; value: string; description?: string }
+export interface EngineVariable { name: string; value: string; description?: string; type?: 'string' | 'secret' }
 export const listEngineVariables = () => getSetting<EngineVariable[]>('engineVars', []);
 export function saveEngineVariables(vars: EngineVariable[]) {
   const seen = new Set<string>();
-  const clean = vars.map(v => ({ name: String(v.name || '').trim(), value: String(v.value ?? ''), description: v.description ? String(v.description) : undefined }));
+  const clean = vars.map(v => ({ name: String(v.name || '').trim(), value: String(v.value ?? ''), description: v.description ? String(v.description) : undefined, ...(v.type ? { type: v.type } : {}) }));
   for (const v of clean) {
     if (!VAR_NAME.test(v.name)) throw new Error(`Engine property name "${v.name}" must start with a letter or _`);
     if (seen.has(v.name)) throw new Error(`Engine property ${v.name} is defined twice`);
     seen.add(v.name);
+    if (v.type && !['string', 'secret'].includes(v.type)) throw new Error('Engine property type must be string or secret.');
+    if (v.type === 'secret' && v.value && !v.value.includes('${env:') && !SECRET_NAME.test(v.value)) throw new Error(`Secret engine property ${v.name}: store an encrypted value and select its reference.`);
   }
   setSetting('engineVars', clean);
-  engineVarCache = null;
+  forgetCachedSettings();
   return clean;
 }
 export function engineVariableValues() {
-  if (engineVarCache && Date.now() - engineVarCache.at < settingsCache.ms) return engineVarCache.values;
-  const values = Object.fromEntries(listEngineVariables().map(v => [v.name, substituteEnv(v.value)]));
-  if (settingsCache.ms > 0) engineVarCache = { at: Date.now(), values };
+  const vars = listEngineVariables(), sensitive = vars.some(v => v.type === 'secret');
+  if (!sensitive && engineVarCache && Date.now() - engineVarCache.at < settingsCache.ms) return engineVarCache.values;
+  const values = Object.fromEntries(vars.map(v => [v.name, v.type === 'secret' ? getSecret(substituteEnv(v.value)) : substituteEnv(v.value)]));
+  if (!sensitive && settingsCache.ms > 0) engineVarCache = { at: Date.now(), values };
   return values;
 }
+/** Secret-typed properties expose vault references only to credential slots, not their plaintext values. */
+export function secretVariableReferences(projectId: string | null | undefined) {
+  const { p, ops } = projectId ? projectAndOps(projectId) : { p: undefined, ops: emptyOps };
+  return {
+    gv: Object.fromEntries((p?.config.variables || []).filter(v => v.type === 'secret').map(v => [v.name, substituteEnv(ops.variables[v.name] ?? v.value)])),
+    ev: Object.fromEntries(listEngineVariables().filter(v => v.type === 'secret').map(v => [v.name, substituteEnv(v.value)])),
+  };
+}
+export const engineSecretValues = () => listEngineVariables().filter(v => v.type === 'secret').map(v => getSecret(substituteEnv(v.value))).filter((v): v is string => v !== undefined);
+export const publicEngineVariableValues = () => Object.fromEntries(listEngineVariables().filter(v => v.type !== 'secret').map(v => [v.name, substituteEnv(v.value)]));
 /** Script activities (PowerShell, shell, programs) run on the server only when the administrator allows them. */
 export function scriptsAllowed() { return getSetting<boolean>('scriptsAllowed', false); }
 export function setScriptsAllowed(on: boolean) { setSetting('scriptsAllowed', !!on); }

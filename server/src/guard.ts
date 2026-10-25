@@ -37,6 +37,7 @@ export const RULES: Record<string, Rule> = {
   'POST /api/projects': R('design', 'all'),
   'GET /api/projects/:id': R('view', 'project'),
   'PUT /api/projects/:id': R('design', 'project'),
+  'PUT /api/projects/:id/variables/:name/secret': R('design', 'project'),
   'DELETE /api/projects/:id': R('design', 'project'),
   'GET /api/projects/:id/ops': R('deploy', 'project'),
   'PUT /api/projects/:id/ops': R('deploy', 'project'),

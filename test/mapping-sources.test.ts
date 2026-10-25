@@ -17,16 +17,20 @@ const doc: FlowDoc = {
   nodes: ['start', 'earlier', 'map', 'parallel', 'later'].map(id => ({ id, name: id === 'earlier' ? 'Fetch customer' : id, type: id === 'earlier' ? 'query' : 'mapper', x: 0, y: 0, config: {} })),
   edges: [['start', 'earlier'], ['earlier', 'map'], ['start', 'parallel'], ['map', 'later']].map(([from, to], i) => ({ id: String(i), from, to, port: 'out' })),
 };
-const activities = [{ type: 'query', name: 'SQL query' }, { type: 'mapper', name: 'Map data' }];
+const activities = [{ type: 'query', name: 'SQL query', ports: ['out'] }, { type: 'mapper', name: 'Map data', ports: ['out'] }];
 test('mapping names current input and earlier activities with their activity types', () => {
   const result = mappingSources(doc, 'map', activities);
   assert.equal(result.inputLabel, 'Fetch customer (SQL query) — current input');
-  assert.deepEqual(result.sources.map(s => s.node.id), ['start', 'earlier', 'parallel']);
-  assert.match(result.sources[2].label, /other branch; available only after completion/);
+  assert.deepEqual(result.sources.map(s => s.node.id), ['start', 'parallel']);
+  assert.match(result.sources[1].label, /other branch; available only after completion/);
 });
 test('multiple incoming branches do not falsely identify a unique runtime source', () => {
   const joined = { ...doc, edges: [...doc.edges, { id: 'join', from: 'parallel', to: 'map', port: 'out' }] };
   assert.match(mappingSources(joined, 'map', activities).inputLabel, /incoming activities: Fetch customer \(SQL query\), parallel \(Map data\)/);
+});
+test('streaming and multi-port predecessor outputs are not incorrectly collapsed into current input', () => {
+  const meta = [{ type: 'query', name: 'Streaming query', ports: ['batch', 'out'] }, { type: 'mapper', name: 'Map data', ports: ['out'] }];
+  assert.ok(mappingSources(doc, 'map', meta).sources.some(s => s.node.id === 'earlier'));
 });
 test('starter, unknown types and cycles have safe labels without self references', () => {
   assert.equal(mappingSources(doc, 'start', []).inputLabel, 'Current input (starter / supplied data)');

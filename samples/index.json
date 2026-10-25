@@ -1,5 +1,14 @@
 [
   {
+    "file": "mongodb-m0-document-lifecycle.zip",
+    "name": "MongoDB M0 document lifecycle",
+    "description": "All six native MongoDB activities in one safe run-scoped lifecycle: insert, list collections, find-one/count/distinct, array-filter/update, read-only aggregation and precise deletion. Includes its strict starter schema and a credential-free connection; configure separate credentials or the MONGODB_URI vault secret before running.",
+    "sutras": [
+      "Sample: MongoDB M0 document lifecycle"
+    ],
+    "bytes": 9982
+  },
+  {
     "file": "ai-document-assistant.zip",
     "name": "AI document assistant",
     "description": "RAG over a folder of documents: every 15 minutes the PDF, Word, PowerPoint and Markdown files of the documents folder are read into a knowledge base (changed files again, deleted ones removed), and the documents answer as a REST API, an MCP tool for AI assistants such as Claude, and a chat agent. Sample documents of a tea shop are included.",
@@ -10,6 +19,6 @@
       "Sample: Document feed from a folder",
       "Sample: Document questions API"
     ],
-    "bytes": 32258
+    "bytes": 32334
   }
 ]

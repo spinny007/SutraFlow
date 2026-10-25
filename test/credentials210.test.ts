@@ -1,0 +1,143 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 2.0.10
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available; see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { testEnv } from './helpers.js';
+import { prepareVariableSave } from '../web/src/variable-drafts.js';
+import { processDnsServers } from '../server/src/dns.js';
+testEnv(23210);
+const { boot } = await import('../server/src/index.js');
+const { saveProject, getProject, storeProjectSecret, effectiveVariables, saveEngineVariables, engineVariableValues, publicEngineVariableValues, engineSecretValues } = await import('../server/src/projects.js');
+const { saveResource, effectiveResource, getResource } = await import('../server/src/resources.js');
+const { setSecret, requireSecret, maskSecrets } = await import('../server/src/secrets.js');
+const { prepare } = await import('../server/src/resourceTest.js');
+const { mongoConnection, closeMongoPools, mongoSettings, mongoAggregationPolicy } = await import('../server/src/connectors/mongodb.js');
+const { q } = await import('../server/src/db.js');
+let server: Awaited<ReturnType<typeof boot>>;
+before(async () => { server = await boot({ listenAdmin: false, gateway: false }); });
+
+test('named Secret GVs own stable project-specific backing values, and connection Test/runtime resolve the same reference', () => {
+  const a = saveProject({ name: 'Named Secret A' }), b = saveProject({ name: 'Named Secret B' });
+  const first = storeProjectSecret(a.id, 'MONGODB_URI', 'SyntheticSecretOne', true);
+  assert.equal(first.reference, '{{gv.MONGODB_URI}}');
+  const rotated = storeProjectSecret(a.id, 'MONGODB_URI', 'SyntheticSecretTwo');
+  assert.equal(rotated.secretRef, first.secretRef, 'one backing entry per named project property');
+  const other = storeProjectSecret(b.id, 'MONGODB_URI', 'SyntheticOtherProject', true);
+  assert.notEqual(other.secretRef, first.secretRef);
+  assert.equal(effectiveVariables(a.id).values.MONGODB_URI, 'SyntheticSecretTwo');
+  assert.equal(effectiveVariables(b.id).values.MONGODB_URI, 'SyntheticOtherProject');
+  assert.throws(() => storeProjectSecret(a.id, 'MONGODB_URI', 'MustNotReplace', true, true), /already exists/);
+  assert.equal(effectiveVariables(a.id).values.MONGODB_URI, 'SyntheticSecretTwo');
+  assert.throws(() => storeProjectSecret(a.id, 'MISSING', 'MustNotCreate'), /not found/);
+  const r = saveResource({ name: 'Named URI', kind: 'mongodb', project_id: a.id, config: { uriSecret: first.reference, database: 'test' } });
+  assert.equal(effectiveResource(r.id)!.config.uriSecret, first.secretRef);
+  assert.equal(prepare(r).r.config.uriSecret, first.secretRef);
+  const serialized = JSON.stringify(getProject(a.id));
+  assert.ok(!serialized.includes('SyntheticSecret'));
+  const row = q.get<any>('select data from secrets where name=?', first.secretRef);
+  assert.ok(!row.data.includes('SyntheticSecret'));
+  assert.deepEqual(processDnsServers(' 1.1.1.1,1.1.1.1,2606:4700:4700::1111 '), ['1.1.1.1','2606:4700:4700::1111']);
+  assert.deepEqual(processDnsServers(undefined), []);
+  assert.throws(() => processDnsServers('bad-hostname'), /IP addresses/);
+  const badUri = 'mongodb://example:SyntheticPublicPassword@localhost/';
+  assert.throws(() => saveResource({ name: 'Reject public URI', kind: 'mongodb', config: { authMode:'username/password', uri:badUri } }), e => /must not contain credentials/.test(String(e)) && !String(e).includes('SyntheticPublicPassword'));
+  const safe = saveResource({ name:'Remove inactive public URI',kind:'mongodb',config:{authMode:'URI secret',uri:badUri,uriSecret:first.secretRef,database:'test'} });
+  assert.equal(safe.config.uri,'');
+});
+
+test('project Secret API enforces design and Manage secrets permissions and never audits plaintext', async () => {
+  const { createAccount } = await import('../server/src/access.js');
+  const project = saveProject({ name: 'Secret API permissions' });
+  const cookies: Record<string,string> = {};
+  for (const [username, role] of [['secret-admin','administrator'],['secret-developer','developer']]) {
+    createAccount({ username, password: 'SyntheticTestOnly-210', mustChange: false, grants: [{ role, project: '' }] });
+    const login = await server.admin.inject({ method:'POST',url:'/api/auth/login',headers:{'x-sutra':'1'},payload:{username,password:'SyntheticTestOnly-210'} });
+    assert.equal(login.statusCode,200,login.body); cookies[username]=String(login.headers['set-cookie']).split(';')[0];
+  }
+  const url = `/api/projects/${project.id}/variables/API_SECRET/secret`, payload = {secretValue:'SyntheticNeverAuditValue',create:true};
+  const denied = await server.admin.inject({method:'PUT',url,payload,headers:{'x-sutra':'1',cookie:cookies['secret-developer']}});
+  assert.equal(denied.statusCode,403);
+  assert.equal(getProject(project.id)!.config.variables.length,0);
+  const accepted = await server.admin.inject({method:'PUT',url,payload,headers:{'x-sutra':'1',cookie:cookies['secret-admin']}});
+  assert.equal(accepted.statusCode,200,accepted.body);
+  assert.equal(accepted.json().reference,'{{gv.API_SECRET}}');
+  assert.ok(!accepted.body.includes('SyntheticNeverAuditValue'));
+  assert.ok(!JSON.stringify(q.all('select * from audit')).includes('SyntheticNeverAuditValue'));
+});
+
+test('one variable Save encrypts pending secrets before persisting references, which survive reload', async () => {
+  const rows = Array.from({ length: 100 }, (_, editKey) => ({ name: `VALUE_${editKey}`, type: 'string' as const, value: String(editKey), editKey }));
+  const drafts = [...rows, { name: 'MONGODB_URI', type: 'secret' as const, value: '', editKey: 105 }];
+  const stores = new Map([[105, async () => { setSecret('SAVED_BY_FORM', 'SyntheticOneSaveOnly'); return 'SAVED_BY_FORM'; }], [999, async () => { throw new Error('removed rows must not save'); }]]);
+  const variables = await prepareVariableSave(drafts, stores);
+  assert.equal(variables[100].value, 'SAVED_BY_FORM');
+  assert.ok(!JSON.stringify(variables).includes('editKey'));
+  assert.ok(!JSON.stringify(variables).includes('SyntheticOneSaveOnly'));
+  const project = saveProject({ name: 'One Save refresh', config: { variables } });
+  assert.equal(getProject(project.id)!.config.variables[100].value, 'SAVED_BY_FORM');
+  assert.equal(effectiveVariables(project.id).values.MONGODB_URI, 'SyntheticOneSaveOnly');
+  assert.deepEqual(await prepareVariableSave([{ ...drafts[100], value: 'SAVED_BY_FORM' }], new Map()), [variables[100]], 'an unchanged or collapsed editor retains its saved reference');
+  await assert.rejects(prepareVariableSave(drafts, new Map([[105, async () => { throw new Error('store failed'); }]])), /store failed/);
+  assert.equal(getProject(project.id)!.config.variables[100].value, 'SAVED_BY_FORM', 'a failed secret store never replaces the saved property with empty');
+});
+after(async () => { await closeMongoPools(); await server.stop(); });
+test('connection secret properties resolve once, remain project-specific and never serialize plaintext', () => {
+  setSecret('PASS_A', 'Synthetic@Password-A'); setSecret('PASS_B', 'Synthetic@Password-B');
+  const a = saveProject({ name: 'Credential A', config: { variables: [{ name: 'PASSWORD', type: 'secret', value: 'PASS_A' }] } });
+  const b = saveProject({ name: 'Credential B', config: { variables: [{ name: 'PASSWORD', type: 'secret', value: 'PASS_B' }] } });
+  for (const project of [a,b]) {
+    const input = { name: 'MongoDB', kind: 'mongodb', project_id: project.id, config: { uri: 'mongodb://localhost:27017', username: 'example', passwordSecret: '{{gv.PASSWORD}}', database: 'test' } };
+    const resource = saveResource(input), ref = project.id === a.id ? 'PASS_A' : 'PASS_B';
+    assert.equal(effectiveResource(resource.id)!.config.passwordSecret, ref);
+    assert.equal(prepare(input).r.config.passwordSecret, ref);
+    assert.equal(resource.config.authMode, 'username/password');
+    assert.ok(!JSON.stringify(resource).includes('Synthetic@'));
+    const sql = saveResource({ ...input, name: 'SQL', kind: 'database' });
+    assert.equal(effectiveResource(sql.id)!.config.passwordSecret, ref, 'same resolution for other connectors');
+  }
+  assert.equal(effectiveVariables(a.id).values.PASSWORD, 'Synthetic@Password-A', 'normal runtime expressions retain actual secret semantics');
+  const stored = q.get<any>('select data from secrets where name=?', 'PASS_A');
+  assert.ok(!stored.data.includes('Synthetic@Password-A'));
+});
+test('administrator Secret engine properties are write-only references and masked at execution boundaries', () => {
+  setSecret('ENGINE_PASS', 'Synthetic@Engine-Password');
+  saveEngineVariables([{ name: 'PASSWORD', type: 'secret', value: 'ENGINE_PASS' }, { name: 'REGION', value: 'test' }]);
+  assert.equal(engineVariableValues().PASSWORD, 'Synthetic@Engine-Password');
+  assert.deepEqual(publicEngineVariableValues(), { REGION: 'test' });
+  assert.ok(!JSON.stringify(maskSecrets({ password: engineVariableValues().PASSWORD }, new Set(engineSecretValues()))).includes('Synthetic@'));
+  const input = { kind: 'mongodb', name: 'Engine credential', config: { passwordSecret: '{{ev.PASSWORD}}' } };
+  assert.equal(prepare(input).r.config.passwordSecret, 'ENGINE_PASS');
+  setSecret('ENGINE_PASS', 'Synthetic@Rotated-Password');
+  assert.equal(engineVariableValues().PASSWORD, 'Synthetic@Rotated-Password', 'rotation must not return cached plaintext');
+});
+test('legacy URI-secret connections remain compatible and invalid references never echo URI credentials', async () => {
+  const r = saveResource({ name: 'Legacy MongoDB', kind: 'mongodb', config: { uriSecret: 'OLD_URI', database: 'test' } });
+  assert.equal(r.config.authMode, 'URI secret');
+  q.run('update resources set config=? where id=?', JSON.stringify({ uriSecret: 'OLD_URI', database: 'test' }), r.id);
+  assert.equal(getResource(r.id)!.config.authMode, 'URI secret');
+  const sensitive = 'mongodb+srv://example:NeverEchoThisPassword@cluster.invalid/';
+  for (const lookup of [() => requireSecret(sensitive), () => prepare({ kind: 'database', config: {} }).secret(sensitive)]) assert.throws(lookup, error => !String(error).includes('NeverEchoThisPassword'));
+  await assert.rejects(mongoConnection({ ...r, config: { uriSecret: sensitive, database: 'test' } }, requireSecret), error => !String(error).includes('NeverEchoThisPassword'));
+  await assert.rejects(mongoConnection({ ...r, config: { uri: sensitive, username: 'example', passwordSecret: 'PASS_A', database: 'test' } }, requireSecret), /must not contain credentials/);
+  assert.throws(() => saveProject({ name: 'Plaintext secret rejection', config: { variables: [{ name: 'PASSWORD', type: 'secret', value: sensitive }] } }), error => !String(error).includes('NeverEchoThisPassword'));
+  const base = { ...r, config: { host: 'localhost', srv: false, port: 27017, username: 'example', passwordSecret: 'PASS_A', database: 'test', tlsEnabled: false } };
+  assert.equal(mongoSettings(base, requireSecret).uri, 'mongodb://localhost:27017/');
+  assert.equal(mongoSettings(base, requireSecret).options.tls, false);
+  assert.throws(() => mongoSettings({ ...base, config: { ...base.config, host: 'remote.example' } }, requireSecret), /loopback/);
+  const cert = '-----BEGIN CERTIFICATE-----\nTEST_CONFIGURATION_ONLY\n-----END CERTIFICATE-----';
+  const x509 = mongoSettings({ ...r, config: { authMode: 'X.509', host: 'cluster.example', database: 'test', clientCertPem: cert, clientKeySecret: 'KEY', caCertSecret: 'CA' } }, () => 'TEST_SECRET_CONFIGURATION_ONLY');
+  assert.equal(x509.options.authMechanism, 'MONGODB-X509'); assert.equal(x509.options.authSource, '$external');
+  assert.equal(x509.options.cert, cert); assert.equal(x509.options.ca, 'TEST_SECRET_CONFIGURATION_ONLY');
+  assert.equal(x509.options.tlsAllowInvalidCertificates, false); assert.equal(x509.options.tlsAllowInvalidHostnames, false);
+  assert.throws(() => mongoSettings({ ...r, config: { authMode: 'X.509', host: 'localhost', srv: false, tlsEnabled: false, database: 'test' } }, requireSecret), /loopback|X.509/);
+  assert.throws(() => mongoAggregationPolicy('Atlas M0 baseline', true, false), /General MongoDB/);
+  assert.throws(() => mongoAggregationPolicy('Atlas M0 baseline', false, true), /General MongoDB/);
+  assert.deepEqual(mongoAggregationPolicy('General MongoDB', true, true), { allowDiskUse: true, allowOutputStages: true, maxStages: 1000 });
+});

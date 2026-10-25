@@ -1,6 +1,6 @@
 {
   "name": "sutraflow",
-  "version": "2.0.9",
+  "version": "2.0.10",
   "description": "SutraFlow: visual integration designer and engine (palettes, mapping, SOAP/WS-Security, REST, exposed secured APIs, TLS/Let's Encrypt).",
   "private": true,
   "license": "AGPL-3.0-only",
@@ -53,6 +53,7 @@
     "jsonata": "^2.2.2",
     "kafkajs": "^2.2.4",
     "mailparser": "^3.9.38",
+    "mongodb": "^7.7.0",
     "mssql": "^12.7.6",
     "mysql2": "^3.24.6",
     "nodemailer": "^10.1.0",
@@ -98,7 +99,9 @@
   },
   "overrides": {
     "@azure/identity": "4.13.0",
-    "@azure/msal-node": { "uuid": "11.1.1" }
+    "@azure/msal-node": {
+      "uuid": "11.1.1"
+    }
   },
   "bin": {
     "sutra": "dist/server/cli.js",

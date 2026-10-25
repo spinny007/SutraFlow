@@ -391,3 +391,14 @@ table.t tr.click:hover td { background: var(--paper); }
 .gitdiff > div { padding: 0 10px; white-space: pre; }
 .gitdiff .add { background: color-mix(in srgb, #2e9e6a 16%, transparent); }
 .gitdiff .rem { background: color-mix(in srgb, #c0392b 16%, transparent); }
+.project-variable-list { display: grid; gap: 12px; min-width: 0; }
+.project-variable-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.project-variable-card > label { display: grid; gap: 4px; min-width: 0; grid-column: 1; }
+.project-variable-card > .x { grid-column: 2; grid-row: 1; align-self: start; }
+.project-variable-value { grid-column: 1 / -1; min-width: 0; overflow-wrap: anywhere; }
+.project-variable-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.project-variable-toggle { grid-column: 1; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border: 0; padding: 0; background: none; color: inherit; cursor: pointer; text-align: left; min-width: 0; overflow-wrap: anywhere; }
+.project-variable-toggle > .code { min-width: 0; flex: 1; }
+.project-variable-toggle > .muted { font-size: 12px; }
+.project-variable-body { grid-column: 1 / -1; min-width: 0; }
+.project-variable-body > label { display: grid; gap: 4px; margin-bottom: 8px; }

@@ -1,0 +1,22 @@
+/*
+ * SutraFlow
+ * Copyright (c) 2026-27 Surya Partap Singh
+ * Developer: Surya Partap Singh | Website: MixAgile.com
+ * File version: 2.0.10
+ * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+ * A commercial licence is available; see COMMERCIAL-LICENSE.md.
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+import type { ProjectVariable } from './types.js';
+export type VariableDraft = ProjectVariable & { editKey: number };
+export type SecretDraftStore = () => Promise<string | undefined>;
+/** Only opaque references enter the project document. A failed store aborts the project save. */
+export async function prepareVariableSave(rows: readonly VariableDraft[], stores: ReadonlyMap<number, SecretDraftStore>): Promise<ProjectVariable[]> {
+  const result: ProjectVariable[] = [];
+  for (const row of rows) {
+    const { editKey, ...value } = row;
+    const reference = row.type === 'secret' ? await stores.get(editKey)?.() : undefined;
+    result.push(reference === undefined ? value : { ...value, value: reference });
+  }
+  return result;
+}

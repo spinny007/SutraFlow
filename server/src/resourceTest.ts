@@ -7,13 +7,14 @@
  * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
  * SPDX-License-Identifier: AGPL-3.0-only
  */
-import { getSecret } from './secrets.js';
+import { getSecret, missingSecretError } from './secrets.js';
 import { effectiveVariables, engineVariableValues } from './projects.js';
 import { resolveResourceConfig } from './settings.js';
-import type { Resource } from './resources.js';
+import { resolveConnectionConfig, type Resource } from './resources.js';
 import { applyAuth, dispatcherFor, httpCall, tlsFromConnection } from './security/outbound.js';
 import { aiCall } from './ai/providers.js';
 import { testDatabase } from './connectors/db.js';
+import { testMongoConnection } from './connectors/mongodb.js';
 import { testBroker } from './connectors/bus.js';
 import { testMail } from './connectors/email.js';
 import { testRemote } from './connectors/remote.js';
@@ -31,12 +32,12 @@ export interface ResourceInput { id?: string; kind: string; name?: string; proje
 /** The settings as they are on screen, with Project and Engine properties filled in, and a secret reader. */
 export function prepare(input: ResourceInput) {
   const t0 = Date.now();
-  const config = resolveResourceConfig(input.config || {}, { gv: effectiveVariables(input.project_id ?? null).values, ev: engineVariableValues() });
+  const config = resolveConnectionConfig(input.config || {}, input.kind, input.project_id);
   const r: Resource = { id: input.id || `test-${t0}`, kind: input.kind, name: input.name || input.kind, project_id: input.project_id ?? null, config, rev: `test-${t0}` } as Resource;
   const secret = (name: string, what = 'Secret') => {
     if (!name) throw new Error(`${what} is not set`);
     const v = getSecret(name);
-    if (v === undefined) throw new Error(`${what}: secret "${name}" does not exist. Add it under Resources > Secrets.`);
+    if (v === undefined) throw missingSecretError(name, what);
     return v;
   };
   return { r, secret };
@@ -84,6 +85,8 @@ async function run(r: Resource, secret: (n: string, w?: string) => string): Prom
       return testMail(r, secret);
     case 'database':
       return testDatabase(r, secret);
+    case 'mongodb':
+      return testMongoConnection(r, secret);
     case 'sftp':
     case 'ftp':
       return testRemote(r, secret);

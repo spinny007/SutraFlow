@@ -21,6 +21,7 @@ import { codeActivities } from './code.js';
 import { transformActivities } from './transform.js';
 import { emailActivities } from '../connectors/email.js';
 import { dbActivities } from '../connectors/db.js';
+import { mongoCandidates } from '../connectors/mongodb.js';
 import { busActivities } from '../connectors/bus.js';
 import { firebaseActivities } from '../connectors/firebase.js';
 import { saasActivities } from '../connectors/saas.js';
@@ -42,6 +43,7 @@ export const PALETTES = [
   { id: 'files', name: 'Files', color: 'data' },
   { id: 'remote', name: 'SFTP / FTP', color: 'data' },
   { id: 'db', name: 'DB Ops', color: 'data' },
+  { id: 'mongodb', name: 'MongoDB', color: 'data' },
   { id: 'memory', name: 'Memory tables', color: 'data' },
   { id: 'bus', name: 'Service Bus', color: 'flow' },
   { id: 'email', name: 'Email', color: 'general' },
@@ -56,7 +58,7 @@ export const PALETTES = [
 ];
 
 export const allActivities = [
-  ...coreActivities, ...processActivities, ...transformActivities, ...httpActivities, ...soapActivities, ...wsActivities, ...fileActivities, ...remoteActivities, ...dbActivities, ...memoryActivities, ...busActivities,
+  ...coreActivities, ...processActivities, ...transformActivities, ...httpActivities, ...soapActivities, ...wsActivities, ...fileActivities, ...remoteActivities, ...dbActivities, ...mongoCandidates, ...memoryActivities, ...busActivities,
   ...emailActivities, ...firebaseActivities, ...saasActivities, ...chatActivities, ...azureActivities, ...microsoftActivities, ...codeActivities, ...scriptActivities, ...releaseActivities, ...aiActivities, ...agentActivities, ...mcpActivities,
 ];
 

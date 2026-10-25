@@ -8,6 +8,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 import crypto from 'node:crypto';
+import { effectiveVariables, engineVariableValues } from '../projects.js';
 import { now, dbKind, memoryStore, q } from '../db.js';
 import { asyncDatabase, localStore, type AsyncStore, type TxBody, type TxQ } from '../asyncdb.js';
 import { config } from '../config.js';
@@ -282,6 +283,7 @@ export class Engine {
       : o.doc.nodes.find(n => this.activities.get(n.type)?.trigger);
     if (!trig) throw new Error('The Sutra has no trigger step');
     if (!this.activities.get(trig.type)?.trigger) throw new Error(`${trig.name} is not a trigger`);
+    await this.activities.get(trig.type)?.validateStart?.({ node: trig, input: o.input, projectId: o.projectId ?? null, scope: { gv: effectiveVariables(o.projectId ?? null).values, ev: engineVariableValues() } });
     const id = o.id || crypto.randomUUID();
     const trace = parseTraceparent(o.traceparent);
     const state: RunState = { outputs: {}, vars: initialVariables(o.doc), live: { [trig.id]: true }, skips: {}, skipped: {}, joins: {}, logs: [], depth: o.depth || 0, ...(trace ? { trace } : {}) };

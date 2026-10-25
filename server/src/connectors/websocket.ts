@@ -21,6 +21,7 @@ import { getSecret } from '../secrets.js';
 import { resolve as resolveTemplate } from '../template.js';
 import { F, when } from '../palettes/common.js';
 import { wsSend } from '../gateway/websocket.js';
+import { messageStartPayload } from '../contracts.js';
 
 export const WS_KINDS: ResourceKind[] = [
   {
@@ -69,14 +70,15 @@ export const wsActivities: Activity[] = [
       F('testRequest', 'Test message (JSON)', 'code', '{\n  "event": "message",\n  "connectionId": "test",\n  "message": { "type": "subscribe", "orderId": "A-1001" }\n}'),
     ],
     outputHint: { event: 'message', connectionId: '', path: '/ws/orders', params: {}, message: {}, auth: { subject: '', method: '' }, client: { ip: '' } },
+    validateStart: async c => { await messageStartPayload('wsService', c.node.config, c.input, c.scope, c.projectId, c.node.name); },
     outputSchema: (cfg, h) => {
       const t = h.infer({ event: 'message', connectionId: '', path: '', params: {}, message: null, auth: { subject: '', method: '', claims: {} }, client: { ip: '', secure: true }, code: 1000, reason: '' });
       const body = h.schema(cfg.bodySchema);
       t.children = t.children!.map(ch => (ch.name === 'message' ? (body ? { ...body, name: 'message' } : h.infer(safeJson(cfg.testRequest)?.message ?? {}, 'message')) : ch));
       return t;
     },
-    execute: c => {
-      const req = c.input ?? safeJson(c.raw('testRequest')) ?? {};
+    execute: async c => {
+      const req = await messageStartPayload('wsService', c.node.config, c.input, c.scope, c.projectId, c.node.name);
       return { port: ['open', 'close'].includes(req.event) ? req.event : 'message', out: req };
     },
   },

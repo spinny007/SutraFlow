@@ -77,8 +77,10 @@ export const fileActivities: Activity[] = [
       F('testEvent', 'Test event (JSON)', 'code', '{\n  "event": "added",\n  "path": "C:/sutra/inbox/orders.csv",\n  "name": "orders.csv",\n  "size": 120,\n  "rows": [{ "id": 1, "amount": 100 }]\n}'),
     ],
     outputSchema: (cfg, h) => shapeWith(h, cfg, [{ name: 'event', type: 'string', enum: ['added', 'modified', 'removed'] }]),
-    execute: c => {
+    execute: async c => {
       const e = c.input ?? JSON.parse(c.raw('testEvent') || '{}');
+      const { validateFileEvent } = await import('./fileformat.js');
+      await validateFileEvent(c, e);
       return { port: ['added', 'modified', 'removed'].includes(e.event) ? e.event : 'added', out: e };
     },
   },

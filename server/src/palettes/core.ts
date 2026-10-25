@@ -17,7 +17,8 @@ import { F, when, isObj, listOf, parseJsonText, needList, OPS, compare } from '.
 import { truthy } from '../expr.js';
 import { checkMappedValue } from '../mapping-check.js';
 import { validateStructured } from '../schema-validation.js';
-import { engineVariableValues, publicProjectVariableValues } from '../projects.js';
+import { manualStartPayload, messageStartPayload, soapStartPayload } from '../contracts.js';
+import { publicEngineVariableValues, publicProjectVariableValues } from '../projects.js';
 
 const safeJson = (t: unknown): any => { if (typeof t !== 'string') return t; try { return JSON.parse(t); } catch { return undefined; } };
 /** Route names from a kv field ([{k, v}]) or a comma list. */
@@ -30,11 +31,14 @@ const triggers: Activity[] = [
     type: 'start', palette: 'triggers', name: 'Manual start', glyph: '▶', trigger: true, ports: ['out'],
     desc: 'Starts the Sutra from the studio or the Run API, with a test payload.',
     fields: [
-      F('schema', 'Payload schema', 'schema', '', { help: 'Optional. Describes the payload for mapping in later steps.' }),
+      F('schema', 'Payload schema', 'schema', '', { schemaKinds: ['json'], help: 'Describes the payload. Turn strict validation On to enforce it before a run starts.' }),
+      F('validateSchema', 'Strict schema validation', 'bool', false, { help: 'On requires a JSON Schema/sample and rejects invalid configured or supplied input before processing. Off is descriptive only.' }),
       F('payload', 'Test payload (JSON)', 'code', '{\n  "orderId": "A-1001"\n}'),
     ],
     outputSchema: (cfg, h) => h.schema(cfg.schema) || h.infer(safeJson(cfg.payload) ?? {}),
-    execute: c => ({ out: c.input ?? parseJsonText(c.raw('payload'), 'Test payload') ?? {} }),
+    execute: async c => ({ out: await manualStartPayload(c.node.config, c.input, c.scope, c.projectId, c.node.name) }),
+    validateStart: async c => { await manualStartPayload(c.node.config, c.input, c.scope, c.projectId, c.node.name); },
+    designCheck: cfg => cfg.schema && !cfg.validateSchema ? ['Payload schema is descriptive only; enable Strict schema validation to enforce it.'] : [],
   },
   {
     type: 'timer', palette: 'triggers', name: 'Timer', glyph: '⏱', trigger: true, ports: ['out'],
@@ -74,7 +78,8 @@ const triggers: Activity[] = [
       t.children = t.children!.map(ch => (ch.name === 'body' ? bodyNode : ch));
       return t;
     },
-    execute: c => ({ out: c.input ?? parseJsonText(c.raw('testRequest'), 'Test request') ?? {} }),
+    execute: async c => ({ out: await messageStartPayload('restService', c.node.config, c.input, c.scope, c.projectId, c.node.name) }),
+    validateStart: async c => { await messageStartPayload('restService', c.node.config, c.input, c.scope, c.projectId, c.node.name); },
   },
   {
     type: 'soapService', palette: 'triggers', name: 'SOAP service', glyph: '⧉', trigger: true,
@@ -93,9 +98,10 @@ const triggers: Activity[] = [
       F('testRequest', 'Test request (JSON)', 'code', '{\n  "operation": "GetOrder",\n  "body": { "OrderId": "A-1001" }\n}'),
     ],
     outputHint: { operation: 'GetOrder', body: {}, header: {}, auth: { subject: '', method: '' }, client: { ip: '' } },
+    validateStart: async c => { await soapStartPayload(c.node.config, c.input, c.scope, c.projectId, c.node.name); },
     outputSchema: (cfg, h) => h.infer({ operation: '', body: safeJson(cfg.testRequest)?.body ?? {}, header: {}, soapAction: '', auth: { subject: '', method: '' }, client: { ip: '', secure: true } }),
-    execute: c => {
-      const req = c.input ?? parseJsonText(c.raw('testRequest'), 'Test request') ?? {};
+    execute: async c => {
+      const req = await soapStartPayload(c.node.config, c.input, c.scope, c.projectId, c.node.name);
       const ops = listOf(c.raw('operations'));
       const op = ops.find(o => o.toLowerCase() === String(req.operation || '').toLowerCase());
       if (ops.length && !op) throw new Error(`Operation "${req.operation}" is not one of: ${ops.join(', ')}`);
@@ -245,7 +251,7 @@ const flow: Activity[] = [
     outputHint: { scope: 'Project', properties: {}, count: 0, name: '', value: null, found: true },
     execute: c => {
       const scope = c.raw('scope') === 'Engine' ? 'Engine' : 'Project';
-      const values = scope === 'Engine' ? engineVariableValues() : publicProjectVariableValues(c.projectId);
+      const values = scope === 'Engine' ? publicEngineVariableValues() : publicProjectVariableValues(c.projectId);
       if (c.raw('what') !== 'one property') return { out: { scope, properties: structuredClone(values), count: Object.keys(values).length } };
       const name = String(c.v('name') ?? '').trim();
       if (!name) throw new Error('Property name is empty');
