@@ -9,6 +9,35 @@
  */
 import type { ActivityMeta, FlowDoc, FlowNode } from './types.js';
 
+/** References must follow field evaluation rules: literal JSON braces are not workflow paths. */
+export function refsIn(src: unknown): string[] {
+  if (typeof src !== 'string' || !src) return [];
+  if (src.startsWith('=')) return [...src.matchAll(/\{([^{}]+)\}/g)].map(m => m[1].trim());
+  return [...src.matchAll(/\{\{\s*([^{}|]+?)\s*(\|[^{}]*)?\}\}/g)].map(m => m[1].trim());
+}
+
+export function mappingPreviewNeedsRun(src: unknown, scope: Record<string, any>) {
+  return !scope.run?.id && !scope.sutra?.id && refsIn(src).some(ref => /^(input|nodes|run|sutra|process|vars|trigger|item|index|iteration)(\.|\[|$)/.test(ref));
+}
+
+/** Resolve display aliases only; never rewrite stored formulas or invent source data. */
+export function mappingDisplayRef(ref: string, inputName?: string) {
+  for (const alias of ['run', 'process']) {
+    if (ref === alias || ref.startsWith(alias + '.') || ref.startsWith(alias + '[')) return 'sutra' + ref.slice(alias.length);
+  }
+  if (inputName) {
+    const segment = /^[^.[\]{}|"'\s][^.[\]{}|"']*$/.test(inputName) ? '.' + inputName : `["${inputName}"]`;
+    const root = 'nodes' + segment;
+    if (ref === root || ref.startsWith(root + '.') || ref.startsWith(root + '[')) return 'input' + ref.slice(root.length);
+  }
+  return ref;
+}
+
+export function mappingRunContext(run: { id: string; flowName: string; version?: number | null; startedAt: string; source?: string | null } | null) {
+  const context = run ? { id: run.id, name: run.flowName, flow: run.flowName, version: run.version, startedAt: run.startedAt, source: run.source } : {};
+  return { run: context, sutra: context, process: context };
+}
+
 export function mappingSources(doc: FlowDoc, nodeId: string, activities: (Pick<ActivityMeta, 'type' | 'name'> & Partial<Pick<ActivityMeta, 'ports'>>)[]) {
   const label = (node: FlowNode) => `${node.name} (${activities.find(a => a.type === node.type)?.name || node.type})`;
   const walk = (direction: 'before' | 'after') => {
@@ -30,6 +59,7 @@ export function mappingSources(doc: FlowDoc, nodeId: string, activities: (Pick<A
   // Do not collapse streaming/multi-port outputs: their named result can differ from this task's input.
   const alias = direct.length === 1 && Array.isArray(ports) && ports.filter(p => p !== 'error').length === 1 ? direct[0].id : undefined;
   return {
+    inputAliasName: doc.nodes.find(n => n.id === alias)?.name,
     // Multiple incoming connections do not identify which branch supplied this task's input.
     inputLabel: direct.length === 1 ? `${label(direct[0])} — current input` : direct.length ? `Current input — incoming activities: ${direct.map(label).join(', ')}` : 'Current input (starter / supplied data)',
     // A unique predecessor already appears as current input. Named-output formulas remain valid;

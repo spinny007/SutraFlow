@@ -9,7 +9,8 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mappingSources } from '../web/src/mapping-sources.js';
+import { mappingSources, mappingDisplayRef, mappingRunContext, mappingPreviewNeedsRun, refsIn } from '../web/src/mapping-sources.js';
+import { resolve } from '../server/src/template.js';
 import type { FlowDoc } from '../web/src/types.js';
 
 const doc: FlowDoc = {
@@ -23,14 +24,36 @@ test('mapping names current input and earlier activities with their activity typ
   assert.equal(result.inputLabel, 'Fetch customer (SQL query) — current input');
   assert.deepEqual(result.sources.map(s => s.node.id), ['start', 'parallel']);
   assert.match(result.sources[1].label, /other branch; available only after completion/);
+  assert.equal(result.inputAliasName, 'Fetch customer');
+  assert.equal(mappingDisplayRef('nodes.Fetch customer.id', result.inputAliasName), 'input.id');
+  assert.equal(mappingDisplayRef('nodes.Fetch customerExtra.id', result.inputAliasName), 'nodes.Fetch customerExtra.id');
+  assert.equal(mappingDisplayRef('nodes["Read.v2"].amount', 'Read.v2'), 'input.amount');
+  assert.equal(mappingDisplayRef('run.id'), 'sutra.id');
+  assert.equal(mappingDisplayRef('process.id'), 'sutra.id');
+  assert.equal(mappingDisplayRef('runner.id'), 'runner.id');
+  assert.deepEqual(refsIn('[{"$match":{"status":"processed"}}]'), [], 'literal MongoDB stages are not workflow references');
+  assert.deepEqual(refsIn("=list(object('$match', object('_id', {run.id})))"), ['run.id']);
+  assert.deepEqual(refsIn('{{nodes.Read.documents}}'), ['nodes.Read.documents']);
+  assert.equal(mappingPreviewNeedsRun("=list(object('$match', object('_id', {run.id})))", mappingRunContext(null)), true);
+  assert.equal(mappingPreviewNeedsRun('={input.amount}', mappingRunContext(null)), true);
+  assert.equal(mappingPreviewNeedsRun('[{"$match":{"status":"processed"}}]', mappingRunContext(null)), false);
+  assert.equal(mappingPreviewNeedsRun('={{gv.STATUS}}', { gv: { STATUS: 'processed' } }), false);
+  const scope = mappingRunContext({ id: 'selected-run', flowName: 'Current flow', version: 1, startedAt: '2026-10-25', source: 'test' });
+  assert.equal(scope.run, scope.sutra); assert.equal(scope.run, scope.process);
+  assert.equal(scope.run.id, 'selected-run');
+  assert.equal(mappingPreviewNeedsRun('={run.id}', scope), false);
+  for (const alias of ['run', 'sutra', 'process']) assert.deepEqual(resolve(`=list(object('$match', object('_id', {${alias}.id})))`, scope), [{ $match: { _id: 'selected-run' } }]);
+  assert.deepEqual(mappingRunContext(null), { run: {}, sutra: {}, process: {} }, 'clearing a run must not retain previous context');
 });
 test('multiple incoming branches do not falsely identify a unique runtime source', () => {
   const joined = { ...doc, edges: [...doc.edges, { id: 'join', from: 'parallel', to: 'map', port: 'out' }] };
   assert.match(mappingSources(joined, 'map', activities).inputLabel, /incoming activities: Fetch customer \(SQL query\), parallel \(Map data\)/);
+  assert.equal(mappingSources(joined, 'map', activities).inputAliasName, undefined);
 });
 test('streaming and multi-port predecessor outputs are not incorrectly collapsed into current input', () => {
   const meta = [{ type: 'query', name: 'Streaming query', ports: ['batch', 'out'] }, { type: 'mapper', name: 'Map data', ports: ['out'] }];
   assert.ok(mappingSources(doc, 'map', meta).sources.some(s => s.node.id === 'earlier'));
+  assert.equal(mappingSources(doc, 'map', meta).inputAliasName, undefined);
 });
 test('starter, unknown types and cycles have safe labels without self references', () => {
   assert.equal(mappingSources(doc, 'start', []).inputLabel, 'Current input (starter / supplied data)');

@@ -12,7 +12,8 @@ import { get, post } from './api';
 import { visible } from './Fields';
 import { useCatalog } from './ui';
 import { renameMappingField, addMappingField } from './mapping-fields';
-import { mappingSources } from './mapping-sources';
+import { mappingSources, mappingDisplayRef, mappingRunContext, mappingPreviewNeedsRun, refsIn } from './mapping-sources';
+export { refsIn } from './mapping-sources';
 import { observedShape } from './mapping-values';
 import { MappingSchemaTools, TargetFieldOptions, MappingPreview } from './MappingTools';
 import './mapping-tools.css';
@@ -47,18 +48,6 @@ export function inferShape(v: any, name: string, depth = 0): SNode {
   }
   if (v && typeof v === 'object') return { name, type: 'object', children: Object.entries(v).map(([k, x]) => inferShape(x, k, depth + 1)) };
   return { name, type: typeof v === 'number' ? 'number' : typeof v === 'boolean' ? 'boolean' : v == null ? 'any' : 'string' };
-}
-
-/** Field references inside a formula or template. */
-export function refsIn(src: unknown): string[] {
-  if (typeof src !== 'string' || !src) return [];
-  const out: string[] = [];
-  if (src.startsWith('=') || !src.includes('{{')) {
-    for (const m of src.matchAll(/\{([^{}]+)\}/g)) out.push(m[1].trim());
-  } else {
-    for (const m of src.matchAll(/\{\{\s*([^{}|]+?)\s*(\|[^{}]*)?\}\}/g)) out.push(m[1].trim());
-  }
-  return out;
 }
 
 const seg = (k: string) => (/^[^.[\]{}|"'\s][^.[\]{}|"']*$/.test(k) ? '.' + k : `["${k}"]`);
@@ -291,7 +280,7 @@ export function Mapper({ node, act, doc, design, run, outputs, updateNode }: Pro
       const v = getVal(t);
       const srcs = (t.kind === 'map' && v && typeof v === 'object'
         ? [v.expr, v.forEach, v.ifCond, v.otherwise, ...(v.choose || []).flatMap(c => [c.when, c.expr])].flatMap(x => refsIn(x ? '=' + x : ''))
-        : refsIn(v)).map(raw => absolutize(t, raw).replace(/\[\d+\]/g, ''));
+        : refsIn(v)).map(raw => mappingDisplayRef(absolutize(t, raw), sourceInfo.inputAliasName).replace(/\[\d+\]/g, ''));
       if (!srcs.length) continue;
       const linked = t.id === sel || (!!focusSrc && srcs.some(p => under(p, focusSrc) || under(focusSrc, p)));
       if (linked) litTargets.add(t.id);
@@ -317,7 +306,7 @@ export function Mapper({ node, act, doc, design, run, outputs, updateNode }: Pro
     R.querySelectorAll<HTMLElement>('.trow').forEach(e => e.classList.toggle('linked', litTargets.has(e.dataset.target || '') && e.dataset.target !== sel));
     L.querySelectorAll<HTMLElement>('.srow').forEach(e => e.classList.toggle('focus', !!focusSrc && e.dataset.ref === focusSrc));
     setLines(prev => (prev.length === out.length && prev.every((l, i) => l.d === out[i].d && l.on === out[i].on) ? prev : out));
-  }, [target, cfg, sel, focusSrc]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [target, cfg, sel, focusSrc, sourceInfo.inputAliasName]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useLayoutEffect(() => { recompute(); });
   useEffect(() => {
@@ -333,6 +322,11 @@ export function Mapper({ node, act, doc, design, run, outputs, updateNode }: Pro
 
   return (
     <div className="mapper">
+      {node.type === 'mongoAggregate' && <div className="hint" style={{ padding: 10 }}>
+        <b>Aggregate queries the MongoDB collection, not the previous activity's document.</b> Pipeline is an ordered JSON array of stage objects, not an array of data records.
+        Use <code>$match</code> to filter, <code>$project</code> to select fields, and <code>$group</code> to calculate totals.
+        Sutra Data supplies parameters to the query; collection fields are not automatically discovered. Select Pipeline below for syntax and source references.
+      </div>}
       <div className="mapper-panes" ref={box}>
         <div className="mpane" ref={leftRef} onScroll={recompute}>
           <div className="mhead"><b>Sutra Data</b><input className="inp" placeholder="Filter" aria-label="Filter Sutra data" value={filter} onChange={e => setFilter(e.target.value)} /></div>
@@ -381,8 +375,7 @@ function buildScope(roots: { path: string; value: any }[], run: RunDetail | null
   const item = roots.find(r => r.path === 'item')?.value;
   return {
     input, nodes: outputs, vars: run?.vars || {}, gv, ev: roots.find(r => r.path === 'ev')?.value, item, index: 1,
-    sutra: run ? { id: run.id, name: run.flowName, version: run.version, startedAt: run.startedAt, source: run.source } : {},
-    process: run ? { id: run.id, name: run.flowName, flow: run.flowName, version: run.version, startedAt: run.startedAt, source: run.source } : {},
+    ...mappingRunContext(run),
     trigger: run ? outputs[run.doc.nodes.find(n => n.id === run.triggerNode)?.name || ''] : undefined,
   };
 }
@@ -636,7 +629,7 @@ function FormulaEditor({ t, value, setVal, scope, functions, relativize }: {
   const refs = useRef<Record<string, HTMLTextAreaElement | HTMLInputElement | null>>({});
   const [group, setGroup] = useState('String');
   const [fnFilter, setFnFilter] = useState('');
-  const [preview, setPreview] = useState<{ ok: boolean; value?: any; error?: string } | null>(null);
+  const [preview, setPreview] = useState<{ ok: boolean; value?: any; error?: string; unavailable?: boolean } | null>(null);
   const groups = [...new Set(functions.map(f => f.group))];
   const expr = isMap ? rule.expr ?? '' : String(value ?? '');
 
@@ -662,12 +655,18 @@ function FormulaEditor({ t, value, setVal, scope, functions, relativize }: {
   // Live preview of the main formula against the last run's data.
   useEffect(() => {
     if (!expr.trim()) { setPreview(null); return; }
+    if (mappingPreviewNeedsRun(isMap ? '=' + expr : expr, scope)) {
+      setPreview({ ok: false, unavailable: true, error: 'Preview needs a selected test run for these runtime references. No previous-run values or substitute data are used.' });
+      return;
+    }
+    setPreview(null);
+    let current = true;
     const timer = setTimeout(() => {
       post('/api/expr/eval', isMap ? { expr, scope } : { expr, scope, mode: 'field' })
-        .then(setPreview)
-        .catch(e => setPreview({ ok: false, error: e.message }));
+        .then(result => { if (current) setPreview(result); })
+        .catch(e => { if (current) setPreview({ ok: false, error: e.message }); });
     }, 300);
-    return () => clearTimeout(timer);
+    return () => { current = false; clearTimeout(timer); };
   }, [expr, isMap, scope]);
 
   const dropText = (key: string) => ({
@@ -733,14 +732,16 @@ function FormulaEditor({ t, value, setVal, scope, functions, relativize }: {
           </>
         ) : (
           <div className="fld">
+            {t.field.help && <div className="hint">{t.field.help}</div>}
             <textarea ref={el => { refs.current.expr = el; }} className="inp code" rows={t.kind === 'field' && (t.field.type === 'code' || t.field.type === 'textarea') ? 6 : 3} spellCheck={false}
               value={String(value ?? '')} onChange={e => setVal(e.target.value)} {...dropText('expr')} />
             <div className="hint">Start with <code>=</code> for a formula, e.g. <code>{"=concat('Order ', {input.id})"}</code>; plain text may contain <code>{'{{input.x}}'}</code> templates.</div>
+            {refsIn(value).length > 0 && <div className="hint">Source references: {[...new Set(refsIn(value))].map((ref, i) => <span key={ref}>{i ? ', ' : ''}<code>{ref}</code>{mappingDisplayRef(ref) !== ref ? ' (shown under $_sutraContext)' : ''}</span>)}</div>}
           </div>
         )}
         {preview && (preview.ok
           ? <div className="okbox mono" style={{ whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'auto' }}>= {typeof preview.value === 'object' ? JSON.stringify(preview.value, null, 1) : String(preview.value)}</div>
-          : <div className="errbox mono">{preview.error}</div>)}
+          : <div className={preview.unavailable ? 'hint' : 'errbox mono'}>{preview.error}</div>)}
       </div>
       <div className="fe-fns">
         <input className="inp" placeholder="Search functions" aria-label="Search functions" value={fnFilter} onChange={e => setFnFilter(e.target.value)} />

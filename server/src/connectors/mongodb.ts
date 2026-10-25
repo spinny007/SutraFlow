@@ -9,7 +9,8 @@
  */
 import crypto from 'node:crypto';
 import { MongoClient, BSON, type Document, type MongoClientOptions } from 'mongodb';
-import type { Activity, ExecCtx } from '../engine/types.js';
+import type { Activity, ExecCtx, SchemaHelpers } from '../engine/types.js';
+import type { SNode } from '../schemas.js';
 import { requireResource, type Resource } from '../resources.js';
 import { F, when } from '../palettes/common.js';
 import { enforceContract, contractDefinition } from '../contracts.js';
@@ -140,7 +141,11 @@ function activityCollection(c: ExecCtx) {
 }
 const filterField = F('filter', 'Filter (JSON / Extended JSON)', 'text', '{}', { tpl: true, help: 'Structured query operators are supported. No JavaScript or shell expressions.' });
 const schemaFields = (label: string) => [F('schema', label, 'schema', '', { schemaKinds: ['json'], vars: true }), F('validateSchema', 'Strict schema validation', 'bool', false, { help: 'On requires the selected contract and validates the documented subject without coercion.' })];
-const docField = (key: string, label: string, value = '{{input}}') => F(key, label, 'text', value, { tpl: true });
+const docField = (key: string, label: string, value = '{{input}}', help?: string) => F(key, label, 'text', value, { tpl: true, ...(help ? { help } : {}) });
+/** Only declared contracts describe row fields; never sample a collection or infer stored rows from update modifiers. */
+function mongoRowsShape(cfg: Record<string, any>, h: SchemaHelpers, key: string): SNode {
+  return { name: 'result', type: 'object', children: [{ ...(h.schema(cfg.schema) || { type: 'any' as const }), name: key, repeats: true }, { name: 'count', type: 'integer' }] };
+}
 function resourceFor(c: ExecCtx) {
   const resource = requireResource(c.raw('connection'), 'mongodb', 'MongoDB connection');
   if (resource.project_id && resource.project_id !== c.projectId) throw new Error('MongoDB connection belongs to another project.');
@@ -207,6 +212,12 @@ const candidates: Activity[] = [
     desc: 'Finds one/many documents, counts matches or returns distinct values. Strict mode validates each returned document/value, not the result envelope. BSON is preserved as canonical Extended JSON.',
     fields: [connectionField, collectionField, collectionInputField, F('operation', 'Operation', 'select', 'find', { options: ['find', 'findOne', 'count', 'distinct'] }), filterField, docField('projection', 'Projection', '{}'), docField('sort', 'Sort', '{}'), F('skip', 'Skip', 'number', 0), F('limit', 'Runtime limit (0 = no query limit)', 'number', 0), F('field', 'Distinct field', 'text', '', when('operation', 'distinct')), ...schemaFields('Returned document/value schema')],
     outputHint: { documents: [], count: 0 },
+    outputSchema: (cfg, h) => {
+      const op = cfg.operation || 'find';
+      if (op === 'count') return { name: 'result', type: 'object', children: [{ name: 'count', type: 'integer' }] };
+      if (op === 'distinct') return mongoRowsShape(cfg, h, 'values');
+      return ['find', 'findOne'].includes(op) ? mongoRowsShape(cfg, h, 'documents') : { name: 'result', type: 'any' };
+    },
     execute: async c => {
       const filter = mongoDocument(c.v('filter') ?? '{}', 'Filter'); noJavascript(filter);
       const { db } = await mongoConnection(resourceFor(c), c.secret);
@@ -227,6 +238,11 @@ const candidates: Activity[] = [
     desc: 'Updates one/many matches or replaces one document. Strict mode applies to the update/replacement request. Modifier validation is not a guarantee about the final stored document; collection validators remain authoritative.',
     fields: [connectionField, collectionField, collectionInputField, filterField, F('operation', 'Operation', 'select', 'updateOne', { options: ['updateOne', 'updateMany', 'replaceOne', 'findOneAndUpdate'] }), docField('update', 'Update operators or replacement'), docField('arrayFilters', 'Array filters (optional JSON array)', '[]'), F('returnDocument', 'Returned document', 'select', 'after', { options: ['after', 'before'], ...when('operation', 'findOneAndUpdate') }), F('upsert', 'Insert when not found', 'bool', false), F('allowAll', 'Allow empty filter for updateMany', 'bool', false), ...schemaFields('Update request / replacement schema')],
     outputHint: { acknowledged: true, matchedCount: 0, modifiedCount: 0, upsertedCount: 0, upsertedId: null },
+    outputSchema: (cfg, h) => cfg.operation === 'findOneAndUpdate'
+      ? { name: 'result', type: 'object', children: [{ name: 'document', type: 'any', doc: 'Returned before/after document, or null when no match. The update-request schema is not its output contract.' }, { name: 'hasDocument', type: 'boolean' }] }
+      : !cfg.operation || ['updateOne', 'updateMany', 'replaceOne'].includes(cfg.operation)
+        ? h.infer({ acknowledged: true, matchedCount: 0, modifiedCount: 0, upsertedCount: 0, upsertedId: null }, 'result')
+        : { name: 'result', type: 'any' },
     execute: async c => {
       const filter = mongoDocument(c.v('filter') ?? '{}', 'Filter'), value = c.v('update'); noJavascript(filter);
       await validate(c, typeof value === 'string' ? JSON.parse(value) : value, 'update/replacement request');
@@ -271,9 +287,10 @@ const candidates: Activity[] = [
   },
   {
     type: 'mongoAggregate', palette: 'mongodb', name: 'Aggregate MongoDB documents', glyph: '{}', ports: ['out'],
-    desc: 'Runs a read-only aggregation by default. General MongoDB connections can explicitly enable disk use and output stages when the server permits them. Strict mode validates each returned result document.',
-    fields: [connectionField, collectionField, collectionInputField, docField('pipeline', 'Pipeline (JSON array)', '[]'), F('allowDiskUse', 'Allow disk use', 'bool', false, { help: 'Requires General MongoDB connection capabilities and server support; disabled for the M0 baseline.' }), F('allowOutputStages', 'Allow output stages ($merge / $out)', 'bool', false, { help: 'Explicit write opt-in on General MongoDB only. Output stages can modify data and may return no documents; a zero result count is not a zero-write guarantee.' }), ...schemaFields('Result document schema')],
+    desc: 'Queries the selected MongoDB collection through ordered stages to filter, reshape or group documents and calculate totals. It does not aggregate the preceding activity output automatically. Read-only by default; strict mode validates each returned result document.',
+    fields: [connectionField, collectionField, collectionInputField, docField('pipeline', 'Pipeline (JSON array)', '[]', 'An ordered array of stage objects, not data records. Example: [{"$match":{"status":"processed"}},{"$project":{"name":1,"amount":1}}]. For this run only: =list(object(\'$match\', object(\'_id\', {sutra.id}))). $amount means a MongoDB field; {input.amount} is a SutraFlow parameter inside a formula. [] reads all collection documents within output limits. Output is documents plus count; collection fields are not auto-discovered.'), F('allowDiskUse', 'Allow disk use', 'bool', false, { help: 'Requires General MongoDB connection capabilities and server support; disabled for the M0 baseline.' }), F('allowOutputStages', 'Allow output stages ($merge / $out)', 'bool', false, { help: 'Explicit write opt-in on General MongoDB only. Output stages can modify data and may return no documents; a zero result count is not a zero-write guarantee.' }), ...schemaFields('Result document schema')],
     outputHint: { documents: [], count: 0 },
+    outputSchema: (cfg, h) => mongoRowsShape(cfg, h, 'documents'),
     execute: async c => {
       const raw = c.v('pipeline'); let pipeline: any;
       try { pipeline = typeof raw === 'string' ? BSON.EJSON.parse(raw, { relaxed: false }) : BSON.EJSON.deserialize(raw); } catch { throw new Error('Aggregation pipeline must be valid JSON.'); }

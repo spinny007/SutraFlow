@@ -24,6 +24,24 @@ test('MongoDB BSON types round-trip, invalid documents fail and every exposed ac
   const steps = mongoSamples('sample-connection').flatMap(flow => flow.nodes);
   for (const activity of mongoCandidates) assert.ok(steps.some(step => step.type === activity.type), `${activity.type} needs an executable sample`);
   assert.deepEqual(new Set(steps.filter(step => step.type === 'mongoFind').map(step => step.config.operation)), new Set(['findOne', 'count', 'distinct']));
+  const aggregate = mongoCandidates.find(a => a.type === 'mongoAggregate')!;
+  assert.match(aggregate.desc, /not aggregate the preceding activity output/);
+  const pipeline = aggregate.fields.find(f => f.k === 'pipeline')!;
+  assert.equal(pipeline.tpl, true);
+  for (const phrase of ['array of stage objects', '$match', '$project', '{sutra.id}', 'not auto-discovered']) assert.ok(pipeline.help?.includes(phrase), `pipeline input help explains ${phrase}`);
+  assert.match(steps.find(s => s.type === 'mongoDelete')!.description!, /Intentional sample cleanup/);
+  const { engine } = await import('../server/src/engine/engine.js');
+  const { designSchemas } = await import('../server/src/design.js');
+  engine.register(mongoCandidates);
+  const flow = mongoSamples('sample-connection')[0];
+  const shapes = designSchemas(flow, { tree: () => null, warnings: () => [] });
+  assert.deepEqual(shapes.m7.out?.children?.map(c => c.name), ['document', 'hasDocument']);
+  assert.deepEqual(shapes.m8.in?.children?.map(c => c.name), ['document', 'hasDocument'], 'Aggregate receives the actual selected Update operation envelope');
+  assert.deepEqual(shapes.m4.out?.children?.map(c => c.name), ['count']);
+  assert.deepEqual(shapes.m5.out?.children?.map(c => c.name), ['values', 'count']);
+  const declared = designSchemas(flow, { tree: () => ({ name: 'record', type: 'object', children: [{ name: 'amount', type: 'string' }] }), warnings: () => [] });
+  assert.equal(declared.m8.out?.children?.[0].children?.[0].name, 'amount', 'declared result row schema is exposed without reading the database');
+  assert.equal(declared.m7.out?.children?.[0].type, 'any', 'update request schemas must not be mislabeled as returned document fields');
 });
 test('Atlas M0 activities use isolated seeded data, strict boundaries and real engine execution', { skip: process.env.SUTRA_MONGO_TEST !== '1' ? 'set SUTRA_MONGO_TEST=1 and SUTRA_MONGO_TEST_ENV_FILE' : false }, async t => {
   if (process.env.SUTRA_MONGO_TEST_DNS) dns.promises.setServers(process.env.SUTRA_MONGO_TEST_DNS.split(','));
@@ -62,6 +80,11 @@ test('Atlas M0 activities use isolated seeded data, strict boundaries and real e
       assert.equal((await ok('mongoFind', { filter: '{}', operation: 'count' })).count, 3);
       assert.equal((await ok('mongoFind', { filter: '{}', operation: 'distinct', field: 'status' })).values.length, 2);
       const agg = await ok('mongoAggregate', { pipeline: '[{"$group":{"_id":"$status","total":{"$sum":"$amount"}}}]' }); assert.equal(agg.count, 2);
+      assert.deepEqual(agg.documents.map((d: any) => [d._id, d.total]).sort(), [['active', { $numberInt: '30' }], ['idle', { $numberInt: '30' }]]);
+      const projected = await ok('mongoAggregate', { pipeline: '[{"$match":{"status":"active"}},{"$project":{"_id":0,"status":1,"amount":1}},{"$sort":{"amount":-1}},{"$limit":1}]' }, { status: 'not-the-collection-source' });
+      assert.equal(projected.count, 1);
+      assert.deepEqual(projected.documents, [{ status: 'active', amount: { $numberInt: '20' } }], 'pipeline reads collection records, not the previous activity payload');
+      assert.equal(await db.collection(collection).countDocuments(), 3, 'read-only aggregation must leave the seeded collection intact');
     });
     await t.test('update, replace, upsert, deletion guards and empty results', async () => {
       assert.equal((await ok('mongoUpdate', { filter: '{"_id":"a"}', update: '{"$set":{"status":"done"}}' })).modifiedCount, 1);
