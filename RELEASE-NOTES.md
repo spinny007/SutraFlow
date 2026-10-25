@@ -1,4 +1,12 @@
-# SutraFlow 2.0.10 release notes
+# SutraFlow 2.0.11 release notes — source verified, packaging pending
+
+Core scope: schema-boundary audit, durable per-resource activity admission and code-maintenance housekeeping. Generic Map, MCP input/result, AI Guard and SOAP request/response/reply boundaries now have explicit enforcement; descriptive defaults remain compatible. Connection limits are shared by durable task claims across engines, acquire multiple explicit resources atomically and queue excess work without retry/worker consumption. Capped resources reject in-memory execution rather than silently bypassing admission. Limits do not cover implicit nested integrations, listeners or admin traffic and do not retract external side effects.
+
+First-party files now carry maintainable overview comments with purpose/support, connected imports and function entry points. Non-comment configuration formats have a companion code-navigation index; generated/vendor/private files are excluded. A check-only regression detects drift. The 2.0.10 backlog/deployment history is reconciled with the actual 4800/4810 receipts.
+
+Verification: 437 passed, 0 failed and 27 optional skips in the full suite (including the PostgreSQL-compatible suite); six additional real local PostgreSQL cases passed. Production build, type checks, documentation generators, overview/header gates and dependency audit passed. MongoDB read-only query preview and mixed Bulk Write remain optional next work, not claimed as implemented. X.509 live testing stays deferred. No 2.0.11 deployment or release package is implied by this source change; final evidence and limits are recorded in docs/releases/2.0.11-verification.md.
+
+## Previous release: 2.0.10
 
 Prepared 2026-10-24. Copyright (c) 2026-27 Surya Partap Singh, MixAgile.com. AGPL-3.0-only; a commercial licence is available.
 
