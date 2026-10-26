@@ -16,7 +16,7 @@
  * @end-sutra-file-overview */
 import crypto from 'node:crypto';
 import { hostname as osHostname } from 'node:os';
-import { getPath, asText, toNumber } from './values.js';
+import { getPath, asText, toNumber, isUnsafeKey } from './values.js';
 
 /**
  * Mapping expressions (XPath-style functions and predicates, without XPath's quirks).
@@ -596,7 +596,7 @@ export const FUNCTIONS: Record<string, FnDef> = Object.fromEntries([
     for (const x of list(l)) { const k = s(getPath(x, s(f))); (m.get(k) || m.set(k, []).get(k)!).push(x); }
     return [...m].map(([key, items]) => ({ key, items, count: items.length }));
   }, "group-by({input.orders}, 'customer')"),
-  def('List', 'count-by', 'count-by(list, field)', 'How many items have each value: { value: count }.', 2, 2, (l, f) => { const o: Record<string, number> = {}; for (const x of list(l)) { const k = s(getPath(x, s(f))); o[k] = (o[k] || 0) + 1; } return o; }),
+  def('List', 'count-by', 'count-by(list, field)', 'How many items have each value: { value: count }.', 2, 2, (l, f) => { const m = new Map<string, number>(); for (const x of list(l)) { const k = s(getPath(x, s(f))); m.set(k, (m.get(k) || 0) + 1); } return Object.fromEntries(m); }),
   def('List', 'flatten', 'flatten(list, childField?)', 'Flattens nested lists; with a child field, one item per child carrying its parent as _parent.', 1, 2, (l, f) => {
     if (f === undefined) return list(l).flat(Infinity);
     return list(l).flatMap(x => { const { [s(f)]: kids, ...parent } = x || {}; return list(kids).map(k => (k && typeof k === 'object' && !Array.isArray(k) ? { ...k, _parent: parent } : { value: k, _parent: parent })); });
@@ -604,7 +604,7 @@ export const FUNCTIONS: Record<string, FnDef> = Object.fromEntries([
   def('List', 'slice', 'slice(list, start, count?)', 'Part of a list; start counts from 1.', 2, 3, (l, st, c) => { const b = Math.max(0, num(st) - 1); return list(l).slice(b, c === undefined ? undefined : b + num(c)); }),
   def('List', 'concat-lists', 'concat-lists(list, list, ...)', 'Joins lists into one.', 1, undefined, (...a) => a.flatMap(list)),
   def('List', 'contains-item', 'contains-item(list, value)', 'True when the list holds the value.', 2, 2, (l, v) => list(l).some(x => eq(x, v))),
-  def('List', 'object', "object('key', value, 'key2', value2, ...)", 'Builds an object from key/value pairs.', 0, undefined, (...a) => { const o: Record<string, any> = {}; for (let i = 0; i + 1 < a.length; i += 2) o[s(a[i])] = a[i + 1]; return o; }),
+  def('List', 'object', "object('key', value, 'key2', value2, ...)", 'Builds an object from key/value pairs.', 0, undefined, (...a) => { const pairs: [string, any][] = []; for (let i = 0; i + 1 < a.length; i += 2) { const k = s(a[i]); if (isUnsafeKey(k)) throw new ExprError(`object(): "${k}" is not a data field name`); pairs.push([k, a[i + 1]]); } return Object.fromEntries(pairs); }),
   def('List', 'merge', 'merge(object, object, ...)', 'Combines objects; later fields win.', 1, undefined, (...a) => Object.assign({}, ...a.filter(x => x && typeof x === 'object'))),
 ]);
 

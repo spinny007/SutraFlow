@@ -93,7 +93,7 @@ const FILES: Group[] = [
       ['server/src/contracts.ts', 'Project-scoped strict contract definitions, non-mutating payload checks and Manual/REST/SOAP/WebSocket starter validation shared by engine admission and execution. SOAP operation objects are validated as namespace-aware XML against the real XSD; invalid starter input is rejected before durable run creation.'],
       ['server/src/sample-mongodb.ts', 'Credential-free Atlas M0 lifecycle sample scoped to the current run ID, with strict starter schema, query modes, update, aggregation and precise cleanup.'],
       ['server/src/connectors/mongodb-kind.ts', 'Independent MongoDB connection field metadata, avoiding initialization cycles with the runtime resource registry.'],
-      ['server/src/connectors/mongodb.ts', 'Native Atlas M0 document activities, verified TLS and vault-backed URI, small pooled clients, bounded operations/cursor cleanup and canonical Extended JSON. Only M0-verified activities are registered; advanced capabilities are not implied by driver probes.'],
+      ['server/src/connectors/mongodb.ts', 'Native Atlas M0 document activities, verified TLS and vault-backed URI, small pooled clients, bounded operations/cursor cleanup and canonical Extended JSON. Only M0-verified activities are registered; advanced capabilities are not implied by driver probes. Bulk write sends up to 1000 insert/update/replace/delete operations in one request, with the single-activity guards, and fails the step with the written counts on any failed operation.'],
       ['server/src/mapping-preview.ts', 'Read-only whole-mapping JSON/XML preview and proposed JSON Schema/XSD generation from bounded sample text. No activity dispatch or external connector is executed.'],
       ['server/src/sample-schemas.ts', 'Project-scoped schema contracts attached to newly added samples without replacing existing drafts or edited shared schemas.'],
       ['server/src/sample-mapping.ts', 'Executable typed JSON and XML mapping examples: shared JSON targets and manual XML attributes, namespaces and repeating elements.'],
@@ -160,7 +160,7 @@ const FILES: Group[] = [
       ['server/src/gateway/tls.ts', 'Gateway certificates: off, self-signed, uploaded, or Let\'s Encrypt (ACME HTTP-01) with renewal 30 days before expiry, and client CA for mutual TLS.'],
       ['server/src/mcp.ts', 'Model Context Protocol over Streamable HTTP: tools/list from deployed MCP skill triggers, tools/call starts the Sutra and returns what Reply to AI sends. JSON Schema from shared schemas or simple input rows.'],
       ['server/src/scheduler.ts', 'Timer triggers (cron or interval) of deployed Sutras, on the leader.'],
-      ['server/src/listeners.ts', 'Long-running process starters on the elected leader: folder watchers, mailbox polling, queue and topic subscriptions, Drive and chat polling. Rebuilt one after another when deployments, properties or connections change; General settings are resolved before a listener starts.'],
+      ['server/src/listeners.ts', 'Long-running process starters on the elected leader: folder watchers, mailbox polling, queue and topic subscriptions, Drive and chat polling. Rebuilt one after another when deployments, properties or connections change; General settings are resolved before a listener starts. Each poll runs under withConnection(): a lease on the limited connections the trigger selects, skipped with a status when there is no room; subscriptions hold no permit.'],
     ],
   },
   {
@@ -284,7 +284,12 @@ const FILES: Group[] = [
       ['web/admin/Tuning.tsx', 'Tuning forms for a Sutra and for the engines, with the defaults shown and the change confirmed with its command.'],
       ['web/admin/Gateway.tsx', 'Gateway pages: Traffic (chart, percentiles, busiest and slowest services, apps, request log), Apps and keys, Plans, Firewall, APIs with OpenAPI and gateway options.'],
       ['web/admin/Alerts.tsx', 'Alerts pages: open alerts and history with acknowledge and resolve, alert rules with Check now, channels with Send a test.'],
-      ['web/admin/Chart.tsx', 'Stacked bar chart over time drawn to one scale from the theme colours (Overview runs and gateway traffic).'],
+      ['web/admin/Chart.tsx', 'Stacked bar chart over time with ECharts, coloured from the theme (Overview runs and gateway traffic).'],
+      ['web/admin/EChart.tsx', 'Apache ECharts for the Admin Console, shipped with SutraFlow (no CDN, works offline) and loaded the first time a page shows a chart: theme colours read from the CSS tokens and redrawn when the theme changes, resize following the page, and the shared axis/tooltip/legend style.'],
+      ['web/admin/echarts-setup.ts', 'The ECharts parts the Admin Console uses (bar and line charts, grid, legend, tooltip, mark line, zoom, SVG renderer), registered once; a file of its own in the build, loaded on demand by EChart.tsx.'],
+      ['web/admin/Trace.tsx', 'Admin Console, Traceability: projects and their Sutras by run outcome, run search by id, starter or input value, and a run with its ids, who started it, its input, every step input and output, reply, log and linked runs; download as JSON.'],
+      ['web/admin/Knowledge.tsx', 'Admin Console, Knowledge search: knowledge bases kept in PostgreSQL (pgvector) with their search index, and Build search index for a table that already holds passages.'],
+      ['web/admin/Connections.tsx', 'Admin Console, Connection limits: every limited connection with its limit (and the Project property it comes from), use by steps and by listener or background leases, waiting steps and their reasons, and a graph of use, waiting and limit over 1 hour to 7 days.'],
       ['web/admin/Approvals.tsx', 'What waits for a person and for whom (roles, accounts, progress, due time), with a button to open the Approval Center.'],
       ['web/admin/Engines.tsx', 'Engines of the cluster: alive, leader, load, heartbeat; drain and stop one; delete old runs now.'],
       ['web/admin/Sso.tsx', 'Single sign-on settings: the identity provider, client, claims, groups to roles, creating and linking accounts; shows the redirect address to register.'],
@@ -319,9 +324,10 @@ const FILES: Group[] = [
       ['tools/loadtest.mjs', 'Load test: starts a studio and engines on their own temporary database, runs a benchmark Sutra (durable or in memory, small or big outputs), and reports steps and runs per second, queue wait and step time percentiles, database lock waits and transactions, CPU and memory; can kill an engine to check recovery, limit cores and memory, or soak. Results in docs/benchmarks.'],
       ['tools/bigfiletest.mjs', 'Big file test: one engine with a small memory limit streams a generated CSV file of any size through a Sutra (Read file, Stream in batches) and reports the time and the peak memory of the process.'],
       ['tools/build-sample-projects.ts', 'Builds the sample project zips in samples/ (<code>npm run samples</code>): whole projects as release zips with their files, listed in samples/index.json for New project.'],
-      ['tools/build-user-guide.ts', 'Builds docs/sutraflow-user-guide.html (<code>npm run guide</code>): chapters, every activity with its settings table, connection types, functions, pipes and samples, read from the server code.'],
+      ['tools/build-user-guide.ts', 'Builds docs/sutraflow-user-guide.html and docs/Sutra-Contributor Information.html (<code>npm run guide</code>), from the same page layout: chapters, every activity with its settings table, connection types, functions, pipes and samples, read from the server code.'],
       ['tools/guide/tables.ts', 'The tables of SutraFlow itself, for the guide and this page: what each holds, groups, what is encrypted or grows, and the columns read from db.ts (the schema and the columns later versions add).'],
-      ['tools/guide/chapters.ts', 'User guide chapters.'],
+      ['tools/guide/chapters.ts', 'User guide chapters: for the people who use SutraFlow (Sutra designers, administrators, approvers, and later developers using the developer portal): concepts, mapping, palettes and activities, operations.'],
+      ['tools/guide/contributor.ts', 'Chapters of Sutra-Contributor Information, for people who change SutraFlow itself: building from source, where the code is, file headers and overviews, tests and their real-service variables, security rules, vendored packages, release builds, and the load, soak and big-file test tools.'],
       ['tools/guide/activities.ts', 'Advice text for every activity in the user guide.'],
       ['tools/guide/benchmarks.ts', 'Guide tables made from measurements: the machine profiles of sizing.ts and the load test results in docs/benchmarks.'],
       ['tools/guide/logo.ts', 'The SutraFlow mark used by both pages.'],
@@ -378,7 +384,8 @@ const FILES: Group[] = [
 
 // Every test file gets a row, described by its test names.
 FILES.push({ id: 'maintenance211', title: 'Admission and code maintenance', intro: 'Durable connection admission and first-party code navigation.', files: [
-  ['server/src/connection-limits.ts', 'Resolves explicitly selected resource limits and atomically admits durable task claims across engines; stale permits are fenced by task owner/claim/status. Excess work stays queued. In-memory attempts fail closed for capped resources.'],
+  ['server/src/trace.ts', 'Traceability for the Admin Console: per project, each Sutra with its runs by outcome over a period; runs found by id, by who started them or by a value in their input; who or what started a run (recorded since 2.1.0, worked out from the source for older runs); and the runs a run called or was called by (Call Sutra). Reads the runs and tasks tables, filtered to the projects the caller may see.'],
+  ['server/src/connection-limits.ts', 'One admission service for every use of a limited connection (Maximum concurrent activities, Project properties allowed), cluster-wide in the engine database. A step is counted on the connections it selects and, transitively, on those their settings select (a knowledge base: its vector database and AI provider), all at once or none; its permit belongs to its durable claim. Listener polls and scheduled refreshes take renewable leases that expire after a crashed engine, and a lost lease aborts its work. Waiting steps stay queued with a reason and a growing pause (no attempt, no worker, timeout not started). In-memory steps fail closed. One lock per connection (several in id order); admission only counts what still holds a place (four round trips), a finished step gives its places back at once and wakes the waiting steps, and the leader sweeps old rows. Also the Admin Console view and the leader samples behind its graphs.'],
   ['tools/file-overviews.mjs', 'Maintains first-party file overview comments and a companion code index from architecture descriptions, local imports and function entry points. Preserves shebangs and licenses; excludes generated and vendored artifacts. Check mode detects drift.'],
 ] });
 const testFiles = fs.readdirSync(path.join(root, 'test')).filter(f => f.endsWith('.test.ts')).sort();
@@ -518,6 +525,53 @@ ${tw(['Address', 'What answers'], [
   ['<code>:4800/guide</code>, <code>/architecture</code>', 'User guide and this page'],
   ['<code>:8080</code>, <code>:8443</code>', 'Gateway: deployed REST and SOAP services, <code>/mcp</code> and MCP server paths, ACME challenges'],
 ].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join(''))}`);
+
+sec('engine', 'The engine: workers, stages and guarantees', `
+<p>The <strong>engine</strong> is the part of every SutraFlow process (studio or headless) that runs Sutras. This section is the overview; the sections after it go into its files (<a href="#engine-inside">Inside the engine</a>), one run in detail (<a href="#lifecycle">How a run works</a>) and several engines (<a href="#cluster">Clusters</a>).</p>
+<h3 id="engine-workers">Engine and workers</h3>
+<ul>
+<li>An engine has a number of <strong>worker slots</strong> (<em>Steps at once</em>, <code>SUTRA_WORKERS</code>; by machine size, 4 to 32). A slot runs one step at a time; it is not a thread or a process. Steps are asynchronous JavaScript, so a slot waiting for a database or an HTTP answer costs no CPU.</li>
+<li>The <strong>scheduler</strong> (<code>engine/scheduler.ts</code>) fills free slots: it claims due tasks from the shared <code>tasks</code> table in batches, by Sutra priority and then age, with one atomic statement per batch. PostgreSQL <code>SKIP LOCKED</code> lets several engines claim at once without waiting for each other; <code>LISTEN/NOTIFY</code> wakes idle engines when work arrives, and polling remains the fallback.</li>
+<li>Each engine process has <strong>two engines</strong>: the durable one, whose runs and steps live in the shared database, and an in-memory one (in the same process, its own SQLite in memory) for Sutras tuned <em>in memory</em>: faster, but their open runs are lost at a restart, they cannot wait, and limited connections refuse them.</li>
+</ul>
+<h3 id="engine-stages">The stages of a step</h3>
+${tw(['Stage', 'What happens', 'Code', 'Kept in the database'], [
+  ['1. Start', 'A trigger, the Run API, Test, a channel, Call Sutra or an MCP/agent call starts a run: the run row (with a copy of the Sutra) and one pending task for the starter, in one transaction. A Sutra over its <em>Runs at once</em> starts the run as queued.', '<code>engine.ts</code> startRun', '<code>runs</code>, <code>tasks</code>'],
+  ['2. Queue', 'The task is pending with a not-before time (now, or later for retries and timers). A committed insert notifies the engines.', '<code>queue-notify.ts</code>', '<code>tasks.status = pending</code>'],
+  ['3. Claim', 'A free slot claims it: status running, owner = this engine, claim number + 1. The claim number fences everything that follows: an engine that lost the task cannot write its result.', '<code>scheduler.ts</code>, <code>run-store.ts</code>', '<code>tasks.owner</code>, <code>tasks.claim</code>'],
+  ['4. Admission', 'If the step (or a connection behind its connections) has a connection limit, places are taken for all of them at once, or the task goes back to pending with a waiting reason and a growing pause, without using an attempt.', '<code>connection-limits.ts</code>', '<code>connection_permits</code>, <code>connection_waits</code>'],
+  ['5. Prepare', 'Settings are resolved (templates, formulas, Project and Engine properties, secrets), the Input mapping is evaluated, and the step runs as its project (a connection of another project is refused).', '<code>executor.ts</code>, <code>mapping.ts</code>', '-'],
+  ['6. Execute', 'The activity runs within its time limit, with an abort signal; loops and streamed batches run here. A finished step gives its connection places back at once and wakes waiting steps.', 'the activity (<code>palettes/</code>, <code>connectors/</code>)', '-'],
+  ['7. Checkpoint', 'In one fenced transaction: the step output, the task done, and the next tasks inserted. A crash before this commit means the step will run again; after it, nothing is lost.', '<code>transitions.ts</code>', '<code>run_outputs</code>, <code>tasks</code>'],
+  ['8. Route', 'The output leaves on one port; each connection carries a live or a skip token by its condition; merges wait for every branch that can still arrive; dead paths are removed.', '<code>router.ts</code>', '<code>runs.state</code>'],
+  ['9. Wait', 'A step may return a wait (approval, ask a person, Call Sutra, timer, agent tool): the task is waiting and holds nothing; a decision, a child run or the timer resumes it.', '<code>waits.ts</code>, <code>operator.ts</code>', '<code>tasks.status = waiting</code>, <code>tasks.wait</code>'],
+  ['10. Finish', 'When no task is pending, running, paused or waiting, the run is settled: done, or failed when a failure had no error path. Reply callbacks and metrics are completed.', '<code>run-store.ts</code>', '<code>runs.status</code>'],
+].map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td></tr>`).join(''))}
+<h3 id="engine-failures">Retries, errors and recovery</h3>
+<ul>
+<li>A failed attempt with retries left goes back to pending with a doubling pause; then the step's error output, the Sutra's Error handler, or a failed run, in that order. A failed run can be resubmitted from the failed step.</li>
+<li>Every engine heartbeats every 5 seconds. An engine silent for three beats is dead: the leader puts its running steps back in the queue (<code>cluster.ts</code> recoverOrphans), where another engine claims them with a new claim number. Drain hands an engine's steps back on purpose.</li>
+<li>Connection places of a dead engine lapse with its claims; its listener leases expire within two minutes.</li>
+</ul>
+<h3 id="engine-guarantees">Guarantees</h3>
+<ul>
+<li><strong>Durable progress</strong>: what a step produced is committed together with the next tasks; a restart resumes from the database, with no replay log anywhere else.</li>
+<li><strong>At least once</strong> for a step's effects: a step interrupted before its checkpoint runs again. Outside effects should be idempotent (run id or business key).</li>
+<li><strong>Fencing</strong>: only the current claim can write a step's result, so a recovered step and a slow original never both commit.</li>
+<li><strong>Once per cluster</strong> for timers and listeners: they run on the leader only, with a lease in the database.</li>
+<li><strong>Limits hold across engines</strong>: connection places are counted in the shared database, never in one process.</li>
+</ul>
+<h3 id="engine-limits">Limits</h3>
+${tw(['Limit', 'Default', 'Set in'], [
+  ['Steps at once, per engine', 'by machine size (4 to 32)', 'Engine tuning; <code>SUTRA_WORKERS</code>'],
+  ['Steps per run', '10,000', 'Engine tuning; <code>SUTRA_MAX_STEPS</code>'],
+  ['Step time limit', '2 minutes (AI 10 minutes)', 'The step\'s Settings'],
+  ['Run time limit, runs at once, priority, retries', 'none', 'Sutra tuning'],
+  ['Work on one connection at once', 'no limit', 'The connection\'s <em>Maximum concurrent activities</em>'],
+  ['Reply wait for callers', '60 seconds', 'Engine tuning; <code>SUTRA_REPLY_TIMEOUT_MS</code>'],
+  ['Call Sutra depth', '10 levels', 'Fixed'],
+  ['Loop on a step', '1,000 items (at most 10,000)', 'The step\'s Settings'],
+].map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join(''))}`);
 
 sec('engine-inside', 'Inside the engine', `
 ${DIAGRAMS.engine}

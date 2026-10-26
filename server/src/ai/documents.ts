@@ -23,22 +23,50 @@ import zlib from 'node:zlib';
  */
 export const DOC_TYPES = ['auto', 'pdf', 'docx', 'pptx', 'xlsx', 'odt', 'html', 'text'] as const;
 
-/** The files of a zip archive (stored or deflated entries). */
-export function unzip(buf: Buffer): Map<string, Buffer> {
+/**
+ * Limits for reading a zip, checked on the bytes actually produced (never trusting the sizes the
+ * archive states about itself): a small archive that inflates to gigabytes is refused when an entry
+ * passes its limit, before that memory is used.
+ */
+export interface ZipLimits { maxEntries: number; maxEntryBytes: number; maxTotalBytes: number }
+/** Office documents and other files read as text. */
+export const DOCUMENT_ZIP_LIMITS: ZipLimits = { maxEntries: 5000, maxEntryBytes: 64 * 1048576, maxTotalBytes: 256 * 1048576 };
+
+/** The files of a zip archive (stored or deflated entries), within the limits. */
+export function unzip(buf: Buffer, limits: ZipLimits = DOCUMENT_ZIP_LIMITS): Map<string, Buffer> {
   const out = new Map<string, Buffer>();
+  const mb = (n: number) => `${Math.round(n / 1048576)} MB`;
+  const need = (at: number, len: number) => { if (at < 0 || at + len > buf.length) throw new Error('The zip file is damaged (an entry points outside the file)'); };
   let eocd = -1;
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
   if (eocd < 0) throw new Error('This is not a zip file (Office documents are zip files)');
   const count = buf.readUInt16LE(eocd + 10);
-  let p = buf.readUInt32LE(eocd + 16);
+  if (count > limits.maxEntries) throw new Error(`The zip has ${count} entries; at most ${limits.maxEntries} are read`);
+  let p = buf.readUInt32LE(eocd + 16), total = 0;
   for (let n = 0; n < count; n++) {
+    need(p, 46);
     if (buf.readUInt32LE(p) !== 0x02014b50) break;
     const method = buf.readUInt16LE(p + 10), csize = buf.readUInt32LE(p + 20), nameLen = buf.readUInt16LE(p + 28), extra = buf.readUInt16LE(p + 30), comment = buf.readUInt16LE(p + 32), local = buf.readUInt32LE(p + 42);
+    need(p + 46, nameLen);
     const name = buf.subarray(p + 46, p + 46 + nameLen).toString('utf8');
+    need(local, 30);
     const lName = buf.readUInt16LE(local + 26), lExtra = buf.readUInt16LE(local + 28);
+    need(local + 30 + lName + lExtra, csize);
     const data = buf.subarray(local + 30 + lName + lExtra, local + 30 + lName + lExtra + csize);
-    if (method === 0) out.set(name, data);
-    else if (method === 8) out.set(name, zlib.inflateRawSync(data));
+    // Left for the remaining budget, and never more than one entry may hold.
+    const room = Math.min(limits.maxEntryBytes, limits.maxTotalBytes - total);
+    let body: Buffer | undefined;
+    if (method === 0) {
+      if (data.length > room) throw new Error(`The zip entry ${name} is larger than ${mb(room)}; zip files are read up to ${mb(limits.maxEntryBytes)} per entry and ${mb(limits.maxTotalBytes)} in all`);
+      body = data;
+    } else if (method === 8) {
+      try { body = zlib.inflateRawSync(data, { maxOutputLength: Math.max(1, room) }); }
+      catch (e: any) {
+        if (e?.code === 'ERR_BUFFER_TOO_LARGE' || /maxOutputLength|buffer.*large|Cannot create a Buffer larger/i.test(String(e?.message))) throw new Error(`The zip entry ${name} unpacks to more than ${mb(room)}; zip files are read up to ${mb(limits.maxEntryBytes)} per entry and ${mb(limits.maxTotalBytes)} in all`);
+        throw new Error(`The zip entry ${name} cannot be unpacked: ${e?.message || e}`);
+      }
+    }
+    if (body) { total += body.length; out.set(name, body); }
     p += 46 + nameLen + extra + comment;
   }
   return out;

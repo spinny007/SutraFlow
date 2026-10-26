@@ -29,11 +29,13 @@ export class Waits {
   private readonly replies = new Map<string, ReplyHandle>();
   private readonly finishers = new Map<string, (status: string, runId: string) => void>();
   private checking = false;
+  /** When each waiter was registered: a run row appears only when its start commits. */
+  private readonly since = new Map<string, number>();
 
   constructor(private readonly store: () => AsyncStore) {}
-  registerReply(runId: string, resolve: ReplyHandle['resolve']) { this.replies.set(runId, { resolve, done: false }); }
-  registerFinish(runId: string, finish: (status: string, runId: string) => void) { this.finishers.set(runId, finish); }
-  forget(runId: string) { this.replies.delete(runId); this.finishers.delete(runId); }
+  registerReply(runId: string, resolve: ReplyHandle['resolve']) { this.replies.set(runId, { resolve, done: false }); this.since.set(runId, Date.now()); }
+  registerFinish(runId: string, finish: (status: string, runId: string) => void) { this.finishers.set(runId, finish); this.since.set(runId, Date.now()); }
+  forget(runId: string) { this.replies.delete(runId); this.finishers.delete(runId); this.since.delete(runId); }
 
   resolveReply(runId: string, state: RunState, error?: string | null) {
     const handle = this.replies.get(runId);
@@ -45,6 +47,7 @@ export class Waits {
         : { runId, status: 200, body: state.last ?? null });
     }
     this.replies.delete(runId);
+    if (!this.finishers.has(runId)) this.since.delete(runId);
   }
 
   sendReply(runId: string, reply: ReplyPayload) {
@@ -56,11 +59,13 @@ export class Waits {
     const handle = this.replies.get(runId);
     if (handle && !handle.done) handle.resolve({ runId, failed: true, error: 'Run cancelled', status: 503, body: { error: 'Run cancelled' } });
     this.replies.delete(runId);
+    if (!this.finishers.has(runId)) this.since.delete(runId);
   }
 
   finish(runId: string, status: string) {
     const finish = this.finishers.get(runId);
     this.finishers.delete(runId);
+    if (!this.replies.has(runId)) this.since.delete(runId);
     if (finish) { try { finish(status, runId); } catch { /* listener owns acknowledgement errors */ } }
   }
 
@@ -75,7 +80,10 @@ export class Waits {
     try {
       for (const runId of ids) {
         const row = await this.store().get<{ status: string; state: string; error: string | null }>('select status, state, error from runs where id = ?', runId);
-        if (!row) continue;
+        // The run is gone (removed by retention or by hand): its waiters are answered, not kept for good.
+        // A run just started has no row until its start commits, so only one missing for a minute counts.
+        if (!row && Date.now() - (this.since.get(runId) ?? Date.now()) < 60000) continue;
+        if (!row) { this.resolveReply(runId, { outputs: {}, failed: true } as unknown as RunState, 'The run no longer exists'); this.finish(runId, 'failed'); continue; }
         const state = JSON.parse(row.state) as RunState;
         const handle = this.replies.get(runId);
         if (handle && !handle.done && state.reply) { handle.done = true; handle.resolve({ ...state.reply, runId }); this.replies.delete(runId); }

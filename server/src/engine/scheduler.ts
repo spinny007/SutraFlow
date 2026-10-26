@@ -18,9 +18,9 @@ import type { AsyncStore } from '../asyncdb.js';
 import { config } from '../config.js';
 import { now } from '../db.js';
 import type { TaskRow } from './run-store.js';
-import { admitConnections, type ConnectionLimit } from '../connection-limits.js';
+import { admitConnections, releaseConnections, type ConnectionLimit } from '../connection-limits.js';
 
-export type ClaimedTask = TaskRow & { run_row?: any; run_outs?: any; admissionError?: string };
+export type ClaimedTask = TaskRow & { run_row?: any; run_outs?: any; admissionError?: string; connections?: ConnectionLimit[] };
 
 export interface SchedulerOptions {
   store(): AsyncStore;
@@ -94,7 +94,11 @@ export class Scheduler {
             this.active++;
             this.options.execute(task)
               .catch(e => console.error(`Step ${task.id} of run ${task.run_id}: ${e?.message || e}`))
-              .finally(() => { this.active--; this.wake(); });
+              .finally(async () => {
+                // Places on limited connections go back now, and the steps waiting for them are woken.
+                if (task.connections?.length) await releaseConnections(this.options.store(), task, this.options.engineId, task.connections).catch(e => console.error(`Releasing connection places of step ${task.id}: ${e?.message || e}`));
+                this.active--; this.wake();
+              });
           }
         }
       } while (this.wakeAgain && !this.draining);
@@ -126,6 +130,7 @@ export class Scheduler {
       try {
         const caps = await this.options.connectionLimits?.(task) || [];
         if (!await admitConnections(db, task, this.options.engineId, caps, config.pollMs)) continue;
+        if (caps.length) task.connections = caps;
       } catch (error: any) { task.admissionError = String(error?.message || 'Connection admission failed.'); }
       admitted.push(task);
     }

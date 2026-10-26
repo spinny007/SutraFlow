@@ -134,7 +134,8 @@ export function readBundle(input: Buffer | string): { package: Package; config?:
   const buf = Buffer.isBuffer(input) ? input : Buffer.from(input, 'utf8');
   if (!isZip(buf)) return { package: readPackage(buf.toString('utf8')), files: [] };
   let z: Map<string, Buffer>;
-  try { z = unzip(buf); } catch (e: any) { throw new Error(`The zip cannot be read: ${e.message}`); }
+  // Release zips may carry deployment files: larger limits than documents, still bounded.
+  try { z = unzip(buf, { maxEntries: 10000, maxEntryBytes: 256 * 1048576, maxTotalBytes: 1024 * 1048576 }); } catch (e: any) { throw new Error(`The zip cannot be read: ${e.message}`); }
   const name = z.has(BUNDLE_PACKAGE) ? BUNDLE_PACKAGE : [...z.keys()].find(k => /\.sutra$/i.test(k));
   if (!name) throw new Error(`The zip has no ${BUNDLE_PACKAGE}`);
   const pkg = readPackage(z.get(name)!.toString('utf8'));

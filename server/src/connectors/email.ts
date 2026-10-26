@@ -100,7 +100,8 @@ registerListener('emailTrigger', async c => {
   const every = Math.max(15, Number(cfg.pollSeconds) || 60) * 1000;
   const inFlight = new Set<number>();
   let stopped = false;
-  const tick = async () => {
+  // One poll under the connection limits of this trigger (skipped when the connection is full).
+  const tick = () => c.withConnection(async () => {
     if (stopped) return;
     const client = new ImapFlow({
       host: r.config.host, port: Number(r.config.port) || 993, secure: r.config.tls !== false,
@@ -147,7 +148,7 @@ registerListener('emailTrigger', async c => {
       c.status('error', e.message);
       try { await client.logout(); } catch { /* ignore */ }
     }
-  };
+  });
   tick();
   const t = setInterval(tick, every);
   return () => { stopped = true; clearInterval(t); };

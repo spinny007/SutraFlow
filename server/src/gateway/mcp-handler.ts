@@ -20,7 +20,7 @@ import { engine } from '../engine/engine.js';
 import type { FlowDoc, FlowNode } from '../engine/types.js';
 import { MCP_PROTOCOLS, toolDefinition, toolResult } from '../mcp.js';
 import { effectiveResource } from '../resources.js';
-import { authorize, PolicyError } from '../security/inbound.js';
+import { authorize, PolicyError, startedByCaller } from '../security/inbound.js';
 import { agentMcpTools, callAgentTool } from './agents.js';
 
 export interface McpTool { endpoint: string; serverId: string; flowId: string; projectId: string; version: number; doc: FlowDoc; node: FlowNode }
@@ -58,7 +58,8 @@ export async function handleMcp(req: FastifyRequest, reply: FastifyReply, secure
     const who = await authorize(policy, ctx);
     const g = (req as any).gw;
     if (g) { g.caller = who.subject; g.appId = who.appId; }
-    return who;
+    // The realm (policy and token issuer) keeps callers of different identity providers apart (agents.ts).
+    return { ...who, realm: `${ref}|${who.claims && typeof who.claims.iss === 'string' ? who.claims.iss : ''}` };
   };
   const out: any[] = [];
   for (const m of batch) {
@@ -98,7 +99,7 @@ export async function handleMcp(req: FastifyRequest, reply: FastifyReply, secure
       if (missing.length) { ok(toolResult(`Missing argument${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}`, true)); continue; }
       const input = { arguments: args, tool: name, auth: caller, client: { ip: req.ip, secure, name: String(req.headers['user-agent'] || ''), version: '' } };
       try {
-        const { runId, reply: r } = await waitReply(onReply => engine.startRun({ doc: t.doc, flowId: t.flowId, projectId: t.projectId, version: t.version, triggerNodeId: t.node.id, input, source: 'mcp', onReply, traceparent: String(req.headers.traceparent || '') }), config.replyTimeoutMs);
+        const { runId, reply: r } = await waitReply(onReply => engine.startRun({ startedBy: startedByCaller(caller, req.ip), doc: t.doc, flowId: t.flowId, projectId: t.projectId, version: t.version, triggerNodeId: t.node.id, input, source: 'mcp', onReply, traceparent: String(req.headers.traceparent || '') }), config.replyTimeoutMs);
         reply.header('x-sutra-run', runId);
         if (r.failed) { ok(toolResult(`The Sutra failed: ${r.error || 'unknown error'}`, true)); continue; }
         const b = r.body;

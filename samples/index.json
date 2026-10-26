@@ -6,7 +6,7 @@
     "sutras": [
       "Sample: MongoDB M0 document lifecycle"
     ],
-    "bytes": 9982
+    "bytes": 11204
   },
   {
     "file": "ai-document-assistant.zip",
@@ -19,6 +19,6 @@
       "Sample: Document feed from a folder",
       "Sample: Document questions API"
     ],
-    "bytes": 32334
+    "bytes": 32403
   }
 ]

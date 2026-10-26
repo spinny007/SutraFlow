@@ -107,6 +107,11 @@ test('connection cap is shared by two schedulers, queues excess work and permits
   } };
   engine.register([probe]); const previousId = config.engineId; config.engineId = '211-peer'; const peer = new Engine(); config.engineId = previousId;
   peer.register(engine.allActivities()); peer.concurrency = 4; await peer.start();
+  // The peer heartbeats like a real engine; otherwise the leader recovers its running steps as orphans
+  // and runs them again (at-least-once for a dead engine), which this test would see as an overlap.
+  const beat = () => q.run(`insert into engines(id, host, pid, mode, version, started_at, heartbeat_at, workers, active, draining, can_lead) values('211-peer', 'test', 0, 'engine', 'test', ?, ?, 4, 0, 0, 0)
+    on conflict(id) do update set heartbeat_at = excluded.heartbeat_at`, new Date().toISOString(), Date.now());
+  beat(); const beating = setInterval(beat, 200);
   try {
     const ids = await Promise.all(Array.from({ length: 9 }, async (_, i) => {
       const s = node('start', 'Start', { payload: '{}' }), p = node('capProbe', 'Probe', { connection: i === 8 ? other.id : connection.id });
@@ -116,7 +121,7 @@ test('connection cap is shared by two schedulers, queues excess work and permits
     for (const id of ids) assert.equal(q.get<any>('select status from runs where id=?', id).status, 'done');
     assert.equal(peak, 1); assert.equal(calls, 9);
     assert.equal(Number(q.get<any>(`select count(*) n from tasks where run_id in (${ids.map(() => '?').join(',')}) and attempt<>0`, ...ids).n), 0, 'queueing does not consume retry attempts');
-  } finally { await peer.drain(1000); peer.stop(); }
+  } finally { clearInterval(beating); await peer.drain(1000); peer.stop(); q.run(`delete from engines where id = '211-peer'`); }
 });
 test('stale permits are fenced and recovered, and invalid connection limits are refused', async () => {
   for (const cap of [-1, 1.5, true, 'wrong']) assert.throws(() => saveResource({ kind: 'httpConnection', name: 'Invalid cap', config: { maxConcurrentTasks: cap } }), /integer/);

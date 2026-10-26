@@ -37,7 +37,7 @@ export function rebuildSchedules() {
       const act = engine.activity(n.type);
       const cfg = act ? resolveSettings(act.fields, n.config, { gv: effectiveVariables(d.projectId).values, ev: engineVariableValues() }) : n.config;
       const fire = () => {
-        engine.startRun({ doc: d.doc, flowId: d.flowId, projectId: d.projectId, version: d.version, triggerNodeId: n.id, input: { firedAt: new Date().toISOString() }, source: 'timer' })
+        engine.startRun({ startedBy: { kind: 'system', id: `timer: ${n.name}` }, doc: d.doc, flowId: d.flowId, projectId: d.projectId, version: d.version, triggerNodeId: n.id, input: { firedAt: new Date().toISOString() }, source: 'timer' })
           .catch((e: any) => { schedulerErrors.push(`${d.doc.name} / ${n.name}: ${e.message}`); });
       };
       try {

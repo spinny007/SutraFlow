@@ -21,6 +21,19 @@ import { gatewayStatus } from './gateway/gateway.js';
 // A promise that fails with nobody to catch it (a run start while the database is unreachable, say)
 // is logged; the engine keeps serving instead of stopping with every step it was running.
 process.on('unhandledRejection', e => { console.error('Unhandled error (the engine keeps running):', (e as any)?.stack || e); });
+// The same for the engine database being out of reach in a timer (a sample, a refresh, a poll): since
+// 2.1.0 such a statement fails at once instead of holding the engine, and the timer's next tick tries
+// again. Seen in the 2.1.0 soak: a 20 s database cut stopped an engine this way. Any other error found
+// nowhere to be caught still stops the engine, as before.
+process.on('uncaughtException', e => {
+  const m = String((e as any)?.message || '');
+  if ((e as any)?.code === 'SUTRA_DB_UNREACHABLE' || /^PostgreSQL cannot be reached|connection to PostgreSQL was lost|Connection terminated unexpectedly|PostgreSQL did not answer/.test(m)) {
+    console.error('Engine database out of reach (the engine keeps running):', m);
+    return;
+  }
+  console.error(e);
+  process.exit(1);
+});
 
 boot({ exitOnDrain: true }).then(({ stop }) => {
   console.log(config.mode === 'engine'

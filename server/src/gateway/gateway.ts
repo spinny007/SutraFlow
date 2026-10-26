@@ -23,6 +23,7 @@ import type { FlowDoc, FlowNode } from '../engine/types.js';
 import { deployedFlows } from '../flows.js';
 import { effectiveResource, getResource, kvToObject } from '../resources.js';
 import { authorize, corsHeaders, PolicyError, type Caller } from '../security/inbound.js';
+import { startedByCaller } from '../security/inbound.js';
 import { xmlParser } from '../security/outbound.js';
 import { checkParsed, checkRaw, limitsOf, MessageRejected } from '../security/validate.js';
 import { validateStructured, validateSoapOperation } from '../schema-validation.js';
@@ -285,7 +286,7 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
     delete header.Security;
     const input = { operation: ops.find(o => o.toLowerCase() === opName.toLowerCase()) || opName, body: env.Body[opName], header, headers, soapAction: req.headers.soapaction, auth: caller, client };
     try {
-      const { runId, reply: r } = await waitReply(onReply => engine.startRun({ doc: route.doc, flowId: route.flowId, projectId: route.projectId, version: route.version, triggerNodeId: n.id, input, source: 'soap', onReply, traceparent: String(req.headers.traceparent || '') }), config.replyTimeoutMs);
+      const { runId, reply: r } = await waitReply(onReply => engine.startRun({ startedBy: startedByCaller(caller, client?.ip), doc: route.doc, flowId: route.flowId, projectId: route.projectId, version: route.version, triggerNodeId: n.id, input, source: 'soap', onReply, traceparent: String(req.headers.traceparent || '') }), config.replyTimeoutMs);
       reply.header('x-sutra-run', runId);
       const ns = String(n.config.namespace || 'urn:sutra');
       if (r.failed || r.soap?.fault) {
@@ -335,7 +336,7 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
   const params = Object.fromEntries(route.keys.map((k, i) => [k, m[i + 1]]));
   const input = { method, path, params, query: Object.fromEntries(url.searchParams), headers, body, auth: caller, client };
   try {
-    const { reply: r } = await waitReply(onReply => engine.startRun({ doc: route.doc, flowId: route.flowId, projectId: route.projectId, version: route.version, triggerNodeId: route.node.id, input, source: 'rest', onReply, traceparent: String(req.headers.traceparent || '') }), config.replyTimeoutMs);
+    const { reply: r } = await waitReply(onReply => engine.startRun({ startedBy: startedByCaller(caller, client?.ip), doc: route.doc, flowId: route.flowId, projectId: route.projectId, version: route.version, triggerNodeId: route.node.id, input, source: 'rest', onReply, traceparent: String(req.headers.traceparent || '') }), config.replyTimeoutMs);
     if (r.failed) return sendRest(reply, { status: r.status || 500, body: { error: r.error || 'Sutra failed', run: r.runId }, runId: r.runId });
     return sendRest(reply, r);
   } catch (e: any) {

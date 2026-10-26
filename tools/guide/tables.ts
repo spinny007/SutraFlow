@@ -70,7 +70,9 @@ export const TABLE_TEXT: Record<string, string> = {
   replay_guard: 'Signatures of HMAC-signed requests seen recently, so a replay to any engine is refused; each row expires after twice the allowed age.',
   acme_challenges: 'Short-lived HTTP-01 tokens and public key authorisations for a Let\'s Encrypt order, shared so any gateway engine can answer the challenge.',
   sso_states: 'One-time SAML browser or API-client sign-in requests: random state, request id, callback and return path, shared by every engine and paired with a signed client cookie; removed when used or expired.',
-  connection_permits: 'Per-resource admission records keyed to a durable task owner and claim. Only running matching claims count; stale records are removed at admission. Queued retries do not hold permits.',
+  connection_permits: 'One row per place in use on a limited connection (Maximum concurrent activities). kind task: a durable step, valid while its claim (task, owner, claim) is running. kind lease: a listener poll or background job, valid until expires_at and renewed while held. Ended claims and expired leases are removed at the next admission.',
+  connection_waits: 'Steps waiting for a limited connection: the connection, the reason shown in the Admin Console, since when, and how many times it was checked (the pause between checks grows to 5 s). Removed when the step runs or leaves the queue.',
+  connection_usage: 'Samples of each limited connection (in use, waiting, limit) taken by the leader every 30 s for the Admin Console graphs; kept 7 days.',
   ws_connections: 'Open WebSocket connections of every engine: id, engine, service path, Sutra, caller. Lets a step on one engine reach a connection held by another.',
   ws_outbox: 'Messages for WebSocket connections held by another engine, waiting a fraction of a second for that engine to deliver them.',
 };
@@ -78,7 +80,7 @@ export const TABLE_TEXT: Record<string, string> = {
 /** The tables by what they are for, in the order the guide shows them. */
 export const TABLE_GROUPS: [string, string[]][] = [
   ['Projects and Sutras', ['projects', 'flows', 'flow_versions', 'deployments', 'resources', 'schemas', 'folders', 'counters', 'mem_rows', 'mem_meta']],
-  ['Runs and the work queue', ['runs', 'tasks', 'connection_permits', 'run_outputs', 'approval_votes']],
+  ['Runs and the work queue', ['runs', 'tasks', 'connection_permits', 'connection_waits', 'connection_usage', 'run_outputs', 'approval_votes']],
   ['Releases and the cluster', ['package_deployments', 'engines', 'leases', 'file_listener_state', 'file_listener_files', 'bus_messages']],
   ['People, access and audit', ['users', 'roles', 'grants', 'api_tokens', 'sso_states', 'audit']],
   ['Vault and server settings', ['secrets', 'settings']],

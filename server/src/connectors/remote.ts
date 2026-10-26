@@ -352,7 +352,8 @@ registerListener('remoteTrigger', ctx => {
   const pending = new Map<string, string>(); // path -> size|mtime seen on the previous poll
   const inFlight = new Set<string>();
   let stopped = false, busy = false;
-  const poll = async () => {
+  // One poll under the connection limits of this trigger (skipped when the connection is full).
+  const poll = () => ctx.withConnection(async () => {
     if (stopped || busy) return;
     busy = true;
     try {
@@ -389,7 +390,7 @@ registerListener('remoteTrigger', ctx => {
     } catch (e: any) {
       ctx.status('error', e.message);
     } finally { busy = false; }
-  };
+  });
   const t = setInterval(poll, Math.max(1, Number(cfg.pollSeconds) || 60) * 1000);
   poll();
   return () => { stopped = true; clearInterval(t); };

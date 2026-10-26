@@ -488,7 +488,8 @@ registerListener('googleDriveTrigger', c => {
   const cfg = c.node.config;
   const every = Math.max(30, Number(cfg.pollSeconds) || 60) * 1000;
   let known: Map<string, { modifiedTime: string; name: string }> | null = null;
-  const tick = async () => {
+  // One poll under the connection limits of this trigger (skipped when the connection is full).
+  const tick = () => c.withConnection(async () => {
     try {
       const q = ['trashed = false', cfg.folderId ? `'${String(cfg.folderId).replace(/'/g, "\\'")}' in parents` : '', MIME[cfg.mimeType] ? `mimeType = '${MIME[cfg.mimeType]}'` : ''].filter(Boolean).join(' and ');
       const r = await apiCall(cfg.connection, { method: 'GET', url: `${DRIVE}/files`, query: { q, fields: 'files(id,name,mimeType,modifiedTime,webViewLink,lastModifyingUser(displayName,emailAddress))', pageSize: '1000' } });
@@ -507,7 +508,7 @@ registerListener('googleDriveTrigger', c => {
     } catch (e: any) {
       c.status('error', e.message);
     }
-  };
+  });
   tick();
   const t = setInterval(tick, every);
   return () => clearInterval(t);
@@ -520,7 +521,8 @@ registerListener('twitchLiveTrigger', c => {
   const logins = String(cfg.logins || '').split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean);
   let state: Map<string, boolean> | null = null;
   const H = 'https://api.twitch.tv/helix';
-  const tick = async () => {
+  // One poll under the connection limits of this trigger (skipped when the connection is full).
+  const tick = () => c.withConnection(async () => {
     try {
       const q = new URLSearchParams(); for (const l of logins) q.append('login', l);
       const users = (await apiCall(cfg.connection, { method: 'GET', url: `${H}/users${logins.length ? `?${q}` : ''}` })).body.data || [];
@@ -537,7 +539,7 @@ registerListener('twitchLiveTrigger', c => {
     } catch (e: any) {
       c.status('error', e.message);
     }
-  };
+  });
   tick();
   const t = setInterval(tick, every);
   return () => clearInterval(t);

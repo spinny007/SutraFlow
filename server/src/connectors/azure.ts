@@ -567,7 +567,8 @@ registerListener('adfRunTrigger', c => {
   const only = String(cfg.pipelines || '').split(',').map(s => s.trim()).filter(Boolean);
   let since = new Date(Date.now() - 60000).toISOString();
   const seen = new Set<string>();
-  const tick = async () => {
+  // One poll under the connection limits of this trigger (skipped when the connection is full).
+  const tick = () => c.withConnection(async () => {
     try {
       const r = requireResource(cfg.connection, 'azureDataFactory', 'Data factory');
       const adf = adfClient(r, (n, w) => { const v = getSecret(n); if (v === undefined) throw new Error(`${w || 'Secret'}: secret "${n}" does not exist`); return v; });
@@ -586,7 +587,7 @@ registerListener('adfRunTrigger', c => {
     } catch (e: any) {
       c.status('error', e.message);
     }
-  };
+  });
   tick();
   const t = setInterval(tick, every);
   return () => clearInterval(t);

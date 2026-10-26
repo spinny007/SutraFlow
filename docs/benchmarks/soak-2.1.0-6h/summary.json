@@ -1,0 +1,2373 @@
+{
+  "version": "2.1.0",
+  "started": "2026-10-25T20:18:31.855Z",
+  "ended": "2026-10-26T02:21:47.592Z",
+  "minutes": 360,
+  "engines": 3,
+  "machine": "AMD Ryzen 7 7435HS, 16 threads, 24 GB, win32",
+  "node": "v24.21.0",
+  "pausedMinutes": 0,
+  "database": "PostgreSQL (through a proxy), SQLite, MySQL, a remote PostgreSQL (gently), a remote MySQL (gently), MongoDB Atlas (gently)",
+  "model": "phi4-mini on Ollama",
+  "sizes": [
+    10,
+    20,
+    30,
+    40,
+    50,
+    60
+  ],
+  "checks": [
+    {
+      "name": "No engine stopped by itself",
+      "ok": true,
+      "detail": "0 unexpected stops"
+    },
+    {
+      "name": "No run left running",
+      "ok": true,
+      "detail": "0 runs still open after starters stopped"
+    },
+    {
+      "name": "No step ran twice",
+      "ok": true,
+      "detail": "0 steps of single-pass Sutras completed more than once"
+    },
+    {
+      "name": "Requests that failed",
+      "ok": true,
+      "detail": "107 of 1018735 (0.011%), fault windows included"
+    },
+    {
+      "name": "PostgreSQL DB Ops stayed correct",
+      "ok": true,
+      "detail": "8603 completed, 1 failed"
+    },
+    {
+      "name": "MySQL DB Ops stayed correct",
+      "ok": true,
+      "detail": "8604 completed, 0 failed"
+    },
+    {
+      "name": "SQLite DB Ops stayed correct",
+      "ok": true,
+      "detail": "8602 completed, 2 failed"
+    },
+    {
+      "name": "RabbitMQ delivered every message",
+      "ok": true,
+      "detail": "64889 published, 64889 consumed, 0 failed"
+    },
+    {
+      "name": "ActiveMQ delivered every message",
+      "ok": true,
+      "detail": "64802 published, 64802 consumed, 0 failed"
+    },
+    {
+      "name": "Kafka delivered every message",
+      "ok": false,
+      "detail": "118 published, 117 consumed, 0 failed"
+    },
+    {
+      "name": "Remote MySQL DB Ops stayed correct",
+      "ok": true,
+      "detail": "178 completed, 1 failed (one every 2 minutes, over the internet)"
+    },
+    {
+      "name": "Remote PostgreSQL DB Ops stayed correct",
+      "ok": true,
+      "detail": "178 completed, 1 failed (one every 2 minutes, over the internet)"
+    },
+    {
+      "name": "MongoDB Atlas stayed correct",
+      "ok": true,
+      "detail": "359 lifecycles completed, 0 failed (one a minute)"
+    },
+    {
+      "name": "MongoDB Atlas left nothing behind",
+      "ok": true,
+      "detail": "0 documents left in the soak collection"
+    },
+    {
+      "name": "Timer kept time",
+      "ok": true,
+      "detail": "2169 runs of 2160 expected (every 10 s)"
+    },
+    {
+      "name": "Every channel message reached its subscriber",
+      "ok": true,
+      "detail": "8616 subscriber runs for 8616 published"
+    },
+    {
+      "name": "Bus messages acknowledged",
+      "ok": true,
+      "detail": "21371 accepted, 0 released, 0 rejected of 21371 sent (2 handed out again after a link closed or a release); subscriber runs {\"done\":21373}"
+    },
+    {
+      "name": "WebSocket client trigger ran for the server's messages",
+      "ok": true,
+      "detail": "8670 runs for 8670 messages pushed"
+    },
+    {
+      "name": "WebSocket broadcasts arrived",
+      "ok": true,
+      "detail": "7185 received of 7190 expected (1438 broadcasts to the clients connected at the time)"
+    },
+    {
+      "name": "Every CSV in the folder was streamed whole",
+      "ok": true,
+      "detail": "35 of 35 files with every row counted (10 MB, 40 MB, 10 MB, 30 MB, 60 MB, 30 MB, 50 MB, 20 MB, 50 MB, 10 MB, 40 MB, 10 MB, 30 MB, 60 MB, 30 MB, 50 MB, 20 MB, 50 MB, 10 MB, 40 MB, 10 MB, 30 MB, 60 MB, 30 MB, 50 MB, 20 MB, 50 MB, 10 MB, 40 MB, 10 MB, 30 MB, 60 MB, 30 MB, 50 MB, 20 MB)"
+    },
+    {
+      "name": "Every SFTP CSV was streamed whole",
+      "ok": true,
+      "detail": "23 of 23 files with every row counted (20 MB, 60 MB, 40 MB, 20 MB, 60 MB, 40 MB, 20 MB, 60 MB, 40 MB, 20 MB, 60 MB, 40 MB, 20 MB, 60 MB, 40 MB, 20 MB, 60 MB, 40 MB, 20 MB, 60 MB, 40 MB, 20 MB, 60 MB)"
+    },
+    {
+      "name": "Every FTP CSV was streamed whole",
+      "ok": true,
+      "detail": "23 of 23 files with every row counted (30 MB, 20 MB, 50 MB, 40 MB, 10 MB, 60 MB, 30 MB, 20 MB, 50 MB, 40 MB, 10 MB, 60 MB, 30 MB, 20 MB, 50 MB, 40 MB, 10 MB, 60 MB, 30 MB, 20 MB, 50 MB, 40 MB, 10 MB)"
+    },
+    {
+      "name": "RAG passages are in the pgvector table",
+      "ok": true,
+      "detail": "457034 passages in soak_knowledge"
+    },
+    {
+      "name": "RAG documents were learned",
+      "ok": true,
+      "detail": "50 MB done in 55 s; 10 MB done in 18 s; 30 MB done in 41 s; 50 MB done in 86 s; 10 MB done in 18 s; 30 MB done in 49 s; 50 MB done in 73 s; 30 MB done in 49 s; 50 MB done in 85 s; 10 MB done in 24 s"
+    },
+    {
+      "name": "Engine 0 stays responsive",
+      "ok": true,
+      "detail": "event loop delay: p99 per minute 40 ms typical, 64 ms in the worst 5% of minutes; longest single wait 1797 ms"
+    },
+    {
+      "name": "Engine 1 stays responsive",
+      "ok": true,
+      "detail": "event loop delay: p99 per minute 37 ms typical, 54 ms in the worst 5% of minutes; longest single wait 1769 ms"
+    },
+    {
+      "name": "Engine 2 stays responsive",
+      "ok": true,
+      "detail": "event loop delay: p99 per minute 37 ms typical, 48 ms in the worst 5% of minutes; longest single wait 23622 ms"
+    },
+    {
+      "name": "Engine 0 memory steady",
+      "ok": true,
+      "detail": "39.8 MB per hour over the second half; highest 1078 MB"
+    },
+    {
+      "name": "Engine 1 memory steady",
+      "ok": true,
+      "detail": "35.9 MB per hour over the second half; highest 905 MB"
+    },
+    {
+      "name": "Engine 2 memory steady",
+      "ok": false,
+      "detail": "52.0 MB per hour over the second half; highest 754 MB"
+    },
+    {
+      "name": "REST orders stays as fast",
+      "ok": true,
+      "detail": "p95 240 ms in the first period, 270 ms in the last"
+    },
+    {
+      "name": "REST in memory stays as fast",
+      "ok": true,
+      "detail": "p95 34 ms in the first period, 45 ms in the last"
+    },
+    {
+      "name": "REST signed and validated stays as fast",
+      "ok": true,
+      "detail": "p95 280 ms in the first period, 315 ms in the last"
+    },
+    {
+      "name": "SOAP UsernameToken stays as fast",
+      "ok": true,
+      "detail": "p95 262 ms in the first period, 323 ms in the last"
+    },
+    {
+      "name": "SOAP X.509 signed and encrypted stays as fast",
+      "ok": true,
+      "detail": "p95 297 ms in the first period, 366 ms in the last"
+    },
+    {
+      "name": "WebSocket echo stays as fast",
+      "ok": true,
+      "detail": "p95 263 ms in the first period, 301 ms in the last"
+    },
+    {
+      "name": "WebSocket broadcast stays as fast",
+      "ok": true,
+      "detail": "p95 756 ms in the first period, 329 ms in the last"
+    },
+    {
+      "name": "PostgreSQL DB Ops stays as fast",
+      "ok": true,
+      "detail": "p95 625 ms in the first period, 854 ms in the last"
+    },
+    {
+      "name": "MySQL DB Ops stays as fast",
+      "ok": true,
+      "detail": "p95 626 ms in the first period, 1121 ms in the last"
+    },
+    {
+      "name": "SQLite DB Ops stays as fast",
+      "ok": true,
+      "detail": "p95 629 ms in the first period, 1109 ms in the last"
+    },
+    {
+      "name": "RabbitMQ publish stays as fast",
+      "ok": true,
+      "detail": "p95 572 ms in the first period, 596 ms in the last"
+    },
+    {
+      "name": "ActiveMQ publish stays as fast",
+      "ok": true,
+      "detail": "p95 574 ms in the first period, 594 ms in the last"
+    },
+    {
+      "name": "MongoDB Atlas (gentle) stays as fast",
+      "ok": true,
+      "detail": "p95 5798 ms in the first period, 8316 ms in the last"
+    },
+    {
+      "name": "Channel publish stays as fast",
+      "ok": true,
+      "detail": "p95 645 ms in the first period, 954 ms in the last"
+    },
+    {
+      "name": "Error handler stays as fast",
+      "ok": true,
+      "detail": "p95 1113 ms in the first period, 1593 ms in the last"
+    },
+    {
+      "name": "Called Sutra and approval stays as fast",
+      "ok": true,
+      "detail": "p95 10751 ms in the first period, 10223 ms in the last"
+    },
+    {
+      "name": "MCP tool stays as fast",
+      "ok": true,
+      "detail": "p95 339 ms in the first period, 315 ms in the last"
+    },
+    {
+      "name": "RAG search stays as fast",
+      "ok": false,
+      "detail": "p95 1668 ms in the first period, 26635 ms in the last"
+    }
+  ],
+  "faults": [
+    {
+      "kind": "engine killed",
+      "from": 1792966736724,
+      "to": 1792966832576
+    },
+    {
+      "kind": "database cut",
+      "from": 1792973936284,
+      "to": 1792973986303
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "REST orders",
+      "ok": 406210,
+      "fail": 21,
+      "errors": [
+        [
+          "fetch failed",
+          20
+        ],
+        [
+          "status 500: {\"statusCode\":500,\"code\":\"ECONNRESET\",\"error\":\"Internal Server Error\",\"message\":\"read ECONNRESET\"}",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 66995,
+          "p50": 93,
+          "p95": 240,
+          "p99": 468
+        },
+        {
+          "n": 67373,
+          "p50": 98,
+          "p95": 243,
+          "p99": 499
+        },
+        {
+          "n": 67660,
+          "p50": 104,
+          "p95": 257,
+          "p99": 716
+        },
+        {
+          "n": 68012,
+          "p50": 111,
+          "p95": 273,
+          "p99": 1077
+        },
+        {
+          "n": 68337,
+          "p50": 113,
+          "p95": 267,
+          "p99": 483
+        },
+        {
+          "n": 67833,
+          "p50": 113,
+          "p95": 270,
+          "p99": 591
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "REST in memory",
+      "ok": 208536,
+      "fail": 9,
+      "errors": [
+        [
+          "fetch failed",
+          8
+        ],
+        [
+          "status 500",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 34868,
+          "p50": 16,
+          "p95": 34,
+          "p99": 199
+        },
+        {
+          "n": 34916,
+          "p50": 16,
+          "p95": 34,
+          "p99": 148
+        },
+        {
+          "n": 34836,
+          "p50": 18,
+          "p95": 42,
+          "p99": 530
+        },
+        {
+          "n": 34724,
+          "p50": 19,
+          "p95": 45,
+          "p99": 649
+        },
+        {
+          "n": 34711,
+          "p50": 19,
+          "p95": 41,
+          "p99": 134
+        },
+        {
+          "n": 34481,
+          "p50": 20,
+          "p95": 45,
+          "p99": 278
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "REST signed and validated",
+      "ok": 42471,
+      "fail": 3,
+      "errors": [
+        [
+          "fetch failed",
+          3
+        ]
+      ],
+      "hours": [
+        {
+          "n": 7109,
+          "p50": 108,
+          "p95": 280,
+          "p99": 1285
+        },
+        {
+          "n": 7126,
+          "p50": 107,
+          "p95": 273,
+          "p99": 1178
+        },
+        {
+          "n": 7087,
+          "p50": 118,
+          "p95": 308,
+          "p99": 1597
+        },
+        {
+          "n": 7081,
+          "p50": 123,
+          "p95": 339,
+          "p99": 1984
+        },
+        {
+          "n": 7053,
+          "p50": 128,
+          "p95": 305,
+          "p99": 1185
+        },
+        {
+          "n": 7015,
+          "p50": 126,
+          "p95": 315,
+          "p99": 1440
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "SOAP UsernameToken",
+      "ok": 42487,
+      "fail": 2,
+      "errors": [
+        [
+          "fetch failed",
+          1
+        ],
+        [
+          "status 500: {\"statusCode\":500,\"error\":\"Internal Server Error\",\"message\":\"Connection terminated unexpectedly\"}",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 7113,
+          "p50": 97,
+          "p95": 262,
+          "p99": 1235
+        },
+        {
+          "n": 7122,
+          "p50": 102,
+          "p95": 261,
+          "p99": 1165
+        },
+        {
+          "n": 7092,
+          "p50": 115,
+          "p95": 292,
+          "p99": 1546
+        },
+        {
+          "n": 7082,
+          "p50": 128,
+          "p95": 328,
+          "p99": 2000
+        },
+        {
+          "n": 7052,
+          "p50": 127,
+          "p95": 294,
+          "p99": 1202
+        },
+        {
+          "n": 7026,
+          "p50": 124,
+          "p95": 323,
+          "p99": 1334
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "SOAP X.509 signed and encrypted",
+      "ok": 10760,
+      "fail": 2,
+      "errors": [
+        [
+          "fetch failed",
+          2
+        ]
+      ],
+      "hours": [
+        {
+          "n": 1796,
+          "p50": 132,
+          "p95": 297,
+          "p99": 1461
+        },
+        {
+          "n": 1799,
+          "p50": 115,
+          "p95": 287,
+          "p99": 1776
+        },
+        {
+          "n": 1793,
+          "p50": 140,
+          "p95": 348,
+          "p99": 1913
+        },
+        {
+          "n": 1798,
+          "p50": 152,
+          "p95": 432,
+          "p99": 2716
+        },
+        {
+          "n": 1789,
+          "p50": 149,
+          "p95": 337,
+          "p99": 2124
+        },
+        {
+          "n": 1785,
+          "p50": 143,
+          "p95": 366,
+          "p99": 2381
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "WebSocket echo",
+      "ok": 104853,
+      "fail": 9,
+      "errors": [
+        [
+          "not connected",
+          6
+        ],
+        [
+          "no echo within 30 s",
+          3
+        ]
+      ],
+      "hours": [
+        {
+          "n": 17602,
+          "p50": 111,
+          "p95": 263,
+          "p99": 1105
+        },
+        {
+          "n": 17624,
+          "p50": 111,
+          "p95": 263,
+          "p99": 1122
+        },
+        {
+          "n": 17459,
+          "p50": 130,
+          "p95": 290,
+          "p99": 1281
+        },
+        {
+          "n": 17384,
+          "p50": 137,
+          "p95": 306,
+          "p99": 1347
+        },
+        {
+          "n": 17429,
+          "p50": 141,
+          "p95": 302,
+          "p99": 1164
+        },
+        {
+          "n": 17355,
+          "p50": 136,
+          "p95": 301,
+          "p99": 1255
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "WebSocket broadcast",
+      "ok": 1437,
+      "fail": 1,
+      "errors": [
+        [
+          "fetch failed",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 239,
+          "p50": 184,
+          "p95": 756,
+          "p99": 1406
+        },
+        {
+          "n": 240,
+          "p50": 134,
+          "p95": 331,
+          "p99": 980
+        },
+        {
+          "n": 239,
+          "p50": 148,
+          "p95": 383,
+          "p99": 2267
+        },
+        {
+          "n": 240,
+          "p50": 135,
+          "p95": 537,
+          "p99": 3092
+        },
+        {
+          "n": 240,
+          "p50": 165,
+          "p95": 443,
+          "p99": 5606
+        },
+        {
+          "n": 239,
+          "p50": 129,
+          "p95": 329,
+          "p99": 3710
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "PostgreSQL DB Ops",
+      "ok": 8603,
+      "fail": 1,
+      "errors": [
+        [
+          "POST /api/flows/79aaf432-5d57-4414-8cc0-daadb2f38487/run?wait=30000: gave up after 1 tries: 500 read ECONNRESET",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 1438,
+          "p50": 554,
+          "p95": 625,
+          "p99": 1617
+        },
+        {
+          "n": 1440,
+          "p50": 551,
+          "p95": 636,
+          "p99": 2070
+        },
+        {
+          "n": 1436,
+          "p50": 552,
+          "p95": 707,
+          "p99": 2474
+        },
+        {
+          "n": 1437,
+          "p50": 559,
+          "p95": 1284,
+          "p99": 3158
+        },
+        {
+          "n": 1428,
+          "p50": 560,
+          "p95": 667,
+          "p99": 2101
+        },
+        {
+          "n": 1424,
+          "p50": 563,
+          "p95": 854,
+          "p99": 2370
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "MySQL DB Ops",
+      "ok": 8604,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 1438,
+          "p50": 556,
+          "p95": 626,
+          "p99": 1420
+        },
+        {
+          "n": 1440,
+          "p50": 553,
+          "p95": 626,
+          "p99": 2034
+        },
+        {
+          "n": 1436,
+          "p50": 560,
+          "p95": 705,
+          "p99": 2561
+        },
+        {
+          "n": 1436,
+          "p50": 561,
+          "p95": 1165,
+          "p99": 3105
+        },
+        {
+          "n": 1428,
+          "p50": 562,
+          "p95": 668,
+          "p99": 2122
+        },
+        {
+          "n": 1426,
+          "p50": 567,
+          "p95": 1121,
+          "p99": 2610
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "SQLite DB Ops",
+      "ok": 8602,
+      "fail": 2,
+      "errors": [
+        [
+          "run failed: Write atomically: cannot start a transaction within a transaction",
+          2
+        ]
+      ],
+      "hours": [
+        {
+          "n": 1438,
+          "p50": 560,
+          "p95": 629,
+          "p99": 1484
+        },
+        {
+          "n": 1440,
+          "p50": 555,
+          "p95": 647,
+          "p99": 2127
+        },
+        {
+          "n": 1436,
+          "p50": 563,
+          "p95": 714,
+          "p99": 2406
+        },
+        {
+          "n": 1434,
+          "p50": 560,
+          "p95": 979,
+          "p99": 3082
+        },
+        {
+          "n": 1429,
+          "p50": 564,
+          "p95": 659,
+          "p99": 2139
+        },
+        {
+          "n": 1425,
+          "p50": 568,
+          "p95": 1109,
+          "p99": 2784
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "RabbitMQ publish",
+      "ok": 64889,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 10992,
+          "p50": 525,
+          "p95": 572,
+          "p99": 1467
+        },
+        {
+          "n": 10913,
+          "p50": 526,
+          "p95": 570,
+          "p99": 1495
+        },
+        {
+          "n": 10876,
+          "p50": 528,
+          "p95": 587,
+          "p99": 1650
+        },
+        {
+          "n": 10733,
+          "p50": 530,
+          "p95": 589,
+          "p99": 1709
+        },
+        {
+          "n": 10732,
+          "p50": 531,
+          "p95": 587,
+          "p99": 1456
+        },
+        {
+          "n": 10643,
+          "p50": 533,
+          "p95": 596,
+          "p99": 1658
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "ActiveMQ publish",
+      "ok": 64802,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 10921,
+          "p50": 526,
+          "p95": 574,
+          "p99": 1461
+        },
+        {
+          "n": 10948,
+          "p50": 526,
+          "p95": 570,
+          "p99": 1522
+        },
+        {
+          "n": 10827,
+          "p50": 529,
+          "p95": 590,
+          "p99": 1665
+        },
+        {
+          "n": 10710,
+          "p50": 530,
+          "p95": 590,
+          "p99": 1749
+        },
+        {
+          "n": 10725,
+          "p50": 531,
+          "p95": 590,
+          "p99": 1422
+        },
+        {
+          "n": 10671,
+          "p50": 533,
+          "p95": 594,
+          "p99": 1549
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Kafka publish (gentle)",
+      "ok": 118,
+      "fail": 1,
+      "errors": [
+        [
+          "run failed: Publish: SASL SCRAM SHA256 authentication failed: Closed connection",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 18,
+          "p50": 1729,
+          "p95": 3677,
+          "p99": 3677
+        },
+        {
+          "n": 20,
+          "p50": 619,
+          "p95": 3576,
+          "p99": 3576
+        },
+        {
+          "n": 20,
+          "p50": 838,
+          "p95": 2086,
+          "p99": 2086
+        },
+        {
+          "n": 20,
+          "p50": 916,
+          "p95": 3240,
+          "p99": 3240
+        },
+        {
+          "n": 20,
+          "p50": 580,
+          "p95": 21697,
+          "p99": 21697
+        },
+        {
+          "n": 20,
+          "p50": 848,
+          "p95": 2049,
+          "p99": 2049
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Remote MySQL DB Ops (gentle)",
+      "ok": 178,
+      "fail": 1,
+      "errors": [
+        [
+          "POST /api/flows/a0b90402-8088-48d1-bb76-ddb025d80288/run?wait=60000: gave up after 1 tries: fetch failed",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 29,
+          "p50": 2681,
+          "p95": 4287,
+          "p99": 6723
+        },
+        {
+          "n": 30,
+          "p50": 3098,
+          "p95": 5444,
+          "p99": 5812
+        },
+        {
+          "n": 30,
+          "p50": 2764,
+          "p95": 4520,
+          "p99": 4693
+        },
+        {
+          "n": 30,
+          "p50": 3116,
+          "p95": 5759,
+          "p99": 6743
+        },
+        {
+          "n": 29,
+          "p50": 2746,
+          "p95": 3757,
+          "p99": 5405
+        },
+        {
+          "n": 30,
+          "p50": 3132,
+          "p95": 3645,
+          "p99": 5169
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Remote PostgreSQL DB Ops (gentle)",
+      "ok": 178,
+      "fail": 1,
+      "errors": [
+        [
+          "POST /api/flows/312dbf65-3de0-4130-9b7e-99524ac1b7a3/run?wait=60000: gave up after 1 tries: fetch failed",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 29,
+          "p50": 3289,
+          "p95": 4389,
+          "p99": 5646
+        },
+        {
+          "n": 30,
+          "p50": 3661,
+          "p95": 5820,
+          "p99": 8735
+        },
+        {
+          "n": 30,
+          "p50": 3740,
+          "p95": 7383,
+          "p99": 8089
+        },
+        {
+          "n": 30,
+          "p50": 3778,
+          "p95": 6736,
+          "p99": 8914
+        },
+        {
+          "n": 29,
+          "p50": 3752,
+          "p95": 4939,
+          "p99": 9101
+        },
+        {
+          "n": 30,
+          "p50": 2231,
+          "p95": 3647,
+          "p99": 6597
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "MongoDB Atlas (gentle)",
+      "ok": 359,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 59,
+          "p50": 3988,
+          "p95": 5798,
+          "p99": 8072
+        },
+        {
+          "n": 60,
+          "p50": 3935,
+          "p95": 4708,
+          "p99": 6790
+        },
+        {
+          "n": 60,
+          "p50": 4048,
+          "p95": 6229,
+          "p99": 8700
+        },
+        {
+          "n": 60,
+          "p50": 4178,
+          "p95": 7209,
+          "p99": 8907
+        },
+        {
+          "n": 60,
+          "p50": 4145,
+          "p95": 5044,
+          "p99": 24691
+        },
+        {
+          "n": 60,
+          "p50": 4207,
+          "p95": 8316,
+          "p99": 10072
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Channel publish",
+      "ok": 8616,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 1438,
+          "p50": 561,
+          "p95": 645,
+          "p99": 1198
+        },
+        {
+          "n": 1440,
+          "p50": 556,
+          "p95": 642,
+          "p99": 2140
+        },
+        {
+          "n": 1438,
+          "p50": 563,
+          "p95": 718,
+          "p99": 2290
+        },
+        {
+          "n": 1439,
+          "p50": 562,
+          "p95": 1106,
+          "p99": 2850
+        },
+        {
+          "n": 1433,
+          "p50": 563,
+          "p95": 685,
+          "p99": 2440
+        },
+        {
+          "n": 1428,
+          "p50": 569,
+          "p95": 954,
+          "p99": 2797
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Error handler",
+      "ok": 8614,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 1438,
+          "p50": 715,
+          "p95": 1113,
+          "p99": 2279
+        },
+        {
+          "n": 1439,
+          "p50": 731,
+          "p95": 1171,
+          "p99": 2633
+        },
+        {
+          "n": 1439,
+          "p50": 694,
+          "p95": 1241,
+          "p99": 3757
+        },
+        {
+          "n": 1438,
+          "p50": 770,
+          "p95": 1767,
+          "p99": 3505
+        },
+        {
+          "n": 1432,
+          "p50": 779,
+          "p95": 1199,
+          "p99": 2977
+        },
+        {
+          "n": 1428,
+          "p50": 784,
+          "p95": 1593,
+          "p99": 3369
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Called Sutra and approval",
+      "ok": 1438,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 239,
+          "p50": 10121,
+          "p95": 10751,
+          "p99": 11572
+        },
+        {
+          "n": 240,
+          "p50": 10082,
+          "p95": 10174,
+          "p99": 11815
+        },
+        {
+          "n": 240,
+          "p50": 10098,
+          "p95": 10235,
+          "p99": 14295
+        },
+        {
+          "n": 240,
+          "p50": 10090,
+          "p95": 10466,
+          "p99": 14430
+        },
+        {
+          "n": 240,
+          "p50": 10096,
+          "p95": 10183,
+          "p99": 15583
+        },
+        {
+          "n": 239,
+          "p50": 10091,
+          "p95": 10223,
+          "p99": 14054
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "MCP tool",
+      "ok": 4313,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 719,
+          "p50": 139,
+          "p95": 339,
+          "p99": 1060
+        },
+        {
+          "n": 720,
+          "p50": 115,
+          "p95": 265,
+          "p99": 660
+        },
+        {
+          "n": 720,
+          "p50": 122,
+          "p95": 282,
+          "p99": 2439
+        },
+        {
+          "n": 720,
+          "p50": 130,
+          "p95": 318,
+          "p99": 2642
+        },
+        {
+          "n": 719,
+          "p50": 125,
+          "p95": 317,
+          "p99": 1106
+        },
+        {
+          "n": 715,
+          "p50": 136,
+          "p95": 315,
+          "p99": 3354
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Bus message",
+      "ok": 21371,
+      "fail": 53,
+      "errors": [
+        [
+          "the subscriber is not connected",
+          53
+        ]
+      ],
+      "hours": [
+        {
+          "n": 3543,
+          "p50": 0,
+          "p95": 0,
+          "p99": 1
+        },
+        {
+          "n": 3575,
+          "p50": 0,
+          "p95": 0,
+          "p99": 1
+        },
+        {
+          "n": 3575,
+          "p50": 0,
+          "p95": 0,
+          "p99": 1
+        },
+        {
+          "n": 3576,
+          "p50": 0,
+          "p95": 0,
+          "p99": 1
+        },
+        {
+          "n": 3553,
+          "p50": 0,
+          "p95": 0,
+          "p99": 1
+        },
+        {
+          "n": 3549,
+          "p50": 0,
+          "p95": 0,
+          "p99": 1
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "RAG search",
+      "ok": 716,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 119,
+          "p50": 1039,
+          "p95": 1668,
+          "p99": 3141
+        },
+        {
+          "n": 120,
+          "p50": 1526,
+          "p95": 5118,
+          "p99": 5655
+        },
+        {
+          "n": 120,
+          "p50": 2137,
+          "p95": 9026,
+          "p99": 10418
+        },
+        {
+          "n": 119,
+          "p50": 6664,
+          "p95": 13633,
+          "p99": 21515
+        },
+        {
+          "n": 118,
+          "p50": 15075,
+          "p95": 21652,
+          "p99": 30960
+        },
+        {
+          "n": 120,
+          "p50": 20696,
+          "p95": 26635,
+          "p99": 27830
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "RAG ask (Ollama)",
+      "ok": 143,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 23,
+          "p50": 1854,
+          "p95": 5843,
+          "p99": 7910
+        },
+        {
+          "n": 24,
+          "p50": 3415,
+          "p95": 5024,
+          "p99": 5695
+        },
+        {
+          "n": 24,
+          "p50": 4068,
+          "p95": 10136,
+          "p99": 14919
+        },
+        {
+          "n": 24,
+          "p50": 9058,
+          "p95": 15591,
+          "p99": 16243
+        },
+        {
+          "n": 24,
+          "p50": 13098,
+          "p95": 22438,
+          "p99": 32814
+        },
+        {
+          "n": 24,
+          "p50": 18054,
+          "p95": 27048,
+          "p99": 28919
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "AI agent chat (Ollama)",
+      "ok": 239,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 39,
+          "p50": 2462,
+          "p95": 5219,
+          "p99": 8865
+        },
+        {
+          "n": 40,
+          "p50": 2290,
+          "p95": 4223,
+          "p99": 4401
+        },
+        {
+          "n": 40,
+          "p50": 2444,
+          "p95": 5485,
+          "p99": 7783
+        },
+        {
+          "n": 40,
+          "p50": 2390,
+          "p95": 4472,
+          "p99": 5032
+        },
+        {
+          "n": 40,
+          "p50": 2287,
+          "p95": 5089,
+          "p99": 23018
+        },
+        {
+          "n": 40,
+          "p50": 2384,
+          "p95": 4525,
+          "p99": 6598
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Folder CSV (streamed)",
+      "ok": 35,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 5,
+          "p50": 217,
+          "p95": 425,
+          "p99": 425
+        },
+        {
+          "n": 6,
+          "p50": 314,
+          "p95": 365,
+          "p99": 365
+        },
+        {
+          "n": 6,
+          "p50": 290,
+          "p95": 536,
+          "p99": 536
+        },
+        {
+          "n": 6,
+          "p50": 378,
+          "p95": 489,
+          "p99": 489
+        },
+        {
+          "n": 6,
+          "p50": 366,
+          "p95": 392,
+          "p99": 392
+        },
+        {
+          "n": 6,
+          "p50": 282,
+          "p95": 503,
+          "p99": 503
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "SFTP CSV",
+      "ok": 23,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 3,
+          "p50": 297,
+          "p95": 402,
+          "p99": 402
+        },
+        {
+          "n": 4,
+          "p50": 275,
+          "p95": 427,
+          "p99": 427
+        },
+        {
+          "n": 4,
+          "p50": 433,
+          "p95": 489,
+          "p99": 489
+        },
+        {
+          "n": 4,
+          "p50": 332,
+          "p95": 513,
+          "p99": 513
+        },
+        {
+          "n": 4,
+          "p50": 392,
+          "p95": 496,
+          "p99": 496
+        },
+        {
+          "n": 4,
+          "p50": 471,
+          "p95": 544,
+          "p99": 544
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "FTP CSV (streamed)",
+      "ok": 23,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 3,
+          "p50": 210,
+          "p95": 335,
+          "p99": 335
+        },
+        {
+          "n": 4,
+          "p50": 330,
+          "p95": 432,
+          "p99": 432
+        },
+        {
+          "n": 4,
+          "p50": 371,
+          "p95": 567,
+          "p99": 567
+        },
+        {
+          "n": 4,
+          "p50": 412,
+          "p95": 451,
+          "p99": 451
+        },
+        {
+          "n": 4,
+          "p50": 363,
+          "p95": 456,
+          "p99": 456
+        },
+        {
+          "n": 4,
+          "p50": 384,
+          "p95": 424,
+          "p99": 424
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "RAG document ingest",
+      "ok": 10,
+      "fail": 1,
+      "errors": [
+        [
+          "POST /api/flows/a27c5ea2-e3cf-4f6f-bc03-42839db0b6e9/run?wait=120000: gave up after 1 tries: 500 read ECONNRESET",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 1,
+          "p50": 55442,
+          "p95": 55442,
+          "p99": 55442
+        },
+        {
+          "n": 2,
+          "p50": 41460,
+          "p95": 41460,
+          "p99": 41460
+        },
+        {
+          "n": 2,
+          "p50": 86615,
+          "p95": 86615,
+          "p99": 86615
+        },
+        {
+          "n": 2,
+          "p50": 74064,
+          "p95": 74064,
+          "p99": 74064
+        },
+        {
+          "n": 1,
+          "p50": 49057,
+          "p95": 49057,
+          "p99": 49057
+        },
+        {
+          "n": 2,
+          "p50": 85308,
+          "p95": 85308,
+          "p99": 85308
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    }
+  ],
+  "stuckRuns": [],
+  "stuckTasks": [],
+  "files": {
+    "csv": [
+      {
+        "name": "soak-28462-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1792960136250
+      },
+      {
+        "name": "soak-56771-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1792960736465
+      },
+      {
+        "name": "soak-85179-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1792961337188
+      },
+      {
+        "name": "soak-112774-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1792961937337
+      },
+      {
+        "name": "soak-141181-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1792962537545
+      },
+      {
+        "name": "soak-169588-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1792963137381
+      },
+      {
+        "name": "soak-197767-50mb.csv",
+        "mb": 50,
+        "rows": 968000,
+        "at": 1792963737485
+      },
+      {
+        "name": "soak-226191-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1792964337292
+      },
+      {
+        "name": "soak-254566-50mb.csv",
+        "mb": 50,
+        "rows": 968000,
+        "at": 1792964937468
+      },
+      {
+        "name": "soak-282646-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1792965537205
+      },
+      {
+        "name": "soak-311133-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1792966137433
+      },
+      {
+        "name": "soak-339556-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1792966737420
+      },
+      {
+        "name": "soak-366666-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1792967337559
+      },
+      {
+        "name": "soak-395278-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1792967937871
+      },
+      {
+        "name": "soak-423913-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1792968537629
+      },
+      {
+        "name": "soak-452337-50mb.csv",
+        "mb": 50,
+        "rows": 968000,
+        "at": 1792969137769
+      },
+      {
+        "name": "soak-480800-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1792969737506
+      },
+      {
+        "name": "soak-509378-50mb.csv",
+        "mb": 50,
+        "rows": 968000,
+        "at": 1792970337716
+      },
+      {
+        "name": "soak-537249-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1792970937421
+      },
+      {
+        "name": "soak-565827-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1792971537722
+      },
+      {
+        "name": "soak-594514-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1792972137594
+      },
+      {
+        "name": "soak-621608-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1792972737756
+      },
+      {
+        "name": "soak-650337-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1792973337981
+      },
+      {
+        "name": "soak-679079-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1792973937752
+      },
+      {
+        "name": "soak-706738-50mb.csv",
+        "mb": 50,
+        "rows": 968000,
+        "at": 1792974537886
+      },
+      {
+        "name": "soak-735477-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1792975137683
+      },
+      {
+        "name": "soak-763961-50mb.csv",
+        "mb": 50,
+        "rows": 968000,
+        "at": 1792975737897
+      },
+      {
+        "name": "soak-791734-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1792976337597
+      },
+      {
+        "name": "soak-820394-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1792976937870
+      },
+      {
+        "name": "soak-849021-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1792977537586
+      },
+      {
+        "name": "soak-875998-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1792978137761
+      },
+      {
+        "name": "soak-904593-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1792978738023
+      },
+      {
+        "name": "soak-933236-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1792979337804
+      },
+      {
+        "name": "soak-961752-50mb.csv",
+        "mb": 50,
+        "rows": 968000,
+        "at": 1792979937911
+      },
+      {
+        "name": "soak-990433-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1792980537711
+      }
+    ],
+    "sftp": [
+      {
+        "name": "soak-42623-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1792960436318
+      },
+      {
+        "name": "soak-85178-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1792961337120
+      },
+      {
+        "name": "soak-126958-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1792962237014
+      },
+      {
+        "name": "soak-169569-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1792963136889
+      },
+      {
+        "name": "soak-211951-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1792964037144
+      },
+      {
+        "name": "soak-254556-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1792964936992
+      },
+      {
+        "name": "soak-296888-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1792965836890
+      },
+      {
+        "name": "soak-339548-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1792966737321
+      },
+      {
+        "name": "soak-380972-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1792967637401
+      },
+      {
+        "name": "soak-423900-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1792968537119
+      },
+      {
+        "name": "soak-466587-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1792969437350
+      },
+      {
+        "name": "soak-509364-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1792970337309
+      },
+      {
+        "name": "soak-551456-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1792971237166
+      },
+      {
+        "name": "soak-594507-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1792972137488
+      },
+      {
+        "name": "soak-635940-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1792973037302
+      },
+      {
+        "name": "soak-679069-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1792973937149
+      },
+      {
+        "name": "soak-721085-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1792974837489
+      },
+      {
+        "name": "soak-763951-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1792975737386
+      },
+      {
+        "name": "soak-806031-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1792976637156
+      },
+      {
+        "name": "soak-849015-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1792977537467
+      },
+      {
+        "name": "soak-890306-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1792978437379
+      },
+      {
+        "name": "soak-933213-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1792979337188
+      },
+      {
+        "name": "soak-976077-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1792980237539
+      }
+    ],
+    "ftp": [
+      {
+        "name": "soak-42624-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1792960436529
+      },
+      {
+        "name": "soak-85185-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1792961337346
+      },
+      {
+        "name": "soak-126968-50mb.csv",
+        "mb": 50,
+        "rows": 968000,
+        "at": 1792962237535
+      },
+      {
+        "name": "soak-169593-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1792963137714
+      },
+      {
+        "name": "soak-211968-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1792964037453
+      },
+      {
+        "name": "soak-254577-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1792964937910
+      },
+      {
+        "name": "soak-296920-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1792965837721
+      },
+      {
+        "name": "soak-339562-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1792966737644
+      },
+      {
+        "name": "soak-380985-50mb.csv",
+        "mb": 50,
+        "rows": 968000,
+        "at": 1792967638046
+      },
+      {
+        "name": "soak-423916-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1792968538005
+      },
+      {
+        "name": "soak-466613-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1792969437718
+      },
+      {
+        "name": "soak-509386-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1792970338169
+      },
+      {
+        "name": "soak-551489-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1792971237974
+      },
+      {
+        "name": "soak-594520-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1792972137919
+      },
+      {
+        "name": "soak-635961-50mb.csv",
+        "mb": 50,
+        "rows": 968000,
+        "at": 1792973038131
+      },
+      {
+        "name": "soak-679085-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1792973938117
+      },
+      {
+        "name": "soak-721100-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1792974837839
+      },
+      {
+        "name": "soak-763966-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1792975738355
+      },
+      {
+        "name": "soak-806074-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1792976638151
+      },
+      {
+        "name": "soak-849038-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1792977538096
+      },
+      {
+        "name": "soak-890339-50mb.csv",
+        "mb": 50,
+        "rows": 968000,
+        "at": 1792978438323
+      },
+      {
+        "name": "soak-933244-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1792979338284
+      },
+      {
+        "name": "soak-976096-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1792980237981
+      }
+    ],
+    "docs": [
+      {
+        "name": "soak-doc-85177-50mb.txt",
+        "mb": 50,
+        "status": "done",
+        "seconds": 55,
+        "error": null,
+        "parts": 54
+      },
+      {
+        "name": "soak-doc-169552-10mb.txt",
+        "mb": 10,
+        "status": "done",
+        "seconds": 18,
+        "error": null,
+        "parts": 11
+      },
+      {
+        "name": "soak-doc-254537-30mb.txt",
+        "mb": 30,
+        "status": "done",
+        "seconds": 41,
+        "error": null,
+        "parts": 33
+      },
+      {
+        "name": "soak-doc-339541-50mb.txt",
+        "mb": 50,
+        "status": "done",
+        "seconds": 86,
+        "error": null,
+        "parts": 54
+      },
+      {
+        "name": "soak-doc-423865-10mb.txt",
+        "mb": 10,
+        "status": "done",
+        "seconds": 18,
+        "error": null,
+        "parts": 11
+      },
+      {
+        "name": "soak-doc-509351-30mb.txt",
+        "mb": 30,
+        "status": "done",
+        "seconds": 49,
+        "error": null,
+        "parts": 33
+      },
+      {
+        "name": "soak-doc-594490-50mb.txt",
+        "mb": 50,
+        "status": "done",
+        "seconds": 73,
+        "error": null,
+        "parts": 54
+      },
+      {
+        "name": "soak-doc-763925-30mb.txt",
+        "mb": 30,
+        "status": "done",
+        "seconds": 49,
+        "error": null,
+        "parts": 33
+      },
+      {
+        "name": "soak-doc-848997-50mb.txt",
+        "mb": 50,
+        "status": "done",
+        "seconds": 85,
+        "error": null,
+        "parts": 54
+      },
+      {
+        "name": "soak-doc-933177-10mb.txt",
+        "mb": 10,
+        "status": "done",
+        "seconds": 24,
+        "error": null,
+        "parts": 11
+      }
+    ],
+    "drive": []
+  },
+  "ws": {
+    "connects": 6,
+    "drops": 1,
+    "broadcastsSent": 1438,
+    "broadcastsExpected": 7190,
+    "broadcastsGot": 7185
+  },
+  "bus": {
+    "sent": 21371,
+    "accepted": 21371,
+    "released": 0,
+    "rejected": 0,
+    "redelivered": 2,
+    "links": 20,
+    "again": [],
+    "senders": {}
+  },
+  "feed": 8670,
+  "restarts": [
+    {
+      "engine": 0,
+      "restarts": 0
+    },
+    {
+      "engine": 1,
+      "restarts": 0
+    },
+    {
+      "engine": 2,
+      "restarts": 0
+    }
+  ]
+}

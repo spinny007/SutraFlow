@@ -27,7 +27,7 @@ const contracts: Record<string, string[]> = {
   callProcess: ['inputSchema', 'resultSchema'], return: ['schema'], channelPublish: ['schema'], channelTrigger: ['schema'],
   httpRequest: ['bodySchema', 'responseSchema'], httpResponse: ['bodySchema'], soapInvoke: ['wsdlRef', 'argsSchema', 'responseSchema'], soapReply: ['bodySchema'], wsService: ['bodySchema'],
   fileTrigger: ['schema'], fileRead: ['schema'], fileList: ['schema'], fileWrite: ['schema'], remoteTrigger: ['schema'], remoteList: ['schema'], remoteRead: ['schema'], remoteWrite: ['schema'],
-  mongoListCollections: ['schema'], mongoInsert: ['schema'], mongoFind: ['schema'], mongoUpdate: ['schema'], mongoDelete: ['schema'], mongoAggregate: ['schema'],
+  mongoListCollections: ['schema'], mongoInsert: ['schema'], mongoFind: ['schema'], mongoUpdate: ['schema'], mongoDelete: ['schema'], mongoBulkWrite: ['schema'], mongoAggregate: ['schema'],
   aiGuard: ['jsonSchema'], mcpTool: ['inputSchema', 'outputSchema'], mcpReply: ['schema'],
 };
 const normalize = (value: Record<string, string[]>) => Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, fields]) => [key, [...fields].sort()]));

@@ -20,7 +20,7 @@ import { toolDefinition } from '../mcp.js';
 import { requireResource, type Resource } from '../resources.js';
 import type { ExecCtx, FlowDoc, FlowNode, StepResult } from '../engine/types.js';
 import { aiCall, type AiResult } from './providers.js';
-import { appendTurns, compact, fitTurns, loadSession, lockSession, settingsOf, tokensOf, unlockSession, cleanSession } from './memory.js';
+import { appendTurns, compact, fitTurns, loadSession, lockSession, settingsOf, tokensOf, unlockSession, cleanSession, memoryKey } from './memory.js';
 import { searchKnowledge } from './knowledge.js';
 import { callMcpTool, listMcpTools, type McpToolInfo } from './mcpClient.js';
 
@@ -181,7 +181,8 @@ const sumAi = (a: AiResult['ai'][], provider: Resource) => ({
 export async function runAgent(c: ExecCtx): Promise<StepResult> {
   const cfg = agentConfig(c);
   const runId = c.runId, nodeId = c.node.id;
-  if (cfg.memory && !lockSession(cfg.memory, cfg.session, runId)) {
+  const key = memoryKey(cfg.session, c.scope);
+  if (cfg.memory && !lockSession(cfg.memory, key, runId)) {
     if (!loadState(runId, nodeId)) c.log('info', `Session ${cfg.session} is busy with another run; waiting`);
     return { deferUntil: Date.now() + 1000 };
   }
@@ -195,10 +196,10 @@ export async function runAgent(c: ExecCtx): Promise<StepResult> {
   const ais: AiResult['ai'][] = [];
   const finish = async (port: string, out: Record<string, any>, turns: { role: 'user' | 'assistant' | 'tool'; content: unknown; name?: string }[]) => {
     if (cfg.memory) {
-      await appendTurns(cfg.memory, c.secret, cfg.session, turns);
+      await appendTurns(cfg.memory, c.secret, key, turns);
       const s = settingsOf(cfg.memory);
-      await compact(cfg.memory, c.secret, cfg.session, Math.max(500, s.contextTokens - s.replyTokens) * 0.6, cfg.provider, c.signal).catch(e => c.log('warn', `Memory summary not updated: ${e.message}`));
-      unlockSession(cfg.memory, cfg.session, runId);
+      await compact(cfg.memory, c.secret, key, Math.max(500, s.contextTokens - s.replyTokens) * 0.6, cfg.provider, c.signal).catch(e => c.log('warn', `Memory summary not updated: ${e.message}`));
+      unlockSession(cfg.memory, key, runId);
     }
     dropState(runId, nodeId);
     return { port, out: { ...out, session: cfg.session || null, steps: st.steps, toolCalls: st.steps.length, tokens: st.tokens, seconds: Math.round((Date.now() - st.started) / 1000), ai: sumAi(ais, cfg.provider) } };
@@ -237,7 +238,7 @@ export async function runAgent(c: ExecCtx): Promise<StepResult> {
       trimSteps(st, Math.max(400, window * 0.4));
       const stepsTokens = st.steps.reduce((a, s) => a + tokensOf(s.result) + tokensOf(s.input), 0);
       let memory = { summary: '', turns: [] as any[] };
-      if (cfg.memory) memory = fitTurns(await loadSession(cfg.memory, c.secret, cfg.session), Math.max(200, window - fixed - stepsTokens));
+      if (cfg.memory) memory = fitTurns(await loadSession(cfg.memory, c.secret, memoryKey(cfg.session, c.scope)), Math.max(200, window - fixed - stepsTokens));
       const { system, prompt } = buildPrompt(cfg, tools, memory, knowledgeText, st);
       st.calls++;
       const res = await aiCall(cfg.provider, c.secret, { system, prompt, effort: cfg.effort, signal: c.signal, json: true });
@@ -300,7 +301,7 @@ export async function runAgent(c: ExecCtx): Promise<StepResult> {
   } catch (e) {
     saveState(runId, nodeId, st);
     // A retry keeps its place in the session queue; after the last attempt the next message may go.
-    if (cfg.memory && c.attempt >= (Number(c.node.settings?.retries) || 0)) unlockSession(cfg.memory, cfg.session, runId);
+    if (cfg.memory && c.attempt >= (Number(c.node.settings?.retries) || 0)) unlockSession(cfg.memory, memoryKey(cfg.session, c.scope), runId);
     throw e;
   }
 }

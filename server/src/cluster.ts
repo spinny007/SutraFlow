@@ -103,6 +103,10 @@ export function beat() {
   const tlsGen = getSetting<number>('tlsGen', 0);
   if (tlsGen !== cluster.tlsGen) { cluster.tlsGen = tlsGen; hooks.tlsChanged?.(); }
   engine.abortCancelledHere().catch(() => {});
+  // Work the database lost track of while it was out of reach: steps stuck as running here, and (leader)
+  // runs whose steps all ended but that were never closed.
+  if (beats % 3 === 0) engine.requeueStrandedHere(t).catch(e => console.error('Stranded steps:', e?.message || e));
+  if (cluster.leader && beats % 3 === 1) engine.settleStranded(t).catch(e => console.error('Stranded runs:', e?.message || e));
   // The Admin Console asked this engine to drain and stop.
   if (!cluster.draining && Number(q.get<any>('select drain_requested from engines where id = ?', config.engineId)?.drain_requested)) hooks.drainRequested?.();
 }

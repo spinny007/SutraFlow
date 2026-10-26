@@ -269,7 +269,8 @@ registerListener('discordTrigger', c => {
   const every = Math.max(5, Number(cfg.pollSeconds) || 10) * 1000;
   const prefix = String(cfg.prefix ?? '!');
   let last: string | null = null;
-  const tick = async () => {
+  // One poll under the connection limits of this trigger (skipped when the connection is full).
+  const tick = () => c.withConnection(async () => {
     try {
       const r = requireResource(cfg.connection, 'discord', 'Discord connection');
       const d = discordClient(r, plainSecret);
@@ -288,7 +289,7 @@ registerListener('discordTrigger', c => {
       }
       c.status('ok', `Watching channel ${channel}`);
     } catch (e: any) { c.status('error', e.message); }
-  };
+  });
   tick();
   const t = setInterval(tick, every);
   return () => clearInterval(t);

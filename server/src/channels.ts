@@ -37,7 +37,7 @@ export async function publishChannel(projectId: string | null | undefined, chann
       const act = engine.activity(n.type);
       const cfg = act ? resolveSettings(act.fields, n.config, { gv: effectiveVariables(d.projectId).values, ev: engineVariableValues() }) : n.config;
       if (norm(cfg.channel) !== want) continue;
-      out.push(await engine.startRun({ doc: d.doc, flowId: d.flowId, projectId: d.projectId, version: d.version, triggerNodeId: n.id, input: structuredClone(message ?? null), source: 'channelTrigger' }));
+      out.push(await engine.startRun({ startedBy: { kind: 'system', id: `channel: ${n.name}` }, doc: d.doc, flowId: d.flowId, projectId: d.projectId, version: d.version, triggerNodeId: n.id, input: structuredClone(message ?? null), source: 'channelTrigger' }));
     }
   }
   return out;

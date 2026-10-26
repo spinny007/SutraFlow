@@ -30,7 +30,7 @@
 import { q, now, getSetting, setSetting } from './db.js';
 import { config } from './config.js';
 import { engine } from './engine/engine.js';
-import { can, type Caller } from './access.js';
+import { can, isAllCaller, type Caller } from './access.js';
 import { sendMail } from './connectors/email.js';
 
 export interface ApprovalWait {
@@ -84,7 +84,7 @@ export function canDecide(c: Caller, t: { wait?: string | null; project_id: stri
   }
   if ((t.source === 'test' || t.source === 'debug') && can(c, 'design', t.project_id || undefined)) return { ok: true, why: 'designer' };
   if (!hasPeople && can(c, 'approve', t.project_id || undefined)) return { ok: true, why: 'permission' };
-  if (c.all || can(c, 'users')) return { ok: true, why: 'administrator', onBehalf: true };
+  if (isAllCaller(c) || can(c, 'users')) return { ok: true, why: 'administrator', onBehalf: true };
   return { ok: false, why: 'not an approver of this item' };
 }
 

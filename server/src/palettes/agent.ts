@@ -20,8 +20,8 @@ import { getFlow, versionDoc } from '../flows.js';
 import { F, when } from './common.js';
 import { approvalWait } from './core.js';
 import { runAgent } from '../ai/agent.js';
-import { appendTurns, cleanSession, clearOld, clearSession, compact, fitTurns, loadSession, settingsOf, tokensOf } from '../ai/memory.js';
-import { addKnowledge, embed, embedWith, keepOnlySources, rebuildKnowledge, removeKnowledge, searchKnowledge } from '../ai/knowledge.js';
+import { appendTurns, cleanSession, clearOld, clearSession, compact, fitTurns, loadSession, settingsOf, tokensOf, memoryKey } from '../ai/memory.js';
+import { addKnowledge, buildKnowledgeSearchIndex, embed, embedWith, keepOnlySources, rebuildKnowledge, removeKnowledge, searchKnowledge } from '../ai/knowledge.js';
 import { callMcpTool, listMcpTools } from '../ai/mcpClient.js';
 import { aiCall } from '../ai/providers.js';
 import { guardText, GUARD_CHECKS } from '../ai/guard.js';
@@ -112,7 +112,7 @@ export const agentActivities: Activity[] = [
       }
       const note = text(c.v('note'));
       return { call: { doc, flowId: f.id, version, projectId: f.project_id, name: f.name, wait: true, triggerNodeId: trig.id,
-        input: { message: note ? `${text(c.v('message'))}\n\n(Handed over: ${note})` : text(c.v('message')), sessionId: text(c.v('sessionId')), channel: 'handoff', caller: { subject: `agent:${c.node.name}`, method: 'handoff' }, history: [] } } };
+        input: { message: note ? `${text(c.v('message'))}\n\n(Handed over: ${note})` : text(c.v('message')), sessionId: text(c.v('sessionId')), channel: 'handoff', caller: c.scope.trigger?.caller && typeof c.scope.trigger.caller === 'object' ? c.scope.trigger.caller : { subject: `agent:${c.node.name}`, method: 'handoff' }, history: [] } } };
     },
   },
 
@@ -125,7 +125,7 @@ export const agentActivities: Activity[] = [
     execute: async c => {
       const r = memoryOf(c), session = cleanSession(c.v('session'));
       const s = settingsOf(r);
-      const st = await loadSession(r, c.secret, session);
+      const st = await loadSession(r, c.secret, memoryKey(session, c.scope));
       const fit = fitTurns(st, Number(c.raw('budget')) > 0 ? Number(c.raw('budget')) : s.contextTokens - s.replyTokens);
       const turns = fit.turns.map(t => ({ role: t.role, ...(t.name ? { name: t.name } : {}), content: t.content, at: t.at }));
       const textOut = [fit.summary ? `Summary: ${fit.summary}` : '', ...turns.map(t => `${t.role}${t.name ? ` (${t.name})` : ''}: ${t.content}`)].filter(Boolean).join('\n');
@@ -147,10 +147,10 @@ export const agentActivities: Activity[] = [
         if (!['user', 'assistant', 'tool', 'system'].includes(role)) throw new Error(`Role "${x.k}" is not user, assistant, tool or system`);
         return { role: role as any, content: c.resolve(x.v) };
       }).filter(t => text(t.content).trim());
-      const made = await appendTurns(r, c.secret, session, turns);
+      const made = await appendTurns(r, c.secret, memoryKey(session, c.scope), turns);
       const s = settingsOf(r);
       const sp = c.raw('summaryProvider') ? requireResource(c.raw('summaryProvider'), 'aiProvider', 'AI provider for the summary') : undefined;
-      const k = await compact(r, c.secret, session, (s.contextTokens - s.replyTokens) * 0.6, sp, c.signal);
+      const k = await compact(r, c.secret, memoryKey(session, c.scope), (s.contextTokens - s.replyTokens) * 0.6, sp, c.signal);
       return { out: { session, saved: made.length, compacted: k.compacted, summary: k.summary } };
     },
   },
@@ -163,8 +163,8 @@ export const agentActivities: Activity[] = [
       const r = memoryOf(c);
       if (c.raw('what') === 'older than the days to keep') return { out: { cleared: 'old turns', turns: await clearOld(r, c.secret) } };
       const session = cleanSession(c.v('session'));
-      const n = (await loadSession(r, c.secret, session)).turns.length;
-      await clearSession(r, c.secret, session);
+      const n = (await loadSession(r, c.secret, memoryKey(session, c.scope))).turns.length;
+      await clearSession(r, c.secret, memoryKey(session, c.scope));
       return { out: { cleared: session, turns: n } };
     },
   },
@@ -254,7 +254,7 @@ export const agentActivities: Activity[] = [
   {
     type: 'knowledgeRemove', palette: 'ai', name: 'Remove knowledge', glyph: '⊖', ports: ['out'],
     desc: 'Removes a source (or a folder of sources) from a knowledge base, everything, the sources not in a list (files deleted from a folder a feed reads), or makes every vector again after the vector model changed.',
-    fields: [knowledgeF, F('action', 'Action', 'select', 'remove a source', { options: ['remove a source', 'keep only these sources', 'remove everything', 'rebuild vectors'] }),
+    fields: [knowledgeF, F('action', 'Action', 'select', 'remove a source', { options: ['remove a source', 'keep only these sources', 'remove everything', 'rebuild vectors', 'build search index'], help: 'Build search index (pgvector): makes the HNSW index of a table that already holds passages, so searches stay fast as it grows; new tables get it at once. Give the step a longer timeout for a large table.' }),
       F('source', 'Source name', 'text', '{{input.name}}', { tpl: true, ...when('action', 'remove a source') }),
       F('keep', 'Sources to keep', 'text', '{{input.items}}', { tpl: true, ...when('action', 'keep only these sources'), help: 'A list of source names, or of files (their relativePath, else name, is the source). Every other source is removed.' }),
       F('under', 'Only in the folder of sources', 'text', '', { tpl: true, ...when('action', 'keep only these sources'), help: 'Empty = the whole knowledge base.' })],
@@ -263,6 +263,7 @@ export const agentActivities: Activity[] = [
       const kb = kbOf(c);
       const a = c.raw('action') || 'remove a source';
       if (a === 'rebuild vectors') return { out: await rebuildKnowledge(kb, c.secret, c.signal) };
+      if (a === 'build search index') return { out: await buildKnowledgeSearchIndex(kb, c.secret) };
       if (a === 'keep only these sources') {
         const v = c.v('keep');
         const list = (Array.isArray(v) ? v : v === undefined || v === null || v === '' ? [] : String(v).split(/\r?\n|,/)).map((x: any) => (x && typeof x === 'object' ? x.source ?? x.relativePath ?? x.name ?? '' : x)).map(text);

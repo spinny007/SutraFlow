@@ -219,3 +219,4 @@ button.c-tile:not(:disabled):hover { border-color: var(--edge); }
 .c-env-development { color: #2b6cb0; border-color: color-mix(in srgb, #2b6cb0 45%, transparent); background: color-mix(in srgb, #2b6cb0 12%, transparent); }
 .c-origin { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .c-origin.is-deployed { color: #2e9e6a; }
+.c-echart { width: 100%; }

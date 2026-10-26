@@ -256,6 +256,11 @@ async function open(r: Resource, secret: (n: string, w?: string) => string): Pro
     case 'sqlite': {
       const file = path.isAbsolute(c.file) ? c.file : path.join(config.dataDir, c.file || 'app.sqlite');
       const db = new DatabaseSync(file);
+      // One handle per connection: a transaction stays open across the step's awaits, so every
+      // transaction and statement waits its turn; otherwise a second step's BEGIN (or a plain
+      // statement) would land inside another step's open transaction.
+      let turn: Promise<unknown> = Promise.resolve();
+      const inTurn = <T>(fn: () => Promise<T>): Promise<T> => { const next = turn.then(fn, fn); turn = next.catch(() => {}); return next; };
       const run = async (s: string, p: Record<string, any>): Promise<DbResult> => {
         const b = bindFor(driver, s, p);
         const st = db.prepare(b.sql);
@@ -264,9 +269,9 @@ async function open(r: Resource, secret: (n: string, w?: string) => string): Pro
         return { rows: [], rowCount: Number(res.changes), columns: [], lastInsertId: Number(res.lastInsertRowid) } as any;
       };
       return {
-        query: run,
+        query: (s, p) => inTurn(() => run(s, p)),
         procedure: async () => { throw new Error('SQLite has no stored procedures'); },
-        transaction: async fn => { db.exec('begin'); try { const v = await fn(run); db.exec('commit'); return v; } catch (e) { db.exec('rollback'); throw e; } },
+        transaction: fn => inTurn(async () => { db.exec('begin'); try { const v = await fn(run); db.exec('commit'); return v; } catch (e) { if (db.isTransaction) db.exec('rollback'); throw e; } }),
         close: async () => db.close(),
       };
     }

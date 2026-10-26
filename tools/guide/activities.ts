@@ -66,6 +66,13 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     steps: ['Choose the connection and collection.', 'Map a filter; keep Delete all matches Off for one-document deletion.', 'An empty filter with Delete all matches requires a separate allow-all opt-in.', 'Strict validation, when enabled, applies to the filter request before deletion.'],
     output: ['Acknowledged flag and deletedCount; zero matches return deletedCount=0.'],
   },
+  mongoBulkWrite: {
+    scope: ['Many inserts, updates, replacements and deletes on one collection in a single request (the MongoDB bulkWrite command), tested on Atlas M0.', 'Ordered (stop at the first failing operation) or unordered (try every operation).', 'The same guards as the single activities: update operators for updates, plain documents for replacements, no server-side JavaScript, and an explicit opt-in for an empty updateMany/deleteMany filter.'],
+    outScope: ['Not a transaction: operations written before a failure stay written. Use a transaction where all-or-nothing is required.', 'At most 1000 operations per step; split bigger batches (a For each loop, or batches from Read file).'],
+    use: ['Apply a batch of changes from a file, an API or a queue in one round trip.', 'Upsert many records by key, or archive and delete in one request.'],
+    steps: ['Choose the connection and collection.', 'Map Operations to an array such as [{"insertOne":{"document":{...}}}, {"updateOne":{"filter":{"_id":"A-1"},"update":{"$set":{"status":"done"}},"upsert":true}}, {"deleteOne":{"filter":{"_id":"A-0"}}}]. A mapping or a formula can build it from incoming data.', 'Keep Ordered on when later operations depend on earlier ones; turn it off to let independent operations go ahead past a failure.', 'Strict validation, when on, checks every inserted and replacement document against the schema before anything is sent.'],
+    output: ['acknowledged, operations, insertedCount, matchedCount, modifiedCount, deletedCount, upsertedCount, insertedIds and upsertedIds (by operation position).', 'A failure fails the step with the counts already written and the first operation errors, so a partial write is never shown as success.'],
+  },
   mongoAggregate: {
     scope: ['Read-only by default. M0 baseline permits up to 50 stages without disk spill.', 'General MongoDB connections permit explicit disk-use/output-stage opt-ins when supported by the server; this is not certified by the M0 test record.'],
     outScope: ['No server-side JavaScript, MapReduce or unsupported diagnostic stages.', 'M0 baseline cannot opt into $out/$merge or disk use. Output stages on a general deployment may write despite returning no documents.'],

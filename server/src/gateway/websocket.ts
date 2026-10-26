@@ -37,7 +37,7 @@ import { config } from '../config.js';
 import { asyncDatabase } from '../asyncdb.js';
 import { engine } from '../engine/engine.js';
 import { effectiveResource } from '../resources.js';
-import { authorize, PolicyError, type Caller } from '../security/inbound.js';
+import { authorize, PolicyError, startedByCaller, type Caller } from '../security/inbound.js';
 import { checkParsed, checkRaw, limitsOf, MessageRejected, validateMessage } from '../security/validate.js';
 import { firewallAllows, getFirewallAsync, logRequest } from './apps.js';
 import type { FlowDoc, FlowNode } from '../engine/types.js';
@@ -127,7 +127,7 @@ const hasEdges = (r: WsRoute, port: string) => r.doc.edges.some(e => e.from === 
 function fire(c: Conn, event: 'open' | 'message' | 'close', extra: Record<string, unknown>, onFinish?: () => void) {
   const r = c.route;
   const input = { event, connectionId: c.id, path: r.path, params: c.params, auth: c.caller, client: c.client, ...extra };
-  return engine.startRun({ doc: r.doc, flowId: r.flowId, projectId: r.projectId, version: r.version, triggerNodeId: r.node.id, input, source: 'websocket', onFinish: onFinish ? () => onFinish() : undefined })
+  return engine.startRun({ startedBy: startedByCaller(c.caller, c.client?.ip), doc: r.doc, flowId: r.flowId, projectId: r.projectId, version: r.version, triggerNodeId: r.node.id, input, source: 'websocket', onFinish: onFinish ? () => onFinish() : undefined })
     .catch(e => { onFinish?.(); send(c, { error: `The message could not be handled: ${e?.message || e}` }); });
 }
 

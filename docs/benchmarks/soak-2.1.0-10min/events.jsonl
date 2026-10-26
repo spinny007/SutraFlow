@@ -1,0 +1,59 @@
+{"at":"2026-10-26T05:10:28.116Z","min":0.1,"kind":"start","message":"SutraFlow 2.1.0, 3 processes, 10 minutes, database sutra_soak_1792991422124, 16 threads, 24 GB"}
+{"at":"2026-10-26T05:10:37.190Z","min":0.3,"kind":"setup","message":"35 Sutras deployed"}
+{"at":"2026-10-26T05:10:45.210Z","min":0.4,"kind":"load","message":"28 scenarios running"}
+{"at":"2026-10-26T05:14:05.221Z","min":3.7,"kind":"fault","message":"engine 2 killed on purpose"}
+{"at":"2026-10-26T05:15:08.763Z","min":4.8,"kind":"fault","message":"engine 2 started again"}
+{"at":"2026-10-26T05:17:25.210Z","min":7.1,"kind":"fault","message":"database cut for 20 seconds"}
+{"at":"2026-10-26T05:17:45.223Z","min":7.4,"kind":"fault","message":"database back"}
+{"at":"2026-10-26T05:20:27.561Z","min":10.1,"kind":"load","message":"load stopped and starters undeployed; waiting for open runs to end (at most 10 minutes)"}
+{"at":"2026-10-26T05:20:44.099Z","min":10.4,"kind":"check","message":"PASS No engine stopped by itself: 0 unexpected stops"}
+{"at":"2026-10-26T05:20:44.101Z","min":10.4,"kind":"check","message":"PASS No run left running: 0 runs still open after starters stopped"}
+{"at":"2026-10-26T05:20:44.225Z","min":10.4,"kind":"check","message":"PASS No step ran twice: 0 steps of single-pass Sutras completed more than once"}
+{"at":"2026-10-26T05:20:44.227Z","min":10.4,"kind":"check","message":"PASS Requests that failed: 56 of 19523 outside the planned faults (0.287%); 888 with the fault windows included"}
+{"at":"2026-10-26T05:20:44.228Z","min":10.4,"kind":"check","message":"PASS PostgreSQL DB Ops stayed correct: 215 completed, 8 failed (0 outside the planned faults)"}
+{"at":"2026-10-26T05:20:44.228Z","min":10.4,"kind":"check","message":"PASS MySQL DB Ops stayed correct: 215 completed, 9 failed (0 outside the planned faults)"}
+{"at":"2026-10-26T05:20:44.229Z","min":10.4,"kind":"check","message":"PASS SQLite DB Ops stayed correct: 217 completed, 9 failed (0 outside the planned faults)"}
+{"at":"2026-10-26T05:20:46.226Z","min":10.4,"kind":"check","message":"PASS RabbitMQ delivered every message: 698 published (180 big), 698 consumed, 0 failed; subscriber runs {\"done\":698}"}
+{"at":"2026-10-26T05:20:48.310Z","min":10.4,"kind":"check","message":"PASS ActiveMQ delivered every message: 650 published (167 big), 651 consumed, 0 failed; subscriber runs {\"done\":651}"}
+{"at":"2026-10-26T05:20:48.322Z","min":10.4,"kind":"check","message":"PASS Kafka delivered every message: 8 published (2 big), 8 consumed, 0 failed; subscriber runs {\"done\":8}"}
+{"at":"2026-10-26T05:20:48.323Z","min":10.4,"kind":"check","message":"PASS Remote MySQL DB Ops stayed correct: 4 completed, 0 failed, 0 outside the planned faults (one every 2 minutes, over the internet)"}
+{"at":"2026-10-26T05:20:48.323Z","min":10.4,"kind":"check","message":"PASS Remote PostgreSQL DB Ops stayed correct: 4 completed, 0 failed, 0 outside the planned faults (one every 2 minutes, over the internet)"}
+{"at":"2026-10-26T05:20:48.324Z","min":10.4,"kind":"check","message":"PASS MongoDB Atlas stayed correct: 9 lifecycles completed, 0 failed, 0 outside the planned faults (one a minute)"}
+{"at":"2026-10-26T05:20:48.654Z","min":10.4,"kind":"check","message":"PASS MongoDB Atlas left nothing behind: 0 documents left in the soak collection"}
+{"at":"2026-10-26T05:20:48.656Z","min":10.4,"kind":"check","message":"PASS Timer kept time: 55 runs of 60 expected (every 10 s)"}
+{"at":"2026-10-26T05:20:48.662Z","min":10.4,"kind":"check","message":"PASS Every channel message reached its subscriber: 221 subscriber runs for 221 published"}
+{"at":"2026-10-26T05:20:48.667Z","min":10.4,"kind":"check","message":"PASS Bus messages acknowledged: 502 accepted, 776 released, 0 rejected of 501 sent (826 handed out again after a link closed or a release); subscriber runs {\"done\":551}"}
+{"at":"2026-10-26T05:20:48.670Z","min":10.4,"kind":"check","message":"PASS WebSocket client trigger ran for the server's messages: 198 runs for 207 messages pushed"}
+{"at":"2026-10-26T05:20:48.670Z","min":10.4,"kind":"check","message":"FAIL WebSocket broadcasts arrived: 185 received of 190 expected (38 broadcasts to the clients connected at the time)"}
+{"at":"2026-10-26T05:20:48.673Z","min":10.4,"kind":"check","message":"PASS Every CSV in the folder was streamed whole: 0 of 0 files with every row counted ()"}
+{"at":"2026-10-26T05:20:48.675Z","min":10.4,"kind":"check","message":"PASS Every SFTP CSV was streamed whole: 0 of 0 files with every row counted ()"}
+{"at":"2026-10-26T05:20:48.677Z","min":10.4,"kind":"check","message":"PASS Every FTP CSV was streamed whole: 0 of 0 files with every row counted ()"}
+{"at":"2026-10-26T05:20:48.679Z","min":10.4,"kind":"retry","message":"soak database query (1/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-26T05:20:51.687Z","min":10.5,"kind":"retry","message":"soak database query (2/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-26T05:20:54.693Z","min":10.5,"kind":"retry","message":"soak database query (3/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-26T05:20:57.705Z","min":10.6,"kind":"retry","message":"soak database query (4/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-26T05:21:00.715Z","min":10.6,"kind":"retry","message":"soak database query (5/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-26T05:21:03.729Z","min":10.7,"kind":"retry","message":"soak database query (6/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-26T05:21:06.744Z","min":10.7,"kind":"retry","message":"soak database query (7/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-26T05:21:09.749Z","min":10.8,"kind":"retry","message":"soak database query (8/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-26T05:21:12.756Z","min":10.8,"kind":"retry","message":"soak database query (9/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-26T05:21:15.769Z","min":10.9,"kind":"check","message":"PASS RAG passages are in the pgvector table: 0 passages in soak_knowledge"}
+{"at":"2026-10-26T05:21:15.770Z","min":10.9,"kind":"check","message":"PASS RAG documents were learned: none"}
+{"at":"2026-10-26T05:21:15.771Z","min":10.9,"kind":"check","message":"FAIL Engine 0 stays responsive: event loop delay: p99 per minute 533 ms typical, 1326 ms in the worst 5% of minutes; longest single wait 1725 ms"}
+{"at":"2026-10-26T05:21:15.772Z","min":10.9,"kind":"check","message":"PASS Engine 1 stays responsive: event loop delay: p99 per minute 708 ms typical, 814 ms in the worst 5% of minutes; longest single wait 1574 ms"}
+{"at":"2026-10-26T05:21:15.774Z","min":10.9,"kind":"check","message":"FAIL Engine 2 stays responsive: event loop delay: p99 per minute 665 ms typical, 1267 ms in the worst 5% of minutes; longest single wait 1634 ms"}
+{"at":"2026-10-26T05:21:15.775Z","min":10.9,"kind":"check","message":"PASS REST orders stays as fast: p95 3723 ms in the first period, 2829 ms in the last"}
+{"at":"2026-10-26T05:21:15.776Z","min":10.9,"kind":"check","message":"PASS REST in memory stays as fast: p95 1378 ms in the first period, 863 ms in the last"}
+{"at":"2026-10-26T05:21:15.776Z","min":10.9,"kind":"check","message":"PASS REST signed and validated stays as fast: p95 4418 ms in the first period, 2626 ms in the last"}
+{"at":"2026-10-26T05:21:15.776Z","min":10.9,"kind":"check","message":"PASS SOAP UsernameToken stays as fast: p95 3761 ms in the first period, 2504 ms in the last"}
+{"at":"2026-10-26T05:21:15.777Z","min":10.9,"kind":"check","message":"PASS SOAP X.509 signed and encrypted stays as fast: p95 4081 ms in the first period, 2465 ms in the last"}
+{"at":"2026-10-26T05:21:15.777Z","min":10.9,"kind":"check","message":"PASS WebSocket echo stays as fast: p95 2943 ms in the first period, 2330 ms in the last"}
+{"at":"2026-10-26T05:21:15.778Z","min":10.9,"kind":"check","message":"PASS PostgreSQL DB Ops stays as fast: p95 4254 ms in the first period, 3201 ms in the last"}
+{"at":"2026-10-26T05:21:15.778Z","min":10.9,"kind":"check","message":"PASS MySQL DB Ops stays as fast: p95 4276 ms in the first period, 3211 ms in the last"}
+{"at":"2026-10-26T05:21:15.778Z","min":10.9,"kind":"check","message":"PASS SQLite DB Ops stays as fast: p95 4269 ms in the first period, 2692 ms in the last"}
+{"at":"2026-10-26T05:21:15.779Z","min":10.9,"kind":"check","message":"PASS RabbitMQ publish stays as fast: p95 4070 ms in the first period, 2618 ms in the last"}
+{"at":"2026-10-26T05:21:15.779Z","min":10.9,"kind":"check","message":"PASS ActiveMQ publish stays as fast: p95 3576 ms in the first period, 2768 ms in the last"}
+{"at":"2026-10-26T05:21:15.779Z","min":10.9,"kind":"check","message":"PASS Channel publish stays as fast: p95 4173 ms in the first period, 2725 ms in the last"}
+{"at":"2026-10-26T05:21:15.780Z","min":10.9,"kind":"check","message":"PASS Error handler stays as fast: p95 6552 ms in the first period, 4868 ms in the last"}
+{"at":"2026-10-26T05:21:15.780Z","min":10.9,"kind":"check","message":"PASS Bus message stays as fast: p95 1 ms in the first period, 1 ms in the last"}
+{"at":"2026-10-26T05:21:15.798Z","min":10.9,"kind":"end","message":"report written to C:\\Users\\kunwa\\Documents\\LocalGitHub\\SutraFlow\\docs\\benchmarks\\soak-2.1.0-10min"}

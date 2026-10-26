@@ -149,7 +149,8 @@ registerListener('msFilesTrigger', c => {
   const every = Math.max(15, Number(cfg.pollSeconds) || 300) * 1000;
   const call = callerFor(cfg.connection);
   let known: Map<string, { modifiedAt: string; name: string; path: string }> | null = null;
-  const tick = async () => {
+  // One poll under the connection limits of this trigger (skipped when the connection is full).
+  const tick = () => c.withConnection(async () => {
     try {
       const { drive, label } = await driveOf(call, cfg);
       const files = await listFolder(call, drive, String(cfg.folder || '').replace(/^\/+|\/+$/g, ''), cfg.recursive !== false, wildcard(String(cfg.pattern || '*')));
@@ -172,7 +173,7 @@ registerListener('msFilesTrigger', c => {
     } catch (e: any) {
       c.status('error', e.message);
     }
-  };
+  });
   tick();
   const t = setInterval(tick, every);
   return () => clearInterval(t);

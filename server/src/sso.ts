@@ -128,7 +128,12 @@ function unsign(t: string | undefined): any {
   try { const v = JSON.parse(Buffer.from(p, 'base64url').toString()); return v.exp > Date.now() ? v : null; } catch { return null; }
 }
 /** Only paths on this server: no other site, no //host. */
-export const safeReturn = (r: unknown) => (typeof r === 'string' && /^\/(?![/\\])/.test(r) ? r : '/');
+/**
+ * Only paths on this server: no other site, no //host, and only ordinary URL path characters, so the
+ * value can never close a script or an attribute of the page that sends the browser on (no < > " ' `,
+ * spaces, backslashes or control characters). Anything else returns to the start page.
+ */
+export const safeReturn = (r: unknown) => (typeof r === 'string' && r.length <= 2000 && /^\/(?![/\\])[A-Za-z0-9\-._~!$&()*+,;=:@%/?#]*$/.test(r) ? r : '/');
 
 /** Where to send the browser, and the short-lived signed cookie that remembers this sign-in. */
 export async function startSignIn(redirectUri: string, returnTo: unknown) {

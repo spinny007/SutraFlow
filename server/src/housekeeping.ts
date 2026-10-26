@@ -43,6 +43,7 @@ export function housekeeping(o: { retentionDays?: number; now?: number } = {}) {
   const cutoffMs = (o.now ?? Date.now()) - days * 86400000;
   deletedRuns += prune(new Date(cutoffMs).toISOString());
   q.run(`delete from bus_messages where status = 'done' and updated_at < ?`, cutoffMs);
+  q.run('delete from connection_usage where at < ?', Date.now() - 7 * 86400e3);  // Admin Console connection graphs keep 7 days
   return { deletedRuns, deletedAudit };
 }
 
