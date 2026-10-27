@@ -19,7 +19,7 @@ import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { Worker, MessageChannel, receiveMessageOnPort, type MessagePort } from 'node:worker_threads';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { config, ensureDataDir } from './config.js';
+import { config, ensureDataDir, sqliteFile } from './config.js';
 
 /**
  * Storage. Every read and write goes through q and tx below, on one of two backends:
@@ -191,6 +191,9 @@ create table if not exists ws_outbox(id integer primary key autoincrement, engin
 create index if not exists ws_outbox_engine on ws_outbox(engine_id, id);
 create table if not exists run_outputs(
   run_id text not null, name text not null, out text, primary key(run_id, name));
+create table if not exists payloads(
+  id text primary key, run_id text not null, size integer not null, data text not null, created_at integer not null);
+create index if not exists payloads_run on payloads(run_id);
 create table if not exists resources(
   id text primary key, kind text not null, name text not null, config text not null, updated_at text not null);
 create table if not exists secrets(
@@ -303,7 +306,7 @@ export function openDb(file?: string) {
     } finally { db.exec('select pg_advisory_unlock(424243)'); }
     return db;
   } else {
-    const f = file || path.join(config.dataDir, 'sutra.db');
+    const f = file || sqliteFile();
     if (f !== ':memory:') ensureDataDir();
     db = sqliteBackend(f);
     // Engines starting together on one file would add the same new columns at once: one at a time
@@ -366,6 +369,9 @@ function migrate(d = getDb()) {
   add('tasks', 'claim', 'claim integer not null default 0');
   add('engines', 'drain_requested', 'drain_requested integer not null default 0');
   add('engines', 'can_lead', 'can_lead integer not null default 1');
+  // 2.1.1: each engine's memory (heap used and limit, process, machine) and a memory change waiting for a restart.
+  add('engines', 'memory', 'memory text');
+  add('engines', 'restart_requested', 'restart_requested integer not null default 0');
   add('users', 'kind', "kind text not null default 'user'");
   add('users', 'display_name', 'display_name text');
   add('users', 'email', 'email text');

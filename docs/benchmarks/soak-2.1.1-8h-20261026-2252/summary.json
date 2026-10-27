@@ -1,0 +1,2920 @@
+{
+  "runId": "amr-2.1.1-20261026-2249-b333",
+  "scenarioGroups": [
+    "core",
+    "files",
+    "ai",
+    "faults",
+    "amaron",
+    "brokers",
+    "kafka",
+    "mongo",
+    "remote",
+    "regression"
+  ],
+  "amaron": {
+    "orders": 19058,
+    "units": 94994,
+    "tickets": 1914,
+    "kafkaEvents": 159,
+    "reviews": 478,
+    "aiSecondOpinions": 94
+  },
+  "regression": {
+    "files": 90,
+    "tests": 566,
+    "pass": 556,
+    "fail": 3,
+    "skipped": 6,
+    "minutes": 14.7,
+    "failing": [
+      "JSON, XML, text, map and bytes round-trip through Kafka activities",
+      "Atlas M0 activities use isolated seeded data, strict boundaries and real engine execution",
+      "every in-process suite passes on PostgreSQL (PGlite)"
+    ],
+    "code": 1
+  },
+  "version": "2.1.1",
+  "started": "2026-10-26T17:19:34.053Z",
+  "ended": "2026-10-27T01:35:08.499Z",
+  "minutes": 480,
+  "engines": 3,
+  "machine": "AMD Ryzen 7 7435HS, 16 threads, 24 GB, win32",
+  "node": "v24.21.0",
+  "pausedMinutes": 0,
+  "database": "PostgreSQL (through a proxy), SQLite, MySQL, a remote PostgreSQL (gently), a remote MySQL (gently), MongoDB Atlas (gently)",
+  "model": "phi4-mini on Ollama",
+  "sizes": [
+    10,
+    20,
+    30,
+    40,
+    50,
+    60
+  ],
+  "checks": [
+    {
+      "name": "No engine stopped by itself",
+      "ok": true,
+      "detail": "0 unexpected stops"
+    },
+    {
+      "name": "No run left running",
+      "ok": true,
+      "detail": "0 runs still open after starters stopped"
+    },
+    {
+      "name": "No step ran twice",
+      "ok": true,
+      "detail": "0 steps of single-pass Sutras completed more than once"
+    },
+    {
+      "name": "Requests that failed",
+      "ok": true,
+      "detail": "72 of 745653 outside the planned faults (0.010%); 583 with the fault windows included"
+    },
+    {
+      "name": "PostgreSQL DB Ops stayed correct",
+      "ok": true,
+      "detail": "5740 completed, 5 failed (0 outside the planned faults)"
+    },
+    {
+      "name": "MySQL DB Ops stayed correct",
+      "ok": true,
+      "detail": "5740 completed, 5 failed (0 outside the planned faults)"
+    },
+    {
+      "name": "SQLite DB Ops stayed correct",
+      "ok": true,
+      "detail": "5739 completed, 5 failed (0 outside the planned faults)"
+    },
+    {
+      "name": "RabbitMQ delivered every message",
+      "ok": true,
+      "detail": "56131 published (0 big), 56131 consumed, 0 failed; subscriber runs {\"done\":56131}"
+    },
+    {
+      "name": "ActiveMQ delivered every message",
+      "ok": false,
+      "detail": "56133 published (0 big), 56134 consumed, 2 failed; subscriber runs {\"done\":56134,\"failed\":2}"
+    },
+    {
+      "name": "Kafka delivered every message",
+      "ok": true,
+      "detail": "159 published (0 big), 160 consumed, 0 failed; subscriber runs {\"done\":160}"
+    },
+    {
+      "name": "Remote MySQL DB Ops stayed correct",
+      "ok": true,
+      "detail": "236 completed, 3 failed, 2 outside the planned faults (one every 2 minutes, over the internet)"
+    },
+    {
+      "name": "Remote PostgreSQL DB Ops stayed correct",
+      "ok": true,
+      "detail": "238 completed, 1 failed, 0 outside the planned faults (one every 2 minutes, over the internet)"
+    },
+    {
+      "name": "MongoDB Atlas stayed correct",
+      "ok": true,
+      "detail": "478 lifecycles completed, 1 failed, 0 outside the planned faults (one a minute)"
+    },
+    {
+      "name": "MongoDB Atlas left nothing behind",
+      "ok": true,
+      "detail": "0 documents left in the soak collection"
+    },
+    {
+      "name": "Timer kept time",
+      "ok": true,
+      "detail": "2873 runs of 2877 expected (every 10 s)"
+    },
+    {
+      "name": "Every channel message reached its subscriber",
+      "ok": true,
+      "detail": "5740 subscriber runs for 5740 published"
+    },
+    {
+      "name": "Bus messages acknowledged",
+      "ok": true,
+      "detail": "14266 accepted, 473 released, 0 rejected of 14266 sent (477 handed out again after a link closed or a release); subscriber runs {\"done\":14270,\"failed\":46}"
+    },
+    {
+      "name": "WebSocket client trigger ran for the server's messages",
+      "ok": true,
+      "detail": "5717 runs for 5722 messages pushed"
+    },
+    {
+      "name": "WebSocket broadcasts arrived",
+      "ok": true,
+      "detail": "4785 received of 4790 expected (958 broadcasts to the clients connected at the time)"
+    },
+    {
+      "name": "Every CSV in the folder was streamed whole",
+      "ok": true,
+      "detail": "23 of 23 files with every row counted (10 MB, 40 MB, 10 MB, 30 MB, 60 MB, 30 MB, 50 MB, 20 MB, 50 MB, 10 MB, 40 MB, 10 MB, 30 MB, 60 MB, 30 MB, 50 MB, 20 MB, 50 MB, 10 MB, 40 MB, 10 MB, 30 MB, 60 MB)"
+    },
+    {
+      "name": "Every SFTP CSV was streamed whole",
+      "ok": true,
+      "detail": "15 of 15 files with every row counted (20 MB, 60 MB, 40 MB, 20 MB, 60 MB, 40 MB, 20 MB, 60 MB, 40 MB, 20 MB, 60 MB, 40 MB, 20 MB, 60 MB, 40 MB)"
+    },
+    {
+      "name": "Every FTP CSV was streamed whole",
+      "ok": true,
+      "detail": "15 of 15 files with every row counted (30 MB, 20 MB, 50 MB, 40 MB, 10 MB, 60 MB, 30 MB, 20 MB, 50 MB, 40 MB, 10 MB, 60 MB, 30 MB, 20 MB, 50 MB)"
+    },
+    {
+      "name": "RAG passages are in the pgvector table",
+      "ok": true,
+      "detail": "263753 passages in soak_knowledge"
+    },
+    {
+      "name": "RAG documents were learned",
+      "ok": false,
+      "detail": "50 MB failed in 9 s; 10 MB done in 13 s; 30 MB done in 37 s; 50 MB done in 66 s; 10 MB done in 25 s; 30 MB done in 58 s; 50 MB done in 84 s"
+    },
+    {
+      "name": "Amaron: every order placed is saved with this run",
+      "ok": true,
+      "detail": "19058 orders of run amr-2.1.1-20261026-2249-b333 (19058 placed through the API, 17 failed); ₹73,45,51,286 in total"
+    },
+    {
+      "name": "Amaron: lines and stock agree",
+      "ok": true,
+      "detail": "47484 lines, 94994 units ordered; stock reserved grew by 94994"
+    },
+    {
+      "name": "Amaron: the warehouse packed every order (RabbitMQ)",
+      "ok": true,
+      "detail": "19058 shipments and 19058 orders packed for 19058 orders"
+    },
+    {
+      "name": "Amaron: every care ticket saved and decided (ActiveMQ)",
+      "ok": true,
+      "detail": "1914 tickets of 1914 raised, 1914 decisions, 0 not as expected"
+    },
+    {
+      "name": "Amaron: tickets are in the pgvector knowledge",
+      "ok": true,
+      "detail": "1914 passages added for 1914 tickets (1948 in all runs)"
+    },
+    {
+      "name": "Amaron: the model gave its second opinions",
+      "ok": true,
+      "detail": "94 decisions by phi4-mini for 94 asked"
+    },
+    {
+      "name": "Amaron: order events came back through Kafka",
+      "ok": true,
+      "detail": "159 events recorded for 159 published to amaron-order-events"
+    },
+    {
+      "name": "Amaron: reviews are in MongoDB with this run",
+      "ok": true,
+      "detail": "478 reviews of run amr-2.1.1-20261026-2249-b333 for 478 written"
+    },
+    {
+      "name": "Engine 0 stays responsive",
+      "ok": true,
+      "detail": "event loop delay: p99 per minute 35 ms typical, 39 ms in the worst 5% of minutes; longest single wait 3022 ms"
+    },
+    {
+      "name": "Engine 1 stays responsive",
+      "ok": true,
+      "detail": "event loop delay: p99 per minute 34 ms typical, 36 ms in the worst 5% of minutes; longest single wait 6157 ms"
+    },
+    {
+      "name": "Engine 2 stays responsive",
+      "ok": true,
+      "detail": "event loop delay: p99 per minute 34 ms typical, 35 ms in the worst 5% of minutes; longest single wait 5931 ms"
+    },
+    {
+      "name": "Engine 0 memory steady",
+      "ok": true,
+      "detail": "-30.6 MB per hour over the second half; highest 1254 MB"
+    },
+    {
+      "name": "Engine 1 memory steady",
+      "ok": true,
+      "detail": "-9.3 MB per hour over the second half; highest 699 MB"
+    },
+    {
+      "name": "Engine 2 memory steady",
+      "ok": false,
+      "detail": "249.0 MB per hour over the second half; highest 1289 MB"
+    },
+    {
+      "name": "REST orders stays as fast",
+      "ok": true,
+      "detail": "p95 225 ms in the first period, 216 ms in the last"
+    },
+    {
+      "name": "REST in memory stays as fast",
+      "ok": true,
+      "detail": "p95 33 ms in the first period, 23 ms in the last"
+    },
+    {
+      "name": "REST signed and validated stays as fast",
+      "ok": true,
+      "detail": "p95 257 ms in the first period, 241 ms in the last"
+    },
+    {
+      "name": "SOAP UsernameToken stays as fast",
+      "ok": true,
+      "detail": "p95 246 ms in the first period, 234 ms in the last"
+    },
+    {
+      "name": "SOAP X.509 signed and encrypted stays as fast",
+      "ok": true,
+      "detail": "p95 285 ms in the first period, 240 ms in the last"
+    },
+    {
+      "name": "WebSocket echo stays as fast",
+      "ok": true,
+      "detail": "p95 246 ms in the first period, 235 ms in the last"
+    },
+    {
+      "name": "WebSocket broadcast stays as fast",
+      "ok": true,
+      "detail": "p95 1418 ms in the first period, 241 ms in the last"
+    },
+    {
+      "name": "PostgreSQL DB Ops stays as fast",
+      "ok": true,
+      "detail": "p95 601 ms in the first period, 573 ms in the last"
+    },
+    {
+      "name": "MySQL DB Ops stays as fast",
+      "ok": true,
+      "detail": "p95 609 ms in the first period, 571 ms in the last"
+    },
+    {
+      "name": "SQLite DB Ops stays as fast",
+      "ok": true,
+      "detail": "p95 619 ms in the first period, 576 ms in the last"
+    },
+    {
+      "name": "RabbitMQ publish stays as fast",
+      "ok": true,
+      "detail": "p95 571 ms in the first period, 551 ms in the last"
+    },
+    {
+      "name": "ActiveMQ publish stays as fast",
+      "ok": true,
+      "detail": "p95 575 ms in the first period, 553 ms in the last"
+    },
+    {
+      "name": "MongoDB Atlas (gentle) stays as fast",
+      "ok": true,
+      "detail": "p95 6463 ms in the first period, 3786 ms in the last"
+    },
+    {
+      "name": "Channel publish stays as fast",
+      "ok": true,
+      "detail": "p95 619 ms in the first period, 581 ms in the last"
+    },
+    {
+      "name": "Error handler stays as fast",
+      "ok": true,
+      "detail": "p95 1100 ms in the first period, 1102 ms in the last"
+    },
+    {
+      "name": "Called Sutra and approval stays as fast",
+      "ok": true,
+      "detail": "p95 10998 ms in the first period, 10108 ms in the last"
+    },
+    {
+      "name": "MCP tool stays as fast",
+      "ok": true,
+      "detail": "p95 238 ms in the first period, 229 ms in the last"
+    },
+    {
+      "name": "Bus message stays as fast",
+      "ok": true,
+      "detail": "p95 1 ms in the first period, 0 ms in the last"
+    },
+    {
+      "name": "RAG search stays as fast",
+      "ok": true,
+      "detail": "p95 1945 ms in the first period, 1806 ms in the last"
+    },
+    {
+      "name": "Amaron orders stays as fast",
+      "ok": true,
+      "detail": "p95 315 ms in the first period, 284 ms in the last"
+    },
+    {
+      "name": "Amaron order status stays as fast",
+      "ok": true,
+      "detail": "p95 252 ms in the first period, 232 ms in the last"
+    },
+    {
+      "name": "Amaron care tickets stays as fast",
+      "ok": true,
+      "detail": "p95 283 ms in the first period, 224 ms in the last"
+    },
+    {
+      "name": "Amaron reviews (gentle) stays as fast",
+      "ok": true,
+      "detail": "p95 5455 ms in the first period, 2329 ms in the last"
+    },
+    {
+      "name": "Regression suite on the same servers",
+      "ok": false,
+      "detail": "556 passed, 3 failed, 6 skipped of 566 in 14.7 min; failing: JSON, XML, text, map and bytes round-trip through Kafka activities; Atlas M0 activities use isolated seeded data, strict boundaries and real engine execution; every in-process suite passes on PostgreSQL (PGlite) (log: regression.log)"
+    }
+  ],
+  "faults": [
+    {
+      "kind": "engine killed",
+      "from": 1793044819874,
+      "to": 1793044915166
+    },
+    {
+      "kind": "database cut",
+      "from": 1793054419876,
+      "to": 1793054469892
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "REST orders",
+      "ok": 275795,
+      "fail": 202,
+      "errors": [
+        [
+          "status 500: {\"statusCode\":500,\"code\":\"ECONNRESET\",\"error\":\"Internal Server Error\",\"message\":\"read ECONNRESET\"}",
+          169
+        ],
+        [
+          "status 500: {\"error\":\"PostgreSQL cannot be reached; trying again in a moment\"}",
+          16
+        ],
+        [
+          "fetch failed",
+          11
+        ],
+        [
+          "status 500: {\"statusCode\":500,\"error\":\"Internal Server Error\",\"message\":\"Connection terminated unexpectedly\"}",
+          1
+        ],
+        [
+          "status 500: {\"error\":\"Price: PostgreSQL cannot be reached; trying again in a moment\",\"run\":\"10ca4739-3bf4-466a-9ae3-bfc94d29a252\"}",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 34508,
+          "p50": 95,
+          "p95": 225,
+          "p99": 348
+        },
+        {
+          "n": 34570,
+          "p50": 96,
+          "p95": 221,
+          "p99": 304
+        },
+        {
+          "n": 34563,
+          "p50": 95,
+          "p95": 214,
+          "p99": 253
+        },
+        {
+          "n": 34576,
+          "p50": 97,
+          "p95": 215,
+          "p99": 295
+        },
+        {
+          "n": 34570,
+          "p50": 96,
+          "p95": 215,
+          "p99": 417
+        },
+        {
+          "n": 34349,
+          "p50": 96,
+          "p95": 215,
+          "p99": 249
+        },
+        {
+          "n": 34544,
+          "p50": 96,
+          "p95": 216,
+          "p99": 299
+        },
+        {
+          "n": 34115,
+          "p50": 97,
+          "p95": 216,
+          "p99": 412
+        }
+      ]
+    },
+    {
+      "name": "REST in memory",
+      "ok": 140308,
+      "fail": 106,
+      "errors": [
+        [
+          "status 500",
+          99
+        ],
+        [
+          "fetch failed",
+          7
+        ]
+      ],
+      "hours": [
+        {
+          "n": 17563,
+          "p50": 17,
+          "p95": 33,
+          "p99": 117
+        },
+        {
+          "n": 17587,
+          "p50": 15,
+          "p95": 29,
+          "p99": 96
+        },
+        {
+          "n": 17576,
+          "p50": 11,
+          "p95": 22,
+          "p99": 48
+        },
+        {
+          "n": 17589,
+          "p50": 11,
+          "p95": 22,
+          "p99": 99
+        },
+        {
+          "n": 17581,
+          "p50": 11,
+          "p95": 22,
+          "p99": 138
+        },
+        {
+          "n": 17481,
+          "p50": 11,
+          "p95": 22,
+          "p99": 47
+        },
+        {
+          "n": 17584,
+          "p50": 11,
+          "p95": 22,
+          "p99": 97
+        },
+        {
+          "n": 17347,
+          "p50": 11,
+          "p95": 23,
+          "p99": 215
+        }
+      ]
+    },
+    {
+      "name": "REST signed and validated",
+      "ok": 28523,
+      "fail": 21,
+      "errors": [
+        [
+          "expected 200, got 500: {\"statusCode\":500,\"code\":\"ECONNRESET\",\"error\":\"Internal Server Error\",\"message\":\"read ECONNRESET\"}",
+          20
+        ],
+        [
+          "fetch failed",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 3569,
+          "p50": 90,
+          "p95": 257,
+          "p99": 797
+        },
+        {
+          "n": 3576,
+          "p50": 93,
+          "p95": 250,
+          "p99": 582
+        },
+        {
+          "n": 3572,
+          "p50": 77,
+          "p95": 241,
+          "p99": 581
+        },
+        {
+          "n": 3575,
+          "p50": 85,
+          "p95": 239,
+          "p99": 643
+        },
+        {
+          "n": 3574,
+          "p50": 81,
+          "p95": 239,
+          "p99": 791
+        },
+        {
+          "n": 3554,
+          "p50": 78,
+          "p95": 235,
+          "p99": 592
+        },
+        {
+          "n": 3576,
+          "p50": 80,
+          "p95": 240,
+          "p99": 767
+        },
+        {
+          "n": 3527,
+          "p50": 81,
+          "p95": 241,
+          "p99": 623
+        }
+      ]
+    },
+    {
+      "name": "SOAP UsernameToken",
+      "ok": 28521,
+      "fail": 24,
+      "errors": [
+        [
+          "status 500: {\"statusCode\":500,\"code\":\"ECONNRESET\",\"error\":\"Internal Server Error\",\"message\":\"read ECONNRESET\"}",
+          18
+        ],
+        [
+          "fetch failed",
+          3
+        ],
+        [
+          "status 500: {\"statusCode\":500,\"code\":\"SUTRA_DB_UNREACHABLE\",\"error\":\"Internal Server Error\",\"message\":\"PostgreSQL cannot be reached;",
+          2
+        ],
+        [
+          "status 500: Orders WS: PostgreSQL cannot be reached; trying again in a moment",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 3570,
+          "p50": 83,
+          "p95": 246,
+          "p99": 625
+        },
+        {
+          "n": 3576,
+          "p50": 79,
+          "p95": 243,
+          "p99": 584
+        },
+        {
+          "n": 3570,
+          "p50": 69,
+          "p95": 230,
+          "p99": 623
+        },
+        {
+          "n": 3575,
+          "p50": 69,
+          "p95": 232,
+          "p99": 758
+        },
+        {
+          "n": 3575,
+          "p50": 66,
+          "p95": 233,
+          "p99": 644
+        },
+        {
+          "n": 3552,
+          "p50": 64,
+          "p95": 229,
+          "p99": 579
+        },
+        {
+          "n": 3575,
+          "p50": 70,
+          "p95": 231,
+          "p99": 611
+        },
+        {
+          "n": 3528,
+          "p50": 68,
+          "p95": 234,
+          "p99": 627
+        }
+      ]
+    },
+    {
+      "name": "SOAP X.509 signed and encrypted",
+      "ok": 7174,
+      "fail": 6,
+      "errors": [
+        [
+          "status 500: {\"statusCode\":500,\"code\":\"ECONNRESET\",\"error\":\"Internal Server Error\",\"message\":\"read ECONNRESET\"}",
+          5
+        ],
+        [
+          "fetch failed",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 898,
+          "p50": 128,
+          "p95": 285,
+          "p99": 486
+        },
+        {
+          "n": 899,
+          "p50": 111,
+          "p95": 252,
+          "p99": 308
+        },
+        {
+          "n": 898,
+          "p50": 105,
+          "p95": 241,
+          "p99": 301
+        },
+        {
+          "n": 899,
+          "p50": 94,
+          "p95": 241,
+          "p99": 477
+        },
+        {
+          "n": 900,
+          "p50": 99,
+          "p95": 245,
+          "p99": 590
+        },
+        {
+          "n": 894,
+          "p50": 106,
+          "p95": 250,
+          "p99": 343
+        },
+        {
+          "n": 899,
+          "p50": 106,
+          "p95": 248,
+          "p99": 868
+        },
+        {
+          "n": 887,
+          "p50": 95,
+          "p95": 240,
+          "p99": 313
+        }
+      ]
+    },
+    {
+      "name": "WebSocket echo",
+      "ok": 71571,
+      "fail": 6,
+      "errors": [
+        [
+          "no echo within 30 s",
+          5
+        ],
+        [
+          "not connected",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 8951,
+          "p50": 101,
+          "p95": 246,
+          "p99": 554
+        },
+        {
+          "n": 8970,
+          "p50": 100,
+          "p95": 244,
+          "p99": 526
+        },
+        {
+          "n": 8977,
+          "p50": 91,
+          "p95": 231,
+          "p99": 332
+        },
+        {
+          "n": 8975,
+          "p50": 91,
+          "p95": 234,
+          "p99": 507
+        },
+        {
+          "n": 8970,
+          "p50": 91,
+          "p95": 235,
+          "p99": 538
+        },
+        {
+          "n": 8902,
+          "p50": 91,
+          "p95": 234,
+          "p99": 440
+        },
+        {
+          "n": 8975,
+          "p50": 93,
+          "p95": 233,
+          "p99": 506
+        },
+        {
+          "n": 8851,
+          "p50": 91,
+          "p95": 235,
+          "p99": 744
+        }
+      ]
+    },
+    {
+      "name": "WebSocket broadcast",
+      "ok": 957,
+      "fail": 1,
+      "errors": [
+        [
+          "status 500",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 119,
+          "p50": 114,
+          "p95": 1418,
+          "p99": 1687
+        },
+        {
+          "n": 120,
+          "p50": 149,
+          "p95": 330,
+          "p99": 420
+        },
+        {
+          "n": 120,
+          "p50": 117,
+          "p95": 234,
+          "p99": 370
+        },
+        {
+          "n": 120,
+          "p50": 95,
+          "p95": 232,
+          "p99": 243
+        },
+        {
+          "n": 120,
+          "p50": 99,
+          "p95": 237,
+          "p99": 247
+        },
+        {
+          "n": 119,
+          "p50": 81,
+          "p95": 225,
+          "p99": 247
+        },
+        {
+          "n": 120,
+          "p50": 64,
+          "p95": 220,
+          "p99": 235
+        },
+        {
+          "n": 119,
+          "p50": 84,
+          "p95": 241,
+          "p99": 416
+        }
+      ]
+    },
+    {
+      "name": "PostgreSQL DB Ops",
+      "ok": 5740,
+      "fail": 5,
+      "errors": [
+        [
+          "POST /api/flows/14a72fba-abe8-4b50-bed2-7a57e29e3146/run?wait=30000: gave up after 1 tries: 500 PostgreSQL cannot be reached; trying again in a moment",
+          4
+        ],
+        [
+          "POST /api/flows/14a72fba-abe8-4b50-bed2-7a57e29e3146/run?wait=30000: gave up after 1 tries: 500 PostgreSQL cannot be reached: read ECONNRESET",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 718,
+          "p50": 551,
+          "p95": 601,
+          "p99": 1523
+        },
+        {
+          "n": 720,
+          "p50": 545,
+          "p95": 594,
+          "p99": 1486
+        },
+        {
+          "n": 719,
+          "p50": 535,
+          "p95": 570,
+          "p99": 1445
+        },
+        {
+          "n": 719,
+          "p50": 535,
+          "p95": 562,
+          "p99": 595
+        },
+        {
+          "n": 720,
+          "p50": 540,
+          "p95": 576,
+          "p99": 1428
+        },
+        {
+          "n": 714,
+          "p50": 536,
+          "p95": 565,
+          "p99": 599
+        },
+        {
+          "n": 720,
+          "p50": 536,
+          "p95": 567,
+          "p99": 1544
+        },
+        {
+          "n": 710,
+          "p50": 537,
+          "p95": 573,
+          "p99": 1546
+        }
+      ]
+    },
+    {
+      "name": "MySQL DB Ops",
+      "ok": 5740,
+      "fail": 5,
+      "errors": [
+        [
+          "POST /api/flows/e2917c30-bd5f-4071-ae47-666d2eb3eca2/run?wait=30000: gave up after 1 tries: 500 PostgreSQL cannot be reached; trying again in a moment",
+          5
+        ]
+      ],
+      "hours": [
+        {
+          "n": 718,
+          "p50": 554,
+          "p95": 609,
+          "p99": 1529
+        },
+        {
+          "n": 720,
+          "p50": 549,
+          "p95": 597,
+          "p99": 1584
+        },
+        {
+          "n": 719,
+          "p50": 537,
+          "p95": 568,
+          "p99": 1297
+        },
+        {
+          "n": 719,
+          "p50": 536,
+          "p95": 563,
+          "p99": 581
+        },
+        {
+          "n": 720,
+          "p50": 542,
+          "p95": 584,
+          "p99": 1583
+        },
+        {
+          "n": 714,
+          "p50": 538,
+          "p95": 567,
+          "p99": 597
+        },
+        {
+          "n": 720,
+          "p50": 538,
+          "p95": 567,
+          "p99": 1454
+        },
+        {
+          "n": 710,
+          "p50": 539,
+          "p95": 571,
+          "p99": 1392
+        }
+      ]
+    },
+    {
+      "name": "SQLite DB Ops",
+      "ok": 5739,
+      "fail": 5,
+      "errors": [
+        [
+          "POST /api/flows/b581c01d-dada-48c8-bcba-5f1ef52fb5c6/run?wait=30000: gave up after 1 tries: 500 PostgreSQL cannot be reached; trying again in a moment",
+          5
+        ]
+      ],
+      "hours": [
+        {
+          "n": 717,
+          "p50": 557,
+          "p95": 619,
+          "p99": 1643
+        },
+        {
+          "n": 720,
+          "p50": 549,
+          "p95": 596,
+          "p99": 1492
+        },
+        {
+          "n": 719,
+          "p50": 539,
+          "p95": 574,
+          "p99": 1360
+        },
+        {
+          "n": 719,
+          "p50": 539,
+          "p95": 568,
+          "p99": 625
+        },
+        {
+          "n": 720,
+          "p50": 544,
+          "p95": 590,
+          "p99": 1496
+        },
+        {
+          "n": 714,
+          "p50": 540,
+          "p95": 569,
+          "p99": 597
+        },
+        {
+          "n": 720,
+          "p50": 540,
+          "p95": 576,
+          "p99": 1510
+        },
+        {
+          "n": 710,
+          "p50": 540,
+          "p95": 576,
+          "p99": 1412
+        }
+      ]
+    },
+    {
+      "name": "RabbitMQ publish",
+      "ok": 56131,
+      "fail": 43,
+      "errors": [
+        [
+          "POST /api/flows/d5b6f59b-96a6-4196-978e-597597ecddbd/run?wait=60000: gave up after 1 tries: 500 PostgreSQL cannot be reached; trying again in a moment",
+          37
+        ],
+        [
+          "POST /api/flows/d5b6f59b-96a6-4196-978e-597597ecddbd/run?wait=60000: gave up after 1 tries: 500 PostgreSQL cannot be reached: read ECONNRESET",
+          3
+        ],
+        [
+          "run failed: Start: PostgreSQL cannot be reached; trying again in a moment",
+          3
+        ]
+      ],
+      "hours": [
+        {
+          "n": 7025,
+          "p50": 530,
+          "p95": 571,
+          "p99": 1335
+        },
+        {
+          "n": 7037,
+          "p50": 527,
+          "p95": 561,
+          "p99": 1322
+        },
+        {
+          "n": 7039,
+          "p50": 523,
+          "p95": 547,
+          "p99": 1291
+        },
+        {
+          "n": 7037,
+          "p50": 523,
+          "p95": 548,
+          "p99": 1264
+        },
+        {
+          "n": 7031,
+          "p50": 523,
+          "p95": 549,
+          "p99": 1288
+        },
+        {
+          "n": 7000,
+          "p50": 523,
+          "p95": 546,
+          "p99": 1206
+        },
+        {
+          "n": 7028,
+          "p50": 523,
+          "p95": 549,
+          "p99": 1333
+        },
+        {
+          "n": 6934,
+          "p50": 523,
+          "p95": 551,
+          "p99": 1288
+        }
+      ]
+    },
+    {
+      "name": "ActiveMQ publish",
+      "ok": 56133,
+      "fail": 41,
+      "errors": [
+        [
+          "POST /api/flows/21e59661-7ed7-4faa-a76d-1d9ca69fe645/run?wait=60000: gave up after 1 tries: 500 PostgreSQL cannot be reached; trying again in a moment",
+          41
+        ]
+      ],
+      "hours": [
+        {
+          "n": 7024,
+          "p50": 534,
+          "p95": 575,
+          "p99": 1329
+        },
+        {
+          "n": 7041,
+          "p50": 530,
+          "p95": 566,
+          "p99": 1331
+        },
+        {
+          "n": 7038,
+          "p50": 524,
+          "p95": 549,
+          "p99": 1302
+        },
+        {
+          "n": 7028,
+          "p50": 524,
+          "p95": 551,
+          "p99": 1331
+        },
+        {
+          "n": 7031,
+          "p50": 524,
+          "p95": 550,
+          "p99": 1306
+        },
+        {
+          "n": 7006,
+          "p50": 524,
+          "p95": 548,
+          "p99": 1074
+        },
+        {
+          "n": 7029,
+          "p50": 524,
+          "p95": 553,
+          "p99": 1316
+        },
+        {
+          "n": 6936,
+          "p50": 524,
+          "p95": 553,
+          "p99": 1304
+        }
+      ]
+    },
+    {
+      "name": "Kafka publish (gentle)",
+      "ok": 159,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 19,
+          "p50": 1695,
+          "p95": 10878,
+          "p99": 10878
+        },
+        {
+          "n": 20,
+          "p50": 1755,
+          "p95": 2750,
+          "p99": 2750
+        },
+        {
+          "n": 20,
+          "p50": 1749,
+          "p95": 2810,
+          "p99": 2810
+        },
+        {
+          "n": 20,
+          "p50": 1432,
+          "p95": 2517,
+          "p99": 2517
+        },
+        {
+          "n": 20,
+          "p50": 1367,
+          "p95": 3081,
+          "p99": 3081
+        },
+        {
+          "n": 20,
+          "p50": 1411,
+          "p95": 2020,
+          "p99": 2020
+        },
+        {
+          "n": 20,
+          "p50": 1465,
+          "p95": 2423,
+          "p99": 2423
+        },
+        {
+          "n": 20,
+          "p50": 1143,
+          "p95": 2095,
+          "p99": 2095
+        }
+      ]
+    },
+    {
+      "name": "Remote MySQL DB Ops (gentle)",
+      "ok": 236,
+      "fail": 3,
+      "errors": [
+        [
+          "run failed: Write atomically: read ECONNRESET",
+          2
+        ],
+        [
+          "POST /api/flows/c385ae4d-8980-414d-b3c8-f6bcd6778bec/run?wait=60000: gave up after 1 tries: 500 PostgreSQL cannot be reached; trying again in a moment",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 28,
+          "p50": 2350,
+          "p95": 3440,
+          "p99": 3556
+        },
+        {
+          "n": 30,
+          "p50": 2446,
+          "p95": 3765,
+          "p99": 4484
+        },
+        {
+          "n": 30,
+          "p50": 2299,
+          "p95": 3095,
+          "p99": 3352
+        },
+        {
+          "n": 29,
+          "p50": 2372,
+          "p95": 3336,
+          "p99": 3353
+        },
+        {
+          "n": 30,
+          "p50": 1900,
+          "p95": 2847,
+          "p99": 3018
+        },
+        {
+          "n": 29,
+          "p50": 1872,
+          "p95": 2424,
+          "p99": 2451
+        },
+        {
+          "n": 30,
+          "p50": 1914,
+          "p95": 2951,
+          "p99": 5706
+        },
+        {
+          "n": 30,
+          "p50": 1972,
+          "p95": 2449,
+          "p99": 4305
+        }
+      ]
+    },
+    {
+      "name": "Remote PostgreSQL DB Ops (gentle)",
+      "ok": 238,
+      "fail": 1,
+      "errors": [
+        [
+          "POST /api/flows/296e246c-e04d-4b3c-b82a-9b0742b31019/run?wait=60000: gave up after 1 tries: 500 PostgreSQL cannot be reached; trying again in a moment",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 29,
+          "p50": 3701,
+          "p95": 5434,
+          "p99": 5456
+        },
+        {
+          "n": 30,
+          "p50": 3273,
+          "p95": 5327,
+          "p99": 7060
+        },
+        {
+          "n": 30,
+          "p50": 3359,
+          "p95": 5011,
+          "p99": 6081
+        },
+        {
+          "n": 30,
+          "p50": 3271,
+          "p95": 4141,
+          "p99": 6348
+        },
+        {
+          "n": 30,
+          "p50": 2373,
+          "p95": 3828,
+          "p99": 4739
+        },
+        {
+          "n": 29,
+          "p50": 2354,
+          "p95": 3245,
+          "p99": 4362
+        },
+        {
+          "n": 30,
+          "p50": 2415,
+          "p95": 3967,
+          "p99": 4219
+        },
+        {
+          "n": 30,
+          "p50": 2477,
+          "p95": 3503,
+          "p99": 5866
+        }
+      ]
+    },
+    {
+      "name": "MongoDB Atlas (gentle)",
+      "ok": 478,
+      "fail": 1,
+      "errors": [
+        [
+          "POST /api/flows/aeb2ef4c-d534-484b-9e61-755dc2e8d78d/run?wait=60000: gave up after 1 tries: 500 PostgreSQL cannot be reached; trying again in a moment",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 59,
+          "p50": 3695,
+          "p95": 6463,
+          "p99": 13115
+        },
+        {
+          "n": 60,
+          "p50": 3725,
+          "p95": 4373,
+          "p99": 8016
+        },
+        {
+          "n": 60,
+          "p50": 3311,
+          "p95": 4072,
+          "p99": 5818
+        },
+        {
+          "n": 60,
+          "p50": 3322,
+          "p95": 3833,
+          "p99": 5841
+        },
+        {
+          "n": 60,
+          "p50": 3285,
+          "p95": 3813,
+          "p99": 4318
+        },
+        {
+          "n": 59,
+          "p50": 3270,
+          "p95": 3803,
+          "p99": 4272
+        },
+        {
+          "n": 60,
+          "p50": 3244,
+          "p95": 3830,
+          "p99": 5646
+        },
+        {
+          "n": 60,
+          "p50": 3279,
+          "p95": 3786,
+          "p99": 4505
+        }
+      ]
+    },
+    {
+      "name": "Channel publish",
+      "ok": 5740,
+      "fail": 5,
+      "errors": [
+        [
+          "POST /api/flows/bb99de70-f000-4e1b-99ae-1dd5f8754060/run?wait=30000: gave up after 1 tries: 500 PostgreSQL cannot be reached; trying again in a moment",
+          5
+        ]
+      ],
+      "hours": [
+        {
+          "n": 718,
+          "p50": 560,
+          "p95": 619,
+          "p99": 1478
+        },
+        {
+          "n": 720,
+          "p50": 554,
+          "p95": 606,
+          "p99": 1423
+        },
+        {
+          "n": 719,
+          "p50": 541,
+          "p95": 581,
+          "p99": 1392
+        },
+        {
+          "n": 719,
+          "p50": 540,
+          "p95": 572,
+          "p99": 619
+        },
+        {
+          "n": 720,
+          "p50": 545,
+          "p95": 598,
+          "p99": 1508
+        },
+        {
+          "n": 714,
+          "p50": 542,
+          "p95": 574,
+          "p99": 628
+        },
+        {
+          "n": 720,
+          "p50": 541,
+          "p95": 579,
+          "p99": 1531
+        },
+        {
+          "n": 710,
+          "p50": 541,
+          "p95": 581,
+          "p99": 1420
+        }
+      ]
+    },
+    {
+      "name": "Error handler",
+      "ok": 5740,
+      "fail": 5,
+      "errors": [
+        [
+          "POST /api/flows/a9bc0489-cbf3-4960-ad2b-651936a9b1f4/run?wait=30000: gave up after 1 tries: 500 PostgreSQL cannot be reached; trying again in a moment",
+          5
+        ]
+      ],
+      "hours": [
+        {
+          "n": 718,
+          "p50": 613,
+          "p95": 1100,
+          "p99": 1861
+        },
+        {
+          "n": 720,
+          "p50": 722,
+          "p95": 1093,
+          "p99": 1704
+        },
+        {
+          "n": 719,
+          "p50": 676,
+          "p95": 1079,
+          "p99": 1908
+        },
+        {
+          "n": 719,
+          "p50": 648,
+          "p95": 1064,
+          "p99": 1122
+        },
+        {
+          "n": 720,
+          "p50": 694,
+          "p95": 1114,
+          "p99": 1840
+        },
+        {
+          "n": 714,
+          "p50": 708,
+          "p95": 1064,
+          "p99": 1118
+        },
+        {
+          "n": 719,
+          "p50": 691,
+          "p95": 1077,
+          "p99": 1878
+        },
+        {
+          "n": 711,
+          "p50": 700,
+          "p95": 1102,
+          "p99": 2006
+        }
+      ]
+    },
+    {
+      "name": "Called Sutra and approval",
+      "ok": 957,
+      "fail": 1,
+      "errors": [
+        [
+          "POST /api/flows/348d5ac9-aa13-48a2-8dda-b83db532f553/run: gave up after 1 tries: 500 PostgreSQL cannot be reached; trying again in a moment",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 119,
+          "p50": 10084,
+          "p95": 10998,
+          "p99": 11493
+        },
+        {
+          "n": 120,
+          "p50": 10080,
+          "p95": 10179,
+          "p99": 10254
+        },
+        {
+          "n": 120,
+          "p50": 10064,
+          "p95": 10097,
+          "p99": 10128
+        },
+        {
+          "n": 120,
+          "p50": 10062,
+          "p95": 10088,
+          "p99": 10137
+        },
+        {
+          "n": 120,
+          "p50": 10063,
+          "p95": 10089,
+          "p99": 10128
+        },
+        {
+          "n": 119,
+          "p50": 10064,
+          "p95": 10095,
+          "p99": 10128
+        },
+        {
+          "n": 120,
+          "p50": 10063,
+          "p95": 10094,
+          "p99": 10215
+        },
+        {
+          "n": 119,
+          "p50": 10063,
+          "p95": 10108,
+          "p99": 10172
+        }
+      ]
+    },
+    {
+      "name": "MCP tool",
+      "ok": 2872,
+      "fail": 2,
+      "errors": [
+        [
+          "status 500: {\"statusCode\":500,\"code\":\"ECONNRESET\",\"error\":\"Internal Server Error\",\"message\":\"read ECONNRESET\"}",
+          2
+        ]
+      ],
+      "hours": [
+        {
+          "n": 359,
+          "p50": 103,
+          "p95": 238,
+          "p99": 760
+        },
+        {
+          "n": 360,
+          "p50": 80,
+          "p95": 237,
+          "p99": 280
+        },
+        {
+          "n": 360,
+          "p50": 72,
+          "p95": 225,
+          "p99": 252
+        },
+        {
+          "n": 360,
+          "p50": 90,
+          "p95": 221,
+          "p99": 238
+        },
+        {
+          "n": 360,
+          "p50": 80,
+          "p95": 223,
+          "p99": 293
+        },
+        {
+          "n": 358,
+          "p50": 69,
+          "p95": 226,
+          "p99": 236
+        },
+        {
+          "n": 360,
+          "p50": 80,
+          "p95": 227,
+          "p99": 249
+        },
+        {
+          "n": 355,
+          "p50": 93,
+          "p95": 229,
+          "p99": 297
+        }
+      ]
+    },
+    {
+      "name": "Bus message",
+      "ok": 14266,
+      "fail": 69,
+      "errors": [
+        [
+          "the subscriber is not connected",
+          69
+        ]
+      ],
+      "hours": [
+        {
+          "n": 1724,
+          "p50": 0,
+          "p95": 1,
+          "p99": 1
+        },
+        {
+          "n": 1796,
+          "p50": 0,
+          "p95": 0,
+          "p99": 1
+        },
+        {
+          "n": 1795,
+          "p50": 0,
+          "p95": 0,
+          "p99": 1
+        },
+        {
+          "n": 1795,
+          "p50": 0,
+          "p95": 0,
+          "p99": 1
+        },
+        {
+          "n": 1794,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 1796,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 1795,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 1771,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "RAG search",
+      "ok": 478,
+      "fail": 1,
+      "errors": [
+        [
+          "POST /api/flows/3e260a3c-8f22-4001-97ab-af4dbf1f2dd5/run?wait=60000: gave up after 1 tries: 500 PostgreSQL cannot be reached; trying again in a moment",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 59,
+          "p50": 1688,
+          "p95": 1945,
+          "p99": 10795
+        },
+        {
+          "n": 60,
+          "p50": 1710,
+          "p95": 1876,
+          "p99": 2597
+        },
+        {
+          "n": 60,
+          "p50": 1715,
+          "p95": 1822,
+          "p99": 1840
+        },
+        {
+          "n": 60,
+          "p50": 1706,
+          "p95": 1811,
+          "p99": 1853
+        },
+        {
+          "n": 60,
+          "p50": 1711,
+          "p95": 1834,
+          "p99": 1856
+        },
+        {
+          "n": 59,
+          "p50": 1683,
+          "p95": 1810,
+          "p99": 1832
+        },
+        {
+          "n": 60,
+          "p50": 1700,
+          "p95": 1813,
+          "p99": 1856
+        },
+        {
+          "n": 60,
+          "p50": 1725,
+          "p95": 1806,
+          "p99": 1868
+        }
+      ]
+    },
+    {
+      "name": "RAG ask (Ollama)",
+      "ok": 94,
+      "fail": 1,
+      "errors": [
+        [
+          "POST /api/flows/f07f7554-1403-42b8-8243-f57de38d86a1/run?wait=600000: gave up after 1 tries: 500 PostgreSQL cannot be reached; trying again in a moment",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 11,
+          "p50": 1660,
+          "p95": 1902,
+          "p99": 1902
+        },
+        {
+          "n": 12,
+          "p50": 3716,
+          "p95": 7322,
+          "p99": 7322
+        },
+        {
+          "n": 12,
+          "p50": 2872,
+          "p95": 4225,
+          "p99": 4225
+        },
+        {
+          "n": 12,
+          "p50": 2753,
+          "p95": 5325,
+          "p99": 5325
+        },
+        {
+          "n": 12,
+          "p50": 2751,
+          "p95": 6238,
+          "p99": 6238
+        },
+        {
+          "n": 11,
+          "p50": 2930,
+          "p95": 6413,
+          "p99": 6413
+        },
+        {
+          "n": 12,
+          "p50": 2920,
+          "p95": 7421,
+          "p99": 7421
+        },
+        {
+          "n": 12,
+          "p50": 2552,
+          "p95": 5874,
+          "p99": 5874
+        }
+      ]
+    },
+    {
+      "name": "AI agent chat (Ollama)",
+      "ok": 159,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 19,
+          "p50": 3099,
+          "p95": 13465,
+          "p99": 13465
+        },
+        {
+          "n": 20,
+          "p50": 2759,
+          "p95": 5615,
+          "p99": 5615
+        },
+        {
+          "n": 20,
+          "p50": 2528,
+          "p95": 4697,
+          "p99": 4697
+        },
+        {
+          "n": 20,
+          "p50": 2775,
+          "p95": 5209,
+          "p99": 5209
+        },
+        {
+          "n": 20,
+          "p50": 1943,
+          "p95": 3124,
+          "p99": 3124
+        },
+        {
+          "n": 20,
+          "p50": 2049,
+          "p95": 3686,
+          "p99": 3686
+        },
+        {
+          "n": 20,
+          "p50": 2110,
+          "p95": 4460,
+          "p99": 4460
+        },
+        {
+          "n": 20,
+          "p50": 1977,
+          "p95": 3711,
+          "p99": 3711
+        }
+      ]
+    },
+    {
+      "name": "Folder CSV (streamed)",
+      "ok": 23,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 3,
+          "p50": 129,
+          "p95": 258,
+          "p99": 258
+        },
+        {
+          "n": 3,
+          "p50": 304,
+          "p95": 398,
+          "p99": 398
+        },
+        {
+          "n": 3,
+          "p50": 311,
+          "p95": 316,
+          "p99": 316
+        },
+        {
+          "n": 3,
+          "p50": 72,
+          "p95": 266,
+          "p99": 266
+        },
+        {
+          "n": 3,
+          "p50": 198,
+          "p95": 387,
+          "p99": 387
+        },
+        {
+          "n": 3,
+          "p50": 314,
+          "p95": 330,
+          "p99": 330
+        },
+        {
+          "n": 3,
+          "p50": 75,
+          "p95": 262,
+          "p99": 262
+        },
+        {
+          "n": 2,
+          "p50": 402,
+          "p95": 402,
+          "p99": 402
+        }
+      ]
+    },
+    {
+      "name": "SFTP CSV",
+      "ok": 15,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 2,
+          "p50": 554,
+          "p95": 554,
+          "p99": 554
+        },
+        {
+          "n": 2,
+          "p50": 390,
+          "p95": 390,
+          "p99": 390
+        },
+        {
+          "n": 2,
+          "p50": 408,
+          "p95": 408,
+          "p99": 408
+        },
+        {
+          "n": 2,
+          "p50": 401,
+          "p95": 401,
+          "p99": 401
+        },
+        {
+          "n": 2,
+          "p50": 271,
+          "p95": 271,
+          "p99": 271
+        },
+        {
+          "n": 2,
+          "p50": 396,
+          "p95": 396,
+          "p99": 396
+        },
+        {
+          "n": 2,
+          "p50": 385,
+          "p95": 385,
+          "p99": 385
+        },
+        {
+          "n": 1,
+          "p50": 268,
+          "p95": 268,
+          "p99": 268
+        }
+      ]
+    },
+    {
+      "name": "FTP CSV (streamed)",
+      "ok": 15,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 1,
+          "p50": 304,
+          "p95": 304,
+          "p99": 304
+        },
+        {
+          "n": 2,
+          "p50": 471,
+          "p95": 471,
+          "p99": 471
+        },
+        {
+          "n": 2,
+          "p50": 221,
+          "p95": 221,
+          "p99": 221
+        },
+        {
+          "n": 2,
+          "p50": 334,
+          "p95": 334,
+          "p99": 334
+        },
+        {
+          "n": 2,
+          "p50": 322,
+          "p95": 322,
+          "p99": 322
+        },
+        {
+          "n": 2,
+          "p50": 230,
+          "p95": 230,
+          "p99": 230
+        },
+        {
+          "n": 2,
+          "p50": 343,
+          "p95": 343,
+          "p99": 343
+        },
+        {
+          "n": 2,
+          "p50": 324,
+          "p95": 324,
+          "p99": 324
+        }
+      ]
+    },
+    {
+      "name": "RAG document ingest",
+      "ok": 6,
+      "fail": 1,
+      "errors": [
+        [
+          "run failed: Learn: duplicate key value violates unique constraint \"pg_type_typname_nsp_index\"",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 1,
+          "p50": 13228,
+          "p95": 13228,
+          "p99": 13228
+        },
+        {
+          "n": 1,
+          "p50": 37464,
+          "p95": 37464,
+          "p99": 37464
+        },
+        {
+          "n": 1,
+          "p50": 66470,
+          "p95": 66470,
+          "p99": 66470
+        },
+        {
+          "n": 1,
+          "p50": 25503,
+          "p95": 25503,
+          "p99": 25503
+        },
+        {
+          "n": 1,
+          "p50": 58176,
+          "p95": 58176,
+          "p99": 58176
+        },
+        {
+          "n": 1,
+          "p50": 84613,
+          "p95": 84613,
+          "p99": 84613
+        }
+      ]
+    },
+    {
+      "name": "Amaron orders",
+      "ok": 19058,
+      "fail": 17,
+      "errors": [
+        [
+          "status 500: {\"statusCode\":500,\"code\":\"ECONNRESET\",\"error\":\"Internal Server Error\",\"message\":\"read ECONNRESET\"}",
+          12
+        ],
+        [
+          "fetch failed",
+          3
+        ],
+        [
+          "status 500: {\"error\":\"PostgreSQL cannot be reached; trying again in a moment\"}",
+          1
+        ],
+        [
+          "status 500: {\"error\":\"Save order: PostgreSQL cannot be reached; trying again in a moment\",\"run\":\"90800776-8c82-41af-87d6-765c689b7c55\"}",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 2385,
+          "p50": 157,
+          "p95": 315,
+          "p99": 1004
+        },
+        {
+          "n": 2389,
+          "p50": 149,
+          "p95": 301,
+          "p99": 944
+        },
+        {
+          "n": 2385,
+          "p50": 134,
+          "p95": 278,
+          "p99": 916
+        },
+        {
+          "n": 2390,
+          "p50": 136,
+          "p95": 278,
+          "p99": 995
+        },
+        {
+          "n": 2389,
+          "p50": 134,
+          "p95": 286,
+          "p99": 1054
+        },
+        {
+          "n": 2373,
+          "p50": 131,
+          "p95": 271,
+          "p99": 935
+        },
+        {
+          "n": 2390,
+          "p50": 133,
+          "p95": 278,
+          "p99": 995
+        },
+        {
+          "n": 2357,
+          "p50": 136,
+          "p95": 284,
+          "p99": 1012
+        }
+      ]
+    },
+    {
+      "name": "Amaron order status",
+      "ok": 9559,
+      "fail": 7,
+      "errors": [
+        [
+          "status 500: {\"statusCode\":500,\"code\":\"ECONNRESET\",\"error\":\"Internal Server Error\",\"message\":\"read ECONNRESET\"}",
+          7
+        ]
+      ],
+      "hours": [
+        {
+          "n": 1195,
+          "p50": 104,
+          "p95": 252,
+          "p99": 389
+        },
+        {
+          "n": 1198,
+          "p50": 95,
+          "p95": 241,
+          "p99": 501
+        },
+        {
+          "n": 1198,
+          "p50": 86,
+          "p95": 232,
+          "p99": 282
+        },
+        {
+          "n": 1198,
+          "p50": 83,
+          "p95": 231,
+          "p99": 368
+        },
+        {
+          "n": 1198,
+          "p50": 86,
+          "p95": 231,
+          "p99": 780
+        },
+        {
+          "n": 1191,
+          "p50": 98,
+          "p95": 234,
+          "p99": 315
+        },
+        {
+          "n": 1199,
+          "p50": 85,
+          "p95": 228,
+          "p99": 486
+        },
+        {
+          "n": 1182,
+          "p50": 95,
+          "p95": 232,
+          "p99": 563
+        }
+      ]
+    },
+    {
+      "name": "Amaron care tickets",
+      "ok": 1914,
+      "fail": 2,
+      "errors": [
+        [
+          "status 500: {\"statusCode\":500,\"code\":\"ECONNRESET\",\"error\":\"Internal Server Error\",\"message\":\"read ECONNRESET\"}",
+          1
+        ],
+        [
+          "status 500: {\"error\":\"PostgreSQL cannot be reached; trying again in a moment\"}",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 239,
+          "p50": 123,
+          "p95": 283,
+          "p99": 1310
+        },
+        {
+          "n": 240,
+          "p50": 131,
+          "p95": 281,
+          "p99": 326
+        },
+        {
+          "n": 240,
+          "p50": 100,
+          "p95": 220,
+          "p99": 262
+        },
+        {
+          "n": 240,
+          "p50": 89,
+          "p95": 229,
+          "p99": 312
+        },
+        {
+          "n": 240,
+          "p50": 105,
+          "p95": 235,
+          "p99": 354
+        },
+        {
+          "n": 238,
+          "p50": 83,
+          "p95": 225,
+          "p99": 249
+        },
+        {
+          "n": 240,
+          "p50": 66,
+          "p95": 235,
+          "p99": 263
+        },
+        {
+          "n": 237,
+          "p50": 97,
+          "p95": 224,
+          "p99": 255
+        }
+      ]
+    },
+    {
+      "name": "Amaron care second opinion (Ollama)",
+      "ok": 94,
+      "fail": 1,
+      "errors": [
+        [
+          "POST /api/flows/fbdd6bcf-d869-4838-a08f-6799c2028561/run?wait=600000: gave up after 1 tries: 500 PostgreSQL cannot be reached; trying again in a moment",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 11,
+          "p50": 2928,
+          "p95": 5261,
+          "p99": 5261
+        },
+        {
+          "n": 12,
+          "p50": 2846,
+          "p95": 5858,
+          "p99": 5858
+        },
+        {
+          "n": 12,
+          "p50": 2362,
+          "p95": 3728,
+          "p99": 3728
+        },
+        {
+          "n": 12,
+          "p50": 1844,
+          "p95": 5927,
+          "p99": 5927
+        },
+        {
+          "n": 12,
+          "p50": 1853,
+          "p95": 3921,
+          "p99": 3921
+        },
+        {
+          "n": 11,
+          "p50": 1916,
+          "p95": 4543,
+          "p99": 4543
+        },
+        {
+          "n": 12,
+          "p50": 2051,
+          "p95": 5929,
+          "p99": 5929
+        },
+        {
+          "n": 12,
+          "p50": 2143,
+          "p95": 3073,
+          "p99": 3073
+        }
+      ]
+    },
+    {
+      "name": "Amaron order events to Kafka (gentle)",
+      "ok": 159,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 19,
+          "p50": 1746,
+          "p95": 10900,
+          "p99": 10900
+        },
+        {
+          "n": 20,
+          "p50": 1810,
+          "p95": 2881,
+          "p99": 2881
+        },
+        {
+          "n": 20,
+          "p50": 1753,
+          "p95": 3608,
+          "p99": 3608
+        },
+        {
+          "n": 20,
+          "p50": 1365,
+          "p95": 2270,
+          "p99": 2270
+        },
+        {
+          "n": 20,
+          "p50": 1381,
+          "p95": 3085,
+          "p99": 3085
+        },
+        {
+          "n": 20,
+          "p50": 1415,
+          "p95": 2072,
+          "p99": 2072
+        },
+        {
+          "n": 20,
+          "p50": 1480,
+          "p95": 2426,
+          "p99": 2426
+        },
+        {
+          "n": 20,
+          "p50": 1507,
+          "p95": 1700,
+          "p99": 1700
+        }
+      ]
+    },
+    {
+      "name": "Amaron reviews (gentle)",
+      "ok": 478,
+      "fail": 1,
+      "errors": [
+        [
+          "POST /api/flows/66e84a65-304c-49f0-94a1-30de21c991c2/run?wait=60000: gave up after 1 tries: 500 PostgreSQL cannot be reached; trying again in a moment",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 59,
+          "p50": 2228,
+          "p95": 5455,
+          "p99": 11811
+        },
+        {
+          "n": 60,
+          "p50": 2233,
+          "p95": 2679,
+          "p99": 5863
+        },
+        {
+          "n": 60,
+          "p50": 2221,
+          "p95": 2827,
+          "p99": 4834
+        },
+        {
+          "n": 60,
+          "p50": 2211,
+          "p95": 2823,
+          "p99": 3662
+        },
+        {
+          "n": 60,
+          "p50": 2223,
+          "p95": 2594,
+          "p99": 4245
+        },
+        {
+          "n": 59,
+          "p50": 2197,
+          "p95": 2329,
+          "p99": 2485
+        },
+        {
+          "n": 60,
+          "p50": 2206,
+          "p95": 2343,
+          "p99": 2755
+        },
+        {
+          "n": 60,
+          "p50": 2227,
+          "p95": 2329,
+          "p99": 2740
+        }
+      ]
+    }
+  ],
+  "stuckRuns": [],
+  "stuckTasks": [],
+  "files": {
+    "csv": [
+      {
+        "name": "soak-29821-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1793036419982
+      },
+      {
+        "name": "soak-59418-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1793037620124
+      },
+      {
+        "name": "soak-89255-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1793038821297
+      },
+      {
+        "name": "soak-119066-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1793040021488
+      },
+      {
+        "name": "soak-148898-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1793041221585
+      },
+      {
+        "name": "soak-178688-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1793042421389
+      },
+      {
+        "name": "soak-208482-50mb.csv",
+        "mb": 50,
+        "rows": 968000,
+        "at": 1793043621515
+      },
+      {
+        "name": "soak-238261-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1793044821347
+      },
+      {
+        "name": "soak-268092-50mb.csv",
+        "mb": 50,
+        "rows": 968000,
+        "at": 1793046021518
+      },
+      {
+        "name": "soak-297890-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1793047221281
+      },
+      {
+        "name": "soak-327691-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1793048421475
+      },
+      {
+        "name": "soak-357497-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1793049621273
+      },
+      {
+        "name": "soak-387294-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1793050821398
+      },
+      {
+        "name": "soak-417079-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1793052021605
+      },
+      {
+        "name": "soak-446889-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1793053221418
+      },
+      {
+        "name": "soak-476693-50mb.csv",
+        "mb": 50,
+        "rows": 968000,
+        "at": 1793054421550
+      },
+      {
+        "name": "soak-506416-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1793055621372
+      },
+      {
+        "name": "soak-536218-50mb.csv",
+        "mb": 50,
+        "rows": 968000,
+        "at": 1793056821549
+      },
+      {
+        "name": "soak-566003-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1793058021309
+      },
+      {
+        "name": "soak-595809-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1793059221499
+      },
+      {
+        "name": "soak-625582-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1793060421303
+      },
+      {
+        "name": "soak-655364-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1793061621441
+      },
+      {
+        "name": "soak-685165-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1793062821644
+      }
+    ],
+    "sftp": [
+      {
+        "name": "soak-44474-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1793037020131
+      },
+      {
+        "name": "soak-89252-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1793038821180
+      },
+      {
+        "name": "soak-133971-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1793040621016
+      },
+      {
+        "name": "soak-178673-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1793042420775
+      },
+      {
+        "name": "soak-223345-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1793044221048
+      },
+      {
+        "name": "soak-268082-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1793046020916
+      },
+      {
+        "name": "soak-312773-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1793047820787
+      },
+      {
+        "name": "soak-357491-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1793049621046
+      },
+      {
+        "name": "soak-402180-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1793051420918
+      },
+      {
+        "name": "soak-446877-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1793053220783
+      },
+      {
+        "name": "soak-491502-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1793055021040
+      },
+      {
+        "name": "soak-536206-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1793056820919
+      },
+      {
+        "name": "soak-580890-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1793058620788
+      },
+      {
+        "name": "soak-625574-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1793060421032
+      },
+      {
+        "name": "soak-670243-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1793062220917
+      }
+    ],
+    "ftp": [
+      {
+        "name": "soak-44475-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1793037020438
+      },
+      {
+        "name": "soak-89263-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1793038821623
+      },
+      {
+        "name": "soak-133984-50mb.csv",
+        "mb": 50,
+        "rows": 968000,
+        "at": 1793040621894
+      },
+      {
+        "name": "soak-178691-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1793042421706
+      },
+      {
+        "name": "soak-223369-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1793044221548
+      },
+      {
+        "name": "soak-268098-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1793046021937
+      },
+      {
+        "name": "soak-312798-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1793047821819
+      },
+      {
+        "name": "soak-357509-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1793049621746
+      },
+      {
+        "name": "soak-402204-50mb.csv",
+        "mb": 50,
+        "rows": 968000,
+        "at": 1793051421938
+      },
+      {
+        "name": "soak-446895-40mb.csv",
+        "mb": 40,
+        "rows": 776000,
+        "at": 1793053221849
+      },
+      {
+        "name": "soak-491524-10mb.csv",
+        "mb": 10,
+        "rows": 198000,
+        "at": 1793055021688
+      },
+      {
+        "name": "soak-536228-60mb.csv",
+        "mb": 60,
+        "rows": 1156000,
+        "at": 1793056821974
+      },
+      {
+        "name": "soak-580911-30mb.csv",
+        "mb": 30,
+        "rows": 582000,
+        "at": 1793058621846
+      },
+      {
+        "name": "soak-625591-20mb.csv",
+        "mb": 20,
+        "rows": 390000,
+        "at": 1793060421755
+      },
+      {
+        "name": "soak-670268-50mb.csv",
+        "mb": 50,
+        "rows": 968000,
+        "at": 1793062221963
+      }
+    ],
+    "docs": [
+      {
+        "name": "soak-doc-89251-50mb.txt",
+        "mb": 50,
+        "status": "failed",
+        "seconds": 9,
+        "error": "Learn: duplicate key value violates unique constraint \"pg_type_typname_nsp_index\"",
+        "parts": null
+      },
+      {
+        "name": "soak-doc-178655-10mb.txt",
+        "mb": 10,
+        "status": "done",
+        "seconds": 13,
+        "error": null,
+        "parts": 11
+      },
+      {
+        "name": "soak-doc-268069-30mb.txt",
+        "mb": 30,
+        "status": "done",
+        "seconds": 37,
+        "error": null,
+        "parts": 33
+      },
+      {
+        "name": "soak-doc-357470-50mb.txt",
+        "mb": 50,
+        "status": "done",
+        "seconds": 66,
+        "error": null,
+        "parts": 54
+      },
+      {
+        "name": "soak-doc-446861-10mb.txt",
+        "mb": 10,
+        "status": "done",
+        "seconds": 25,
+        "error": null,
+        "parts": 11
+      },
+      {
+        "name": "soak-doc-536187-30mb.txt",
+        "mb": 30,
+        "status": "done",
+        "seconds": 58,
+        "error": null,
+        "parts": 33
+      },
+      {
+        "name": "soak-doc-625551-50mb.txt",
+        "mb": 50,
+        "status": "done",
+        "seconds": 84,
+        "error": null,
+        "parts": 54
+      }
+    ],
+    "drive": []
+  },
+  "ws": {
+    "connects": 6,
+    "drops": 6,
+    "broadcastsSent": 958,
+    "broadcastsExpected": 4790,
+    "broadcastsGot": 4785
+  },
+  "bus": {
+    "sent": 14266,
+    "accepted": 14266,
+    "released": 473,
+    "rejected": 0,
+    "redelivered": 477,
+    "links": 32,
+    "again": [],
+    "senders": {}
+  },
+  "feed": 5722,
+  "restarts": [
+    {
+      "engine": 0,
+      "restarts": 0
+    },
+    {
+      "engine": 1,
+      "restarts": 0
+    },
+    {
+      "engine": 2,
+      "restarts": 0
+    }
+  ]
+}

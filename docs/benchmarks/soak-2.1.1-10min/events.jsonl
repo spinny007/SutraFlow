@@ -1,0 +1,47 @@
+{"at":"2026-10-26T16:01:56.071Z","min":0,"kind":"start","message":"SutraFlow 2.1.1, 3 processes, 10 minutes, database sutra_soak_1793030515828, 16 threads, 24 GB"}
+{"at":"2026-10-26T16:02:03.982Z","min":0.1,"kind":"setup","message":"25 Sutras deployed"}
+{"at":"2026-10-26T16:02:12.000Z","min":0.3,"kind":"load","message":"21 scenarios running"}
+{"at":"2026-10-26T16:05:32.012Z","min":3.6,"kind":"fault","message":"engine 2 killed on purpose"}
+{"at":"2026-10-26T16:06:34.075Z","min":4.6,"kind":"fault","message":"engine 2 started again"}
+{"at":"2026-10-26T16:08:52.001Z","min":6.9,"kind":"fault","message":"database cut for 20 seconds"}
+{"at":"2026-10-26T16:08:52.865Z","min":7,"kind":"retry","message":"GET /api/runs/bc0e03de-67e7-4c22-a17c-1ea574655fef (1/5): 500 PostgreSQL cannot be reached; trying again in a moment"}
+{"at":"2026-10-26T16:08:54.877Z","min":7,"kind":"retry","message":"GET /api/runs/bc0e03de-67e7-4c22-a17c-1ea574655fef (2/5): 500 PostgreSQL cannot be reached: read ECONNRESET"}
+{"at":"2026-10-26T16:08:56.884Z","min":7,"kind":"retry","message":"GET /api/runs/bc0e03de-67e7-4c22-a17c-1ea574655fef (3/5): 500 PostgreSQL cannot be reached: read ECONNRESET"}
+{"at":"2026-10-26T16:08:58.895Z","min":7.1,"kind":"retry","message":"GET /api/runs/bc0e03de-67e7-4c22-a17c-1ea574655fef (4/5): 500 PostgreSQL cannot be reached: read ECONNRESET"}
+{"at":"2026-10-26T16:09:12.011Z","min":7.3,"kind":"fault","message":"database back"}
+{"at":"2026-10-26T16:12:04.315Z","min":10.1,"kind":"load","message":"load stopped and starters undeployed; waiting for open runs to end (at most 10 minutes)"}
+{"at":"2026-10-26T16:12:20.704Z","min":10.4,"kind":"check","message":"PASS No engine stopped by itself: 0 unexpected stops"}
+{"at":"2026-10-26T16:12:20.706Z","min":10.4,"kind":"check","message":"PASS No run left running: 0 runs still open after starters stopped"}
+{"at":"2026-10-26T16:12:20.777Z","min":10.4,"kind":"check","message":"PASS No step ran twice: 0 steps of single-pass Sutras completed more than once"}
+{"at":"2026-10-26T16:12:20.779Z","min":10.4,"kind":"check","message":"PASS Requests that failed: 3 of 11964 outside the planned faults (0.025%); 379 with the fault windows included"}
+{"at":"2026-10-26T16:12:20.779Z","min":10.4,"kind":"check","message":"PASS PostgreSQL DB Ops stayed correct: 111 completed, 5 failed (0 outside the planned faults)"}
+{"at":"2026-10-26T16:12:20.780Z","min":10.4,"kind":"check","message":"PASS SQLite DB Ops stayed correct: 111 completed, 5 failed (0 outside the planned faults)"}
+{"at":"2026-10-26T16:12:20.782Z","min":10.4,"kind":"check","message":"PASS Timer kept time: 57 runs of 60 expected (every 10 s)"}
+{"at":"2026-10-26T16:12:20.785Z","min":10.4,"kind":"check","message":"PASS Every channel message reached its subscriber: 111 subscriber runs for 111 published"}
+{"at":"2026-10-26T16:12:20.787Z","min":10.4,"kind":"check","message":"PASS Bus messages acknowledged: 287 accepted, 392 released, 0 rejected of 287 sent (392 handed out again after a link closed or a release); subscriber runs {\"done\":287,\"failed\":16}"}
+{"at":"2026-10-26T16:12:20.789Z","min":10.4,"kind":"check","message":"PASS WebSocket client trigger ran for the server's messages: 112 runs for 117 messages pushed"}
+{"at":"2026-10-26T16:12:20.790Z","min":10.4,"kind":"check","message":"PASS WebSocket broadcasts arrived: 95 received of 95 expected (19 broadcasts to the clients connected at the time)"}
+{"at":"2026-10-26T16:12:20.793Z","min":10.4,"kind":"check","message":"PASS Every CSV in the folder was streamed whole: 0 of 0 files with every row counted ()"}
+{"at":"2026-10-26T16:12:20.795Z","min":10.4,"kind":"check","message":"PASS Every SFTP CSV was streamed whole: 0 of 0 files with every row counted ()"}
+{"at":"2026-10-26T16:12:20.797Z","min":10.4,"kind":"check","message":"PASS Every FTP CSV was streamed whole: 0 of 0 files with every row counted ()"}
+{"at":"2026-10-26T16:12:20.801Z","min":10.4,"kind":"retry","message":"soak database query (1/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-26T16:12:23.815Z","min":10.5,"kind":"retry","message":"soak database query (2/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-26T16:12:26.821Z","min":10.5,"kind":"retry","message":"soak database query (3/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-26T16:12:29.836Z","min":10.6,"kind":"retry","message":"soak database query (4/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-26T16:12:32.843Z","min":10.6,"kind":"retry","message":"soak database query (5/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-26T16:12:35.855Z","min":10.7,"kind":"retry","message":"soak database query (6/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-26T16:12:38.871Z","min":10.7,"kind":"retry","message":"soak database query (7/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-26T16:12:41.876Z","min":10.8,"kind":"retry","message":"soak database query (8/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-26T16:12:44.881Z","min":10.8,"kind":"retry","message":"soak database query (9/10): relation \"soak_knowledge\" does not exist"}
+{"at":"2026-10-26T16:12:47.894Z","min":10.9,"kind":"check","message":"PASS RAG passages are in the pgvector table: 0 passages in soak_knowledge"}
+{"at":"2026-10-26T16:12:47.895Z","min":10.9,"kind":"check","message":"PASS RAG documents were learned: none"}
+{"at":"2026-10-26T16:12:47.897Z","min":10.9,"kind":"check","message":"PASS Engine 0 stays responsive: event loop delay: p99 per minute 37 ms typical, 55 ms in the worst 5% of minutes; longest single wait 908 ms"}
+{"at":"2026-10-26T16:12:47.898Z","min":10.9,"kind":"check","message":"PASS Engine 1 stays responsive: event loop delay: p99 per minute 36 ms typical, 57 ms in the worst 5% of minutes; longest single wait 426 ms"}
+{"at":"2026-10-26T16:12:47.900Z","min":10.9,"kind":"check","message":"PASS Engine 2 stays responsive: event loop delay: p99 per minute 36 ms typical, 44 ms in the worst 5% of minutes; longest single wait 510 ms"}
+{"at":"2026-10-26T16:12:47.902Z","min":10.9,"kind":"check","message":"PASS REST orders stays as fast: p95 217 ms in the first period, 225 ms in the last"}
+{"at":"2026-10-26T16:12:47.902Z","min":10.9,"kind":"check","message":"PASS REST in memory stays as fast: p95 34 ms in the first period, 42 ms in the last"}
+{"at":"2026-10-26T16:12:47.903Z","min":10.9,"kind":"check","message":"PASS REST signed and validated stays as fast: p95 246 ms in the first period, 243 ms in the last"}
+{"at":"2026-10-26T16:12:47.903Z","min":10.9,"kind":"check","message":"PASS SOAP UsernameToken stays as fast: p95 241 ms in the first period, 250 ms in the last"}
+{"at":"2026-10-26T16:12:47.904Z","min":10.9,"kind":"check","message":"PASS WebSocket echo stays as fast: p95 258 ms in the first period, 264 ms in the last"}
+{"at":"2026-10-26T16:12:47.904Z","min":10.9,"kind":"check","message":"PASS Bus message stays as fast: p95 1 ms in the first period, 1 ms in the last"}
+{"at":"2026-10-26T16:12:47.915Z","min":10.9,"kind":"end","message":"report written to C:\\Users\\kunwa\\Documents\\LocalGitHub\\SutraFlow\\docs\\benchmarks\\soak-2.1.1-10min"}

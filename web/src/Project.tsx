@@ -500,10 +500,12 @@ function VariablesEditor() {
             <button type="button" className="project-variable-toggle" aria-expanded={expanded.has(v.editKey)} aria-controls={`variable-body-${v.editKey}`} onClick={() => setExpanded(previous => { const next = new Set(previous); if (next.has(v.editKey)) next.delete(v.editKey); else next.add(v.editKey); return next; })}><span aria-hidden="true">{expanded.has(v.editKey) ? '−' : '+'}</span><span className="code">{v.name || '(new variable)'}</span><span className="muted">{v.type}{v.type === 'secret' ? (v.value ? (secrets.some(s => s.name === v.value) ? ' · stored' : ' · reference set') : ' · not set') : ''}</span></button>
             <div className="project-variable-body" id={`variable-body-${v.editKey}`} hidden={!expanded.has(v.editKey)}>
             <label>Name<input className="inp code" aria-label={`Variable ${i + 1} name`} value={v.name} onChange={e => set(i, 'name', e.target.value)} /></label>
-            <label>Type<select className="inp" aria-label={`Variable ${i + 1} type`} value={v.type} onChange={e => setVars(vs => vs.map((x, j) => j === i ? { ...x, type: e.target.value as ProjectVariable['type'], value: '' } : x))}>{['string', 'number', 'boolean', 'secret'].map(t => <option key={t}>{t}</option>)}</select></label>
-            <div className="project-variable-value"><div className="muted">Default value</div>{v.type === 'secret'
-              ? <><div className="inp" aria-label={`Variable ${i + 1} secret`}>{v.value ? '•••••• (reference set)' : '(not set)'}</div><InlineCredential propertyName={v.name} label={v.name || 'secret property'} registerStore={store => { stores.current.set(v.editKey, store); return () => { stores.current.delete(v.editKey); }; }} onStored={ref => set(i, 'value', ref)} /></>
-              : <input className="inp code" aria-label={`Variable ${i + 1} value`} value={v.value} onChange={e => set(i, 'value', e.target.value)} />}
+            <label>Type<select className="inp" aria-label={`Variable ${i + 1} type`} value={v.type} onChange={e => setVars(vs => vs.map((x, j) => j === i ? { ...x, type: e.target.value as ProjectVariable['type'], value: '' } : x))}>{['string', 'number', 'boolean', 'secret', 'certificate', 'private key'].map(t => <option key={t}>{t}</option>)}</select></label>
+            <div className="project-variable-value"><div className="muted">Default value</div>{v.type === 'secret' || v.type === 'private key'
+              ? <><div className="inp" aria-label={`Variable ${i + 1} secret`}>{v.value ? '•••••• (reference set)' : '(not set)'}</div><InlineCredential propertyName={v.name} label={v.name || 'secret property'} registerStore={store => { stores.current.set(v.editKey, store); return () => { stores.current.delete(v.editKey); }; }} onStored={ref => set(i, 'value', ref)} privateKey={v.type === 'private key'} /></>
+              : v.type === 'certificate'
+                ? <textarea className="inp code" rows={4} spellCheck={false} aria-label={`Variable ${i + 1} value`} placeholder={'-----BEGIN CERTIFICATE-----  or a file: C:\\certs\\ca.pem, /etc/ssl/certs/ca.pem'} value={v.value} onChange={e => set(i, 'value', e.target.value)} />
+                : <input className="inp code" aria-label={`Variable ${i + 1} value`} value={v.value} onChange={e => set(i, 'value', e.target.value)} />}
               <input className="inp" style={{ marginTop: 4, fontSize: 12 }} placeholder="Description" aria-label={`Variable ${i + 1} description`} value={v.description || ''} onChange={e => set(i, 'description', e.target.value)} /></div>
             </div>
             <button className="x" aria-label={`Remove variable ${v.name || i + 1}`} onClick={() => setVars(vs => vs.filter((_, j) => j !== i))}>✕</button>
@@ -556,7 +558,7 @@ function OpsEditor() {
       <div className="group">Variable overrides</div>
       {project.config.variables.length ? (
         <table className="t"><tbody>{project.config.variables.map(v => (
-          <tr key={v.name}><td><code>{v.name}</code><div className="muted xs">default: {v.type === 'secret' ? `secret ${v.value}` : v.value || '(empty)'}</div></td>
+          <tr key={v.name}><td><code>{v.name}</code><div className="muted xs">default: {v.type === 'secret' || v.type === 'private key' ? `${v.type} ${v.value}` : v.value || '(empty)'}</div></td>
             <td><input className="inp code" aria-label={`Override ${v.name}`} placeholder="(use default)" value={ops.variables[v.name] ?? ''} onChange={e => {
               const vars = { ...ops.variables };
               if (e.target.value === '') delete vars[v.name]; else vars[v.name] = e.target.value;

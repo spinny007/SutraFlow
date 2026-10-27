@@ -125,7 +125,10 @@ One launcher runs SutraFlow everywhere: `bin/sutraflow` (Linux, macOS) and `bin\
 
 | Command | Does |
 |---|---|
-| `setup` | `npm install` and `npm run build` in a source folder (`npm ci --omit=dev` in a built copy), the settings file and the local admin token |
+| `install [--port 4790] [--no-open] [--reset]` | The web installer (2.1.1), on this machine only with a one-time address: administrator, database with a connection test, ports checked free, Node memory, cluster engines and their settings files; or the upgrade pages |
+| `install --config install.json [--dry-run]` | The same install from a JSON file, without a browser: passwords from environment variables or files only, every problem reported before anything changes, log in `<data>/logs/installer.log`. Example: `docs/install-example.json` |
+| `upgrade --config upgrade.json [--dry-run]` | From the new release's folder: an installation from 2.1.0 on is stopped, backed up (data folder, settings, `pg_dump` read back with `pg_restore --list`, or the SQLite file), its runtime replaced, the data compared, started and checked; a failed step puts the previous version back |
+| `setup [--ports]` | `npm install` and `npm run build` in a source folder (`npm ci --omit=dev` in a built copy), the settings file (asking for the ports) and the local admin token |
 | `start`, `start engine` | The studio, or a headless engine on the same database, in the background; output in `<data>/logs/<name>.out.log`. `--foreground` for services and Laragon |
 | `stop`, `stop engine`, `stop all` | Graceful drain: running steps finish first; `--force` ends a process that does not stop within 45 s |
 | `restart`, `status`, `logs [--follow]` | Restart; ready or not, process, addresses and database; the output log |
@@ -145,6 +148,8 @@ Laragon uses the same launcher; `deploy/laragon/` holds only its settings, the A
 3. `01-sutra.conf` goes to `C:\laragon\etc\apache2\sites-enabled`: it loads Apache's proxy modules and forwards `http://sutra.test` to the studio.
 4. Add to Laragon's Procfile (Menu > Procfile): `SutraFlow: autorun C:\laragon\www\sutra\bin\sutraflow.cmd start --foreground PWD=www/sutra`.
 5. Everything else: `bin\sutraflow.cmd status`, `stop all`, `start engine`, `cli sutras list`, `open admin`.
+
+Since 2.1.1 a release unpacked straight into `C:\laragon\www` (or any web root) is safe: its `.htaccess` lets Apache show only `install-sutraflow.html`, a page saying how to install and start SutraFlow; `sutraflow.env`, the data folder and the keys return 403. Install it with `bin\sutraflow.cmd install`, then forward a host name to its port as in step 3. An upgrade keeps the site's own `.htaccess`.
 
 Laragon's MySQL works as a DB Ops connection (driver mysql, host 127.0.0.1, port 3306, user root). `SUTRA_TEST_MYSQL_URL=mysql://root@127.0.0.1:3306/sutraflow_test npm test` also runs the MySQL tests.
 

@@ -57,7 +57,10 @@ const FOLDERS = ['dist', 'bin', 'samples', 'deploy', 'docs/guide-images', 'docs/
 const FILES = [
   'package.json', 'package-lock.json', 'LICENSE', 'COMMERCIAL-LICENSE.md', 'SECURITY.md', 'README.md', 'RELEASE-NOTES.md',
   'sutraflow.env.example',
-  'docs/sutraflow-user-guide.html', 'docs/sutraflow-architecture.html', 'docs/deployment.md', 'docs/architecture.md',
+  // Apache and IIS: unpacked under a web root (Laragon www, htdocs, wwwroot) only the page that says how to
+  // install and start SutraFlow is served; settings, data and keys never are.
+  '.htaccess', 'web.config', 'install-sutraflow.html',
+  'docs/sutraflow-user-guide.html', 'docs/sutraflow-architecture.html', 'docs/deployment.md', 'docs/architecture.md', 'docs/install-example.json',
   'tools/migrate-to-postgres.mjs', 'tools/migrate-to-postgres.cmd', 'tools/migrate-to-postgres.sh',
 ];
 const skip = rel => /(^|\/)(node_modules|\.git)(\/|$)/.test(rel) || /\.(log|map)$/.test(rel);

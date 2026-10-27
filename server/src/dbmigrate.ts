@@ -18,7 +18,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { getSetting, setSetting, dbKind, q } from './db.js';
-import { config, rootDir } from './config.js';
+import { config, rootDir, sqliteFile } from './config.js';
 import { getSecret, setSecret } from './secrets.js';
 
 /**
@@ -146,7 +146,7 @@ export function readStatus(): MigrationStatus {
 export function databaseInfo() {
   const kind = dbKind();
   const counts = Object.fromEntries(['projects', 'flows', 'resources', 'runs', 'users', 'secrets'].map(t => { try { return [t, Number(q.get<any>(`select count(*) as n from ${t}`)?.n ?? 0)]; } catch { return [t, null]; } }));
-  const where = kind === 'postgres' ? config.dbUrl.replace(/\/\/([^:@/]+):[^@/]*@/, '//$1:***@') : path.join(config.dataDir, 'sutra.db');
+  const where = kind === 'postgres' ? config.dbUrl.replace(/\/\/([^:@/]+):[^@/]*@/, '//$1:***@') : sqliteFile();
   const scripts = { windows: path.join(rootDir, 'tools', 'migrate-to-postgres.cmd'), linux: path.join(rootDir, 'tools', 'migrate-to-postgres.sh') };
   return { kind, where, counts, target: publicTarget(), status: readStatus(), envFile: envFile(), scripts, launcher: fs.existsSync(path.join(rootDir, 'bin', 'sutraflow.mjs')) };
 }

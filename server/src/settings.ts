@@ -83,7 +83,9 @@ export function resolveResourceConfig(config: Record<string, any>, scope: Record
       // never be treated as a template. An exact Project/Engine-property
       // reference is safe and lets administrators select a certificate per
       // deployment without copying it into every connection.
-      return /^\s*\{\{\s*(?:gv|ev)\.[^{}]+\s*\}\}\s*$/.test(v) ? staticValue(v) : v;
+      // A file location may also carry variables ({{ev.CERTS}}\ca.pem, 2.1.1): one line, no PEM block.
+      const pathLike = !/-----BEGIN /.test(v) && !/[\r\n]/.test(v) && /[\\/]|\.(pem|crt|cer|cert|key)$/i.test(v.replace(/\{\{[^{}]*\}\}/g, ''));
+      return /^\s*\{\{\s*(?:gv|ev)\.[^{}]+\s*\}\}\s*$/.test(v) || pathLike ? staticValue(v) : v;
     }
     if (Array.isArray(v)) return v.map(x => walk(x));
     if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x, k)]));

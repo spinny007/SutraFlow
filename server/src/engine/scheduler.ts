@@ -20,7 +20,9 @@ import { now } from '../db.js';
 import type { TaskRow } from './run-store.js';
 import { admitConnections, releaseConnections, type ConnectionLimit } from '../connection-limits.js';
 
-export type ClaimedTask = TaskRow & { run_row?: any; run_outs?: any; admissionError?: string; connections?: ConnectionLimit[] };
+export type ClaimedTask = TaskRow & { run_row?: any; run_outs?: any; admissionError?: string; connections?: ConnectionLimit[];
+  /** An in-memory step's places: a lease in the shared engine database (2.1.1). */
+  lease?: import('../connection-limits.js').Lease };
 
 export interface SchedulerOptions {
   store(): AsyncStore;

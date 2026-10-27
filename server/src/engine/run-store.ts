@@ -96,6 +96,7 @@ export class RunStore {
     if (!run) return undefined;
     const tasks = (await this.db.all<any>('select * from tasks where run_id = ? order by id', runId)).map(({ id: _id, ...task }) => task);
     const outputs = await this.db.all<any>('select * from run_outputs where run_id = ?', runId);
+    const payloads = await this.db.all<any>('select * from payloads where run_id = ?', runId);
     const insert = async (tx: TxQ, table: string, rows: any[]) => {
       if (!rows.length) return;
       const cols = Object.keys(rows[0]);
@@ -109,10 +110,12 @@ export class RunStore {
       await insert(tx, 'runs', [run]);
       await insert(tx, 'tasks', tasks);
       await insert(tx, 'run_outputs', outputs);
+      await insert(tx, 'payloads', payloads);
     });
     await this.db.transaction(undefined, async tx => {
       await tx.run('delete from tasks where run_id = ?', runId);
       await tx.run('delete from run_outputs where run_id = ?', runId);
+      await tx.run('delete from payloads where run_id = ?', runId);
       await tx.run('delete from runs where id = ?', runId);
     });
     return run;

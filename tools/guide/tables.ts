@@ -66,6 +66,7 @@ export const TABLE_TEXT: Record<string, string> = {
   api_tokens: 'API tokens of system accounts: hash, name, expiry and last use. Token values are never stored.',
   audit: 'Audit log: time, actor, address, action, target, project, status, outcome and safe details.',
   approval_votes: 'Each approver\'s decision on an approval: the step\'s task, the username, approved or not, the comment, when, and whether an administrator decided on behalf of the approvers.',
+  payloads: "Large parts of a run's input (over 256 KB: a broker message body, a file's content), stored once (2.1.1); the run's data carries a reference to them and each step gets the whole value back.",
   run_outputs: 'The output of each step of a run, one row per step name (a later pass of a loop replaces it), read by the steps after it. Kept apart from the run state so a step writes only its own output.',
   replay_guard: 'Signatures of HMAC-signed requests seen recently, so a replay to any engine is refused; each row expires after twice the allowed age.',
   acme_challenges: 'Short-lived HTTP-01 tokens and public key authorisations for a Let\'s Encrypt order, shared so any gateway engine can answer the challenge.',
@@ -80,7 +81,7 @@ export const TABLE_TEXT: Record<string, string> = {
 /** The tables by what they are for, in the order the guide shows them. */
 export const TABLE_GROUPS: [string, string[]][] = [
   ['Projects and Sutras', ['projects', 'flows', 'flow_versions', 'deployments', 'resources', 'schemas', 'folders', 'counters', 'mem_rows', 'mem_meta']],
-  ['Runs and the work queue', ['runs', 'tasks', 'connection_permits', 'connection_waits', 'connection_usage', 'run_outputs', 'approval_votes']],
+  ['Runs and the work queue', ['runs', 'tasks', 'connection_permits', 'connection_waits', 'connection_usage', 'run_outputs', 'payloads', 'approval_votes']],
   ['Releases and the cluster', ['package_deployments', 'engines', 'leases', 'file_listener_state', 'file_listener_files', 'bus_messages']],
   ['People, access and audit', ['users', 'roles', 'grants', 'api_tokens', 'sso_states', 'audit']],
   ['Vault and server settings', ['secrets', 'settings']],
@@ -100,6 +101,7 @@ export const TABLE_NOTES: Record<string, { encrypted?: string; grows?: string }>
   runs: { grows: 'one row per run; housekeeping deletes runs older than the retention days (Admin Console > Engines > Tuning)' },
   tasks: { grows: 'one row per step; deleted with their run' },
   run_outputs: { grows: 'one row per step name of a run; deleted with their run' },
+  payloads: { grows: 'one row per large input part of a run; deleted with their run' },
   replay_guard: { grows: 'one row per signed request; housekeeping deletes expired rows' },
   acme_challenges: { grows: 'one row per active HTTP-01 proof; removed after validation, with expired rows removed before the next order' },
   sso_states: { grows: 'one row per SAML sign-in start; consumed by the callback and expired rows are deleted at the next sign-in' },

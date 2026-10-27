@@ -97,7 +97,7 @@ function secretsOf(resources: Package['resources'], variables: any[], docs: Flow
       if (f.type === 'kv' && f.k === 'users' && Array.isArray(v)) v.filter((x: any) => x?.v).forEach((x: any) => out.add(String(x.v)));
     }
   }
-  for (const v of variables) if (v?.type === 'secret' && v.value) out.add(String(v.value));
+  for (const v of variables) if ((v?.type === 'secret' || v?.type === 'private key') && v.value) out.add(String(v.value));
   const text = JSON.stringify(docs);
   for (const m of text.matchAll(/secret\.([A-Za-z_][\w]*)/g)) out.add(m[1]);
   for (const d of docs) for (const n of d.nodes) {

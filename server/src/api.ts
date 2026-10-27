@@ -18,7 +18,7 @@ import crypto from 'node:crypto';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { asyncDatabase, poolFigures } from './asyncdb.js';
 import { connectionUse, connectionSampling } from './connection-limits.js';
-import { setEngineName, bumpGatewayGen, bumpTlsGen, bumpDeployGen } from './cluster.js';
+import { setEngineName, setMayLead, setClusterName, bumpGatewayGen, bumpTlsGen, bumpDeployGen } from './cluster.js';
 import { allMemTables, memTable, reload, memClear, memStats, memRows, memPut, memDelete, memoryQuotas, saveMemoryQuotas, memoryUsage } from './memtables.js';
 import * as gitAccounts from './git/accounts.js';
 import * as gitWs from './git/workspaces.js';
@@ -46,7 +46,7 @@ import { ssoSettings, saveSsoSettings, startSignIn, finishSignIn, SsoError } fro
 import { listApprovals, approvalHistory, decideApproval, reassign } from './approvals.js';
 import { deleteItem, renameItem, usageOf, folderContents, deleteFolderTree } from './deletes.js';
 import { audit, listAudit, auditCsv, auditStats, clearAudit } from './audit.js';
-import { overview, applications, setSutraEnabled, requestDrain, restartSutra } from './console.js';
+import { overview, applications, setSutraEnabled, requestDrain, requestRestart, restartSutra } from './console.js';
 import * as gwa from './gateway/apps.js';
 import * as alerts from './alerts.js';
 import { apiRoutes as gatewayRoutes, refreshFirewall } from './gateway/gateway.js';
@@ -414,6 +414,13 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     const x = req.query || {};
     return (await import('./trace.js')).traceRuns(seen(req), { projectId: x.projectId, flowId: x.flowId, status: x.status, hours: Number(x.hours) || 24, text: x.q, before: x.before, limit: Number(x.limit) || 50, tests: x.tests === '1' });
   });
+  /** A large value stored once for a run (engine/payloads.ts), for the project's viewers only. */
+  app.get('/api/console/trace/payloads/:id', async (req: any, reply: any) => {
+    const p = q.get<{ data: string; run_id: string }>('select data, run_id from payloads where id = ?', req.params.id);
+    const run = p ? q.get<{ project_id: string | null }>('select project_id from runs where id = ?', p.run_id) : undefined;
+    if (!p || !run || !seen(req)(run.project_id)) throw new HttpError(404, 'Not found');
+    return reply.type('application/json; charset=utf-8').header('content-disposition', `attachment; filename="payload-${req.params.id}.json"`).send(p.data);
+  });
   app.get('/api/console/trace/runs/:id', async (req: any) => {
     const r = runDetail(req.params.id) as any;
     if (!seen(req)(r.projectId)) throw new HttpError(404, 'Run not found');
@@ -424,6 +431,7 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   });
   app.put('/api/console/sutras/:id/enabled', async (req: any) => { try { return setSutraEnabled(req.params.id, !!req.body?.enabled); } catch (e: any) { throw bad(e.message); } });
   app.post('/api/console/engines/:id/drain', async (req: any) => { try { return requestDrain(req.params.id); } catch (e: any) { throw new HttpError(404, e.message); } });
+  app.post('/api/console/engines/:id/restart', async (req: any) => { try { return requestRestart(req.params.id); } catch (e: any) { throw new HttpError(/No engine/.test(e.message) ? 404 : 409, e.message); } });
   app.post('/api/console/sutras/:id/restart', async (req: any) => { try { return restartSutra(req.params.id); } catch (e: any) { throw bad(e.message); } });
   // Tuning: engine values for the cluster or one engine, and per deployed Sutra.
   app.get('/api/console/tuning', async () => ({ fields: { engine: ENGINE_FIELDS, sutra: SUTRA_FIELDS }, ...engineTuning() }));
@@ -488,6 +496,8 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.post('/api/console/memory/:id/clear', async (req: any) => { try { const t = await memTable(req.params.id); memClear(t); return memStats(t); } catch (e: any) { throw bad(e.message); } });
   // A display name for an engine (its id stays the same).
   app.put('/api/console/engines/:id/name', async (req: any) => ({ id: req.params.id, name: setEngineName(req.params.id, req.body?.name) }));
+  app.put('/api/console/engines/:id/lead', async (req: any) => { try { return setMayLead(req.params.id, req.body?.mayLead !== false); } catch (e: any) { throw bad(e.message); } });
+  app.put('/api/console/cluster/name', async (req: any) => ({ name: setClusterName(req.body?.name) }));
   app.get('/api/console/machine', async () => ({ ...machineInfo(), engine: config.engineId, database: dbKind(), memoryRuns: engine.memoryRuns, running: engine.running, pool: asyncDatabase().pooled ? { ...poolFigures } : null }));
   app.put('/api/console/tuning/engine', async (req: any) => { try { setEngineTuning(req.body?.values || {}); return engineTuning(); } catch (e: any) { throw bad(e.message); } });
   app.put('/api/console/tuning/engines/:id', async (req: any) => { try { setEngineTuning(req.body?.values || {}, req.params.id); return engineTuning(req.params.id); } catch (e: any) { throw bad(e.message); } });
@@ -563,7 +573,7 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.put('/api/projects/:id', async (req: any) => { projects.requireProject(req.params.id); return projects.saveProject({ ...req.body, id: req.params.id }); });
   app.put('/api/projects/:id/variables/:name/secret', async (req: any) => {
     if (!access.can(caller(req), 'secrets')) throw new HttpError(403, 'Manage secrets permission is required.');
-    return projects.storeProjectSecret(req.params.id, req.params.name, req.body?.secretValue, req.body?.create === true, req.body?.onlyCreate === true);
+    return projects.storeProjectSecret(req.params.id, req.params.name, req.body?.secretValue, req.body?.create === true, req.body?.onlyCreate === true, req.body?.type === 'private key' ? 'private key' : 'secret');
   });
   app.delete('/api/projects/:id', async (req: any) => { projects.deleteProject(req.params.id); return { ok: true }; });
   app.get('/api/projects/:id/ops', async (req: any) => projects.getOps(req.params.id));

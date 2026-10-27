@@ -66,7 +66,7 @@ export function TuningForm({ fields, values, defaults, readOnly, action, onSaved
 
 interface EngineTuningData { fields: { engine: Field[] }; defaults: Record<string, number>; cluster: Record<string, number>; perEngine: Record<string, Record<string, number>> }
 
-const ENGINE_FLAGS: Record<string, string> = { workers: 'workers', maxStepsPerRun: 'max-steps', replyTimeoutMs: 'reply-timeout-ms', runRetentionDays: 'retention-days', auditRetentionDays: 'audit-retention-days', traceSampling: 'trace-sampling', memoryWorkers: 'memory-workers', pollMs: 'poll-ms', settingsRefreshMs: 'settings-refresh-ms' };
+const ENGINE_FLAGS: Record<string, string> = { workers: 'workers', maxStepsPerRun: 'max-steps', replyTimeoutMs: 'reply-timeout-ms', runRetentionDays: 'retention-days', auditRetentionDays: 'audit-retention-days', traceSampling: 'trace-sampling', memoryWorkers: 'memory-workers', pollMs: 'poll-ms', settingsRefreshMs: 'settings-refresh-ms', memoryMb: 'memory-mb' };
 const flags = (v: Record<string, unknown>) => Object.entries(ENGINE_FLAGS).flatMap(([k, f]) => (v[k] !== undefined ? [`--${f}`, String(v[k])] : []));
 
 /** Engine tuning: values for every engine, and Steps at once per engine. */
@@ -82,7 +82,7 @@ export function EngineTuning({ engines }: { engines: { id: string }[] }) {
   return (
     <section className="c-section c-project">
       <h2>Tuning</h2>
-      <p className="muted">For every engine of the cluster, applied within a heartbeat without a restart. Empty fields use the value the engine started with (shown greyed).</p>
+      <p className="muted">For every engine of the cluster, applied within a heartbeat without a restart; Node memory applies when the engine restarts (Restart in the list above). Empty fields use the value the engine started with (shown greyed).</p>
       <Machine readOnly={ro} cluster={t.data.cluster} onApplied={() => { toast('Recommended tuning applied'); t.reload(); }} />
       <TuningForm key={JSON.stringify(t.data.cluster)} idPrefix="te" fields={t.data.fields.engine} values={t.data.cluster} defaults={t.data.defaults} readOnly={ro}
         action={values => ({ label: 'Tune all engines', method: 'PUT', url: '/api/console/tuning/engine', body: { values }, cli: ['engines', 'tune', ...flags(values)] })}

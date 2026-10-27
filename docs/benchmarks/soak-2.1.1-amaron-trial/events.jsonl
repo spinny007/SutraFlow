@@ -1,0 +1,54 @@
+{"at":"2026-10-26T16:51:44.686Z","min":0,"kind":"run","message":"amr-2.1.1-20261026-2221-b9b2: scenarios core, amaron, brokers, kafka, mongo, remote, ai"}
+{"at":"2026-10-26T16:51:44.689Z","min":0,"kind":"connections","message":"remote PostgreSQL pooled.db.prisma.io:5432"}
+{"at":"2026-10-26T16:51:44.689Z","min":0,"kind":"connections","message":"remote MySQL srv1880.hstgr.io:3306/<db> password yes"}
+{"at":"2026-10-26T16:51:44.690Z","min":0,"kind":"connections","message":"Kafka SASL kafkaxxx-a1-kafka-39c8.a.aivencloud.com:13367 (password yes, CA yes); client certificate kafkaxxx-a1-kafka-39c8.a.aivencloud.com:13356 (files yes)"}
+{"at":"2026-10-26T16:51:44.690Z","min":0,"kind":"connections","message":"MongoDB user yes, password yes, cluster missing (add \"Cluster: <name>.mongodb.net\" under Mongo DB)"}
+{"at":"2026-10-26T16:51:44.692Z","min":0,"kind":"connections","message":"RabbitMQ 127.0.0.1:5672 (default local)"}
+{"at":"2026-10-26T16:51:44.693Z","min":0,"kind":"connections","message":"ActiveMQ 127.0.0.1:5673 (default local)"}
+{"at":"2026-10-26T16:51:46.661Z","min":0,"kind":"setup","message":"RabbitMQ is starting from C:\\rabbitmq_server-4.4.0"}
+{"at":"2026-10-26T16:51:57.690Z","min":0.2,"kind":"setup","message":"RabbitMQ is running on 127.0.0.1:5672"}
+{"at":"2026-10-26T16:51:57.713Z","min":0.2,"kind":"setup","message":"ActiveMQ is starting from C:\\apache-activemq-6.3.2"}
+{"at":"2026-10-26T16:52:04.746Z","min":0.3,"kind":"setup","message":"ActiveMQ is running on 127.0.0.1:5673"}
+{"at":"2026-10-26T16:52:09.511Z","min":0.4,"kind":"start","message":"SutraFlow 2.1.1, 3 processes, 6 minutes, database sutra_soak_1793033504799, 16 threads, 24 GB"}
+{"at":"2026-10-26T16:52:18.074Z","min":0.6,"kind":"setup","message":"44 Sutras deployed"}
+{"at":"2026-10-26T16:52:26.105Z","min":0.7,"kind":"load","message":"30 scenarios running"}
+{"at":"2026-10-26T16:57:53.258Z","min":6.1,"kind":"load","message":"load stopped and starters undeployed; waiting for open runs to end (at most 10 minutes)"}
+{"at":"2026-10-26T16:58:09.581Z","min":6.4,"kind":"check","message":"PASS No engine stopped by itself: 0 unexpected stops"}
+{"at":"2026-10-26T16:58:09.583Z","min":6.4,"kind":"check","message":"PASS No run left running: 0 runs still open after starters stopped"}
+{"at":"2026-10-26T16:58:09.649Z","min":6.4,"kind":"check","message":"PASS No step ran twice: 0 steps of single-pass Sutras completed more than once"}
+{"at":"2026-10-26T16:58:09.649Z","min":6.4,"kind":"check","message":"PASS Requests that failed: 28 of 8280 outside the planned faults (0.338%); 28 with the fault windows included"}
+{"at":"2026-10-26T16:58:09.650Z","min":6.4,"kind":"check","message":"PASS PostgreSQL DB Ops stayed correct: 63 completed, 0 failed (0 outside the planned faults)"}
+{"at":"2026-10-26T16:58:09.650Z","min":6.4,"kind":"check","message":"PASS MySQL DB Ops stayed correct: 63 completed, 0 failed (0 outside the planned faults)"}
+{"at":"2026-10-26T16:58:09.651Z","min":6.4,"kind":"check","message":"PASS SQLite DB Ops stayed correct: 63 completed, 0 failed (0 outside the planned faults)"}
+{"at":"2026-10-26T16:58:09.659Z","min":6.4,"kind":"check","message":"PASS RabbitMQ delivered every message: 625 published (0 big), 625 consumed, 0 failed; subscriber runs {\"done\":625}"}
+{"at":"2026-10-26T16:58:09.668Z","min":6.4,"kind":"check","message":"PASS ActiveMQ delivered every message: 625 published (0 big), 625 consumed, 0 failed; subscriber runs {\"done\":625}"}
+{"at":"2026-10-26T16:58:09.670Z","min":6.4,"kind":"check","message":"PASS Kafka delivered every message: 1 published (0 big), 1 consumed, 0 failed; subscriber runs {\"done\":1}"}
+{"at":"2026-10-26T16:58:09.670Z","min":6.4,"kind":"check","message":"PASS Remote MySQL DB Ops stayed correct: 2 completed, 0 failed, 0 outside the planned faults (one every 2 minutes, over the internet)"}
+{"at":"2026-10-26T16:58:09.671Z","min":6.4,"kind":"check","message":"PASS Remote PostgreSQL DB Ops stayed correct: 2 completed, 0 failed, 0 outside the planned faults (one every 2 minutes, over the internet)"}
+{"at":"2026-10-26T16:58:09.672Z","min":6.4,"kind":"check","message":"PASS MongoDB Atlas stayed correct: 5 lifecycles completed, 0 failed, 0 outside the planned faults (one a minute)"}
+{"at":"2026-10-26T16:58:09.974Z","min":6.4,"kind":"check","message":"PASS MongoDB Atlas left nothing behind: 0 documents left in the soak collection"}
+{"at":"2026-10-26T16:58:09.976Z","min":6.4,"kind":"check","message":"PASS Timer kept time: 33 runs of 36 expected (every 10 s)"}
+{"at":"2026-10-26T16:58:09.977Z","min":6.4,"kind":"check","message":"PASS Every channel message reached its subscriber: 63 subscriber runs for 63 published"}
+{"at":"2026-10-26T16:58:09.978Z","min":6.4,"kind":"check","message":"PASS Bus messages acknowledged: 135 accepted, 0 released, 0 rejected of 135 sent (0 handed out again after a link closed or a release); subscriber runs {\"done\":135}"}
+{"at":"2026-10-26T16:58:09.980Z","min":6.4,"kind":"check","message":"PASS WebSocket client trigger ran for the server's messages: 55 runs for 55 messages pushed"}
+{"at":"2026-10-26T16:58:09.980Z","min":6.4,"kind":"check","message":"PASS WebSocket broadcasts arrived: 50 received of 50 expected (10 broadcasts to the clients connected at the time)"}
+{"at":"2026-10-26T16:58:10.005Z","min":6.4,"kind":"check","message":"PASS Amaron: every order placed is saved with this run: 211 orders of run amr-2.1.1-20261026-2221-b9b2 (211 placed through the API, 0 failed); ₹81,04,456 in total"}
+{"at":"2026-10-26T16:58:10.019Z","min":6.4,"kind":"check","message":"PASS Amaron: lines and stock agree: 536 lines, 1054 units ordered; stock reserved grew by 1054"}
+{"at":"2026-10-26T16:58:10.022Z","min":6.4,"kind":"check","message":"FAIL Amaron: the warehouse packed every order (RabbitMQ): 0 shipments and 0 orders packed for 211 orders"}
+{"at":"2026-10-26T16:58:10.026Z","min":6.4,"kind":"check","message":"PASS Amaron: every care ticket saved and decided (ActiveMQ): 21 tickets of 21 raised, 21 decisions, 0 not as expected"}
+{"at":"2026-10-26T16:58:10.029Z","min":6.4,"kind":"check","message":"PASS Amaron: tickets are in the pgvector knowledge: 21 passages added for 21 tickets (21 in all runs)"}
+{"at":"2026-10-26T16:58:10.030Z","min":6.4,"kind":"check","message":"PASS Amaron: the model gave its second opinions: 1 decisions by phi4-mini for 1 asked"}
+{"at":"2026-10-26T16:58:10.031Z","min":6.4,"kind":"check","message":"PASS Amaron: order events came back through Kafka: 1 events recorded for 1 published to amaron-order-events"}
+{"at":"2026-10-26T16:58:10.326Z","min":6.4,"kind":"check","message":"FAIL Amaron: reviews are in MongoDB with this run: 5 reviews of run amr-2.1.1-20261026-2221-b9b2 for 0 written"}
+{"at":"2026-10-26T16:58:10.328Z","min":6.4,"kind":"check","message":"PASS Engine 0 stays responsive: event loop delay: p99 per minute 35 ms typical, 45 ms in the worst 5% of minutes; longest single wait 713 ms"}
+{"at":"2026-10-26T16:58:10.329Z","min":6.4,"kind":"check","message":"PASS Engine 1 stays responsive: event loop delay: p99 per minute 35 ms typical, 35 ms in the worst 5% of minutes; longest single wait 387 ms"}
+{"at":"2026-10-26T16:58:10.330Z","min":6.4,"kind":"check","message":"PASS Engine 2 stays responsive: event loop delay: p99 per minute 35 ms typical, 37 ms in the worst 5% of minutes; longest single wait 693 ms"}
+{"at":"2026-10-26T16:58:10.331Z","min":6.4,"kind":"check","message":"PASS REST orders stays as fast: p95 220 ms in the first period, 220 ms in the last"}
+{"at":"2026-10-26T16:58:10.332Z","min":6.4,"kind":"check","message":"PASS REST in memory stays as fast: p95 36 ms in the first period, 27 ms in the last"}
+{"at":"2026-10-26T16:58:10.332Z","min":6.4,"kind":"check","message":"PASS REST signed and validated stays as fast: p95 234 ms in the first period, 239 ms in the last"}
+{"at":"2026-10-26T16:58:10.333Z","min":6.4,"kind":"check","message":"PASS SOAP UsernameToken stays as fast: p95 235 ms in the first period, 236 ms in the last"}
+{"at":"2026-10-26T16:58:10.333Z","min":6.4,"kind":"check","message":"PASS WebSocket echo stays as fast: p95 273 ms in the first period, 217 ms in the last"}
+{"at":"2026-10-26T16:58:10.334Z","min":6.4,"kind":"check","message":"PASS RabbitMQ publish stays as fast: p95 580 ms in the first period, 546 ms in the last"}
+{"at":"2026-10-26T16:58:10.334Z","min":6.4,"kind":"check","message":"PASS ActiveMQ publish stays as fast: p95 583 ms in the first period, 554 ms in the last"}
+{"at":"2026-10-26T16:58:10.334Z","min":6.4,"kind":"check","message":"PASS Amaron orders stays as fast: p95 320 ms in the first period, 299 ms in the last"}
+{"at":"2026-10-26T16:58:10.345Z","min":6.4,"kind":"end","message":"report written to C:\\Users\\kunwa\\Documents\\LocalGitHub\\SutraFlow\\docs\\benchmarks\\soak-2.1.1-amaron-trial"}

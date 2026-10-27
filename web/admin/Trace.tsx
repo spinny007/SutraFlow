@@ -29,7 +29,7 @@ function by(b: StartedBy | undefined) {
   if (!b) return '-';
   if (b.recorded === false) return b.kind === 'system' ? `system: ${b.id}` : b.kind === 'run' ? 'another run' : `${b.kind === 'person' ? 'a person' : 'an API client'} (not recorded before 2.1.0)`;
   if (b.kind === 'person') return b.id;
-  if (b.kind === 'client') return b.anonymous ? `anonymous client${b.ip ? ` ${b.ip}` : ''}` : `${b.id}${b.app ? ` (app ${b.app})` : ''} · ${b.how}${b.ip ? ` · ${b.ip}` : ''}`;
+  if (b.kind === 'client') return b.anonymous ? `${b.id.startsWith('visitor:') ? `visitor ${b.id.slice(8)}` : 'anonymous client'}${b.ip ? ` ${b.ip}` : ''}` : `${b.id}${b.app ? ` (app ${b.app})` : ''} · ${b.how}${b.ip ? ` · ${b.ip}` : ''}`;
   if (b.kind === 'run') return `run ${b.id.slice(0, 8)}`;
   return `system: ${b.id}`;
 }
@@ -51,7 +51,12 @@ function Id({ v }: { v: string }) {
 function Data({ label, v }: { label: string; v: unknown }) {
   if (v === undefined || v === null) return <span className="muted xs">{label}: none kept</span>;
   const text = json(v);
-  return <details><summary className="xs">{label} <span className="muted">({text.length < 1024 ? `${text.length} characters` : `${Math.round(text.length / 1024)} KB`})</span></summary><pre className="c-code">{text.length > 200000 ? text.slice(0, 200000) + '\n… (cut at 200 KB; Download has it all)' : text}</pre></details>;
+  // Large values are stored once and shown as a reference (2.1.1): each can be downloaded.
+  const refs: { $payload: string; size: number }[] = [];
+  const find = (x: any) => { if (!x || typeof x !== 'object') return; if (typeof x.$payload === 'string' && 'size' in x) { refs.push(x); return; } Object.values(x).forEach(find); };
+  find(v);
+  return <details><summary className="xs">{label} <span className="muted">({text.length < 1024 ? `${text.length} characters` : `${Math.round(text.length / 1024)} KB`})</span></summary><pre className="c-code">{text.length > 200000 ? text.slice(0, 200000) + '\n… (cut at 200 KB; Download has it all)' : text}</pre>
+    {refs.map(r => <div key={r.$payload} className="xs">Stored once: {r.size < 1048576 ? `${Math.round(r.size / 1024)} KB` : `${(r.size / 1048576).toFixed(1)} MB`} <a href={`/api/console/trace/payloads/${r.$payload}`} download>Download</a></div>)}</details>;
 }
 
 /**
@@ -179,7 +184,7 @@ function RunTrace({ id, onOpen, onClose }: { id: string; onOpen(id: string): voi
       {r && <>
         <p>{runState(r.status)} <b>{r.flowName}</b> v{r.version} · {r.source} · started {when(r.startedAt)}{r.finishedAt ? `, finished ${when(r.finishedAt)}` : ''}</p>
         <div className="xs">Run <Id v={r.id} /> · Sutra <Id v={r.flowId || '-'} /> · Project <Id v={r.projectId || '-'} /></div>
-        <p className="xs">Started by <b>{by(r.startedBy)}</b>{r.startedBy?.anonymous && <span className="muted"> · the route has no security policy, so callers are not told apart (visitor identities for them are planned)</span>}</p>
+        <p className="xs">Started by <b>{by(r.startedBy)}</b>{r.startedBy?.anonymous && <span className="muted"> · the route has no security policy; agent channels tell such callers apart by a signed visitor token, other routes do not</span>}</p>
         {r.error && <div className="errbox">{r.error}</div>}
         {(r.links?.parent || r.links?.children?.length > 0) && <ul className="xs">{r.links.parent && link(r.links.parent, 'Called by')}{(r.links.children || []).map((c: Link) => link(c, 'Called'))}</ul>}
         {r.stepData !== 'all' && <p className="muted xs">Step data: {r.stepData}. Step inputs and outputs are kept {r.stepData === 'none' ? 'for no run' : 'for failed runs only'} (the Sutra's Step data tuning).</p>}

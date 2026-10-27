@@ -9,7 +9,7 @@
  */
 /* @sutra-file-overview
  * File: test/regression.test.ts
- * Purpose/support: Regression coverage: PostgreSQL lowercased camelCase column names; queries quote them (failures list, approvals); "window" is a reserved word in PostgreSQL: plan usage is counted in a column named win; a transaction inside a transaction joined it instead of failing ("cannot start a transaction within a transaction"); the first folder table migrated with INSERT ... SELECT ... ON CONFLICT, a syntax error in SQLite that stopped the server; a wrong SFTP host key took 25 s to fail (the library retried); it fails at once and is not retried; remote paths stayed inside the base folder even with base "/" and ../ in the name; an MCP server command in a folder with spaces (Windows) did not start through the shell; every AI activity had the 2-minute step limit; models often take longer, so AI steps allow 10 minutes; small models answered "tool": "none", "(order_status)" or "final_answer"; the agent understands them; a small model called the same tool again and again until the step limit; repeats are not run, and the limit still answers; knowledge search missed "returns" for "return" (no stemming); Excel text lost its column tabs (whitespace tidy collapsed them); a message waiting for a person kept the caller waiting the full answer time; it returns a job at once; clearing the audit log left two entries (the request and the clearing); now one; project variable references were found inside other words ("agv.X") after a backslash was lost in \\b; the built-in Git missed an edit of the same size in the same second (it trusted file times); "sutraflow help" made a settings file and printed a path of the machine; every sutra command had a description in its help (the guide listed some with none); the user guide had no text for new activities (the guide build listed them as missing); an activity link inside a guide tip ended the tip box early and showed raw [[...]] text; guide links to chapters used the chapter id without its ch- prefix and went nowhere; a model call failed with ECONNRESET when the server closed an idle keep-alive connection as the call went out; it is sent once more; a single backslash in a guide chapter (C:\\SutraFlow) vanished in the page: chapters are template strings; X.509 signing of SOAP messages used a method xml-crypto deprecated (a warning on every signed call); the signature is now placed by xml-crypto itself; the README test badge said 275 while the suite had grown past 300: it must match the tests in the files; a Microsoft connection for one organisation signed in at "common", which such apps refuse (AADSTS50194): the tenant is used. Uses isolated test fixtures; not a runtime activity.
+ * Purpose/support: Regression coverage: PostgreSQL lowercased camelCase column names; queries quote them (failures list, approvals); "window" is a reserved word in PostgreSQL: plan usage is counted in a column named win; a transaction inside a transaction joined it instead of failing ("cannot start a transaction within a transaction"); the first folder table migrated with INSERT ... SELECT ... ON CONFLICT, a syntax error in SQLite that stopped the server; a wrong SFTP host key took 25 s to fail (the library retried); it fails at once and is not retried; remote paths stayed inside the base folder even with base "/" and ../ in the name; an MCP server command in a folder with spaces (Windows) did not start through the shell; every AI activity had the 2-minute step limit; models often take longer, so AI steps allow 10 minutes; small models answered "tool": "none", "(order_status)" or "final_answer"; the agent understands them; a small model called the same tool again and again until the step limit; repeats are not run, and the limit still answers; knowledge search missed "returns" for "return" (no stemming); Excel text lost its column tabs (whitespace tidy collapsed them); a message waiting for a person kept the caller waiting the full answer time; it returns a job at once; clearing the audit log left two entries (the request and the clearing); now one; project variable references were found inside other words ("agv.X") after a backslash was lost in \\b; the built-in Git missed an edit of the same size in the same second (it trusted file times); "sutraflow help" made a settings file and printed a path of the machine; every sutra command had a description in its help (the guide listed some with none); the user guide had no text for new activities (the guide build listed them as missing); an activity link inside a guide tip ended the tip box early and showed raw [[...]] text; guide links to chapters used the chapter id without its ch- prefix and went nowhere; a model call failed with ECONNRESET when the server closed an idle keep-alive connection as the call went out; it is sent once more; a single backslash in a guide chapter (C:\\SutraFlow) vanished in the page: chapters are template strings; X.509 signing of SOAP messages used a method xml-crypto deprecated (a warning on every signed call); the signature is now placed by xml-crypto itself; the README test badge said 275 while the suite had grown past 300: it must match the tests in the files; a Microsoft connection for one organisation signed in at "common", which such apps refuse (AADSTS50194): the tenant is used; a JSON message body written as text with {{...}} values was published as a quoted string, not as the JSON object; a release unpacked under a web root (Laragon www) let Apache serve sutraflow.env with the database password: every release carries an .htaccess that denies everything; the first big document learned in parallel batches failed: "duplicate key value violates unique constraint pg_type_typname_nsp_index" (several steps made the pgvector table at once). Uses isolated test fixtures; not a runtime activity.
  * Connects to (static imports): node:test, node:assert/strict, node:fs, node:os, node:path, node:http, node:child_process, node:url, ./helpers.js, ./sftpserver.js
  * Functions/entry points (static scan): run
  * Maintenance: generated by tools/file-overviews.mjs from architecture descriptions and declarations; update source descriptions, then regenerate. Detailed runtime contracts remain beside implementations.
@@ -356,4 +356,54 @@ test('a Microsoft connection for one organisation signed in at "common", which s
   const any = saveResource({ kind: 'oauthApp', name: 'Any files', project_id: pid, config: { provider: 'microsoft', clientId: 'cid', scopes: 'Files.Read.All offline_access' } });
   assert.match(oauth.startUrl(one.id, 'http://127.0.0.1:4800/api/oauth/callback'), /^https:\/\/login\.microsoftonline\.com\/contoso\.onmicrosoft\.com\/oauth2\/v2\.0\/authorize\?/);
   assert.match(oauth.startUrl(any.id, 'http://127.0.0.1:4800/api/oauth/callback'), /^https:\/\/login\.microsoftonline\.com\/common\/oauth2\/v2\.0\/authorize\?/);
+});
+
+test('a JSON message body written as text with {{...}} values was published as a quoted string, not as the JSON object', async () => {
+  // Found by the 2.1.1 soak: the warehouse queue got "{\"orderNo\": ...}" and the subscriber saw no orderNo.
+  const { jsonBody, encodeMessage } = await import('../server/src/connectors/message-body.js');
+  const sent = (body: unknown) => JSON.parse(encodeMessage(jsonBody(body), 'JSON').buf.toString());
+  assert.deepEqual(sent('{"orderNo": "AMR-1", "qty": 2}'), { orderNo: 'AMR-1', qty: 2 });
+  assert.deepEqual(sent(' [1, 2]'), [1, 2]);
+  assert.deepEqual(sent({ orderNo: 'AMR-2' }), { orderNo: 'AMR-2' }, 'an object stays the object');
+  assert.equal(sent('hello'), 'hello', 'plain text stays a string');
+  assert.equal(sent('{not json'), '{not json', 'text that only looks like JSON stays a string');
+  const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'server', 'src', 'connectors', 'bus.ts'), 'utf8');
+  assert.match(src, /bodyBytes\([^;]*jsonBody\(c\.v\('body'\)\)/, 'Publish passes the body through jsonBody for JSON and map messages');
+});
+
+test('a release unpacked under a web root (Laragon www) let Apache serve sutraflow.env with the database password: every release carries an .htaccess that denies everything', () => {
+  const home = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  assert.match(fs.readFileSync(path.join(home, '.htaccess'), 'utf8'), /^Require all denied$/m);
+  const htaccess = fs.readFileSync(path.join(home, '.htaccess'), 'utf8');
+  assert.match(htaccess, /<Files "install-sutraflow\.html">\s*Require all granted\s*<\/Files>/, 'only the install page is let through');
+  assert.equal((htaccess.match(/Require all granted/g) || []).length, 1);
+  // The folder itself shows the page; a folder is let through only when it holds it (checked on Apache 2.4).
+  assert.match(htaccess, /^Require expr "-f '%\{REQUEST_FILENAME\}\/install-sutraflow\.html'"$/m);
+  const iis = fs.readFileSync(path.join(home, 'web.config'), 'utf8');
+  for (const hidden of ['sutraflow.env', 'data', 'backups', 'bin', 'dist', 'docs', 'node_modules']) assert.match(iis, new RegExp(`<add segment="${hidden.replace('.', '\\.')}" />`), `IIS hides ${hidden}`);
+  assert.match(iis, /<fileExtensions allowUnlisted="false">/, 'IIS refuses every other kind of file');
+  const page = fs.readFileSync(path.join(home, 'install-sutraflow.html'), 'utf8');
+  assert.match(page, /bin\\sutraflow\.cmd install/); assert.match(page, /bin\/sutraflow install/);
+  assert.doesNotMatch(page, /<script/i, 'a static page');
+  assert.match(fs.readFileSync(path.join(home, 'tools', 'build-release.mjs'), 'utf8'), /^\s*'\.htaccess', 'web\.config', 'install-sutraflow\.html',$/m, 'the release builder ships all three');
+  assert.match(fs.readFileSync(path.join(home, 'server', 'src', 'install', 'core.ts'), 'utf8'), /\['\.htaccess', 'web\.config'\]\.includes\(f\) && !fs\.existsSync\(path\.join\(from, f\)\)/, 'an upgrade adds it where it is missing and keeps the site own one');
+});
+
+test('the first big document learned in parallel batches failed: "duplicate key value violates unique constraint pg_type_typname_nsp_index" (several steps made the pgvector table at once)', async () => {
+  // Found by the 8-hour 2.1.1 soak. A knowledge or memory table is now made once per engine, and a race lost to another engine is tried again.
+  const { createOnce, forgetCreated } = await import('../server/src/ddl-once.js');
+  forgetCreated();
+  let made = 0;
+  const create = async () => { made++; await new Promise(r => setTimeout(r, 20)); };
+  await Promise.all(Array.from({ length: 8 }, () => createOnce('kb:t', create)));
+  assert.equal(made, 1, 'eight steps at once: the table is made once');
+  let tries = 0;
+  await createOnce('kb:race', async () => { if (++tries < 3) throw new Error('duplicate key value violates unique constraint "pg_type_typname_nsp_index"'); });
+  assert.equal(tries, 3, 'another engine made it at the same moment: tried again');
+  let fails = 0;
+  await assert.rejects(createOnce('kb:bad', async () => { fails++; throw new Error('permission denied for schema public'); }), /permission denied/);
+  assert.equal(fails, 1, 'any other error is not retried');
+  await createOnce('kb:bad', async () => {});
+  const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'server', 'src', 'ai', 'knowledge.ts'), 'utf8');
+  assert.match(src, /createOnce\(`knowledge:/, 'the pgvector knowledge store uses it');
 });

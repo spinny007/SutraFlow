@@ -17,6 +17,7 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { get, put } from './api';
 import type { Field, Resource } from './types';
+import { PRIVATE_KEY_PEM } from './types';
 import { useCatalog } from './ui';
 
 /** MIME type used when dragging a data reference from the mapper tree. */
@@ -57,6 +58,7 @@ function holds(c: { k: string; in: any[] }, values: Record<string, any>, all: Fi
 }
 
 export function visible(f: Field, values: Record<string, any>, all: Field[]): boolean {
+  if (f.legacy && (values[f.k] === undefined || values[f.k] === null || values[f.k] === '')) return false;
   if (f.showIf && !holds(f.showIf, values, all)) return false;
   if (f.showIfAny && !f.showIfAny.some(c => holds(c, values, all))) return false;
   return true;
@@ -132,7 +134,7 @@ function FieldInput({ f, value, onChange, resources, secrets, onFocusField, inli
       break;
     }
     case 'secret':
-      if (inlineCredentials) return <div className="fld"><label htmlFor={id}>{f.label}</label><SecretPropertyPick id={id} label={f.label} value={String(value || '')} onChange={onChange} />{f.help && <div className="hint">{f.help}</div>}</div>;
+      if (inlineCredentials) return <div className="fld"><label htmlFor={id}>{f.label}</label><SecretPropertyPick id={id} label={f.label} value={String(value || '')} onChange={onChange} keyFile={f.keyFile} />{f.help && <div className="hint">{f.help}</div>}</div>;
       input = (
         <>
           <select id={id} value={value} onChange={e => onChange(e.target.value)}>
@@ -186,12 +188,12 @@ function FieldInput({ f, value, onChange, resources, secrets, onFocusField, inli
 /** Explicit encrypted storage; plaintext never enters resource configuration or GV values. */
 export type CredentialStore = () => Promise<string | undefined>;
 export type RegisterCredentialStore = (store: CredentialStore) => () => void;
-export function InlineCredential({ label, onStored, registerStore, propertyName }: { label: string; onStored(name: string): void; registerStore?: RegisterCredentialStore; propertyName?: string }) {
+export function InlineCredential({ label, onStored, registerStore, propertyName, privateKey }: { label: string; onStored(name: string): void; registerStore?: RegisterCredentialStore; propertyName?: string; privateKey?: boolean }) {
   const { projectId, reload } = useCatalog();
-  const saveValue = propertyName !== undefined ? async (secretValue: string) => (await put(`/api/projects/${encodeURIComponent(projectId)}/variables/${encodeURIComponent(propertyName)}/secret`, { secretValue, create: true })).secretRef : undefined;
-  return <SecretValueEntry label={label} onStored={onStored} namespace={projectId} onReload={reload} registerStore={registerStore} saveValue={saveValue} />;
+  const saveValue = propertyName !== undefined ? async (secretValue: string) => (await put(`/api/projects/${encodeURIComponent(projectId)}/variables/${encodeURIComponent(propertyName)}/secret`, { secretValue, create: true, ...(privateKey ? { type: 'private key' } : {}) })).secretRef : undefined;
+  return <SecretValueEntry label={label} onStored={onStored} namespace={projectId} onReload={reload} registerStore={registerStore} saveValue={saveValue} privateKey={privateKey} />;
 }
-export function SecretValueEntry({ label, onStored, namespace, onReload, registerStore, saveValue }: { label: string; onStored(name: string): void; namespace?: string; onReload?(): Promise<void>; registerStore?: RegisterCredentialStore; saveValue?(plain: string): Promise<string> }) {
+export function SecretValueEntry({ label, onStored, namespace, onReload, registerStore, saveValue, privateKey }: { label: string; onStored(name: string): void; namespace?: string; onReload?(): Promise<void>; registerStore?: RegisterCredentialStore; saveValue?(plain: string): Promise<string>; privateKey?: boolean }) {
   const [open, setOpen] = useState(false), [plain, setPlain] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [show, setShow] = useState(false);
   const latest = useRef(onStored), alive = useRef(true);
@@ -201,6 +203,7 @@ export function SecretValueEntry({ label, onStored, namespace, onReload, registe
   const store: CredentialStore = () => {
     if (inFlight.current) return inFlight.current;
     if (!open || !plain) return Promise.resolve(undefined);
+    if (privateKey && !PRIVATE_KEY_PEM.test(plain)) { const message = 'Paste the PEM private key (-----BEGIN ... PRIVATE KEY----- to -----END ... PRIVATE KEY-----).'; setError(message); return Promise.reject(new Error(message)); }
     setBusy(true); setError('');
     const request = (async () => {
     try {
@@ -224,7 +227,7 @@ export function SecretValueEntry({ label, onStored, namespace, onReload, registe
   useEffect(() => registerStore?.(() => currentStore.current()), [registerStore]);
   return <div style={{ marginTop: 6 }}>
     {!open ? <button type="button" className="btn small" onClick={() => { setPlain(''); setError(''); setShow(false); setOpen(true); }}>Enter new value</button> : <>
-      <div className="row"><input type={show ? 'text' : 'password'} aria-label={`New ${label}`} autoComplete="new-password" value={plain} onChange={e => setPlain(e.target.value)} disabled={busy} /><button type="button" className="btn small" aria-label={show ? 'Hide entered value' : 'Reveal entered value'} aria-pressed={show} disabled={busy} onClick={() => setShow(s => !s)}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>{show && <path d="m3 3 18 18"/>}</svg></button></div>
+      <div className="row">{privateKey ? <textarea className="code" rows={5} spellCheck={false} aria-label={`New ${label}`} placeholder="-----BEGIN PRIVATE KEY-----" style={show ? undefined : { WebkitTextSecurity: 'disc' } as any} value={plain} onChange={e => setPlain(e.target.value)} disabled={busy} /> : <input type={show ? 'text' : 'password'} aria-label={`New ${label}`} autoComplete="new-password" value={plain} onChange={e => setPlain(e.target.value)} disabled={busy} />}<button type="button" className="btn small" aria-label={show ? 'Hide entered value' : 'Reveal entered value'} aria-pressed={show} disabled={busy} onClick={() => setShow(s => !s)}><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>{show && <path d="m3 3 18 18"/>}</svg></button></div>
       <div className="row"><button type="button" className="btn small" disabled={!plain || busy} onClick={() => { void store().catch(() => {}); }}>{busy ? 'Storing…' : 'Store encrypted value'}</button><button type="button" className="btn small" disabled={busy} onClick={() => { setPlain(''); setOpen(false); setError(''); setShow(false); }}>Cancel</button></div>
     </>}
     <div className="hint">{registerStore ? 'Save also encrypts a value still being entered and saves its reference. ' : 'Store the encrypted value, then save the connection/property. '}Stored values are never read back; the eye reveals only a value you are entering. Requires Manage secrets permission.</div>
@@ -232,35 +235,32 @@ export function SecretValueEntry({ label, onStored, namespace, onReload, registe
   </div>;
 }
 
-/** Connection credentials reference named Secret properties, not a list of vault implementation keys. */
-function SecretPropertyPick({ id, label, value, onChange }: { id: string; label: string; value: string; onChange(value: string): void }) {
-  const { project, projectId, reload } = useCatalog();
+/**
+ * Connection credentials reference one named Secret property, and that is the only thing set here:
+ * values are entered where the property lives (Configuration, Project variables; engine properties in
+ * the Admin Console), so one change there reaches every connection that uses it (2.1.1).
+ */
+function SecretPropertyPick({ id, value, onChange, keyFile }: { id: string; label: string; value: string; onChange(value: string): void; keyFile?: boolean }) {
+  const { project } = useCatalog();
   const [engine, setEngine] = useState<{ name: string; type?: string }[]>([]);
-  const [creating, setCreating] = useState(false), [name, setName] = useState('');
   useEffect(() => { get('/api/engine-variables').then(setEngine).catch(() => setEngine([])); }, []);
-  const properties = (project?.config.variables || []).filter(v => v.type === 'secret');
+  // A private key may also be a Private key property, or a key file on the server (2.1.1).
+  const vault = (t?: string) => t === 'secret' || (!!keyFile && t === 'private key');
+  const properties = (project?.config.variables || []).filter(v => vault(v.type));
+  const engineVault = engine.filter(v => vault(v.type));
   const reference = /^\{\{\s*(gv|ev)\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}$/.exec(value);
-  const gv = reference?.[1] === 'gv' ? reference[2] : undefined;
-  const known = properties.some(v => value === `{{gv.${v.name}}}`) || engine.some(v => v.type === 'secret' && value === `{{ev.${v.name}}}`);
-  const saveProperty = async (property: string, plain: string, create: boolean) => {
-    const result = await put(`/api/projects/${encodeURIComponent(projectId)}/variables/${encodeURIComponent(property)}/secret`, { secretValue: plain, create, onlyCreate: create });
-    return String(result.reference);
-  };
+  const isFile = !!keyFile && !reference && (/[\\/]/.test(value) || /\.(pem|key)$/i.test(value));
+  const known = properties.some(v => value === `{{gv.${v.name}}}`) || engineVault.some(v => value === `{{ev.${v.name}}}`);
+  const kindOf = (t?: string) => (t === 'private key' ? 'Private key' : 'Secret');
   return <>
-    <select id={id} value={value} onChange={e => onChange(e.target.value)}>
-      <option value="">(choose a Secret property)</option>
-      <optgroup label="Project Secret properties">{properties.map(v => <option key={v.name} value={`{{gv.${v.name}}}`}>gv.{v.name} (Secret)</option>)}</optgroup>
-      <optgroup label="Administrator Secret engine properties">{engine.filter(v => v.type === 'secret').map(v => <option key={v.name} value={`{{ev.${v.name}}}`}>ev.{v.name} (Secret)</option>)}</optgroup>
-      {value && !known && <option value={value}>{reference ? `${reference[1]}.${reference[2]} (unavailable or not Secret-type)` : 'Existing encrypted reference (legacy)'}</option>}
+    <select id={id} value={isFile ? '' : value} onChange={e => onChange(e.target.value)}>
+      <option value="">{keyFile ? (isFile ? '(a key file, below)' : '(choose a property, or give a key file below)') : '(choose a Secret property)'}</option>
+      <optgroup label="Project properties">{properties.map(v => <option key={v.name} value={`{{gv.${v.name}}}`}>gv.{v.name} ({kindOf(v.type)})</option>)}</optgroup>
+      <optgroup label="Administrator engine properties">{engineVault.map(v => <option key={v.name} value={`{{ev.${v.name}}}`}>ev.{v.name} ({kindOf(v.type)})</option>)}</optgroup>
+      {value && !known && !isFile && <option value={value}>{reference ? `${reference[1]}.${reference[2]} (unavailable or not Secret-type)` : 'Existing encrypted reference (legacy)'}</option>}
     </select>
-    <div className="hint">One named Secret property, encrypted internally. Connections store only its gv/ev reference; internal vault keys are not extra variables. Engine properties can be edited only by administrators.</div>
-    {gv && properties.some(v => v.name === gv) && <><SecretValueEntry key={`${projectId}:${gv}`} label={`gv.${gv}`} saveValue={plain => saveProperty(gv, plain, false)} onStored={onChange} onReload={reload} /><div className="hint">Updating gv.{gv} changes all uses of this property in this project. Save the connection if its selected property changed.</div></>}
-    {!creating ? <button type="button" className="btn small" onClick={() => { setName(''); setCreating(true); }}>+ Secret project variable</button> : <div>
-      <label htmlFor={`${id}-property`}>New Secret variable name</label><input id={`${id}-property`} className="inp code" value={name} onChange={e => setName(e.target.value)} placeholder="MONGODB_URI or DB_PASSWORD" maxLength={64} />
-      {/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(name) && !project?.config.variables.some(v => v.name === name) && <SecretValueEntry key={`${projectId}:${name}`} label={`gv.${name}`} saveValue={plain => saveProperty(name, plain, true)} onStored={ref => { onChange(ref); setCreating(false); }} onReload={reload} />}
-      <button type="button" className="btn small" onClick={() => setCreating(false)}>Cancel new variable</button>
-      <div className="hint">Use a new variable name; existing properties are never silently replaced or converted.</div>
-    </div>}
+    {keyFile && <input className="inp code" style={{ marginTop: 4 }} aria-label="Key file on the server" spellCheck={false} placeholder="or a key file on the server: C:\certs\client.key or {{ev.CERTS}}\client.key" value={isFile ? value : ''} onChange={e => onChange(e.target.value)} />}
+    <div className="hint">Values are set under Configuration, Project variables; engine properties (ev) by administrators in the Admin Console.{reference?.[1] === 'gv' && ` Changing gv.${reference[2]} there changes every connection that uses it.`}</div>
   </>;
 }
 
@@ -314,8 +314,8 @@ export function VarPicker({ target, onInsert, secretOnly }: { target: string; on
   const { project } = useCatalog();
   const [open, setOpen] = useState(false);
   const [engine, setEngine] = useState<{ name: string; description?: string; type?: string }[] | null>(null);
-  const vars = (project?.config.variables || []).filter(v => !secretOnly || v.type === 'secret');
-  const engineVars = (engine || []).filter(v => !secretOnly || v.type === 'secret');
+  const vars = (project?.config.variables || []).filter(v => !secretOnly || v.type === 'secret' || v.type === 'private key');
+  const engineVars = (engine || []).filter(v => !secretOnly || v.type === 'secret' || v.type === 'private key');
   const toggle = (e: React.MouseEvent) => {
     e.preventDefault();
     if (!open && engine === null) get('/api/engine-variables').then(setEngine).catch(() => setEngine([]));

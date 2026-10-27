@@ -21,13 +21,14 @@ import { settingsCache } from './projects.js';
 /**
  * Tuning parameters, changed in the Admin Console while running and applied by every engine without
  * a restart (the change raises the deploy generation; each engine re-reads tuning on its next beat).
- * Environment variables stay the defaults.
+ * Environment variables stay the defaults. Node memory is the exception: it applies when the engine restarts
+ * (engine-memory.ts).
  *
  *  Engine: for the whole cluster, and "Steps at once" also per engine.
  *  Sutra:  per deployed Sutra, kept across redeploys of new versions.
  */
 
-export interface Field { k: string; name: string; help: string; type: 'number' | 'select'; min?: number; max?: number; step?: number; unit?: string; options?: string[]; perEngine?: boolean }
+export interface Field { k: string; name: string; help: string; type: 'number' | 'select'; min?: number; max?: number; step?: number; unit?: string; options?: string[]; perEngine?: boolean; restart?: boolean; minIfSet?: number }
 
 export const ENGINE_FIELDS: Field[] = [
   { k: 'workers', name: 'Steps at once', help: 'How many steps one engine runs at the same moment, across all runs of all Sutras. A step is one activity box running in one run; this is not a number of Sutras or palettes. 0 = this engine runs nothing (a studio in a cluster).', type: 'number', min: 0, max: 512, unit: 'steps', perEngine: true },
@@ -38,6 +39,7 @@ export const ENGINE_FIELDS: Field[] = [
   { k: 'memoryWorkers', name: 'Steps at once in memory', help: 'The same, for Sutras that run in memory. 0 = the same as Steps at once.', type: 'number', min: 0, max: 512, unit: 'steps', perEngine: true },
   { k: 'pollMs', name: 'Queue check', help: 'How often an idle engine looks for due steps. Lower answers sooner and costs more database reads; steps started on the same engine begin at once either way.', type: 'number', min: 20, max: 10000, step: 10, unit: 'ms', perEngine: true },
   { k: 'settingsRefreshMs', name: 'Settings refresh', help: 'How long an engine keeps Project and Engine properties before reading them again. 0 = read on every step.', type: 'number', min: 0, max: 60000, step: 100, unit: 'ms' },
+  { k: 'memoryMb', name: 'Node memory', help: 'The most memory one engine may use for its data (node --max-old-space-size). 0 = Node.js decides from the machine. Takes effect when the engine restarts: the engine writes it to its settings file and the Engines list offers Restart. Leave room for the system and the other engines on the same machine.', type: 'number', min: 0, max: 1048576, step: 256, unit: 'MB', perEngine: true, restart: true, minIfSet: 256 },
   { k: 'traceSampling', name: 'Trace sampling', help: 'Share of runs sent to the OpenTelemetry collector: 1 = every run, 0.1 = one in ten.', type: 'number', min: 0, max: 1, step: 0.05 },
 ];
 
@@ -56,7 +58,7 @@ export const SUTRA_FIELDS: Field[] = [
 const DEFAULTS: Record<string, number> = {
   workers: config.workerConcurrency, maxStepsPerRun: config.maxStepsPerRun, replyTimeoutMs: config.replyTimeoutMs,
   runRetentionDays: config.runRetentionDays, auditRetentionDays: config.auditRetentionDays, traceSampling: config.traceSampling,
-  memoryWorkers: config.memoryWorkers, pollMs: config.pollMs, settingsRefreshMs: settingsCache.ms,
+  memoryWorkers: config.memoryWorkers, pollMs: config.pollMs, settingsRefreshMs: settingsCache.ms, memoryMb: config.memoryMb,
 };
 
 function clean(fields: Field[], values: Record<string, unknown>, only?: (f: Field) => boolean) {
@@ -72,6 +74,7 @@ function clean(fields: Field[], values: Record<string, unknown>, only?: (f: Fiel
     } else {
       const n = Number(v);
       if (!Number.isFinite(n) || n < (f.min ?? -Infinity) || n > (f.max ?? Infinity)) throw new Error(`${f.name}: a number from ${f.min} to ${f.max}`);
+      if (f.minIfSet && n > 0 && n < f.minIfSet) throw new Error(`${f.name}: 0 or at least ${f.minIfSet}`);
       out[k] = f.step && f.step < 1 ? n : Math.round(n);
     }
   }

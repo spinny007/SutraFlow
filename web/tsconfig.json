@@ -10,5 +10,5 @@
     "noEmit": true,
     "types": []
   },
-  "include": ["src", "admin", "approvals"]
+  "include": ["src", "admin", "approvals", "install"]
 }

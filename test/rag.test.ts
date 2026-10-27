@@ -181,10 +181,12 @@ test('pgvector search index: a new table gets it at once, a small knowledge base
   const dbName = `sutra_vec_${Date.now()}`;
   await admin.query(`CREATE DATABASE ${dbName}`);
   const u = new URL(PG_ADMIN!);
-  const vdbId = saveResource({ kind: 'database', name: 'Vectors real PG', project_id: pid, config: { driver: 'postgres', host: u.hostname, port: Number(u.port || 5432), database: dbName, user: decodeURIComponent(u.username || 'postgres'), poolMax: 4 } }).id;
+  const vdbId = saveResource({ kind: 'database', name: 'Vectors real PG', project_id: pid, config: { driver: 'postgres', host: u.hostname, port: Number(u.port || 5432), database: dbName, user: decodeURIComponent(u.username || 'postgres'), passwordSecret: u.password ? 'VEC_PG_PW' : '', poolMax: 4 } }).id;
+  // The server's password (CI signs in with one; a local server may not) reaches the connection as a secret.
+  const pgPassword = decodeURIComponent(u.password || '');
   try {
   // Seen in the 2.1.0 soak: without an index, search time grew with the table (1.7 s to 26.6 s at 457,034 passages).
-  const secret = () => '' as any;
+  const secret = (n: string) => (n === 'VEC_PG_PW' ? pgPassword : '') as any;
   const kbOf = (name: string, table: string) => getResource(saveResource({ kind: 'aiKnowledge', name, project_id: pid, config: { store: 'PostgreSQL (pgvector)', database: vdbId, table, embedWith: 'built-in', chunkTokens: 60 } }).id)!;
   const big = kbOf('Big', 'kb_shared'), small = kbOf('Small', 'kb_shared');
   for (let i = 0; i < 120; i++) await kn.addKnowledge(big, secret, `big/${i}.md`, `Shipment ${i} left the warehouse on time with ${i} parcels for the northern region.`);

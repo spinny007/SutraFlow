@@ -1,0 +1,42 @@
+{
+  "_about": "SutraFlow silent install: sutraflow install --config install.json [--dry-run]. Passwords are never written here: give {\"env\": \"NAME\"} (an environment variable) or {\"file\": \"path\"} (a file holding only the password). Remove the _comment fields or leave them; they are ignored.",
+  "admin": {
+    "username": "admin",
+    "email": "admin@example.com",
+    "password": { "env": "SUTRA_INSTALL_ADMIN_PASSWORD" }
+  },
+  "database": {
+    "_comment": "kind: sqlite (a file in the data folder; one server) or postgres (several engines, larger volumes). For sqlite: \"kind\" and optionally \"file\" (a file name in the data folder, default sutra.db); SQLite has no users or passwords.",
+    "kind": "postgres",
+    "host": "127.0.0.1",
+    "port": 5432,
+    "database": "sutraflow",
+    "user": "sutraflow",
+    "password": { "env": "SUTRA_INSTALL_DB_PASSWORD" },
+    "sslMode": "off",
+    "create": true,
+    "_pgvector": "required (default): the install stops unless pgvector is enabled in the database, enabling it when it is installed on the server; optional: go on without it (knowledge bases then use the built-in store).",
+    "pgvector": "required"
+  },
+  "server": {
+    "_comment": "host 127.0.0.1 keeps the designer and Admin Console on this machine. environment: development, test or production.",
+    "host": "127.0.0.1",
+    "studioPort": 4800,
+    "gatewayHttp": 8080,
+    "gatewayHttps": 8443,
+    "environment": "production",
+    "_memory": "Node memory of the studio (and of an engine beside it, with enginePort), in MB: 0 = Node.js decides. Each engine is its own process with its own memory; the processes on this machine must leave 15% for the system. Changed later in the Admin Console (Engines, Tuning).",
+    "studioMemoryMb": 2048,
+    "_names": "engineId: this server's engine name (default <machine>-studio); studioMayLead: whether it may lead (default true).",
+    "engineId": "web-1",
+    "studioMayLead": true
+  },
+  "cluster": {
+    "_comment": "name: the cluster's name, shown in the Admin Console. engines: further engines (PostgreSQL only), each with a settings file beside the installer (sutraflow-engine-<name>.env). canLead false: never the leader (the leader is elected among those that may; at least one must). All of it can be changed later in the Admin Console, Engines.",
+    "name": "Production",
+    "engines": [
+      { "name": "engine-2", "host": "0.0.0.0", "port": 4801, "http": 9080, "https": 9443, "memoryMb": 2048, "canLead": true }
+    ]
+  },
+  "start": true
+}

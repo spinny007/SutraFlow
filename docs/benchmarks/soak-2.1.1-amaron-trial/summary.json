@@ -1,0 +1,1261 @@
+{
+  "runId": "amr-2.1.1-20261026-2221-b9b2",
+  "scenarioGroups": [
+    "core",
+    "amaron",
+    "brokers",
+    "kafka",
+    "mongo",
+    "remote",
+    "ai"
+  ],
+  "amaron": {
+    "orders": 211,
+    "units": 1054,
+    "tickets": 21,
+    "kafkaEvents": 1,
+    "reviews": 0,
+    "aiSecondOpinions": 1
+  },
+  "regression": null,
+  "version": "2.1.1",
+  "started": "2026-10-26T16:51:44.685Z",
+  "ended": "2026-10-26T16:58:10.335Z",
+  "minutes": 6,
+  "engines": 3,
+  "machine": "AMD Ryzen 7 7435HS, 16 threads, 24 GB, win32",
+  "node": "v24.21.0",
+  "pausedMinutes": 0,
+  "database": "PostgreSQL (through a proxy), SQLite, MySQL, a remote PostgreSQL (gently), a remote MySQL (gently), MongoDB Atlas (gently)",
+  "model": "phi4-mini on Ollama",
+  "sizes": [
+    10,
+    20,
+    30,
+    40,
+    50,
+    60
+  ],
+  "checks": [
+    {
+      "name": "No engine stopped by itself",
+      "ok": true,
+      "detail": "0 unexpected stops"
+    },
+    {
+      "name": "No run left running",
+      "ok": true,
+      "detail": "0 runs still open after starters stopped"
+    },
+    {
+      "name": "No step ran twice",
+      "ok": true,
+      "detail": "0 steps of single-pass Sutras completed more than once"
+    },
+    {
+      "name": "Requests that failed",
+      "ok": true,
+      "detail": "28 of 8280 outside the planned faults (0.338%); 28 with the fault windows included"
+    },
+    {
+      "name": "PostgreSQL DB Ops stayed correct",
+      "ok": true,
+      "detail": "63 completed, 0 failed (0 outside the planned faults)"
+    },
+    {
+      "name": "MySQL DB Ops stayed correct",
+      "ok": true,
+      "detail": "63 completed, 0 failed (0 outside the planned faults)"
+    },
+    {
+      "name": "SQLite DB Ops stayed correct",
+      "ok": true,
+      "detail": "63 completed, 0 failed (0 outside the planned faults)"
+    },
+    {
+      "name": "RabbitMQ delivered every message",
+      "ok": true,
+      "detail": "625 published (0 big), 625 consumed, 0 failed; subscriber runs {\"done\":625}"
+    },
+    {
+      "name": "ActiveMQ delivered every message",
+      "ok": true,
+      "detail": "625 published (0 big), 625 consumed, 0 failed; subscriber runs {\"done\":625}"
+    },
+    {
+      "name": "Kafka delivered every message",
+      "ok": true,
+      "detail": "1 published (0 big), 1 consumed, 0 failed; subscriber runs {\"done\":1}"
+    },
+    {
+      "name": "Remote MySQL DB Ops stayed correct",
+      "ok": true,
+      "detail": "2 completed, 0 failed, 0 outside the planned faults (one every 2 minutes, over the internet)"
+    },
+    {
+      "name": "Remote PostgreSQL DB Ops stayed correct",
+      "ok": true,
+      "detail": "2 completed, 0 failed, 0 outside the planned faults (one every 2 minutes, over the internet)"
+    },
+    {
+      "name": "MongoDB Atlas stayed correct",
+      "ok": true,
+      "detail": "5 lifecycles completed, 0 failed, 0 outside the planned faults (one a minute)"
+    },
+    {
+      "name": "MongoDB Atlas left nothing behind",
+      "ok": true,
+      "detail": "0 documents left in the soak collection"
+    },
+    {
+      "name": "Timer kept time",
+      "ok": true,
+      "detail": "33 runs of 36 expected (every 10 s)"
+    },
+    {
+      "name": "Every channel message reached its subscriber",
+      "ok": true,
+      "detail": "63 subscriber runs for 63 published"
+    },
+    {
+      "name": "Bus messages acknowledged",
+      "ok": true,
+      "detail": "135 accepted, 0 released, 0 rejected of 135 sent (0 handed out again after a link closed or a release); subscriber runs {\"done\":135}"
+    },
+    {
+      "name": "WebSocket client trigger ran for the server's messages",
+      "ok": true,
+      "detail": "55 runs for 55 messages pushed"
+    },
+    {
+      "name": "WebSocket broadcasts arrived",
+      "ok": true,
+      "detail": "50 received of 50 expected (10 broadcasts to the clients connected at the time)"
+    },
+    {
+      "name": "Amaron: every order placed is saved with this run",
+      "ok": true,
+      "detail": "211 orders of run amr-2.1.1-20261026-2221-b9b2 (211 placed through the API, 0 failed); ₹81,04,456 in total"
+    },
+    {
+      "name": "Amaron: lines and stock agree",
+      "ok": true,
+      "detail": "536 lines, 1054 units ordered; stock reserved grew by 1054"
+    },
+    {
+      "name": "Amaron: the warehouse packed every order (RabbitMQ)",
+      "ok": false,
+      "detail": "0 shipments and 0 orders packed for 211 orders"
+    },
+    {
+      "name": "Amaron: every care ticket saved and decided (ActiveMQ)",
+      "ok": true,
+      "detail": "21 tickets of 21 raised, 21 decisions, 0 not as expected"
+    },
+    {
+      "name": "Amaron: tickets are in the pgvector knowledge",
+      "ok": true,
+      "detail": "21 passages added for 21 tickets (21 in all runs)"
+    },
+    {
+      "name": "Amaron: the model gave its second opinions",
+      "ok": true,
+      "detail": "1 decisions by phi4-mini for 1 asked"
+    },
+    {
+      "name": "Amaron: order events came back through Kafka",
+      "ok": true,
+      "detail": "1 events recorded for 1 published to amaron-order-events"
+    },
+    {
+      "name": "Amaron: reviews are in MongoDB with this run",
+      "ok": false,
+      "detail": "5 reviews of run amr-2.1.1-20261026-2221-b9b2 for 0 written"
+    },
+    {
+      "name": "Engine 0 stays responsive",
+      "ok": true,
+      "detail": "event loop delay: p99 per minute 35 ms typical, 45 ms in the worst 5% of minutes; longest single wait 713 ms"
+    },
+    {
+      "name": "Engine 1 stays responsive",
+      "ok": true,
+      "detail": "event loop delay: p99 per minute 35 ms typical, 35 ms in the worst 5% of minutes; longest single wait 387 ms"
+    },
+    {
+      "name": "Engine 2 stays responsive",
+      "ok": true,
+      "detail": "event loop delay: p99 per minute 35 ms typical, 37 ms in the worst 5% of minutes; longest single wait 693 ms"
+    },
+    {
+      "name": "REST orders stays as fast",
+      "ok": true,
+      "detail": "p95 220 ms in the first period, 220 ms in the last"
+    },
+    {
+      "name": "REST in memory stays as fast",
+      "ok": true,
+      "detail": "p95 36 ms in the first period, 27 ms in the last"
+    },
+    {
+      "name": "REST signed and validated stays as fast",
+      "ok": true,
+      "detail": "p95 234 ms in the first period, 239 ms in the last"
+    },
+    {
+      "name": "SOAP UsernameToken stays as fast",
+      "ok": true,
+      "detail": "p95 235 ms in the first period, 236 ms in the last"
+    },
+    {
+      "name": "WebSocket echo stays as fast",
+      "ok": true,
+      "detail": "p95 273 ms in the first period, 217 ms in the last"
+    },
+    {
+      "name": "RabbitMQ publish stays as fast",
+      "ok": true,
+      "detail": "p95 580 ms in the first period, 546 ms in the last"
+    },
+    {
+      "name": "ActiveMQ publish stays as fast",
+      "ok": true,
+      "detail": "p95 583 ms in the first period, 554 ms in the last"
+    },
+    {
+      "name": "Amaron orders stays as fast",
+      "ok": true,
+      "detail": "p95 320 ms in the first period, 299 ms in the last"
+    }
+  ],
+  "faults": [],
+  "scenarios": [
+    {
+      "name": "REST orders",
+      "ok": 3083,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 869,
+          "p50": 105,
+          "p95": 220,
+          "p99": 308
+        },
+        {
+          "n": 879,
+          "p50": 106,
+          "p95": 232,
+          "p99": 318
+        },
+        {
+          "n": 870,
+          "p50": 102,
+          "p95": 218,
+          "p99": 288
+        },
+        {
+          "n": 465,
+          "p50": 81,
+          "p95": 220,
+          "p99": 261
+        }
+      ]
+    },
+    {
+      "name": "REST in memory",
+      "ok": 1561,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 440,
+          "p50": 16,
+          "p95": 36,
+          "p99": 181
+        },
+        {
+          "n": 444,
+          "p50": 19,
+          "p95": 35,
+          "p99": 58
+        },
+        {
+          "n": 441,
+          "p50": 13,
+          "p95": 25,
+          "p99": 157
+        },
+        {
+          "n": 236,
+          "p50": 13,
+          "p95": 27,
+          "p99": 39
+        }
+      ]
+    },
+    {
+      "name": "REST signed and validated",
+      "ok": 316,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 89,
+          "p50": 78,
+          "p95": 234,
+          "p99": 499
+        },
+        {
+          "n": 89,
+          "p50": 112,
+          "p95": 254,
+          "p99": 525
+        },
+        {
+          "n": 90,
+          "p50": 54,
+          "p95": 239,
+          "p99": 1159
+        },
+        {
+          "n": 48,
+          "p50": 79,
+          "p95": 207,
+          "p99": 253
+        }
+      ]
+    },
+    {
+      "name": "SOAP UsernameToken",
+      "ok": 316,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 89,
+          "p50": 77,
+          "p95": 235,
+          "p99": 682
+        },
+        {
+          "n": 89,
+          "p50": 86,
+          "p95": 234,
+          "p99": 383
+        },
+        {
+          "n": 90,
+          "p50": 105,
+          "p95": 236,
+          "p99": 1116
+        },
+        {
+          "n": 48,
+          "p50": 79,
+          "p95": 234,
+          "p99": 305
+        }
+      ]
+    },
+    {
+      "name": "SOAP X.509 signed and encrypted",
+      "ok": 79,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 22,
+          "p50": 237,
+          "p95": 315,
+          "p99": 976
+        },
+        {
+          "n": 22,
+          "p50": 191,
+          "p95": 306,
+          "p99": 1082
+        },
+        {
+          "n": 23,
+          "p50": 117,
+          "p95": 772,
+          "p99": 943
+        },
+        {
+          "n": 12,
+          "p50": 161,
+          "p95": 456,
+          "p99": 456
+        }
+      ]
+    },
+    {
+      "name": "WebSocket echo",
+      "ok": 790,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 220,
+          "p50": 118,
+          "p95": 273,
+          "p99": 967
+        },
+        {
+          "n": 225,
+          "p50": 103,
+          "p95": 274,
+          "p99": 941
+        },
+        {
+          "n": 225,
+          "p50": 84,
+          "p95": 245,
+          "p99": 590
+        },
+        {
+          "n": 120,
+          "p50": 102,
+          "p95": 217,
+          "p99": 231
+        }
+      ]
+    },
+    {
+      "name": "WebSocket broadcast",
+      "ok": 10,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 2,
+          "p50": 910,
+          "p95": 910,
+          "p99": 910
+        },
+        {
+          "n": 3,
+          "p50": 251,
+          "p95": 822,
+          "p99": 822
+        },
+        {
+          "n": 3,
+          "p50": 822,
+          "p95": 1130,
+          "p99": 1130
+        },
+        {
+          "n": 2,
+          "p50": 1156,
+          "p95": 1156,
+          "p99": 1156
+        }
+      ]
+    },
+    {
+      "name": "PostgreSQL DB Ops",
+      "ok": 63,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 17,
+          "p50": 546,
+          "p95": 1087,
+          "p99": 1087
+        },
+        {
+          "n": 18,
+          "p50": 570,
+          "p95": 1495,
+          "p99": 1495
+        },
+        {
+          "n": 18,
+          "p50": 550,
+          "p95": 1333,
+          "p99": 1333
+        },
+        {
+          "n": 10,
+          "p50": 552,
+          "p95": 697,
+          "p99": 697
+        }
+      ]
+    },
+    {
+      "name": "MySQL DB Ops",
+      "ok": 63,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 17,
+          "p50": 549,
+          "p95": 1393,
+          "p99": 1393
+        },
+        {
+          "n": 18,
+          "p50": 587,
+          "p95": 1431,
+          "p99": 1431
+        },
+        {
+          "n": 18,
+          "p50": 551,
+          "p95": 1124,
+          "p99": 1124
+        },
+        {
+          "n": 10,
+          "p50": 537,
+          "p95": 709,
+          "p99": 709
+        }
+      ]
+    },
+    {
+      "name": "SQLite DB Ops",
+      "ok": 63,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 17,
+          "p50": 557,
+          "p95": 1079,
+          "p99": 1079
+        },
+        {
+          "n": 18,
+          "p50": 587,
+          "p95": 1457,
+          "p99": 1457
+        },
+        {
+          "n": 18,
+          "p50": 544,
+          "p95": 1386,
+          "p99": 1386
+        },
+        {
+          "n": 10,
+          "p50": 550,
+          "p95": 990,
+          "p99": 990
+        }
+      ]
+    },
+    {
+      "name": "RabbitMQ publish",
+      "ok": 625,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 176,
+          "p50": 530,
+          "p95": 580,
+          "p99": 1055
+        },
+        {
+          "n": 177,
+          "p50": 532,
+          "p95": 597,
+          "p99": 1099
+        },
+        {
+          "n": 177,
+          "p50": 523,
+          "p95": 564,
+          "p99": 1077
+        },
+        {
+          "n": 95,
+          "p50": 521,
+          "p95": 546,
+          "p99": 1362
+        }
+      ]
+    },
+    {
+      "name": "ActiveMQ publish",
+      "ok": 625,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 175,
+          "p50": 531,
+          "p95": 583,
+          "p99": 1110
+        },
+        {
+          "n": 178,
+          "p50": 539,
+          "p95": 591,
+          "p99": 1107
+        },
+        {
+          "n": 177,
+          "p50": 524,
+          "p95": 574,
+          "p99": 1130
+        },
+        {
+          "n": 95,
+          "p50": 525,
+          "p95": 554,
+          "p99": 1281
+        }
+      ]
+    },
+    {
+      "name": "Kafka publish (gentle)",
+      "ok": 1,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 1,
+          "p50": 2695,
+          "p95": 2695,
+          "p99": 2695
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Remote MySQL DB Ops (gentle)",
+      "ok": 2,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 1,
+          "p50": 2763,
+          "p95": 2763,
+          "p99": 2763
+        },
+        {
+          "n": 1,
+          "p50": 3306,
+          "p95": 3306,
+          "p99": 3306
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Remote PostgreSQL DB Ops (gentle)",
+      "ok": 2,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 1,
+          "p50": 3808,
+          "p95": 3808,
+          "p99": 3808
+        },
+        {
+          "n": 1,
+          "p50": 3590,
+          "p95": 3590,
+          "p99": 3590
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "MongoDB Atlas (gentle)",
+      "ok": 5,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 1,
+          "p50": 10630,
+          "p95": 10630,
+          "p99": 10630
+        },
+        {
+          "n": 1,
+          "p50": 3803,
+          "p95": 3803,
+          "p99": 3803
+        },
+        {
+          "n": 2,
+          "p50": 3809,
+          "p95": 3809,
+          "p99": 3809
+        },
+        {
+          "n": 1,
+          "p50": 3759,
+          "p95": 3759,
+          "p99": 3759
+        }
+      ]
+    },
+    {
+      "name": "Channel publish",
+      "ok": 63,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 17,
+          "p50": 553,
+          "p95": 1381,
+          "p99": 1381
+        },
+        {
+          "n": 18,
+          "p50": 601,
+          "p95": 1449,
+          "p99": 1449
+        },
+        {
+          "n": 18,
+          "p50": 554,
+          "p95": 1478,
+          "p99": 1478
+        },
+        {
+          "n": 10,
+          "p50": 551,
+          "p95": 995,
+          "p99": 995
+        }
+      ]
+    },
+    {
+      "name": "Error handler",
+      "ok": 63,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 17,
+          "p50": 1036,
+          "p95": 1684,
+          "p99": 1684
+        },
+        {
+          "n": 18,
+          "p50": 838,
+          "p95": 1793,
+          "p99": 1793
+        },
+        {
+          "n": 18,
+          "p50": 757,
+          "p95": 1821,
+          "p99": 1821
+        },
+        {
+          "n": 10,
+          "p50": 566,
+          "p95": 1065,
+          "p99": 1065
+        }
+      ]
+    },
+    {
+      "name": "Called Sutra and approval",
+      "ok": 10,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 2,
+          "p50": 10942,
+          "p95": 10942,
+          "p99": 10942
+        },
+        {
+          "n": 3,
+          "p50": 10192,
+          "p95": 10196,
+          "p99": 10196
+        },
+        {
+          "n": 3,
+          "p50": 10940,
+          "p95": 10994,
+          "p99": 10994
+        },
+        {
+          "n": 2,
+          "p50": 10882,
+          "p95": 10882,
+          "p99": 10882
+        }
+      ]
+    },
+    {
+      "name": "MCP tool",
+      "ok": 31,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 8,
+          "p50": 158,
+          "p95": 814,
+          "p99": 814
+        },
+        {
+          "n": 9,
+          "p50": 179,
+          "p95": 862,
+          "p99": 862
+        },
+        {
+          "n": 9,
+          "p50": 186,
+          "p95": 1020,
+          "p99": 1020
+        },
+        {
+          "n": 5,
+          "p50": 131,
+          "p95": 512,
+          "p99": 512
+        }
+      ]
+    },
+    {
+      "name": "Bus message",
+      "ok": 135,
+      "fail": 23,
+      "errors": [
+        [
+          "the subscriber is not connected",
+          23
+        ]
+      ],
+      "hours": [
+        {
+          "n": 39,
+          "p50": 0,
+          "p95": 1,
+          "p99": 1
+        },
+        {
+          "n": 40,
+          "p50": 0,
+          "p95": 1,
+          "p99": 2
+        },
+        {
+          "n": 37,
+          "p50": 0,
+          "p95": 1,
+          "p99": 1
+        },
+        {
+          "n": 19,
+          "p50": 0,
+          "p95": 1,
+          "p99": 1
+        }
+      ]
+    },
+    {
+      "name": "RAG search",
+      "ok": 5,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 1,
+          "p50": 1724,
+          "p95": 1724,
+          "p99": 1724
+        },
+        {
+          "n": 1,
+          "p50": 1786,
+          "p95": 1786,
+          "p99": 1786
+        },
+        {
+          "n": 2,
+          "p50": 1793,
+          "p95": 1793,
+          "p99": 1793
+        },
+        {
+          "n": 1,
+          "p50": 1721,
+          "p95": 1721,
+          "p99": 1721
+        }
+      ]
+    },
+    {
+      "name": "RAG ask (Ollama)",
+      "ok": 1,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 1,
+          "p50": 1731,
+          "p95": 1731,
+          "p99": 1731
+        }
+      ]
+    },
+    {
+      "name": "AI agent chat (Ollama)",
+      "ok": 1,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 1,
+          "p50": 6134,
+          "p95": 6134,
+          "p99": 6134
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Amaron orders",
+      "ok": 211,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 59,
+          "p50": 164,
+          "p95": 320,
+          "p99": 996
+        },
+        {
+          "n": 60,
+          "p50": 200,
+          "p95": 387,
+          "p99": 979
+        },
+        {
+          "n": 60,
+          "p50": 124,
+          "p95": 299,
+          "p99": 440
+        },
+        {
+          "n": 32,
+          "p50": 186,
+          "p95": 288,
+          "p99": 1364
+        }
+      ]
+    },
+    {
+      "name": "Amaron order status",
+      "ok": 105,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 29,
+          "p50": 142,
+          "p95": 313,
+          "p99": 1153
+        },
+        {
+          "n": 30,
+          "p50": 153,
+          "p95": 421,
+          "p99": 1240
+        },
+        {
+          "n": 30,
+          "p50": 83,
+          "p95": 223,
+          "p99": 622
+        },
+        {
+          "n": 16,
+          "p50": 107,
+          "p95": 247,
+          "p99": 247
+        }
+      ]
+    },
+    {
+      "name": "Amaron care tickets",
+      "ok": 21,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 5,
+          "p50": 202,
+          "p95": 1047,
+          "p99": 1047
+        },
+        {
+          "n": 6,
+          "p50": 278,
+          "p95": 1140,
+          "p99": 1140
+        },
+        {
+          "n": 6,
+          "p50": 199,
+          "p95": 1137,
+          "p99": 1137
+        },
+        {
+          "n": 4,
+          "p50": 143,
+          "p95": 817,
+          "p99": 817
+        }
+      ]
+    },
+    {
+      "name": "Amaron care second opinion (Ollama)",
+      "ok": 1,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 1,
+          "p50": 2747,
+          "p95": 2747,
+          "p99": 2747
+        }
+      ]
+    },
+    {
+      "name": "Amaron order events to Kafka (gentle)",
+      "ok": 1,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 1,
+          "p50": 2693,
+          "p95": 2693,
+          "p99": 2693
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    },
+    {
+      "name": "Amaron reviews (gentle)",
+      "ok": 0,
+      "fail": 5,
+      "errors": [
+        [
+          "run done: {\"documents\":[{\"_id\":\"amr-2.1.1-20261026-2221-b9b2\",\"reviews\":{\"$numberInt\":\"1\"},\"rating\":{\"$numberInt\":\"5\"}}],\"count\":1}",
+          1
+        ],
+        [
+          "run done: {\"documents\":[{\"_id\":\"amr-2.1.1-20261026-2221-b9b2\",\"reviews\":{\"$numberInt\":\"2\"},\"rating\":{\"$numberDouble\":\"4.5\"}}],\"count\":1}",
+          1
+        ],
+        [
+          "run done: {\"documents\":[{\"_id\":\"amr-2.1.1-20261026-2221-b9b2\",\"reviews\":{\"$numberInt\":\"3\"},\"rating\":{\"$numberInt\":\"4\"}}],\"count\":1}",
+          1
+        ],
+        [
+          "run done: {\"documents\":[{\"_id\":\"amr-2.1.1-20261026-2221-b9b2\",\"reviews\":{\"$numberInt\":\"4\"},\"rating\":{\"$numberInt\":\"4\"}}],\"count\":1}",
+          1
+        ],
+        [
+          "run done: {\"documents\":[{\"_id\":\"amr-2.1.1-20261026-2221-b9b2\",\"reviews\":{\"$numberInt\":\"5\"},\"rating\":{\"$numberDouble\":\"3.4\"}}],\"count\":1}",
+          1
+        ]
+      ],
+      "hours": [
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        }
+      ]
+    }
+  ],
+  "stuckRuns": [],
+  "stuckTasks": [],
+  "files": {
+    "csv": [],
+    "sftp": [],
+    "ftp": [],
+    "docs": [],
+    "drive": []
+  },
+  "ws": {
+    "connects": 5,
+    "drops": 0,
+    "broadcastsSent": 10,
+    "broadcastsExpected": 50,
+    "broadcastsGot": 50
+  },
+  "bus": {
+    "sent": 135,
+    "accepted": 135,
+    "released": 0,
+    "rejected": 0,
+    "redelivered": 0,
+    "links": 14,
+    "again": [],
+    "senders": {}
+  },
+  "feed": 55,
+  "restarts": [
+    {
+      "engine": 0,
+      "restarts": 0
+    },
+    {
+      "engine": 1,
+      "restarts": 0
+    },
+    {
+      "engine": 2,
+      "restarts": 0
+    }
+  ]
+}

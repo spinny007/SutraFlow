@@ -107,12 +107,15 @@ const HELP = `sutra <command> [options]
             One run step by step; runs it again from its failed steps; or cancels it.
   approvals list | approve <id> [--comment text] | reject <id> [--comment text]
             Steps waiting for a person, and the decision on one.
-  engines   list | drain <engine> | housekeeping
+  engines   list | drain <engine> | restart <engine> | housekeeping
             Engines of the cluster; stops one gracefully; deletes runs and audit entries past retention.
+  engines   lead <engine> --yes|--no | cluster-name <name>
+            Whether an engine may lead (the leader is elected among those that may), and the cluster's name.
   engines   tune [--engine <id>] [--workers n] [--max-steps n] [--reply-timeout-ms n]
                 [--retention-days n] [--audit-retention-days n] [--trace-sampling 0..1]
-                [--memory-workers n] [--poll-ms n] [--settings-refresh-ms n]
-            Engine tuning, for every engine or one: workers, limits, retention, trace sampling, queue check.
+                [--memory-workers n] [--poll-ms n] [--settings-refresh-ms n] [--memory-mb n]
+            Engine tuning, for every engine or one: workers, limits, retention, trace sampling, queue check;
+            Node memory (MB, applies at restart: sutra engines restart <engine>).
   engines   machine
             The cores and memory of the machine the engine runs on (read when it starts), and the settings
             recommended for it. Every engine reads its own machine, so each install gets its own advice.
@@ -253,7 +256,7 @@ async function dbMigrate(a: Args) {
     const u = new URL(url);
     user = decodeURIComponent(u.username); password = decodeURIComponent(u.password);
   }
-  out(`From SQLite ${path.join((await import('./config.js')).config.dataDir, 'sutra.db')} to ${shown}`);
+  out(`From SQLite ${(await import('./config.js')).sqliteFile()} to ${shown}`);
   await ensurePgDatabase(url);
   const r = copyDatabase(url, { replace: !!a.replace, log: msg => out(`  ${msg}`) });
   // Every table: the same number of rows on both sides.
@@ -541,7 +544,7 @@ async function main(argv: string[]) {
       if (a._[1] === 'info') {
         openDb();
         const counts = ['projects', 'flows', 'resources', 'runs', 'users', 'settings'].map(t => [t, String(q.get<any>(`select count(*) as n from ${t}`)?.n ?? 0)]);
-        out(`${dbKind() === 'postgres' ? `PostgreSQL ${config.dbUrl.replace(/\/\/([^:@/]+):[^@/]*@/, '//$1:***@')}` : `SQLite ${config.dataDir}`}`);
+        out(`${dbKind() === 'postgres' ? `PostgreSQL ${config.dbUrl.replace(/\/\/([^:@/]+):[^@/]*@/, '//$1:***@')}` : `SQLite ${(await import('./config.js')).sqliteFile()}`}`);
         table([['TABLE', 'ROWS'], ...counts]);
         return 0;
       }
@@ -706,7 +709,7 @@ async function operate(cmd: string, a: Args, call: Call): Promise<number> {
     }
     case 'engines list': {
       const st = await call('GET', '/api/engine/status');
-      table([['ENGINE', 'STATE', 'LEADER', 'STEPS', 'HOST', 'VERSION'], ...st.engines.map((e: any) => [e.id, !e.alive ? 'silent' : e.draining ? 'draining' : 'alive', e.leader ? 'yes' : '', `${e.running}/${e.workers}`, e.host, e.version])]);
+      table([['ENGINE', 'STATE', 'LEADER', 'STEPS', 'MEMORY', 'HOST', 'VERSION'], ...st.engines.map((e: any) => [e.id, !e.alive ? 'silent' : e.draining ? 'draining' : 'alive', e.leader ? 'yes' : '', `${e.running}/${e.workers}`, e.memory ? `${e.memory.heapUsedMb}/${e.memory.heapLimitMb} MB${e.memory.wantedMb !== e.memory.startedMb ? ` (restart: ${e.memory.wantedMb || 'default'})` : ''}` : '', e.host, e.version])]);
       return 0;
     }
     case 'engines machine': {
@@ -750,13 +753,16 @@ async function operate(cmd: string, a: Args, call: Call): Promise<number> {
       out(r.name ? `${arg} is shown as ${r.name}` : `${arg} is shown by its id`);
       return 0;
     }
+    case 'engines lead': { if (!arg) throw new Usage('Give the engine name'); const yes = !a.no; const r = await call('PUT', `/api/console/engines/${encodeURIComponent(arg)}/lead`, { mayLead: yes }); out(`${arg} ${r.mayLead ? 'may lead' : 'never leads'}`); return 0; }
+    case 'engines cluster-name': { const r = await call('PUT', '/api/console/cluster/name', { name: arg || '' }); out(r.name ? `The cluster is named ${r.name}` : 'The cluster has no name'); return 0; }
+    case 'engines restart': { if (!arg) throw new Usage('Give the engine name'); await call('POST', `/api/console/engines/${encodeURIComponent(arg)}/restart`); out(`${arg} restarts on its next heartbeat: running steps finish first`); return 0; }
     case 'engines drain': { if (!arg) throw new Usage('Give the engine name'); await call('POST', `/api/console/engines/${encodeURIComponent(arg)}/drain`); out(`${arg} drains and stops on its next heartbeat`); return 0; }
     case 'engines housekeeping': { const r = await call('POST', '/api/engine/housekeeping', {}); out(`${r.deletedRuns} runs and ${r.deletedAudit ?? 0} audit entries deleted`); return 0; }
     case 'engines tune': {
       const cur = await call('GET', '/api/console/tuning');
       const engineId = str(a, 'engine');
       const values: Record<string, unknown> = { ...(engineId ? cur.perEngine[engineId] || {} : cur.cluster) };
-      const map: Record<string, string> = { workers: 'workers', 'max-steps': 'maxStepsPerRun', 'reply-timeout-ms': 'replyTimeoutMs', 'retention-days': 'runRetentionDays', 'audit-retention-days': 'auditRetentionDays', 'trace-sampling': 'traceSampling', 'memory-workers': 'memoryWorkers', 'poll-ms': 'pollMs', 'settings-refresh-ms': 'settingsRefreshMs' };
+      const map: Record<string, string> = { workers: 'workers', 'max-steps': 'maxStepsPerRun', 'reply-timeout-ms': 'replyTimeoutMs', 'retention-days': 'runRetentionDays', 'audit-retention-days': 'auditRetentionDays', 'trace-sampling': 'traceSampling', 'memory-workers': 'memoryWorkers', 'poll-ms': 'pollMs', 'settings-refresh-ms': 'settingsRefreshMs', 'memory-mb': 'memoryMb' };
       for (const [flag, k] of Object.entries(map)) if (str(a, flag) === '') delete values[k]; else if (str(a, flag) !== undefined) values[k] = num(a, flag);
       const r = await call('PUT', engineId ? `/api/console/tuning/engines/${encodeURIComponent(engineId)}` : '/api/console/tuning/engine', { values });
       out(`${engineId || 'All engines'}: ${JSON.stringify(engineId ? r.perEngine[engineId] || {} : r.cluster)}`);

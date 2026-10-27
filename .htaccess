@@ -1,0 +1,17 @@
+# SutraFlow
+# Copyright (c) 2026-27 Surya Partap Singh
+# Developer: Surya Partap Singh | Website: MixAgile.com
+# File version: 2.1.1
+# License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+# A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+# SPDX-License-Identifier: AGPL-3.0-only
+# SutraFlow is a Node.js server with web servers of its own (studio 4800, gateway 8080/8443); Apache never
+# serves this folder: only the page that says how to install and start SutraFlow. To reach SutraFlow through
+# Apache, proxy a host name to its ports (user guide, "Install and start the server").
+Require all denied
+# The folder itself shows that page: a folder is let through only when it holds the page (this one, none below).
+Require expr "-f '%{REQUEST_FILENAME}/install-sutraflow.html'"
+DirectoryIndex install-sutraflow.html
+<Files "install-sutraflow.html">
+    Require all granted
+</Files>

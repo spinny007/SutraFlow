@@ -116,7 +116,7 @@ export function Mapper({ node, act, doc, design, run, outputs, updateNode }: Pro
   const [engineVars, setEngineVars] = useState<{ name: string; value: string; description?: string }[]>([]);
   useEffect(() => { get('/api/engine-variables').then(setEngineVars).catch(() => {}); }, []);
   const gvShape = useMemo<SNode>(() => ({ name: 'gv', type: 'object', children: (projectVars || []).map(v => ({ name: v.name, type: v.type === 'number' ? 'number' : v.type === 'boolean' ? 'boolean' : 'string', doc: v.description })) }), [projectVars]);
-  const gvValue = useMemo(() => Object.fromEntries((projectVars || []).map(v => [v.name, v.type === 'secret' ? '••••••' : v.value])), [projectVars]);
+  const gvValue = useMemo(() => Object.fromEntries((projectVars || []).map(v => [v.name, v.type === 'secret' || v.type === 'private key' ? '••••••' : v.value])), [projectVars]);
   const procShape = useMemo(() => inferShape({ id: '', name: '', sutraId: '', version: 0, project: '', startedAt: '', source: '', step: '', attempt: 0 }, 'sutra'), []);
   const varShape = useMemo<SNode>(() => ({ name: 'vars', type: 'object', children: [...(doc.variables || []).map(v => ({ name: v.name, type: (v.type === 'number' ? 'number' : v.type === 'boolean' ? 'boolean' : 'string') as SNode['type'] })), ...doc.nodes.filter(n => n.type === 'setVar').flatMap(n => ((n.config.vars as any[]) || []).filter(r => r?.k).map(r => ({ name: String(r.k), type: 'any' as const })))] }), [doc]);
 
@@ -415,7 +415,7 @@ export function ConditionDataBrowser({ from, doc, design, run, outputs, localVar
     const list: { label: string; path: string; shape: SNode | null; value: any }[] = [
       { label: `${from.name} (${meta.activities.find(a => a.type === from.type)?.name || from.type}) — current input`, path: 'input', shape: from.name in outputs ? observedShape(inputValue, 'input') : design[from.id]?.out ?? null, value: inputValue },
       { label: 'Local variables', path: 'vars', shape: vars, value: run?.vars || localVars },
-      { label: 'Project properties', path: 'gv', shape: { name: 'gv', type: 'object', children: projectVars.map(v => ({ name: v.name, type: v.type === 'number' ? 'number' : v.type === 'boolean' ? 'boolean' : 'string', doc: v.description })) }, value: Object.fromEntries(projectVars.map(v => [v.name, v.type === 'secret' ? '••••••' : v.value])) },
+      { label: 'Project properties', path: 'gv', shape: { name: 'gv', type: 'object', children: projectVars.map(v => ({ name: v.name, type: v.type === 'number' ? 'number' : v.type === 'boolean' ? 'boolean' : 'string', doc: v.description })) }, value: Object.fromEntries(projectVars.map(v => [v.name, v.type === 'secret' || v.type === 'private key' ? '••••••' : v.value])) },
     ];
     if (engineVars.length) list.push({ label: 'Engine properties (read only)', path: 'ev', shape: { name: 'ev', type: 'object', children: engineVars.map(v => ({ name: v.name, type: 'string' as const, doc: v.description })) }, value: Object.fromEntries(engineVars.map(v => [v.name, v.value])) });
     if (trigger) list.push({ label: `${trigger.name} (${meta.activities.find(a => a.type === trigger.type)?.name || trigger.type}) — trigger data`, path: 'trigger', shape: trigger.name in outputs ? observedShape(outputs[trigger.name], 'trigger') : design[trigger.id]?.out ?? null, value: outputs[trigger.name] });

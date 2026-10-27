@@ -133,7 +133,7 @@ export function GatewayTls() {
 /** Engine properties: administrator-managed settings shared by all projects. */
 function EngineVariables() {
   const toast = useToast();
-  const [vars, setVars] = useState<{ name: string; value: string; description?: string; type?: 'string' | 'secret' }[] | null>(null);
+  const [vars, setVars] = useState<{ name: string; value: string; description?: string; type?: 'string' | 'secret' | 'certificate' | 'private key' }[] | null>(null);
   useEffect(() => { get('/api/engine-variables').then(setVars).catch(e => toast(e.message, true)); }, [toast]);
   if (!vars) return null;
   const set = (i: number, k: 'name' | 'value' | 'description' | 'type', v: string) => setVars(vs => vs!.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
@@ -145,8 +145,8 @@ function EngineVariables() {
         {vars.map((v, i) => (
           <tr key={i}>
             <td><input className="inp code" aria-label={`Engine property ${i + 1} name`} placeholder="NAME" value={v.name} onChange={e => set(i, 'name', e.target.value)} /></td>
-            <td><select aria-label={`Engine property ${i + 1} type`} value={v.type || 'string'} onChange={e => {set(i, 'type', e.target.value); set(i, 'value', '');}}><option value="string">String</option><option value="secret">Secret</option></select></td>
-            <td>{v.type === 'secret' ? <><span className="muted">{v.value ? '•••••• (stored)' : '(not set)'}</span><SecretValueEntry key={`${v.name}:${i}`} label={v.name || 'engine secret'} namespace="engine" onStored={ref => set(i, 'value', ref)} /></> : <input className="inp code" aria-label={`Engine property ${i + 1} value`} placeholder="value" value={v.value} onChange={e => set(i, 'value', e.target.value)} />}</td>
+            <td><select aria-label={`Engine property ${i + 1} type`} value={v.type || 'string'} onChange={e => {set(i, 'type', e.target.value); set(i, 'value', '');}}><option value="string">String</option><option value="secret">Secret</option><option value="certificate">Certificate</option><option value="private key">Private key</option></select></td>
+            <td>{v.type === 'secret' || v.type === 'private key' ? <><span className="muted">{v.value ? '•••••• (stored)' : '(not set)'}</span><SecretValueEntry key={`${v.name}:${i}`} label={v.name || 'engine secret'} namespace="engine" privateKey={v.type === 'private key'} onStored={ref => set(i, 'value', ref)} /></> : v.type === 'certificate' ? <textarea className="inp code" rows={3} spellCheck={false} aria-label={`Engine property ${i + 1} value`} placeholder={'-----BEGIN CERTIFICATE-----  or a file: C:\\certs\\ca.pem, /etc/ssl/certs/ca.pem'} value={v.value} onChange={e => set(i, 'value', e.target.value)} /> : <input className="inp code" aria-label={`Engine property ${i + 1} value`} placeholder="value" value={v.value} onChange={e => set(i, 'value', e.target.value)} />}</td>
             <td><input className="inp" aria-label={`Engine property ${i + 1} description`} placeholder="Description" value={v.description || ''} onChange={e => set(i, 'description', e.target.value)} /></td>
             <td><button className="x" aria-label="Remove Engine property" onClick={() => setVars(vs => vs!.filter((_, j) => j !== i))}>✕</button></td>
           </tr>

@@ -1,0 +1,82 @@
+<!doctype html>
+<!--
+  SutraFlow
+  Copyright (c) 2026-27 Surya Partap Singh
+  Developer: Surya Partap Singh | Website: MixAgile.com
+  File version: 2.1.1
+  License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+  A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+  SPDX-License-Identifier: AGPL-3.0-only
+
+  The only page a web server (Apache, IIS) shows from this folder when SutraFlow is unpacked under a web
+  root: SutraFlow is a Node.js server and is started on the machine, not by opening this folder.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Install SutraFlow</title>
+<style>
+:root { --bg: #f6f7f5; --card: #fff; --ink: #1d2027; --muted: #5f6673; --line: #e3e4e8; --code: #eef1ef; --auto: #0E7A62; --general: #3E6A86; --ai: #C88A00; --data: #B0435F; }
+@media (prefers-color-scheme: dark) { :root { --bg: #14171b; --card: #1b1f25; --ink: #e8e9ec; --muted: #9aa0ab; --line: #2c3039; --code: #23282f; --auto: #34B892; --general: #6FA0C2; --ai: #F0B429; --data: #E07393; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 760px; margin: 0 auto; padding: 32px 16px 48px; }
+header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+header svg { width: 46px; height: 46px; flex: none; }
+h1 { margin: 0; font-size: 24px; } h2 { font-size: 17px; margin: 0 0 8px; }
+.sub { margin: 2px 0 0; color: var(--muted); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin: 14px 0; }
+ol { margin: 0; padding-left: 20px; } li { margin: 6px 0; }
+code, pre { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 13px; }
+code { background: var(--code); padding: 1px 6px; border-radius: 6px; overflow-wrap: anywhere; }
+pre { background: var(--code); padding: 10px 12px; border-radius: 9px; overflow-x: auto; margin: 8px 0; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.muted { color: var(--muted); font-size: 13.5px; }
+.note { border-left: 4px solid var(--auto); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 22c4-10 8-10 11-4s7 6 11-4" fill="none" stroke="var(--auto)" stroke-width="3" stroke-linecap="round"/><circle cx="5" cy="22" r="3" fill="var(--general)"/><circle cx="16" cy="17" r="3" fill="var(--ai)"/><circle cx="27" cy="14" r="3" fill="var(--data)"/></svg>
+    <div><h1>Install SutraFlow</h1><p class="sub">SutraFlow is unpacked here, but it is not running yet.</p></div>
+  </header>
+
+  <div class="card note">
+    <p style="margin:0">SutraFlow is a Node.js server with web servers of its own. This web server (Apache or IIS) does not run it, and serves nothing else from this folder, so its settings, data and keys stay private. Start SutraFlow once on this machine, as below.</p>
+  </div>
+
+  <div class="card">
+    <h2>1. Run the installer on the server</h2>
+    <p class="muted" style="margin-top:0">In a terminal, in the folder SutraFlow was unpacked to. Node.js 22.13 or later is needed (24 recommended).</p>
+    <div class="two">
+      <div><b>Windows</b><pre>bin\sutraflow.cmd install</pre></div>
+      <div><b>Linux and macOS</b><pre>bin/sutraflow install</pre></div>
+    </div>
+    <p class="muted">It opens in the browser of that machine, page by page: administrator, database (SQLite or PostgreSQL, with a connection test), ports and an optional cluster. It answers only on that machine, with a one-time address, so nobody else can take it over. Without a browser there: <code>install --no-open</code> prints the address, or <code>install --config install.json</code> installs from a file (see <code>docs/install-example.json</code>).</p>
+    <p class="muted">Upgrading an installation from 2.1.0 on: unpack the new release beside it and run <code>upgrade</code> from the new folder.</p>
+  </div>
+
+  <div class="card">
+    <h2>2. Open SutraFlow</h2>
+    <p style="margin-top:0">When the installer is done, SutraFlow runs on its own ports: the designer and Admin Console at <code>http://127.0.0.1:4800</code> (or the port chosen) and deployed APIs on the gateway, <code>8080</code> and <code>8443</code>. Start and stop it with <code>sutraflow start</code> and <code>sutraflow stop</code>; <code>sutraflow service</code> prints a service that starts it with the machine.</p>
+  </div>
+
+  <div class="card">
+    <h2>3. A host name for it (optional)</h2>
+    <p style="margin-top:0">To reach SutraFlow at a name such as <code>sutra.example.com</code> through this web server, forward that name to SutraFlow's port. With Apache (mod_proxy, mod_proxy_http, mod_proxy_wstunnel):</p>
+    <pre>&lt;VirtualHost *:443&gt;
+  ServerName sutra.example.com
+  ProxyPreserveHost On
+  ProxyPass        / http://127.0.0.1:4800/ upgrade=websocket
+  ProxyPassReverse / http://127.0.0.1:4800/
+&lt;/VirtualHost&gt;</pre>
+    <p class="muted">Keep the designer and Admin Console behind your own access rules (VPN, single sign-on, an IP list). Deployed APIs are better forwarded to the gateway's HTTPS port (8443). The user guide, chapter <i>Install and start the server</i>, explains when a web server in front helps; it is in <code>docs/sutraflow-user-guide.html</code> in this folder, and at <code>/guide</code> once SutraFlow runs.</p>
+  </div>
+
+  <p class="muted">SutraFlow 2.1.1 · AGPL-3.0-only, a commercial licence is available · MixAgile.com</p>
+</main>
+</body>
+</html>

@@ -22,7 +22,7 @@ export async function prepareVariableSave(rows: readonly VariableDraft[], stores
   const result: ProjectVariable[] = [];
   for (const row of rows) {
     const { editKey, ...value } = row;
-    const reference = row.type === 'secret' ? await stores.get(editKey)?.() : undefined;
+    const reference = row.type === 'secret' || row.type === 'private key' ? await stores.get(editKey)?.() : undefined;
     result.push(reference === undefined ? value : { ...value, value: reference });
   }
   return result;

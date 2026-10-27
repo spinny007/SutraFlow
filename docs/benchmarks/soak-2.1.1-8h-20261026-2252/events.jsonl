@@ -1,0 +1,143 @@
+{"at":"2026-10-26T17:19:34.055Z","min":0,"kind":"run","message":"amr-2.1.1-20261026-2249-b333: scenarios core, files, ai, faults, amaron, brokers, kafka, mongo, remote, regression"}
+{"at":"2026-10-26T17:19:34.057Z","min":0,"kind":"connections","message":"remote PostgreSQL pooled.db.prisma.io:5432"}
+{"at":"2026-10-26T17:19:34.058Z","min":0,"kind":"connections","message":"remote MySQL srv1880.hstgr.io:3306/<db> password yes"}
+{"at":"2026-10-26T17:19:34.061Z","min":0,"kind":"connections","message":"Kafka SASL ? (password no, CA no); client certificate kafkaxxx-a1-kafka-39c8.a.aivencloud.com:13358 (files no)"}
+{"at":"2026-10-26T17:19:34.063Z","min":0,"kind":"connections","message":"MongoDB user yes, password yes, cluster missing (add \"Cluster: <name>.mongodb.net\" under Mongo DB)"}
+{"at":"2026-10-26T17:19:34.064Z","min":0,"kind":"connections","message":"RabbitMQ 127.0.0.1:5672 (default local)"}
+{"at":"2026-10-26T17:19:34.064Z","min":0,"kind":"connections","message":"ActiveMQ 127.0.0.1:5673 (default local)"}
+{"at":"2026-10-26T17:19:36.397Z","min":0,"kind":"setup","message":"RabbitMQ is starting from C:\\rabbitmq_server-4.4.0"}
+{"at":"2026-10-26T17:19:49.442Z","min":0.3,"kind":"setup","message":"RabbitMQ is running on 127.0.0.1:5672"}
+{"at":"2026-10-26T17:19:49.467Z","min":0.3,"kind":"setup","message":"ActiveMQ is starting from C:\\apache-activemq-6.3.2"}
+{"at":"2026-10-26T17:19:56.482Z","min":0.4,"kind":"setup","message":"ActiveMQ is running on 127.0.0.1:5673"}
+{"at":"2026-10-26T17:20:02.395Z","min":0.5,"kind":"start","message":"SutraFlow 2.1.1, 3 processes, 480 minutes, database sutra_soak_1793035174167, 16 threads, 24 GB"}
+{"at":"2026-10-26T17:20:11.841Z","min":0.6,"kind":"setup","message":"44 Sutras deployed"}
+{"at":"2026-10-26T17:20:19.870Z","min":0.8,"kind":"load","message":"34 scenarios running"}
+{"at":"2026-10-26T17:40:19.982Z","min":20.8,"kind":"file","message":"soak-29821-10mb.csv: 198000 rows to the watched folder"}
+{"at":"2026-10-26T17:50:20.131Z","min":30.8,"kind":"file","message":"soak-44474-20mb.csv: 390000 rows to the SFTP inbox"}
+{"at":"2026-10-26T17:50:20.438Z","min":30.8,"kind":"file","message":"soak-44475-30mb.csv: 582000 rows to the FTP inbox"}
+{"at":"2026-10-26T18:00:20.124Z","min":40.8,"kind":"file","message":"soak-59418-40mb.csv: 776000 rows to the watched folder"}
+{"at":"2026-10-26T18:20:21.180Z","min":60.8,"kind":"file","message":"soak-89252-60mb.csv: 1156000 rows to the SFTP inbox"}
+{"at":"2026-10-26T18:20:21.297Z","min":60.8,"kind":"file","message":"soak-89255-10mb.csv: 198000 rows to the watched folder"}
+{"at":"2026-10-26T18:20:21.623Z","min":60.8,"kind":"file","message":"soak-89263-20mb.csv: 390000 rows to the FTP inbox"}
+{"at":"2026-10-26T18:20:29.514Z","min":60.9,"kind":"document","message":"soak-doc-89251-50mb.txt: failed in 9 s: Learn: duplicate key value violates unique constraint \"pg_type_typname_nsp_index\""}
+{"at":"2026-10-26T18:40:21.488Z","min":80.8,"kind":"file","message":"soak-119066-30mb.csv: 582000 rows to the watched folder"}
+{"at":"2026-10-26T18:50:21.016Z","min":90.8,"kind":"file","message":"soak-133971-40mb.csv: 776000 rows to the SFTP inbox"}
+{"at":"2026-10-26T18:50:21.894Z","min":90.8,"kind":"file","message":"soak-133984-50mb.csv: 968000 rows to the FTP inbox"}
+{"at":"2026-10-26T19:00:21.585Z","min":100.8,"kind":"file","message":"soak-148898-60mb.csv: 1156000 rows to the watched folder"}
+{"at":"2026-10-26T19:20:20.775Z","min":120.8,"kind":"file","message":"soak-178673-20mb.csv: 390000 rows to the SFTP inbox"}
+{"at":"2026-10-26T19:20:21.389Z","min":120.8,"kind":"file","message":"soak-178688-30mb.csv: 582000 rows to the watched folder"}
+{"at":"2026-10-26T19:20:21.706Z","min":120.8,"kind":"file","message":"soak-178691-40mb.csv: 776000 rows to the FTP inbox"}
+{"at":"2026-10-26T19:20:33.095Z","min":121,"kind":"document","message":"soak-doc-178655-10mb.txt: done in 13 s"}
+{"at":"2026-10-26T19:40:21.515Z","min":140.8,"kind":"file","message":"soak-208482-50mb.csv: 968000 rows to the watched folder"}
+{"at":"2026-10-26T19:50:21.048Z","min":150.8,"kind":"file","message":"soak-223345-60mb.csv: 1156000 rows to the SFTP inbox"}
+{"at":"2026-10-26T19:50:21.548Z","min":150.8,"kind":"file","message":"soak-223369-10mb.csv: 198000 rows to the FTP inbox"}
+{"at":"2026-10-26T20:00:19.874Z","min":160.8,"kind":"fault","message":"engine 2 killed on purpose"}
+{"at":"2026-10-26T20:00:21.347Z","min":160.8,"kind":"file","message":"soak-238261-20mb.csv: 390000 rows to the watched folder"}
+{"at":"2026-10-26T20:01:25.166Z","min":161.9,"kind":"fault","message":"engine 2 started again"}
+{"at":"2026-10-26T20:20:20.916Z","min":180.8,"kind":"file","message":"soak-268082-40mb.csv: 776000 rows to the SFTP inbox"}
+{"at":"2026-10-26T20:20:21.518Z","min":180.8,"kind":"file","message":"soak-268092-50mb.csv: 968000 rows to the watched folder"}
+{"at":"2026-10-26T20:20:21.937Z","min":180.8,"kind":"file","message":"soak-268098-60mb.csv: 1156000 rows to the FTP inbox"}
+{"at":"2026-10-26T20:20:57.332Z","min":181.4,"kind":"document","message":"soak-doc-268069-30mb.txt: done in 37 s"}
+{"at":"2026-10-26T20:40:21.281Z","min":200.8,"kind":"file","message":"soak-297890-10mb.csv: 198000 rows to the watched folder"}
+{"at":"2026-10-26T20:50:20.787Z","min":210.8,"kind":"file","message":"soak-312773-20mb.csv: 390000 rows to the SFTP inbox"}
+{"at":"2026-10-26T20:50:21.819Z","min":210.8,"kind":"file","message":"soak-312798-30mb.csv: 582000 rows to the FTP inbox"}
+{"at":"2026-10-26T21:00:21.475Z","min":220.8,"kind":"file","message":"soak-327691-40mb.csv: 776000 rows to the watched folder"}
+{"at":"2026-10-26T21:20:21.046Z","min":240.8,"kind":"file","message":"soak-357491-60mb.csv: 1156000 rows to the SFTP inbox"}
+{"at":"2026-10-26T21:20:21.273Z","min":240.8,"kind":"file","message":"soak-357497-10mb.csv: 198000 rows to the watched folder"}
+{"at":"2026-10-26T21:20:21.746Z","min":240.8,"kind":"file","message":"soak-357509-20mb.csv: 390000 rows to the FTP inbox"}
+{"at":"2026-10-26T21:21:26.340Z","min":241.9,"kind":"document","message":"soak-doc-357470-50mb.txt: done in 66 s"}
+{"at":"2026-10-26T21:40:21.398Z","min":260.8,"kind":"file","message":"soak-387294-30mb.csv: 582000 rows to the watched folder"}
+{"at":"2026-10-26T21:50:20.918Z","min":270.8,"kind":"file","message":"soak-402180-40mb.csv: 776000 rows to the SFTP inbox"}
+{"at":"2026-10-26T21:50:21.938Z","min":270.8,"kind":"file","message":"soak-402204-50mb.csv: 968000 rows to the FTP inbox"}
+{"at":"2026-10-26T22:00:21.605Z","min":280.8,"kind":"file","message":"soak-417079-60mb.csv: 1156000 rows to the watched folder"}
+{"at":"2026-10-26T22:20:20.783Z","min":300.8,"kind":"file","message":"soak-446877-20mb.csv: 390000 rows to the SFTP inbox"}
+{"at":"2026-10-26T22:20:21.418Z","min":300.8,"kind":"file","message":"soak-446889-30mb.csv: 582000 rows to the watched folder"}
+{"at":"2026-10-26T22:20:21.849Z","min":300.8,"kind":"file","message":"soak-446895-40mb.csv: 776000 rows to the FTP inbox"}
+{"at":"2026-10-26T22:20:45.372Z","min":301.2,"kind":"document","message":"soak-doc-446861-10mb.txt: done in 25 s"}
+{"at":"2026-10-26T22:40:19.876Z","min":320.8,"kind":"fault","message":"database cut for 20 seconds"}
+{"at":"2026-10-26T22:40:21.550Z","min":320.8,"kind":"file","message":"soak-476693-50mb.csv: 968000 rows to the watched folder"}
+{"at":"2026-10-26T22:40:39.892Z","min":321.1,"kind":"fault","message":"database back"}
+{"at":"2026-10-26T22:50:21.040Z","min":330.8,"kind":"file","message":"soak-491502-60mb.csv: 1156000 rows to the SFTP inbox"}
+{"at":"2026-10-26T22:50:21.688Z","min":330.8,"kind":"file","message":"soak-491524-10mb.csv: 198000 rows to the FTP inbox"}
+{"at":"2026-10-26T23:00:21.372Z","min":340.8,"kind":"file","message":"soak-506416-20mb.csv: 390000 rows to the watched folder"}
+{"at":"2026-10-26T23:20:20.919Z","min":360.8,"kind":"file","message":"soak-536206-40mb.csv: 776000 rows to the SFTP inbox"}
+{"at":"2026-10-26T23:20:21.549Z","min":360.8,"kind":"file","message":"soak-536218-50mb.csv: 968000 rows to the watched folder"}
+{"at":"2026-10-26T23:20:21.974Z","min":360.8,"kind":"file","message":"soak-536228-60mb.csv: 1156000 rows to the FTP inbox"}
+{"at":"2026-10-26T23:21:18.050Z","min":361.7,"kind":"document","message":"soak-doc-536187-30mb.txt: done in 58 s"}
+{"at":"2026-10-26T23:40:21.309Z","min":380.8,"kind":"file","message":"soak-566003-10mb.csv: 198000 rows to the watched folder"}
+{"at":"2026-10-26T23:50:20.788Z","min":390.8,"kind":"file","message":"soak-580890-20mb.csv: 390000 rows to the SFTP inbox"}
+{"at":"2026-10-26T23:50:21.846Z","min":390.8,"kind":"file","message":"soak-580911-30mb.csv: 582000 rows to the FTP inbox"}
+{"at":"2026-10-27T00:00:21.499Z","min":400.8,"kind":"file","message":"soak-595809-40mb.csv: 776000 rows to the watched folder"}
+{"at":"2026-10-27T00:20:21.032Z","min":420.8,"kind":"file","message":"soak-625574-60mb.csv: 1156000 rows to the SFTP inbox"}
+{"at":"2026-10-27T00:20:21.303Z","min":420.8,"kind":"file","message":"soak-625582-10mb.csv: 198000 rows to the watched folder"}
+{"at":"2026-10-27T00:20:21.755Z","min":420.8,"kind":"file","message":"soak-625591-20mb.csv: 390000 rows to the FTP inbox"}
+{"at":"2026-10-27T00:21:44.501Z","min":422.2,"kind":"document","message":"soak-doc-625551-50mb.txt: done in 84 s"}
+{"at":"2026-10-27T00:40:21.441Z","min":440.8,"kind":"file","message":"soak-655364-30mb.csv: 582000 rows to the watched folder"}
+{"at":"2026-10-27T00:50:20.917Z","min":450.8,"kind":"file","message":"soak-670243-40mb.csv: 776000 rows to the SFTP inbox"}
+{"at":"2026-10-27T00:50:21.963Z","min":450.8,"kind":"file","message":"soak-670268-50mb.csv: 968000 rows to the FTP inbox"}
+{"at":"2026-10-27T01:00:21.644Z","min":460.8,"kind":"file","message":"soak-685165-60mb.csv: 1156000 rows to the watched folder"}
+{"at":"2026-10-27T01:19:47.604Z","min":480.2,"kind":"load","message":"load stopped and starters undeployed; waiting for open runs to end (at most 10 minutes)"}
+{"at":"2026-10-27T01:20:04.245Z","min":480.5,"kind":"check","message":"PASS No engine stopped by itself: 0 unexpected stops"}
+{"at":"2026-10-27T01:20:04.250Z","min":480.5,"kind":"check","message":"PASS No run left running: 0 runs still open after starters stopped"}
+{"at":"2026-10-27T01:20:16.966Z","min":480.7,"kind":"check","message":"PASS No step ran twice: 0 steps of single-pass Sutras completed more than once"}
+{"at":"2026-10-27T01:20:16.969Z","min":480.7,"kind":"check","message":"PASS Requests that failed: 72 of 745653 outside the planned faults (0.010%); 583 with the fault windows included"}
+{"at":"2026-10-27T01:20:16.969Z","min":480.7,"kind":"check","message":"PASS PostgreSQL DB Ops stayed correct: 5740 completed, 5 failed (0 outside the planned faults)"}
+{"at":"2026-10-27T01:20:16.970Z","min":480.7,"kind":"check","message":"PASS MySQL DB Ops stayed correct: 5740 completed, 5 failed (0 outside the planned faults)"}
+{"at":"2026-10-27T01:20:16.970Z","min":480.7,"kind":"check","message":"PASS SQLite DB Ops stayed correct: 5739 completed, 5 failed (0 outside the planned faults)"}
+{"at":"2026-10-27T01:20:17.955Z","min":480.7,"kind":"check","message":"PASS RabbitMQ delivered every message: 56131 published (0 big), 56131 consumed, 0 failed; subscriber runs {\"done\":56131}"}
+{"at":"2026-10-27T01:20:18.835Z","min":480.7,"kind":"check","message":"FAIL ActiveMQ delivered every message: 56133 published (0 big), 56134 consumed, 2 failed; subscriber runs {\"done\":56134,\"failed\":2}"}
+{"at":"2026-10-27T01:20:18.842Z","min":480.7,"kind":"check","message":"PASS Kafka delivered every message: 159 published (0 big), 160 consumed, 0 failed; subscriber runs {\"done\":160}"}
+{"at":"2026-10-27T01:20:18.843Z","min":480.7,"kind":"check","message":"PASS Remote MySQL DB Ops stayed correct: 236 completed, 3 failed, 2 outside the planned faults (one every 2 minutes, over the internet)"}
+{"at":"2026-10-27T01:20:18.843Z","min":480.7,"kind":"check","message":"PASS Remote PostgreSQL DB Ops stayed correct: 238 completed, 1 failed, 0 outside the planned faults (one every 2 minutes, over the internet)"}
+{"at":"2026-10-27T01:20:18.844Z","min":480.7,"kind":"check","message":"PASS MongoDB Atlas stayed correct: 478 lifecycles completed, 1 failed, 0 outside the planned faults (one a minute)"}
+{"at":"2026-10-27T01:20:19.254Z","min":480.8,"kind":"check","message":"PASS MongoDB Atlas left nothing behind: 0 documents left in the soak collection"}
+{"at":"2026-10-27T01:20:19.308Z","min":480.8,"kind":"check","message":"PASS Timer kept time: 2873 runs of 2877 expected (every 10 s)"}
+{"at":"2026-10-27T01:20:19.501Z","min":480.8,"kind":"check","message":"PASS Every channel message reached its subscriber: 5740 subscriber runs for 5740 published"}
+{"at":"2026-10-27T01:20:19.717Z","min":480.8,"kind":"check","message":"PASS Bus messages acknowledged: 14266 accepted, 473 released, 0 rejected of 14266 sent (477 handed out again after a link closed or a release); subscriber runs {\"done\":14270,\"failed\":46}"}
+{"at":"2026-10-27T01:20:19.813Z","min":480.8,"kind":"check","message":"PASS WebSocket client trigger ran for the server's messages: 5717 runs for 5722 messages pushed"}
+{"at":"2026-10-27T01:20:19.814Z","min":480.8,"kind":"check","message":"PASS WebSocket broadcasts arrived: 4785 received of 4790 expected (958 broadcasts to the clients connected at the time)"}
+{"at":"2026-10-27T01:20:19.834Z","min":480.8,"kind":"check","message":"PASS Every CSV in the folder was streamed whole: 23 of 23 files with every row counted (10 MB, 40 MB, 10 MB, 30 MB, 60 MB, 30 MB, 50 MB, 20 MB, 50 MB, 10 MB, 40 MB, 10 MB, 30 MB, 60 MB, 30 MB, 50 MB, 20 MB, 50 MB, 10 MB, 40 MB, 10 MB, 30 MB, 60 MB)"}
+{"at":"2026-10-27T01:20:19.843Z","min":480.8,"kind":"check","message":"PASS Every SFTP CSV was streamed whole: 15 of 15 files with every row counted (20 MB, 60 MB, 40 MB, 20 MB, 60 MB, 40 MB, 20 MB, 60 MB, 40 MB, 20 MB, 60 MB, 40 MB, 20 MB, 60 MB, 40 MB)"}
+{"at":"2026-10-27T01:20:19.853Z","min":480.8,"kind":"check","message":"PASS Every FTP CSV was streamed whole: 15 of 15 files with every row counted (30 MB, 20 MB, 50 MB, 40 MB, 10 MB, 60 MB, 30 MB, 20 MB, 50 MB, 40 MB, 10 MB, 60 MB, 30 MB, 20 MB, 50 MB)"}
+{"at":"2026-10-27T01:20:20.002Z","min":480.8,"kind":"check","message":"PASS RAG passages are in the pgvector table: 263753 passages in soak_knowledge"}
+{"at":"2026-10-27T01:20:20.003Z","min":480.8,"kind":"check","message":"FAIL RAG documents were learned: 50 MB failed in 9 s; 10 MB done in 13 s; 30 MB done in 37 s; 50 MB done in 66 s; 10 MB done in 25 s; 30 MB done in 58 s; 50 MB done in 84 s"}
+{"at":"2026-10-27T01:20:20.118Z","min":480.8,"kind":"check","message":"PASS Amaron: every order placed is saved with this run: 19058 orders of run amr-2.1.1-20261026-2249-b333 (19058 placed through the API, 17 failed); ₹73,45,51,286 in total"}
+{"at":"2026-10-27T01:20:20.149Z","min":480.8,"kind":"check","message":"PASS Amaron: lines and stock agree: 47484 lines, 94994 units ordered; stock reserved grew by 94994"}
+{"at":"2026-10-27T01:20:20.186Z","min":480.8,"kind":"check","message":"PASS Amaron: the warehouse packed every order (RabbitMQ): 19058 shipments and 19058 orders packed for 19058 orders"}
+{"at":"2026-10-27T01:20:20.194Z","min":480.8,"kind":"check","message":"PASS Amaron: every care ticket saved and decided (ActiveMQ): 1914 tickets of 1914 raised, 1914 decisions, 0 not as expected"}
+{"at":"2026-10-27T01:20:20.197Z","min":480.8,"kind":"check","message":"PASS Amaron: tickets are in the pgvector knowledge: 1914 passages added for 1914 tickets (1948 in all runs)"}
+{"at":"2026-10-27T01:20:20.199Z","min":480.8,"kind":"check","message":"PASS Amaron: the model gave its second opinions: 94 decisions by phi4-mini for 94 asked"}
+{"at":"2026-10-27T01:20:20.211Z","min":480.8,"kind":"check","message":"PASS Amaron: order events came back through Kafka: 159 events recorded for 159 published to amaron-order-events"}
+{"at":"2026-10-27T01:20:20.498Z","min":480.8,"kind":"check","message":"PASS Amaron: reviews are in MongoDB with this run: 478 reviews of run amr-2.1.1-20261026-2249-b333 for 478 written"}
+{"at":"2026-10-27T01:20:20.516Z","min":480.8,"kind":"check","message":"PASS Engine 0 stays responsive: event loop delay: p99 per minute 35 ms typical, 39 ms in the worst 5% of minutes; longest single wait 3022 ms"}
+{"at":"2026-10-27T01:20:20.533Z","min":480.8,"kind":"check","message":"PASS Engine 1 stays responsive: event loop delay: p99 per minute 34 ms typical, 36 ms in the worst 5% of minutes; longest single wait 6157 ms"}
+{"at":"2026-10-27T01:20:20.553Z","min":480.8,"kind":"check","message":"PASS Engine 2 stays responsive: event loop delay: p99 per minute 34 ms typical, 35 ms in the worst 5% of minutes; longest single wait 5931 ms"}
+{"at":"2026-10-27T01:20:20.563Z","min":480.8,"kind":"check","message":"PASS Engine 0 memory steady: -30.6 MB per hour over the second half; highest 1254 MB"}
+{"at":"2026-10-27T01:20:20.565Z","min":480.8,"kind":"check","message":"PASS Engine 1 memory steady: -9.3 MB per hour over the second half; highest 699 MB"}
+{"at":"2026-10-27T01:20:20.566Z","min":480.8,"kind":"check","message":"FAIL Engine 2 memory steady: 249.0 MB per hour over the second half; highest 1289 MB"}
+{"at":"2026-10-27T01:20:20.567Z","min":480.8,"kind":"check","message":"PASS REST orders stays as fast: p95 225 ms in the first period, 216 ms in the last"}
+{"at":"2026-10-27T01:20:20.568Z","min":480.8,"kind":"check","message":"PASS REST in memory stays as fast: p95 33 ms in the first period, 23 ms in the last"}
+{"at":"2026-10-27T01:20:20.569Z","min":480.8,"kind":"check","message":"PASS REST signed and validated stays as fast: p95 257 ms in the first period, 241 ms in the last"}
+{"at":"2026-10-27T01:20:20.569Z","min":480.8,"kind":"check","message":"PASS SOAP UsernameToken stays as fast: p95 246 ms in the first period, 234 ms in the last"}
+{"at":"2026-10-27T01:20:20.570Z","min":480.8,"kind":"check","message":"PASS SOAP X.509 signed and encrypted stays as fast: p95 285 ms in the first period, 240 ms in the last"}
+{"at":"2026-10-27T01:20:20.570Z","min":480.8,"kind":"check","message":"PASS WebSocket echo stays as fast: p95 246 ms in the first period, 235 ms in the last"}
+{"at":"2026-10-27T01:20:20.571Z","min":480.8,"kind":"check","message":"PASS WebSocket broadcast stays as fast: p95 1418 ms in the first period, 241 ms in the last"}
+{"at":"2026-10-27T01:20:20.571Z","min":480.8,"kind":"check","message":"PASS PostgreSQL DB Ops stays as fast: p95 601 ms in the first period, 573 ms in the last"}
+{"at":"2026-10-27T01:20:20.572Z","min":480.8,"kind":"check","message":"PASS MySQL DB Ops stays as fast: p95 609 ms in the first period, 571 ms in the last"}
+{"at":"2026-10-27T01:20:20.572Z","min":480.8,"kind":"check","message":"PASS SQLite DB Ops stays as fast: p95 619 ms in the first period, 576 ms in the last"}
+{"at":"2026-10-27T01:20:20.573Z","min":480.8,"kind":"check","message":"PASS RabbitMQ publish stays as fast: p95 571 ms in the first period, 551 ms in the last"}
+{"at":"2026-10-27T01:20:20.574Z","min":480.8,"kind":"check","message":"PASS ActiveMQ publish stays as fast: p95 575 ms in the first period, 553 ms in the last"}
+{"at":"2026-10-27T01:20:20.574Z","min":480.8,"kind":"check","message":"PASS MongoDB Atlas (gentle) stays as fast: p95 6463 ms in the first period, 3786 ms in the last"}
+{"at":"2026-10-27T01:20:20.575Z","min":480.8,"kind":"check","message":"PASS Channel publish stays as fast: p95 619 ms in the first period, 581 ms in the last"}
+{"at":"2026-10-27T01:20:20.575Z","min":480.8,"kind":"check","message":"PASS Error handler stays as fast: p95 1100 ms in the first period, 1102 ms in the last"}
+{"at":"2026-10-27T01:20:20.576Z","min":480.8,"kind":"check","message":"PASS Called Sutra and approval stays as fast: p95 10998 ms in the first period, 10108 ms in the last"}
+{"at":"2026-10-27T01:20:20.576Z","min":480.8,"kind":"check","message":"PASS MCP tool stays as fast: p95 238 ms in the first period, 229 ms in the last"}
+{"at":"2026-10-27T01:20:20.577Z","min":480.8,"kind":"check","message":"PASS Bus message stays as fast: p95 1 ms in the first period, 0 ms in the last"}
+{"at":"2026-10-27T01:20:20.577Z","min":480.8,"kind":"check","message":"PASS RAG search stays as fast: p95 1945 ms in the first period, 1806 ms in the last"}
+{"at":"2026-10-27T01:20:20.578Z","min":480.8,"kind":"check","message":"PASS Amaron orders stays as fast: p95 315 ms in the first period, 284 ms in the last"}
+{"at":"2026-10-27T01:20:20.579Z","min":480.8,"kind":"check","message":"PASS Amaron order status stays as fast: p95 252 ms in the first period, 232 ms in the last"}
+{"at":"2026-10-27T01:20:20.579Z","min":480.8,"kind":"check","message":"PASS Amaron care tickets stays as fast: p95 283 ms in the first period, 224 ms in the last"}
+{"at":"2026-10-27T01:20:20.580Z","min":480.8,"kind":"check","message":"PASS Amaron reviews (gentle) stays as fast: p95 5455 ms in the first period, 2329 ms in the last"}
+{"at":"2026-10-27T01:20:23.596Z","min":480.8,"kind":"regression","message":"90 test files against PostgreSQL, MySQL, RabbitMQ, ActiveMQ, Kafka, MongoDB, the remote databases"}
+{"at":"2026-10-27T01:35:08.497Z","min":495.6,"kind":"check","message":"FAIL Regression suite on the same servers: 556 passed, 3 failed, 6 skipped of 566 in 14.7 min; failing: JSON, XML, text, map and bytes round-trip through Kafka activities; Atlas M0 activities use isolated seeded data, strict boundaries and real engine execution; every in-process suite passes on PostgreSQL (PGlite) (log: regression.log)"}
+{"at":"2026-10-27T01:35:08.556Z","min":495.6,"kind":"end","message":"report written to C:\\Users\\kunwa\\Documents\\LocalGitHub\\SutraFlow\\docs\\benchmarks\\soak-2.1.1-8h-20261026-2252"}

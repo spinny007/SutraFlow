@@ -87,6 +87,10 @@ export interface Field {
   showIf?: { k: string; in: any[] };
   /** Show when any of these conditions holds. */
   showIfAny?: { k: string; in: any[] }[];
+  /** An older way kept for existing connections: shown only while it holds a value (2.1.1). */
+  legacy?: boolean;
+  /** A private key: a Private key or Secret property, or a key file on the server (2.1.1). */
+  keyFile?: boolean;
   /** Changing this field changes the step's output ports. */
   ports?: boolean;
   group?: string;

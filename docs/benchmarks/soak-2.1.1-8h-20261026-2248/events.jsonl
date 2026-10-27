@@ -1,0 +1,21 @@
+{"at":"2026-10-26T17:15:24.729Z","min":0,"kind":"run","message":"amr-2.1.1-20261026-2245-9b00: scenarios core, files, ai, faults, amaron, brokers, kafka, mongo, remote, regression"}
+{"at":"2026-10-26T17:15:24.731Z","min":0,"kind":"connections","message":"remote PostgreSQL pooled.db.prisma.io:5432"}
+{"at":"2026-10-26T17:15:24.733Z","min":0,"kind":"connections","message":"remote MySQL srv1880.hstgr.io:3306/<db> password yes"}
+{"at":"2026-10-26T17:15:24.735Z","min":0,"kind":"connections","message":"Kafka SASL ? (password no, CA no); client certificate kafkaxxx-a1-kafka-39c8.a.aivencloud.com:13358 (files no)"}
+{"at":"2026-10-26T17:15:24.736Z","min":0,"kind":"connections","message":"MongoDB user yes, password yes, cluster missing (add \"Cluster: <name>.mongodb.net\" under Mongo DB)"}
+{"at":"2026-10-26T17:15:24.736Z","min":0,"kind":"connections","message":"RabbitMQ 127.0.0.1:5672 (default local)"}
+{"at":"2026-10-26T17:15:24.737Z","min":0,"kind":"connections","message":"ActiveMQ 127.0.0.1:5673 (default local)"}
+{"at":"2026-10-26T17:15:26.742Z","min":0,"kind":"setup","message":"RabbitMQ is starting from C:\\rabbitmq_server-4.4.0"}
+{"at":"2026-10-26T17:15:37.778Z","min":0.2,"kind":"setup","message":"RabbitMQ is running on 127.0.0.1:5672"}
+{"at":"2026-10-26T17:15:37.805Z","min":0.2,"kind":"setup","message":"ActiveMQ is starting from C:\\apache-activemq-6.3.2"}
+{"at":"2026-10-26T17:15:44.836Z","min":0.3,"kind":"setup","message":"ActiveMQ is running on 127.0.0.1:5673"}
+{"at":"2026-10-26T17:15:56.085Z","min":0.5,"kind":"retry","message":"connect to Kafka (1/10): Connection error: unable to get local issuer certificate"}
+{"at":"2026-10-26T17:16:10.554Z","min":0.8,"kind":"retry","message":"connect to Kafka (2/10): Connection error: unable to get local issuer certificate"}
+{"at":"2026-10-26T17:16:25.215Z","min":1,"kind":"retry","message":"connect to Kafka (3/10): Connection error: unable to get local issuer certificate"}
+{"at":"2026-10-26T17:16:38.014Z","min":1.2,"kind":"retry","message":"connect to Kafka (4/10): Connection error: unable to get local issuer certificate"}
+{"at":"2026-10-26T17:16:55.232Z","min":1.5,"kind":"retry","message":"connect to Kafka (5/10): Connection error: unable to get local issuer certificate"}
+{"at":"2026-10-26T17:17:08.739Z","min":1.7,"kind":"retry","message":"connect to Kafka (6/10): Connection error: unable to get local issuer certificate"}
+{"at":"2026-10-26T17:17:29.876Z","min":2.1,"kind":"retry","message":"connect to Kafka (7/10): Connection error: unable to get local issuer certificate"}
+{"at":"2026-10-26T17:17:39.171Z","min":2.2,"kind":"retry","message":"connect to Kafka (8/10): Connection error: unable to get local issuer certificate"}
+{"at":"2026-10-26T17:17:51.918Z","min":2.5,"kind":"retry","message":"connect to Kafka (9/10): Connection error: unable to get local issuer certificate"}
+{"at":"2026-10-26T17:18:05.022Z","min":2.7,"kind":"tool error","message":"Error: connect to Kafka: gave up after 10 tries: Connection error: unable to get local issuer certificate\n    at retry (file:///C:/Users/kunwa/Documents/LocalGitHub/SutraFlow/tools/soak.mjs:236:40)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async file:///C:/Users/kunwa/Documents/LocalGitHub/SutraFlow/tools/soak.mjs:318:3"}

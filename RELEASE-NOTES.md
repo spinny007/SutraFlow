@@ -1,16 +1,211 @@
-# SutraFlow 2.1.0 release notes
+# SutraFlow 2.1.1 release notes
 
-Prepared 2026-10-25. Copyright (c) 2026-27 Surya Partap Singh, MixAgile.com. AGPL-3.0-only; a commercial licence is available.
+Prepared 2026-10-27. Copyright (c) 2026-27 Surya Partap Singh, MixAgile.com. AGPL-3.0-only; a commercial licence is available.
 
 | Download | For |
 |---|---|
-| `sutraflow-2.1.0-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
-| `sutraflow-2.1.0-windows-x64-offline.zip` | The same with the runtime packages inside, for servers without the npm registry |
-| `sutraflow-2.1.0-linux.tar.gz` | Linux (x64 or arm64); also macOS |
+| `sutraflow-2.1.1-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
+| `sutraflow-2.1.1-windows-x64-offline.zip` | The same with the runtime packages inside, for servers without the npm registry |
+| `sutraflow-2.1.1-linux.tar.gz` | Linux (x64 or arm64); also macOS |
 
-Each comes with a `.sha256` file to check the download.
+Each comes with a `.sha256` file to check the download: `sha256sum -c <archive>.sha256`, or on Windows `Get-FileHash <archive> -Algorithm SHA256`.
 
-## What is new in 2.1.0
+## In short
+
+- **A web installer and upgrader**, page by page like a CMS installer, or silent from a JSON file. It covers SQLite or PostgreSQL (with pgvector checked and enabled), ports, Node memory and cluster engines. Upgrades from 2.1.0 on make a backup, compare the data and roll back on failure.
+- **Safe in a web folder**: unpacked under Laragon `www`, `htdocs` or IIS, a release shows only a page saying how to install it, never its settings or keys.
+- **Node memory per engine**, set in the installer or the Admin Console and applied by Restart.
+- **Certificates and keys** as files on the server (Windows or Linux), Certificate or Private key properties, or PEM text, in every connection and policy. Secrets are chosen from properties, never typed into a connection.
+- **A separate identity for each anonymous visitor** of an agent channel.
+- **Connection limits** now cover in-memory Sutras and each call inside a step.
+- **Large messages are stored once**: a run with a 4 MB message took 93 ms instead of 536 ms.
+- **One soak test** for everything, including the regression suite against real servers.
+
+## Install
+
+- **Web installer**: unpack, then `bin/sutraflow install` (Windows: `bin\sutraflow.cmd install`). It opens in the browser of that machine.
+- **Silent**: `bin/sutraflow install --config install.json`; the example is `docs/install-example.json`, and `--dry-run` prints the plan.
+- **By hand**: `bin/sutraflow setup`, then `bin/sutraflow start`.
+
+Node.js 22.13 or later is needed (24 recommended). For PostgreSQL, the installer requires pgvector unless you choose to go on without it (below).
+
+## Upgrade from 2.1.0
+
+Unpack 2.1.1 beside the installation, then run from the new folder:
+
+```
+bin/sutraflow upgrade                              # the upgrade pages in the browser
+bin/sutraflow upgrade --config upgrade.json        # silent: { "from": "/opt/sutraflow-2.1.0", "start": true }
+```
+
+The upgrade runs these steps; if one fails, it puts 2.1.0 back and starts it:
+1. Stops SutraFlow gracefully.
+2. Backs up the data folder and settings into `backups/2.1.0-<time>`. On PostgreSQL it also runs `pg_dump`, read back with `pg_restore --list` before anything changes.
+3. Replaces the program and adds any new settings.
+4. Applies the database changes and compares the data with a snapshot taken before.
+5. Starts SutraFlow and checks it.
+
+In a cluster, upgrade every engine's folder before starting any of them. Before 2.1.0, upgrade by hand as for earlier releases.
+
+**What changes for you:**
+- **Agent channels without a security policy.** An API client keeps its conversation across calls only by sending back its visitor token (the `X-Sutra-Visitor` header). Chat pages and the chat button do this for you. For integrations, a security policy is the better choice.
+- **Secrets in connection forms are chosen from Secret properties.** Set or change their values under Configuration, Project variables, or in the Admin Console for engine properties. Connections that already reference a secret keep working.
+- **Number properties are checked when saved.** A project holding a malformed number, such as `12,5`, must have it corrected before it can be saved again.
+- **A site's own `.htaccess` and `web.config` are kept.** An installation without them gets the release's.
+
+## What is new in 2.1.1
+
+### Web installer and upgrader
+- **`sutraflow install`** opens a page-by-page installer in the browser, on that machine only, at a one-time address:
+  - welcome and system check;
+  - administrator;
+  - database: SQLite (a file name of your choice in the data folder) or PostgreSQL;
+  - server ports, each checked free, with a free one suggested;
+  - Node memory;
+  - the cluster: its name, every engine's name, and which engines may lead, with a settings file for each further engine;
+  - review, progress and done.
+
+  It writes `sutraflow.env`, makes the tables and the first administrator, then locks itself (`--reset` unlocks it).
+- **PostgreSQL**: host, port, database, user, password, SSL (off, require, verify), and create-the-database-when-missing. **Test connection** must pass before going on. It checks:
+  - that the server can be reached, and the login;
+  - that the database exists, or makes it;
+  - the right to create tables;
+  - the PostgreSQL version;
+  - whether the database already holds SutraFlow data.
+- **pgvector is required on PostgreSQL** (knowledge bases and AI memory search). The test enables it in the database (`CREATE EXTENSION vector`) when it is installed on the server. Otherwise it stops and says what to do:
+  - **not installed on the server**: install it (the pgvector build on Windows, `postgresql-<version>-pgvector` on Linux, or allow the `vector` extension on a managed service);
+  - **installed, but the user may not enable it**: a superuser runs `CREATE EXTENSION vector;` in that database.
+
+  Choose **Continue without pgvector** on the page, or set `"pgvector": "optional"` in the config file, to go on without it; knowledge bases then use the built-in store or another vector database.
+- **SQLite**: the database file is always in the data folder, with the master key and the backups; the installer asks for its name (`sutra.db` by default; `SUTRA_DB=shop.db` in `sutraflow.env`). SQLite has no user names or passwords: the file is protected by the data folder's permissions, and passwords and keys inside SutraFlow are encrypted with `master.key`. Choose PostgreSQL for a database with its own logins.
+- **Cluster**:
+  - a **cluster name**, shown in the Admin Console;
+  - a **name for every engine**: this server (default `<machine>-studio`), the engine beside it, and further engines;
+  - **May lead** for each engine. The leader runs timers, listeners, recovery and housekeeping. It is elected among the engines that may lead, and another takes over when it stops. Allowing only one fixes the leader, without failover; at least one must be allowed.
+
+  In the Admin Console (Engines), **Name the cluster** and **May lead / Never lead** change these later (`sutra engines cluster-name`, `sutra engines lead <engine> --yes|--no`). The setting is kept in the shared database, so every engine follows it at its next heartbeat. The display names of engines were already changeable there.
+- **Upgrade** from 2.1.0 on, as described above.
+- **Silent install and upgrade**: `sutraflow install --config install.json` and `sutraflow upgrade --config upgrade.json` run the same steps from a JSON file.
+  - Passwords are only ever environment variables or files.
+  - Every problem is reported before anything changes.
+  - `--dry-run` prints the plan.
+  - Exit codes: 0 done, 1 a step failed, 2 the file is wrong.
+  - Log: `<data>/logs/installer.log`.
+- **`sutraflow setup`** asks for the ports when it makes `sutraflow.env` (or with `--ports`), checking each is free.
+- **In a web folder** (Laragon `www`, `htdocs`, IIS `wwwroot`): the release's `.htaccess` (Apache) and `web.config` (IIS) let the web server show only `install-sutraflow.html`. That page says how to install, start and reach SutraFlow, and includes an Apache proxy example. Everything else is refused, so `sutraflow.env`, the data folder and the keys are never served.
+
+### Node memory per engine
+- Each engine is its own Node.js process with its own memory; engines do not draw from one shared pool. Its limit (`node --max-old-space-size`) can be set in any of these places; 0 lets Node.js decide, as before:
+  - **Node memory** under Admin Console, Engines, Tuning (for every engine or one);
+  - `sutra engines tune --memory-mb`;
+  - `STUDIO_MEMORY_MB` / `ENGINE_MEMORY_MB` in `sutraflow.env`;
+  - the installer: the Server page, and a Memory column for each engine of a cluster.
+- The Engines list shows each engine's memory in use against its limit, and the machine's memory.
+- A changed value is written by each engine to its own settings file and applies when the engine restarts.
+  - **Restart** (or `sutra engines restart <engine>`) lets running steps finish and starts the engine again, for engines started with `sutraflow start`.
+  - Engines started by a service manager or Docker show how to apply it there.
+- The installer checks the sizes: 0, or 256 MB and more. The processes on one machine must leave at least 15% of its memory for the system.
+
+### Certificates, keys and secrets in connections
+- **One setting per certificate or key**, in every connection and security policy that uses one: databases, Kafka, RabbitMQ, ActiveMQ / AMQP 1.0, MongoDB, SFTP, outbound TLS and WS-Security, and inbound JWT, X.509 and SAML. Each takes any of:
+  - a **file on the server**, on Windows (`C:\certs\ca.pem`, `\\server\certs\ca.pem`) or Linux (`/etc/ssl/ca.pem`, `~/certs/ca.pem`), optionally with a variable (`{{ev.CERTS}}/ca.pem`);
+  - a **Certificate** or **Private key** property;
+  - PEM text, which is what existing connections hold.
+
+  On Linux, a backslash in a path is read as a folder separator, so settings written on Windows work. To renew a certificate, replace the file or change the property; the connections themselves don't change.
+- **New property types** (project and engine):
+  - **certificate**: PEM text or a file path, shown like a string;
+  - **private key**: kept in the vault like a Secret, checked to be a PEM private key before it is encrypted, never shown again.
+- **Secrets are chosen, not entered.** A password, key or passphrase setting in a connection is a pick of a Secret (or Private key) property; a key can also be a key file on the server. The value is entered once, where the property lives. Entering a value or creating a property from inside a connection is gone.
+- Every certificate setting has the variable picker.
+- Number properties take decimals (12.5, -0.075, 1e-3) and are checked when saved.
+
+### Visitors on agent channels
+- Callers of an agent channel without a security policy are no longer one anonymous caller. Each is a **visitor** with a signed visitor token, made with a key derived from the server's master key. The token comes back in the `X-Sutra-Visitor` response header, and as `visitor` in the chat API answer.
+- Conversations, AI memory and job results are bound to the visitor, as they have been for authenticated callers since 2.1.0. A missing, forged or foreign token makes a new visitor, never someone else's.
+- The chat page and chat button keep the token in the browser. Traceability shows such runs as started by `visitor <id>`.
+
+### Connection limits: in-memory Sutras and each call
+- **In-memory Sutras** can use limited connections. Each step takes a small lease in the shared engine database, renewed while it runs and expiring if its engine stops, so memory and durable Sutras share one cluster-wide limit.
+  - With no room, the step waits with a growing pause.
+  - A lost lease stops it.
+  - If the engine database cannot be reached, the step fails with that reason. Before, such steps were refused.
+- **Calls at the same time inside a step** are counted where the client makes them: database queries, procedures and transactions, AI requests and vectors.
+  - Each extra call at the same time takes a place of its own, or waits for the step's own place, so a limit of 1 makes them take turns instead of deadlocking.
+  - A query inside a transaction is not counted again.
+  - MongoDB, HTTP and file connections are still counted per step.
+
+### Large messages stored once
+- A part of a run's input over 256 KB (a broker message body and its text, a file's content) is stored once, in the new `payloads` table. The run's input, step inputs and outputs, state and step data carry a small reference.
+- Each step gets the whole value, through a cache bounded at 64 MB, and callers always get whole answers.
+- Stored parts are removed with the run by retention; in-memory runs keep them when saved.
+- 256 KB is where storing once starts, not a size limit: bigger inputs are accepted up to a service's Max body size. `SUTRA_PAYLOAD_STORE_KB` changes it (0 = never); `SUTRA_PAYLOAD_CACHE_MB` sets the cache.
+- Measured on SQLite, on the same machine: a run with a 4 MB message used to write about 20 MB and now writes about 4 MB; it took 536 ms and now takes 93 ms.
+- Traceability shows a stored part as *Stored once*, with a Download link (needs View permission on the run's project).
+
+### One soak test
+- `tools/soak.mjs` is now the one soak test; it is not shipped in the release. `--scenarios` picks the parts:
+  - core, files, AI and faults;
+  - **Amaron**, a made-up online shop kept between runs: orders, warehouse over RabbitMQ, customer care over ActiveMQ with AI decisions and pgvector, order events over Kafka, and reviews in MongoDB;
+  - local RabbitMQ and ActiveMQ, started from their folders when needed;
+  - remote Kafka, MongoDB, and remote PostgreSQL and MySQL;
+  - the regression suite against the same servers.
+- `--connections` reads the services' details from a notes file kept outside the repository.
+- Every run has an id, stamped on every row and message it writes and recorded in `amaron.soak_runs`.
+- How to run it: `tools/soak/RUNBOOK.md`.
+
+### Fixes in 2.1.1
+
+| What you would have seen | Cause | Now |
+|---|---|---|
+| A release unpacked under a web root (Laragon `www`, `htdocs`) was served by Apache file by file once installed, including `sutraflow.env` with the database password. | The archives carried no `.htaccess`; only installations set up by hand had one. | Every release carries an `.htaccess` (Apache) and a `web.config` (IIS) that refuse everything except the install page. An upgrade adds them where there are none and keeps a site's own. |
+| A visitor of a published agent without a security policy could read another visitor's conversation or job answer by learning its session or job id. | All callers without a policy were one anonymous caller. | Each visitor has its own signed identity; conversations, memory and jobs are bound to it. |
+| With large broker messages (2 MB, about 1 MB/s), engine event-loop delays rose from about 40 ms to 400–800 ms and CPU use doubled (2.1.0 soak). | Each message was written about five times per run: run input, step inputs, run outputs, run state, step data. | Large parts of a run's input are stored once and referenced: about 4 MB per run instead of about 20 MB, and 93 ms per run instead of 536 ms. |
+| A message published as JSON whose body was written as JSON text with `{{...}}` values (for example `{"orderNo": "{{input.id}}"}`) arrived as a quoted string, and the subscriber found no fields. Found by the 2.1.1 soak. | The body field is text once its values are filled in, and the JSON message type encoded that text again. | Text that is a JSON object or array is published as that JSON; other text stays a string. |
+| A number project property written with a comma (12,5), or as text, was accepted and arrived in Sutras as NaN. | Number properties were converted when used, never checked when saved. | A number property is checked when saved. Decimals with a point, negatives and exponents are allowed; anything else is refused with the reason. |
+| The first large document learned into a new pgvector knowledge base could fail with `duplicate key value violates unique constraint "pg_type_typname_nsp_index"` (8-hour soak: the first 50 MB document). | Its parts are learned by steps running at the same time, and each tried to make the knowledge table at once; PostgreSQL's `CREATE TABLE IF NOT EXISTS` is not safe against that. The AI memory store made its table on every call, with the same risk. | Each table is made once per engine, every step waiting for it; a race lost to another engine is tried again. |
+| On PostgreSQL, the installer went ahead when pgvector was missing; knowledge bases there then failed later. | pgvector was only noted. | The connection test enables pgvector, or stops and says how to install or enable it, unless you choose to go on without it. |
+
+## 2.1.1 release gate
+
+Done on 26 and 27 October 2026, from built 2.1.1 archives, in temporary folders on spare ports. Which check ran on which build is in `docs/releases/2.1.1-packages.md`.
+
+- **Web installer, page by page in a browser.**
+  - On SQLite: a busy port was found and a free one suggested.
+  - On PostgreSQL: Next was refused until the connection test passed. Test connection made the database and enabled pgvector 0.8.6. The install made 52 tables.
+  - Both times, the administrator signs in, a wrong password is refused, and the installer locks itself.
+- **Silent install** on SQLite and on PostgreSQL, with Node memory. A cluster engine started from its generated settings file joined the studio.
+- **Upgrade from 2.1.0**, with data and a deployed Sutra, on SQLite (twice) and on PostgreSQL. The data compared unchanged and the Sutra from before still runs.
+  - **Rollback**: an upgrade to a deliberately broken build failed at start, then put 2.1.0 back with its database and started it.
+- **Node memory**: set at install and changed in Tuning, then applied by Restart from the Admin Console with the new limit. This worked for the studio and for a cluster engine in another folder.
+- **Web folder**: a release unpacked into Laragon `www` (Apache 2.4) served only the install page. `sutraflow.env`, the data folder, `bin`, `dist`, `docs` and `.htaccess` all returned 403.
+- **Connection and property forms** were checked in a browser on a throwaway studio.
+- **Full suite** on real PostgreSQL 18 (pgvector) and MySQL: 537 tests, 526 passed, 0 failed, 11 skipped. The skipped tests need outside brokers, Atlas M0, Docker or a remote database with TLS.
+- **Runtime check** (`tools/runtime-check.mjs`) of the Linux archive, including the upgrade from the 2.1.0 Linux archive, passed on Windows. It now also runs in CI on Linux.
+- **Eight-hour soak**, every scenario (run `amr-2.1.1-20261026-2249-b333`, report `docs/benchmarks/soak-2.1.1-8h-20261026-2252`). Three engines on local PostgreSQL, with Ollama, local RabbitMQ and ActiveMQ, the remote Kafka, MongoDB Atlas and the remote PostgreSQL and MySQL; an engine was killed and the database cut on purpose. **58 of 62 checks passed.**
+  - The Amaron shop took 19,058 orders, 1,914 care tickets with 94 AI second opinions, 159 Kafka order events and 478 MongoDB reviews.
+  - Every RabbitMQ and ActiveMQ message was delivered (56,131 and 56,133).
+  - The four failures:
+    - **The first 50 MB document failed to learn**: a real bug, fixed (Fixes table).
+    - **ActiveMQ had 2 failed subscriber runs**: their messages were then delivered, and one was finished twice, which fits redelivery after the planned faults. The soak now keeps each failed run's error and time, and passes them only inside a planned fault.
+    - **One engine's memory** rose from about 400 MB to 1.2 GB in the last hour, after it learned a 50 MB document, and stayed there; it was steady for the six and a half hours before. This is under investigation (backlog).
+    - **Regression run on the same servers** (556 of 566 passed): the new `.htaccess` lacked its licence header (fixed); the MongoDB test was not given its login separately, and one Kafka test needs more than 3 minutes against a remote free-tier broker (both fixed in the soak).
+- **Ten-minute soak** on local PostgreSQL, with three engines and Ollama: 25 checks passed, through a planned engine kill and a 20-second database cut.
+  - Event-loop p99 was about 36 ms per engine.
+  - REST, SOAP and WebSocket p95 stayed steady from the first period to the last.
+  - The report is in `docs/benchmarks/soak-2.1.1-10min`.
+
+**Still to do:**
+- the 24-hour remote-PostgreSQL soak (runbook: `tools/soak/RUNBOOK.md`; it also covers the large-file and RAG phases, which do not start in ten minutes);
+- the first CI run of the Linux runtime job on GitHub;
+- a check of `web.config` on IIS.
+
+### 2.1.0 follow-up checks
+- A clean install of the final 2.1.0 offline archive passed, and so did the live MongoDB Atlas M0 suite (9 tests). See `docs/releases/2.1.0-packages.md`.
+
+## Previous release: 2.1.0
+
+Packaged 26 October 2026 and deployed to 4800 and Laragon 4810; see `docs/releases/2.1.0-packages.md`.
 
 ### Traceability in the Admin Console
 - **Operate, Traceability**: each project's Sutras with their runs by outcome over an hour to 90 days, their runs, and each run as stored: what it started with, every step's input and output, error, try, time and engine, its reply and log, and the runs it called or was called by. Find a run by its id, by who started it, or by a value in its input such as an order number; download it as JSON.

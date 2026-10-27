@@ -2,14 +2,14 @@
 
 **A visual integration designer and engine.** Drag activities onto a canvas, map data between steps, test and debug, and deploy *Sutras* (integration processes) that run as REST, SOAP and MCP services, on schedules, or on events: files, queues, mail, cloud drives, chat messages and more.
 
-![Version](https://img.shields.io/badge/version-2.1.0-2f6fd8)
+![Version](https://img.shields.io/badge/version-2.1.1-2f6fd8)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Commercial licence available](https://img.shields.io/badge/commercial%20licence-available-orange)](COMMERCIAL-LICENSE.md)
 ![Node.js](https://img.shields.io/badge/node-%E2%89%A5%2022.13-339933?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-7-3178c6?logo=typescript&logoColor=white)
 ![Database](https://img.shields.io/badge/database-SQLite%20%7C%20PostgreSQL-4169e1?logo=postgresql&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Docker-555)
-![Tests](https://img.shields.io/badge/tests-488-success)
+![Tests](https://img.shields.io/badge/tests-512-success)
 
 ![The SutraFlow designer: palettes, canvas and the step inspector](docs/guide-images/designer.jpg)
 
@@ -43,7 +43,9 @@
 - **APIs and gateway**: REST, SOAP and WebSocket services with generated WSDL and OpenAPI; security policies (API keys, Basic, JWT, OAuth token introspection, HMAC-signed requests, mutual TLS, WS-Security UsernameToken, X.509 signatures and SAML assertions, encrypted SOAP, IP allow lists, rate limits, CORS); scopes per service and operation; bodies validated against JSON Schema or XSD; threat protection (depth, fields, sizes, no DOCTYPE); gateway apps with keys, OAuth client-credentials tokens, plans and a firewall; TLS with your own certificate or Let's Encrypt.
 - **AI**: AI steps (prompt, classify, route, extract, summarize, translate, sentiment) on Claude, OpenAI, Gemini, Ollama and other providers; AI agents with tools, memory, guardrails, people in the loop and hand-offs; knowledge bases for RAG (built-in, pgvector, Qdrant, Chroma, Pinecone); Sutras published as MCP tools for Claude and other assistants; agents as chat pages, an OpenAI-compatible API and A2A.
 - **Connectors**: HTTP, SOAP with WS-Security, files, SFTP and FTP, PostgreSQL, MySQL, SQL Server, Oracle and SQLite, MongoDB (documents, aggregation and bulk write), Kafka, RabbitMQ and ActiveMQ, email, Firebase, Google Drive, Sheets and Docs, SharePoint and OneDrive, Dropbox, YouTube, Twitch, Discord, Telegram, Facebook Pages, Azure Data Factory, Databricks, Python, PowerShell and shell scripts, and any OAuth REST API.
-- **Operations**: an Admin Console for deployed applications (start, stop, tuning, runs, approvals, engines, alerts, gateway traffic, connection limits, users and roles, system accounts, audit log, releases, the database), with graphs drawn by Apache ECharts; clusters of engines on PostgreSQL with a leader, failover and graceful drain; Prometheus metrics, OpenTelemetry traces and JSON logs; single sign-on for people with OpenID Connect or SAML 2.0, with roles from identity-provider groups.
+- **Operations**: an Admin Console for deployed applications (start, stop, tuning, runs, approvals, engines, alerts, gateway traffic, connection limits, users and roles, system accounts, audit log, releases, the database), with graphs drawn by Apache ECharts; clusters of engines on PostgreSQL with a leader, failover and graceful drain, each engine with its own Node memory, set and restarted from the Admin Console; Prometheus metrics, OpenTelemetry traces and JSON logs; single sign-on for people with OpenID Connect or SAML 2.0, with roles from identity-provider groups.
+- **Installer and upgrader**: a page-by-page web installer (administrator, database with a connection test, ports checked free, Node memory, cluster engines) or a silent install from a JSON file; upgrades from 2.1.0 on with a backup, a before-and-after data comparison and an automatic way back; a release unpacked under a web root (Laragon `www`, `htdocs`, IIS) shows only a page saying how to install it, never its settings or keys.
+- **Certificates and keys**: every connection and security policy takes each certificate or key as a file on the server (Windows or Linux path), a Certificate or Private key property, or PEM text; secrets are chosen from Secret properties, never typed into a connection.
 - **Releases**: projects in Git from the designer; release zips with the deployment config, documentation and files; built by a CI/CD pipeline straight from Git with the `sutra` command; deployed by command line or the Admin Console, with history and rollback.
 - **Documentation from the design**: each Sutra and project produces its own documentation (HTML and Markdown) from its steps and their descriptions.
 
@@ -51,11 +53,20 @@
 
 ## Download
 
-Each release has a Windows zip and a Linux tar.gz, already built, with SHA-256 files and offline archives (packages included) on the GitHub Releases page. Unpack, run `bin/sutraflow setup` (Windows: `bin\sutraflow.cmd setup`), then `bin/sutraflow start`. Steps for each system and for upgrades: [RELEASE-NOTES.md](RELEASE-NOTES.md).
+Each release has a Windows zip and a Linux tar.gz, already built, with SHA-256 files and offline archives (packages included) on the GitHub Releases page.
+
+| To | Run, in the unpacked folder |
+|---|---|
+| Install with the web installer | `bin/sutraflow install` (Windows: `bin\sutraflow.cmd install`): opens page by page in the browser of that machine: administrator, database, ports, Node memory, cluster |
+| Install without a browser | `bin/sutraflow install --config install.json` (example: `docs/install-example.json`; `--dry-run` prints the plan) |
+| Upgrade from 2.1.0 on | Unpack the new release beside the old one, then `bin/sutraflow upgrade` from the new folder (or `upgrade --config upgrade.json`): backup, data compared, rolled back if a step fails |
+| Set up by hand | `bin/sutraflow setup` (asks for the ports), then `bin/sutraflow start` |
+
+SutraFlow is a Node.js server: unpacking it under a web root (Laragon `www`, `htdocs`, IIS `wwwroot`) does not start it. The release's `.htaccess` (Apache) and `web.config` (IIS) let the web server show only `install-sutraflow.html`, which says how to install and start it; `sutraflow.env`, the data folder and the keys are never served. Steps for each system and for upgrades: [RELEASE-NOTES.md](RELEASE-NOTES.md).
 
 ## Quick start
 
-**Requirements**: [Node.js](https://nodejs.org) 22.13 or later (24 recommended). Nothing else: the database is SQLite, built into Node. Python 3, PostgreSQL, Docker and AI models are optional.
+**Requirements**: [Node.js](https://nodejs.org) 22.13 or later (24 recommended). Nothing else: the database is SQLite, built into Node. Python 3, PostgreSQL, Docker and AI models are optional. No web server is needed (no Apache, IIS, nginx, Laragon, WAMP or LAMP): SutraFlow serves its pages and APIs itself, with HTTPS and Let's Encrypt. Put one in front only to share ports 80/443 with other sites, balance several engines, or meet a company proxy rule; see the user guide, *Install and start the server*.
 
 ```bash
 git clone https://github.com/spinny007/SutraFlow.git
@@ -169,6 +180,8 @@ Full pipelines for GitHub Actions, GitLab CI, Azure DevOps and Jenkins are in th
 - **PostgreSQL and clusters**: move from SQLite with one button (Admin Console → Database → Migrate now) or `tools/migrate-to-postgres`; then add engines on the same database. Work is shared, one live claim owns a task, claim fencing rejects stale completions, a leader runs timers and listeners with failover, and a stopped engine's unfinished work is recovered by another.
 - **Docker**: `Dockerfile`, `docker-compose.yml` (studio and engine) and `docker-compose.cluster.yml` (PostgreSQL, a studio and two engines).
 - **Monitoring**: `/health`, `/ready`, Prometheus `/metrics`, OpenTelemetry traces, JSON logs, alert rules (failed runs, slow runs, waiting approvals, gateway errors, engines, certificates) to email, webhooks or Sutras.
+- **Node memory**: each engine is its own process with its own limit (`STUDIO_MEMORY_MB`, `ENGINE_MEMORY_MB`, or Engines → Tuning → Node memory), applied by Restart from the Admin Console.
+- **Certificates and keys**: point connections at files on each server or at Certificate and Private key properties, so renewing a certificate is replacing a file or changing one property.
 - **Sign-in on production servers**: secrets per server vault; Azure managed identities or service principals; OAuth accounts connected with `sutra connect` or a refresh token secret.
 
 See [docs/deployment.md](docs/deployment.md) and the user guide's *Running in production*.
@@ -194,6 +207,8 @@ Settings are environment variables, set in `sutraflow.env` for the launcher. The
 | `SUTRA_ADMIN_HOST`, `SUTRA_ADMIN_PORT` | `127.0.0.1`, `4800` | Studio and admin API |
 | `SUTRA_GATEWAY_HTTP_PORT`, `SUTRA_GATEWAY_HTTPS_PORT` | `8080`, `8443` | Gateway |
 | `SUTRA_WORKERS` | by machine | Steps one engine runs at once (4 on 1 vCPU / 1 GB, up to 32) |
+| `STUDIO_MEMORY_MB`, `ENGINE_MEMORY_MB` | Node.js decides | Node memory of the studio and of an engine (launcher settings); also set in the Admin Console |
+| `SUTRA_PAYLOAD_STORE_KB` | `256` | A part of a run's input this big is stored once and referenced (not a size limit); 0 = never |
 
 Every setting is listed in the architecture page (*Settings*); the build fails when the code reads one it does not list.
 
@@ -251,7 +266,8 @@ Tested against stand-in services that answer like the real ones, but not yet aga
 ## Known limitations
 
 - **Twitch and Discord triggers** poll (every minute and every few seconds) rather than receive pushed events.
-- **The soak test** covers the starters that run on one machine. Email (IMAP) and cloud triggers still use stand-ins in the normal suite; broker certification is a separate opt-in real-service gate so CI never needs production credentials.
+- **The soak test** (`tools/soak.mjs`, run by its runbook `tools/soak/RUNBOOK.md`) covers the starters that run on one machine, the Amaron shop, local RabbitMQ and ActiveMQ, a remote Kafka, MongoDB Atlas, remote PostgreSQL and MySQL, and the regression suite against the same servers, with connection details from a notes file outside the repository. Email (IMAP) and cloud triggers still use stand-ins; real-service tests stay opt-in so CI never needs production credentials.
+- **IIS**: the release's `web.config` (only the install page is served) was written for IIS but checked only on Apache.
 
 ## Contributing
 

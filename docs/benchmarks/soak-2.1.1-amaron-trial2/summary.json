@@ -1,0 +1,416 @@
+{
+  "runId": "amr-2.1.1-20261026-2231-6a94",
+  "scenarioGroups": [
+    "amaron",
+    "brokers",
+    "mongo"
+  ],
+  "amaron": {
+    "orders": 134,
+    "units": 671,
+    "tickets": 13,
+    "kafkaEvents": 0,
+    "reviews": 3,
+    "aiSecondOpinions": 0
+  },
+  "regression": null,
+  "version": "2.1.1",
+  "started": "2026-10-26T17:01:03.824Z",
+  "ended": "2026-10-26T17:05:28.932Z",
+  "minutes": 4,
+  "engines": 2,
+  "machine": "AMD Ryzen 7 7435HS, 16 threads, 24 GB, win32",
+  "node": "v24.21.0",
+  "pausedMinutes": 0,
+  "database": "PostgreSQL (through a proxy), SQLite, MongoDB Atlas (gently)",
+  "model": null,
+  "sizes": [
+    10,
+    20,
+    30,
+    40,
+    50,
+    60
+  ],
+  "checks": [
+    {
+      "name": "No engine stopped by itself",
+      "ok": true,
+      "detail": "0 unexpected stops"
+    },
+    {
+      "name": "No run left running",
+      "ok": true,
+      "detail": "0 runs still open after starters stopped"
+    },
+    {
+      "name": "No step ran twice",
+      "ok": true,
+      "detail": "0 steps of single-pass Sutras completed more than once"
+    },
+    {
+      "name": "Requests that failed",
+      "ok": true,
+      "detail": "0 of 1016 outside the planned faults (0.000%); 0 with the fault windows included"
+    },
+    {
+      "name": "RabbitMQ delivered every message",
+      "ok": true,
+      "detail": "398 published (0 big), 398 consumed, 0 failed; subscriber runs {\"done\":398}"
+    },
+    {
+      "name": "ActiveMQ delivered every message",
+      "ok": true,
+      "detail": "398 published (0 big), 398 consumed, 0 failed; subscriber runs {\"done\":398}"
+    },
+    {
+      "name": "MongoDB Atlas stayed correct",
+      "ok": true,
+      "detail": "3 lifecycles completed, 0 failed, 0 outside the planned faults (one a minute)"
+    },
+    {
+      "name": "MongoDB Atlas left nothing behind",
+      "ok": true,
+      "detail": "0 documents left in the soak collection"
+    },
+    {
+      "name": "Timer kept time",
+      "ok": false,
+      "detail": "21 runs of 24 expected (every 10 s)"
+    },
+    {
+      "name": "Every channel message reached its subscriber",
+      "ok": true,
+      "detail": "0 subscriber runs for 0 published"
+    },
+    {
+      "name": "Bus messages acknowledged",
+      "ok": true,
+      "detail": "0 accepted, 0 released, 0 rejected of 0 sent (0 handed out again after a link closed or a release); subscriber runs {}"
+    },
+    {
+      "name": "WebSocket client trigger ran for the server's messages",
+      "ok": true,
+      "detail": "37 runs for 37 messages pushed"
+    },
+    {
+      "name": "WebSocket broadcasts arrived",
+      "ok": true,
+      "detail": "0 received of 0 expected (0 broadcasts to the clients connected at the time)"
+    },
+    {
+      "name": "Amaron: every order placed is saved with this run",
+      "ok": true,
+      "detail": "134 orders of run amr-2.1.1-20261026-2231-6a94 (134 placed through the API, 0 failed); ₹50,65,189 in total"
+    },
+    {
+      "name": "Amaron: lines and stock agree",
+      "ok": true,
+      "detail": "341 lines, 671 units ordered; stock reserved grew by 671"
+    },
+    {
+      "name": "Amaron: the warehouse packed every order (RabbitMQ)",
+      "ok": true,
+      "detail": "134 shipments and 134 orders packed for 134 orders"
+    },
+    {
+      "name": "Amaron: every care ticket saved and decided (ActiveMQ)",
+      "ok": true,
+      "detail": "13 tickets of 13 raised, 13 decisions, 0 not as expected"
+    },
+    {
+      "name": "Amaron: tickets are in the pgvector knowledge",
+      "ok": true,
+      "detail": "13 passages added for 13 tickets (34 in all runs)"
+    },
+    {
+      "name": "Amaron: reviews are in MongoDB with this run",
+      "ok": true,
+      "detail": "3 reviews of run amr-2.1.1-20261026-2231-6a94 for 3 written"
+    },
+    {
+      "name": "Engine 0 stays responsive",
+      "ok": true,
+      "detail": "event loop delay: p99 per minute 34 ms typical, 47 ms in the worst 5% of minutes; longest single wait 408 ms"
+    },
+    {
+      "name": "Engine 1 stays responsive",
+      "ok": true,
+      "detail": "event loop delay: p99 per minute 33 ms typical, 34 ms in the worst 5% of minutes; longest single wait 117 ms"
+    },
+    {
+      "name": "RabbitMQ publish stays as fast",
+      "ok": true,
+      "detail": "p95 539 ms in the first period, 534 ms in the last"
+    },
+    {
+      "name": "ActiveMQ publish stays as fast",
+      "ok": true,
+      "detail": "p95 540 ms in the first period, 536 ms in the last"
+    }
+  ],
+  "faults": [],
+  "scenarios": [
+    {
+      "name": "RabbitMQ publish",
+      "ok": 398,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 117,
+          "p50": 80,
+          "p95": 539,
+          "p99": 554
+        },
+        {
+          "n": 118,
+          "p50": 80,
+          "p95": 532,
+          "p99": 542
+        },
+        {
+          "n": 118,
+          "p50": 517,
+          "p95": 534,
+          "p99": 537
+        },
+        {
+          "n": 45,
+          "p50": 68,
+          "p95": 539,
+          "p99": 945
+        }
+      ]
+    },
+    {
+      "name": "ActiveMQ publish",
+      "ok": 398,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 117,
+          "p50": 518,
+          "p95": 540,
+          "p99": 552
+        },
+        {
+          "n": 118,
+          "p50": 517,
+          "p95": 534,
+          "p99": 542
+        },
+        {
+          "n": 117,
+          "p50": 67,
+          "p95": 536,
+          "p99": 541
+        },
+        {
+          "n": 46,
+          "p50": 520,
+          "p95": 538,
+          "p99": 1088
+        }
+      ]
+    },
+    {
+      "name": "MongoDB Atlas (gentle)",
+      "ok": 3,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 1,
+          "p50": 7902,
+          "p95": 7902,
+          "p99": 7902
+        },
+        {
+          "n": 1,
+          "p50": 2773,
+          "p95": 2773,
+          "p99": 2773
+        },
+        {
+          "n": 1,
+          "p50": 2862,
+          "p95": 2862,
+          "p99": 2862
+        }
+      ]
+    },
+    {
+      "name": "Amaron orders",
+      "ok": 134,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 39,
+          "p50": 112,
+          "p95": 292,
+          "p99": 307
+        },
+        {
+          "n": 40,
+          "p50": 110,
+          "p95": 264,
+          "p99": 843
+        },
+        {
+          "n": 40,
+          "p50": 105,
+          "p95": 284,
+          "p99": 349
+        },
+        {
+          "n": 15,
+          "p50": 154,
+          "p95": 312,
+          "p99": 312
+        }
+      ]
+    },
+    {
+      "name": "Amaron order status",
+      "ok": 67,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 19,
+          "p50": 96,
+          "p95": 302,
+          "p99": 302
+        },
+        {
+          "n": 20,
+          "p50": 38,
+          "p95": 606,
+          "p99": 606
+        },
+        {
+          "n": 20,
+          "p50": 89,
+          "p95": 208,
+          "p99": 208
+        },
+        {
+          "n": 8,
+          "p50": 39,
+          "p95": 173,
+          "p99": 173
+        }
+      ]
+    },
+    {
+      "name": "Amaron care tickets",
+      "ok": 13,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 3,
+          "p50": 155,
+          "p95": 219,
+          "p99": 219
+        },
+        {
+          "n": 4,
+          "p50": 79,
+          "p95": 562,
+          "p99": 562
+        },
+        {
+          "n": 4,
+          "p50": 81,
+          "p95": 261,
+          "p99": 261
+        },
+        {
+          "n": 2,
+          "p50": 223,
+          "p95": 223,
+          "p99": 223
+        }
+      ]
+    },
+    {
+      "name": "Amaron reviews (gentle)",
+      "ok": 3,
+      "fail": 0,
+      "errors": [],
+      "hours": [
+        {
+          "n": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0
+        },
+        {
+          "n": 1,
+          "p50": 6430,
+          "p95": 6430,
+          "p99": 6430
+        },
+        {
+          "n": 1,
+          "p50": 1443,
+          "p95": 1443,
+          "p99": 1443
+        },
+        {
+          "n": 1,
+          "p50": 1835,
+          "p95": 1835,
+          "p99": 1835
+        }
+      ]
+    }
+  ],
+  "stuckRuns": [],
+  "stuckTasks": [],
+  "files": {
+    "csv": [],
+    "sftp": [],
+    "ftp": [],
+    "docs": [],
+    "drive": []
+  },
+  "ws": {
+    "connects": 5,
+    "drops": 0,
+    "broadcastsSent": 0,
+    "broadcastsExpected": 0,
+    "broadcastsGot": 0
+  },
+  "bus": {
+    "sent": 0,
+    "accepted": 0,
+    "released": 0,
+    "rejected": 0,
+    "redelivered": 0,
+    "links": 22,
+    "again": [],
+    "senders": {}
+  },
+  "feed": 37,
+  "restarts": [
+    {
+      "engine": 0,
+      "restarts": 0
+    },
+    {
+      "engine": 1,
+      "restarts": 0
+    }
+  ]
+}
