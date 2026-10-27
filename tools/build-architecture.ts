@@ -325,12 +325,16 @@ const FILES: Group[] = [
       ['tools/soak/amaron.mjs', 'The soak test shop Amaron (2.1.1): a kept PostgreSQL database of customers, products, warehouses and stock, orders, shipments, order events, care tickets and AI decisions, seeded once with made-up data that looks real; every row carries the soak run id, and soak_runs records each run with its result.'],
       ['tools/soak/connections.mjs', 'Reads the soak test connections (remote PostgreSQL and MySQL, Kafka, MongoDB, local RabbitMQ and ActiveMQ) from a notes file kept outside the repository, by its section headings; prints only a masked summary.'],
       ['tools/soak/local-brokers.mjs', 'Starts local RabbitMQ and ActiveMQ from their folders for the soak test when they are not running, and stops only the ones it started.'],
+      ['tools/soak/RUNBOOK.md', 'How to run the soak test (2.1.1): what to prepare, the commands for a short trial and for the 8- and 24-hour runs, the connections file, and how to read and keep the report.'],
       ['tools/loadtest.mjs', 'Load test: starts a studio and engines on their own temporary database, runs a benchmark Sutra (durable or in memory, small or big outputs), and reports steps and runs per second, queue wait and step time percentiles, database lock waits and transactions, CPU and memory; can kill an engine to check recovery, limit cores and memory, or soak. Results in docs/benchmarks.'],
       ['tools/bigfiletest.mjs', 'Big file test: one engine with a small memory limit streams a generated CSV file of any size through a Sutra (Read file, Stream in batches) and reports the time and the peak memory of the process.'],
       ['tools/build-sample-projects.ts', 'Builds the sample project zips in samples/ (<code>npm run samples</code>): whole projects as release zips with their files, listed in samples/index.json for New project.'],
-      ['tools/build-user-guide.ts', 'Builds docs/sutraflow-user-guide.html and docs/Sutra-Contributor Information.html (<code>npm run guide</code>), from the same page layout: chapters, every activity with its settings table, connection types, functions, pipes and samples, read from the server code.'],
+      ['tools/build-user-guide.ts', 'Builds docs/sutraflow-user-guide.html, docs/sutraflow-admin-guide.html and docs/Sutra-Contributor Information.html (<code>npm run guide</code>), from the same page layout: chapters in parts, every activity with its settings table, connection types, functions, pipes and samples, read from the server code. A link to a chapter of the other guide opens that guide there; a link to a chapter no guide has fails the build.'],
+      ['tools/guide/admin.ts', 'Chapters written for the SutraFlow Administration Guide (2.1.2): what administrators do, planning a server, the web installer page by page, silent installation, how upgrades work, development machines, the launcher and server settings, receiving releases, monitoring and troubleshooting.'],
+      ['tools/guide/headless.mjs', 'A headless Edge or Chrome for the guide screenshots, driven through the DevTools protocol with its own temporary profile: navigate, run code in the page, save screenshots to docs/guide-images.'],
+      ['tools/capture-admin-shots.mjs', 'Takes the Administration Guide screenshots on a throwaway installation from the offline release: the web installer page by page, the Admin Console of a seeded server, and with SUTRA_SHOTS_UPGRADE a real upgrade of a named installation through the upgrade pages; then removes what it made.'],
       ['tools/guide/tables.ts', 'The tables of SutraFlow itself, for the guide and this page: what each holds, groups, what is encrypted or grows, and the columns read from db.ts (the schema and the columns later versions add).'],
-      ['tools/guide/chapters.ts', 'User guide chapters: for the people who use SutraFlow (Sutra designers, administrators, approvers, and later developers using the developer portal): concepts, mapping, palettes and activities, operations.'],
+      ['tools/guide/chapters.ts', 'Guide chapters and their order: PARTS places the user guide chapters (designers, approvers, and later developers using the developer portal: concepts, mapping, palettes and activities, releases) and ADMIN_PARTS the Administration Guide chapters (installing, running, engines, the Admin Console, security); every chapter is in exactly one part of one guide.'],
       ['tools/guide/contributor.ts', 'Chapters of Sutra-Contributor Information, for people who change SutraFlow itself: building from source, where the code is, file headers and overviews, tests and their real-service variables, security rules, vendored packages, release builds, and the load, soak and big-file test tools.'],
       ['tools/guide/activities.ts', 'Advice text for every activity in the user guide.'],
       ['tools/guide/benchmarks.ts', 'Guide tables made from measurements: the machine profiles of sizing.ts and the load test results in docs/benchmarks.'],
@@ -363,9 +367,9 @@ const FILES: Group[] = [
       ['deploy/laragon/01-sutra.conf', 'Laragon Apache site: forwards http://sutra.test to the Node.js server.'],
       ['deploy/laragon/.htaccess', 'Denies direct access to the SutraFlow folder under the Laragon www folder.'],
       ['deploy/README.md', 'The deploy folder: drop .sutra packages here for engines that deploy them at start.'],
-      ['docs/deployment.md', 'Operations guide: packages, CLI, headless engines, Docker, clusters, monitoring, retention, settings.'],
       ['docs/architecture.md', 'Short text notes on the architecture (this page is the full version).'],
-      ['docs/sutraflow-user-guide.html', 'The generated user guide, served at /guide.'],
+      ['docs/sutraflow-user-guide.html', 'The generated user guide, for designers, served at /guide.'],
+      ['docs/sutraflow-admin-guide.html', 'The generated Administration Guide (2.1.2), for administrators, served at /admin-guide: installing, upgrading, running, engines and clusters, the Admin Console, security, releases on servers.'],
       ['README.md', 'Project introduction and quick start.'],
       ['RELEASE-NOTES.md', 'Release notes of the current version: what is new, requirements, install steps for Windows and Linux, upgrade steps, known limitations. The release archives require it.'],
     ],
@@ -541,7 +545,7 @@ ${tw(['Address', 'What answers'], [
   ['<code>:4800/health</code>, <code>/ready</code>', 'Liveness and readiness'],
   ['<code>:4800/metrics</code>', 'Prometheus metrics'],
   ['<code>:4800/admin</code>', 'Admin Console (also on headless engines)'],
-  ['<code>:4800/guide</code>, <code>/architecture</code>', 'User guide and this page'],
+  ['<code>:4800/guide</code>, <code>/admin-guide</code>, <code>/architecture</code>', 'User guide, Administration Guide and this page'],
   ['<code>:8080</code>, <code>:8443</code>', 'Gateway: deployed REST and SOAP services, <code>/mcp</code> and MCP server paths, ACME challenges'],
 ].map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join(''))}`);
 
@@ -656,7 +660,7 @@ sec('data', 'Data, mapping and expressions', `
 <li><strong>Shapes before running</strong> (<code>design.ts</code>, <code>schemas.ts</code>): each activity\'s output hint, schemas and earlier steps give the mapper a tree to drag from before any run exists.</li>
 </ul>`);
 
-sec('mapping-contracts', 'Typed JSON/XML mapping (2.0.7)', `
+sec('mapping-contracts', 'Typed JSON/XML mapping', `
 <p><strong>Map JSON Data</strong> and <strong>Map XML Data</strong> are focused activity definitions over the same structured mapping engine as legacy Map data and Render JSON/XML. Mapping creates an object; rendering creates text. Existing generic activity identifiers remain valid.</p>
 <p>Targets come from project-scoped JSON Schema/XSD references or a MappingValue containing path declarations, rules and optional typed definitions. Definitions carry scalar/object type, required/repeating flags, item bounds, description and object-element namespace URI. Attributes use <code>@_name</code>; list markers use <code>[]</code> in declarations and normalized paths in rules. XML has exactly one non-repeating element root. Namespace declarations become <code>@_xmlns</code> attributes on objects; qualified object names declare the corresponding prefix.</p>
 <p><code>designSchemas</code> and <code>validateDoc</code> use the same static checks: malformed formulas, unmapped required targets, invalid XML target names/root and contradictory cardinalities are errors; stale target rules and references absent from known source shapes are warnings. Hidden mapping fields in value-mode renderers are not checked. Output coercion retains legacy behavior unless typed definitions or a new typed activity opt into strict value checks. Type failures follow ordinary engine error routing.</p>
@@ -670,7 +674,7 @@ sec('mapping-contracts', 'Typed JSON/XML mapping (2.0.7)', `
 <p>Protected ingress verifies authentication and scopes before returning schema diagnostics. Authorized invalid requests receive REST 400 with error details or a SOAP Client fault; missing credentials return 401 and insufficient scopes 403 without schema details. Dedicated JWT-protected REST/SOAP tests verify the response distinctions and the unchanged durable run count.</p>
 `);
 
-sec('contracts-mongodb', '2.0.10 strict boundaries and MongoDB M0', `
+sec('contracts-mongodb', 'Strict boundaries and MongoDB', `
 <p>The optional activity <code>validateStart</code> hook runs before durable run creation. Manual start, REST, SOAP and WebSocket implement it so Test/Debug, Run API and direct engine calls cannot bypass their enabled ingress contracts. Execution validates again. <code>contracts.ts</code> centralizes project ownership, schema existence/kind, compilation and actual-value validation without coercion or sample substitution. SOAP object admission validates its namespace-aware XML representation with the real XSD backend.</p>
 <p>Call Sutra validates input and, when configured to wait, its resumed child result. Return and internal channel activities have explicit strict controls. Local/remote file triggers reject invalid parsed events before downstream processing; a file-trigger failure can still have a failed run record. A selected descriptive schema with validation Off is not an enforcement promise. The schema-field inventory is a review gate, not proof of every activity's runtime behavior.</p>
 <p>MongoDB metadata is separated from runtime resource lookup to avoid registry initialization cycles. The official driver uses a vault-backed URI, verified TLS, small resource-revision-keyed pools, operation budgets, abort signals and explicit shutdown. Public durable values use canonical Extended JSON rather than storing BSON instances or losing Int64/decimal precision. Cursor readers close in finally blocks and fail at the documented output ceiling rather than silently truncate.</p>
@@ -742,7 +746,7 @@ ${tw(['Service', 'Sign-in and token addresses', 'What SutraFlow adds', 'Scopes t
   ['Twitch', '<code>id.twitch.tv/oauth2/authorize</code>, <code>id.twitch.tv/oauth2/token</code>', '<code>force_verify=true</code>; the client ID on every API call', '<code>user:read:email</code>, <code>channel:manage:broadcast</code>, <code>clips:edit</code> and others', 'Twitch developer console: a Confidential application with the redirect URL'],
   ['Custom', 'the connection\'s <em>Authorization URL</em> and <em>Token URL</em>', 'nothing', 'the provider\'s', 'the provider\'s developer portal'],
 ].map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td></tr>`).join(''))}
-<p>The step-by-step set-up of each, with the screens to open and the fields to fill, is in the user guide: <a href="/guide#ch-oauth-setup">OAuth connections step by step</a>.</p>
+<p>The step-by-step set-up of each, with the screens to open and the fields to fill, is in the user guide: <a href="sutraflow-user-guide.html#ch-oauth-setup">OAuth connections step by step</a>.</p>
 <p>Design points: the client secret stays a vault secret read only when exchanging codes; the signed, expiring state stops forged or replayed callbacks; tokens are encrypted at rest and keyed by the connection, so two projects never share an account by accident; and the database is the one place every engine looks, so a leader change or a restarted engine needs no new sign-in.</p>`);
 
 sec('triggers', 'Timers, listeners and channels', `
@@ -834,6 +838,28 @@ ${tw(['Strategy', 'How', 'When'], [
 <h3 id="docker">Docker</h3>
 <p>The Dockerfile builds in one stage and runs in a slim Node 24 image as the <code>node</code> user under tini, with a health check on <code>/ready</code>. Defaults: headless mode, data in <code>/data</code>, packages from <code>/deploy</code>, admin on 0.0.0.0, JSON logs. <code>docker-compose.yml</code> runs one server; <code>docker-compose.cluster.yml</code> runs PostgreSQL, a studio and two engines with a shared <code>SUTRA_MASTER_KEY</code> and a 45-second stop grace period.</p>`);
 
+sec('installer', 'Installing and upgrading', `
+<p>This section is how the installer works inside. To install or upgrade a server, follow the <a href="sutraflow-admin-guide.html#ch-install">Administration Guide</a> (<em>The web installer</em>, <em>Silent installation</em>, <em>Upgrading</em>), which has every page with its picture.</p>
+<p>The installer (<code>server/src/install</code>) runs before any settings exist, so it is a program of its own, started by the launcher (<code>sutraflow install</code> or <code>upgrade</code>): <code>server.ts</code> serves the pages of <code>web/install</code>, <code>cli.ts</code> the same steps silently from a JSON file, and both call <code>core.ts</code>. Each install step that needs SutraFlow's own code (tables, the administrator, migrations, backups) runs in a child process (<code>task.ts</code>) with the target's settings, so the installer never opens a database with its own.</p>
+${tw(['Guard', 'How'], [
+  ['Only this machine', 'Listens on 127.0.0.1; the Host header must name this machine (no DNS rebinding)'],
+  ['Only this browser', 'A one-time token in the address, compared in constant time, on every request'],
+  ['Only once', '<code>data/install.lock</code> after an install; <code>--reset</code> removes it'],
+  ['Nothing half done', 'Every answer is checked before anything changes: ports free, database reachable, pgvector, passwords strong'],
+  ['No secrets in files', 'Silent configs and saved answers take passwords as <code>{"env"}</code> or <code>{"file"}</code>; the database password goes to <code>SUTRA_DB_PASSWORD</code>, apart from the address'],
+].map(([a, b]) => `<tr><td><strong>${a}</strong></td><td>${b}</td></tr>`).join(''))}
+<h3 id="upgrade-steps">An upgrade</h3>
+<ol>
+<li>Snapshot: row counts and checksums of every table, read only.</li>
+<li>Stop the studio and the engine beside it through the launcher (graceful drain; 2.1.2 stops both, and remembers whether the engine ran).</li>
+<li>Backup: the data folder, settings, and <code>pg_dump</code> read back with <code>pg_restore --list</code>, or SutraFlow's own copy of the database.</li>
+<li>Program files free: every program file is opened for writing; one held without sharing stops here, named with its holder from the Windows Restart Manager.</li>
+<li>Move the old runtime into the backup; copy the new one in. A folder in use (a web server, terminal or Explorer in it) cannot be renamed on Windows, so it is copied into the backup and updated in place. The data folder, settings and a site's own <code>.htaccess</code>/<code>web.config</code> stay.</li>
+<li>New settings with defaults; the new version's migrations; compare with the snapshot.</li>
+<li>Start what ran before and check that it answers the new version.</li>
+</ol>
+<p>Any failure runs the way back: stop, remove the new runtime, move the old one back, restore the data folder, settings and database (a PostgreSQL restore waits at most a minute for locks and reports when it could not restore), and start the old version. Every step is reported to the page or terminal and written to <code>data/logs/installer.log</code>.</p>`);
+
 sec('startstop', 'Start and stop', `
 <h3 id="boot">Start order</h3>
 <ol>
@@ -881,7 +907,7 @@ sec('ai', 'AI and MCP', `
 <p>The other direction: a Sutra that starts with an <strong>MCP skill</strong> trigger becomes a tool for AI assistants, described by its name, purpose and inputs, and answered by <strong>Reply to AI</strong>. An MCP server connection groups skills under one address, so an assistant can be given, for example, only the order skills.</p>`);
 
 sec('features', 'Features by palette', `
-<p>${allActivities.length} activities in ${pals.length} palettes. The user guide (<a href="/guide">/guide</a>) describes each one with its settings.</p>
+<p>${allActivities.length} activities in ${pals.length} palettes. The <a href="sutraflow-user-guide.html#ch-activities">user guide</a> describes each one with its settings.</p>
 ${tw(['Palette', 'Activities'], pals.map(p => `<tr id="pal-${p.id}"><td><strong>${esc(p.name)}</strong><span class="cond">${p.acts.length}</span></td><td>${p.acts.map(a => esc(a.name)).join(', ')}</td></tr>`).join(''))}
 <h3 id="conn-types">Connection types</h3>
 <p>${RESOURCE_KINDS.map(k => esc(k.name)).join(', ')}.</p>
@@ -1033,7 +1059,7 @@ footer{margin-top:60px;color:var(--muted);font-size:.88em;text-align:center}
 ${ARROW_DEFS}
 <div class="wrap">
 <header class="top"><img src="${LOGO_URI}" alt=""><div><h1>SutraFlow Architecture</h1></div></header>
-<p class="sub1">Version ${esc(version)} &middot; how it works, what each file does, deployment and features &middot; <a href="/guide">User guide</a></p>
+<p class="sub1">Version ${esc(version)} &middot; how it works, what each file does, deployment and features &middot; <a href="sutraflow-user-guide.html">User guide</a> &middot; <a href="sutraflow-admin-guide.html">Administration Guide</a></p>
 <div class="layout">
 <nav class="toc">
   <div id="asearch"><input id="aq" type="search" placeholder="Search files, tables, settings, topics" aria-label="Search the architecture page" autocomplete="off"><div id="ares" role="list"></div></div>

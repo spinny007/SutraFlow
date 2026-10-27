@@ -177,7 +177,8 @@ test('no third-party product names in the code, docs or guide', () => {
       const p = path.join(d, e.name);
       if (e.isDirectory()) walk(p);
       else if (/\.(ts|tsx|md|html|json|css|mjs)$/.test(e.name) && e.name !== 'package-lock.json') {
-        const text = fs.readFileSync(p, 'utf8');
+        // Pictures embedded as data: addresses are base64, not words: letters in them can spell anything.
+        const text = fs.readFileSync(p, 'utf8').replace(/data:[\w/+.-]+;base64,[A-Za-z0-9+/=]+/g, '');
         if (new RegExp(['tib', 'co|flo', 'go'].join(''), 'i').test(text)) hits.push(path.relative(root, p));
       }
     }

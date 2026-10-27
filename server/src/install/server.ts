@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { HOME, memoryInfo, checkPorts, clusterFiles, detectInstall, install, isLocked, systemCheck, testDatabase, thisVersion, upgrade, validateInstall, type InstallConfig, type UpgradeConfig } from './core.js';
+import { HOME, answersFile, lockFile, memoryInfo, checkPorts, clusterFiles, detectInstall, install, isLocked, systemCheck, testDatabase, thisVersion, upgrade, validateInstall, type InstallConfig, type UpgradeConfig } from './core.js';
 
 /**
  * The web installer (2.1.1): a page of several steps, like a Joomla installer, served only on this
@@ -35,7 +35,7 @@ const opt = (f: string) => { const i = args.indexOf(f); return i >= 0 ? args[i +
 const token = crypto.randomBytes(24).toString('hex');
 const web = path.join(HOME, 'dist', 'web');
 
-interface Job { kind: 'install' | 'upgrade'; steps: { step: string; state: string; detail?: string }[]; done: boolean; error?: string; result?: any }
+interface Job { kind: 'install' | 'upgrade'; steps: { step: string; state: string; detail?: string }[]; done: boolean; error?: string; result?: any; log: string[]; logFile?: string }
 let job: Job | null = null;
 let lastCluster: { name: string; env: string }[] = [];
 
@@ -48,15 +48,24 @@ const readBody = (req: http.IncomingMessage) => new Promise<any>((resolve, rejec
   req.on('data', d => { b += d; if (b.length > 1e6) req.destroy(); });
   req.on('end', () => { try { resolve(b ? JSON.parse(b) : {}); } catch { reject(new Error('The request is not valid JSON')); } });
 });
-const run = (kind: Job['kind'], fn: (p: (step: string, state: string, detail?: string) => void) => Promise<any>) => {
+/** folder: the installation the job is for; its data folder keeps the log (an upgrade's, not the new release's). */
+const run = (kind: Job['kind'], folder: string, fn: (p: (step: string, state: string, detail?: string) => void) => Promise<any>) => {
   if (job && !job.done) throw new Error('Another installer step is still running');
-  const j: Job = { kind, steps: [], done: false };
+  const j: Job = { kind, steps: [], done: false, log: [], logFile: path.join(path.dirname(lockFile(folder)), 'logs', 'installer.log') };
   job = j;
+  // The log (2.1.2): every step as it changes, as the silent install writes it; kept in <data>/logs/installer.log and offered on the last page.
+  const say = (m: string) => j.log.push(`${new Date().toISOString()} ${m}`);
+  say(`SutraFlow ${thisVersion()} web installer: ${kind}`);
   const progress = (step: string, state: string, detail?: string) => {
     const i = j.steps.findIndex(s => s.step === step);
     if (i >= 0) j.steps[i] = { step, state, detail }; else j.steps.push({ step, state, detail });
+    say(`${state === 'run' ? '…' : state === 'ok' ? '✓' : state === 'fail' ? '✗' : '-'} ${step}${detail ? `: ${detail}` : ''}`);
   };
-  fn(progress).then(r => { j.result = r; j.done = true; }, e => { j.error = e?.message || String(e); j.done = true; });
+  const end = () => {
+    j.done = true;
+    try { fs.mkdirSync(path.dirname(j.logFile!), { recursive: true }); fs.appendFileSync(j.logFile!, j.log.join('\n') + '\n'); } catch { /* the page offers it */ }
+  };
+  fn(progress).then(r => { j.result = r; say(kind === 'install' ? `Installed; open ${r?.address || ''}` : `Upgraded; backup in ${r?.backup || ''}`); end(); }, e => { j.error = e?.message || String(e); say(`Failed: ${j.error}`); end(); });
 };
 
 const server = http.createServer(async (req, res) => {
@@ -84,7 +93,12 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { version: thisVersion(), home: HOME, locked: isLocked(HOME), system: systemCheck(HOME), here: await detectInstall(HOME),
         memory: memoryInfo(), hostname: os.hostname(), defaults: { studioPort: 4800, gatewayHttp: 8080, gatewayHttps: 8443, enginePort: 4801, engineHttp: 9080, engineHttps: 9443 } });
     }
-    if (req.method === 'GET' && url.pathname === '/api/job') return send(res, 200, job || { steps: [], done: true });
+    if (req.method === 'GET' && url.pathname === '/api/job') return send(res, 200, job ? { ...job, log: undefined } : { steps: [], done: true });
+    if (req.method === 'GET' && url.pathname === '/api/log') {
+      if (!job) return send(res, 404, { error: 'Nothing has run yet' });
+      res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'content-disposition': `attachment; filename="sutraflow-${job.kind}.log"`, 'cache-control': 'no-store' });
+      return res.end(job.log.join('\n') + '\n');
+    }
     if (req.method === 'GET' && url.pathname === '/api/cluster-file') {
       const f = lastCluster.find(e => e.name === url.searchParams.get('name'));
       if (!f) return send(res, 404, { error: 'Not found' });
@@ -98,16 +112,17 @@ const server = http.createServer(async (req, res) => {
       case '/api/database': return send(res, 200, await testDatabase(b.database, HOME));
       case '/api/detect': return send(res, 200, await detectInstall(path.resolve(String(b.folder || ''))));
       case '/api/validate': return send(res, 200, { errors: validateInstall(b.config as InstallConfig) });
+      case '/api/answers': return send(res, 200, answersFile(b.config as InstallConfig));
       case '/api/install': {
         const c = b.config as InstallConfig;
         const errors = validateInstall(c);
         if (errors.length) return send(res, 400, { error: errors.join('; ') });
         lastCluster = clusterFiles(c);
-        run('install', p => install(c, HOME, p as any));
+        run('install', HOME, p => install(c, HOME, p as any));
         return send(res, 202, { started: true });
       }
       case '/api/upgrade': {
-        run('upgrade', p => upgrade(b.config as UpgradeConfig, p as any, { dryRun: !!b.dryRun }));
+        run('upgrade', path.resolve(String((b.config as UpgradeConfig)?.from || HOME)), p => upgrade(b.config as UpgradeConfig, p as any, { dryRun: !!b.dryRun }));
         return send(res, 202, { started: true });
       }
       case '/api/quit': send(res, 200, { ok: true }); setTimeout(() => process.exit(0), 200); return;

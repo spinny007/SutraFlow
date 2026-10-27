@@ -131,7 +131,8 @@ export function Console() {
             <div className="c-sidefoot">
               {status.mode === 'studio' && <a className="btn small" href="/">Designer</a>}
               <a className="btn small" href="/approvals" target="_blank" rel="noopener" title="Opens the Approval Center in a new tab">Approval Center</a>
-              <a className="btn small" href="/guide" target="_blank" rel="noopener">Guide</a>
+              <a className="btn small" href="/admin-guide" target="_blank" rel="noopener" title="The Administration Guide: installing, upgrading, engines, clusters and this console">Admin guide</a>
+              <a className="btn small" href="/guide" target="_blank" rel="noopener" title="The user guide, for designers">Guide</a>
               <span className="muted xs">v{status.version}{status.mode === 'engine' ? ' · headless' : ''}</span>
             </div>
           </aside>

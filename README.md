@@ -2,14 +2,14 @@
 
 **A visual integration designer and engine.** Drag activities onto a canvas, map data between steps, test and debug, and deploy *Sutras* (integration processes) that run as REST, SOAP and MCP services, on schedules, or on events: files, queues, mail, cloud drives, chat messages and more.
 
-![Version](https://img.shields.io/badge/version-2.1.1-2f6fd8)
+![Version](https://img.shields.io/badge/version-2.1.2-2f6fd8)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Commercial licence available](https://img.shields.io/badge/commercial%20licence-available-orange)](COMMERCIAL-LICENSE.md)
 ![Node.js](https://img.shields.io/badge/node-%E2%89%A5%2022.13-339933?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-7-3178c6?logo=typescript&logoColor=white)
 ![Database](https://img.shields.io/badge/database-SQLite%20%7C%20PostgreSQL-4169e1?logo=postgresql&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Docker-555)
-![Tests](https://img.shields.io/badge/tests-512-success)
+![Tests](https://img.shields.io/badge/tests-515-success)
 
 ![The SutraFlow designer: palettes, canvas and the step inspector](docs/guide-images/designer.jpg)
 
@@ -19,8 +19,7 @@
 - [Download](#download)
 - [Quick start](#quick-start)
 - [Documentation](#documentation)
-- [Palettes](#palettes)
-- [Running Python](#running-python)
+- [Palettes](#palettes) (with [Running Python](#running-python))
 - [Releases and CI/CD](#releases-and-cicd)
 - [Running in production](#running-in-production)
 - [Performance and sizing](#performance-and-sizing)
@@ -62,7 +61,7 @@ Each release has a Windows zip and a Linux tar.gz, already built, with SHA-256 f
 | Upgrade from 2.1.0 on | Unpack the new release beside the old one, then `bin/sutraflow upgrade` from the new folder (or `upgrade --config upgrade.json`): backup, data compared, rolled back if a step fails |
 | Set up by hand | `bin/sutraflow setup` (asks for the ports), then `bin/sutraflow start` |
 
-SutraFlow is a Node.js server: unpacking it under a web root (Laragon `www`, `htdocs`, IIS `wwwroot`) does not start it. The release's `.htaccess` (Apache) and `web.config` (IIS) let the web server show only `install-sutraflow.html`, which says how to install and start it; `sutraflow.env`, the data folder and the keys are never served. Steps for each system and for upgrades: [RELEASE-NOTES.md](RELEASE-NOTES.md).
+SutraFlow is a Node.js server: unpacking it under a web root (Laragon `www`, `htdocs`, IIS `wwwroot`) does not start it. The release's `.htaccess` (Apache) and `web.config` (IIS) let the web server show only `install-sutraflow.html`, which says how to install and start it; `sutraflow.env`, the data folder and the keys are never served. Each installer page, silent installation and how an upgrade works, with pictures: the [Administration Guide](docs/sutraflow-admin-guide.html).
 
 ## Quick start
 
@@ -82,7 +81,7 @@ The `sutraflow` launcher is the one place for every command on Windows and Linux
 
 | Port | Default | For |
 |---|---|---|
-| Studio (admin) | `127.0.0.1:4800` | The designer, the Admin Console (`/admin`), the user guide (`/guide`) and the admin API. Keep it private. |
+| Studio (admin) | `127.0.0.1:4800` | The designer, the Admin Console (`/admin`), the user guide (`/guide`), the Administration Guide (`/admin-guide`) and the admin API. Keep it private. |
 | Gateway | `8080` (HTTP), `8443` (HTTPS) | The deployed Sutras: REST, SOAP, MCP, agents, `/oauth/token`, `/openapi.json`, `/health`. |
 | Headless engine | `4801`, gateway `9080` / `9443` | An engine without the designer, beside the studio or on other machines. |
 
@@ -90,9 +89,9 @@ The `sutraflow` launcher is the one place for every command on Windows and Linux
 
 | Document | What it covers |
 |---|---|
-| [User guide](docs/sutraflow-user-guide.html) (also at `/guide`) | 50 chapters: every screen, every activity with its settings, connection types, functions; designing Sutras, how the engine runs them, AI, RAG step by step, the API gateway, releases and CI/CD, PostgreSQL, the data tables, production. |
+| [User guide](docs/sutraflow-user-guide.html) (also at `/guide`) | For designers: every screen, every activity with its settings, connection types with tested examples, functions; designing Sutras, how the engine runs them, AI, RAG step by step, the API gateway, releases and CI/CD. |
+| [Administration Guide](docs/sutraflow-admin-guide.html) (also at `/admin-guide`) | For administrators: planning a server, the web installer page by page, silent installation, how upgrades work, the launcher and settings, PostgreSQL, engines and clusters, sizing, the Admin Console, security, receiving releases, monitoring, troubleshooting. |
 | [Architecture](docs/sutraflow-architecture.html) (also at `/architecture`) | How SutraFlow works inside: every source file, every table, every API route, the settings, with diagrams. |
-| [Deployment](docs/deployment.md) | Packages, the `sutra` command, headless engines, Docker, clusters, monitoring. |
 | [Engine design](docs/architecture.md) | Runs, tasks, checkpoints and the cluster in short. |
 | [Backlog](docs/backlog.md) | Release gates, planned capabilities, implementation guidance and completion criteria. |
 | [Laragon (Windows development)](deploy/laragon/README.txt) | Running SutraFlow in Laragon with PostgreSQL. |
@@ -134,7 +133,7 @@ HTTP-only integrations can start from four tested samples: **Kafka REST publish*
 
 FTP and SFTP remain connection-driven: every remote-file activity and trigger selects an **FTP server** or **SFTP server** resource. Connection fields—including host, port, user, base folder and the vault-secret name—may use Project variables such as `{{gv.FTP_HOST}}`; deployment configuration can override them before deployment, while the actual password or private key remains in that server's vault. See [Files, streaming, SFTP and FTP](docs/sutraflow-user-guide.html#ch-files).
 
-## Running Python
+### Running Python
 
 The **Python script** activity runs Python 3 code written in the designer or a `.py` file on the SutraFlow server. An administrator must first open **Admin Console → Server → Runtime**, enable script activities in the **Scripts** card, and confirm the detected interpreter. From a shell, the same check and configuration are available through:
 
@@ -184,14 +183,14 @@ Full pipelines for GitHub Actions, GitLab CI, Azure DevOps and Jenkins are in th
 - **Certificates and keys**: point connections at files on each server or at Certificate and Private key properties, so renewing a certificate is replacing a file or changing one property.
 - **Sign-in on production servers**: secrets per server vault; Azure managed identities or service principals; OAuth accounts connected with `sutra connect` or a refresh token secret.
 
-See [docs/deployment.md](docs/deployment.md) and the user guide's *Running in production*.
+See the [Administration Guide](docs/sutraflow-admin-guide.html).
 
 ## Performance and sizing
 
 SutraFlow sizes itself: an engine takes its steps at once, queue check and settings refresh from the machine it runs on (from 1 vCPU / 1 GB up), unless environment variables set them. The Admin Console (*Engines → Tuning → This machine*) shows the profile and applies it; `sutra engines machine` prints it.
 
 - Load test: `node tools/loadtest.mjs` (durable or in memory, one or more engines, small or big outputs, a killed engine, a soak, one core and a small heap); big files: `node tools/bigfiletest.mjs`.
-- Results measured for this release are in [docs/benchmarks](docs/benchmarks), and explained in the user guide's *Sizing and performance*, with which services suit which machine and what file sizes to read whole or stream.
+- Results measured for this release are in [docs/benchmarks](docs/benchmarks), and explained in the Administration Guide's *Sizing and performance*, with which services suit which machine and what file sizes to read whole or stream.
 
 ## Configuration
 
@@ -221,7 +220,7 @@ npm test               # the whole test suite (builds first)
 npm run typecheck      # server and web
 npm run build          # production build into dist/
 npm run vendor:check:online # verify reviewed vendor trees and check npm for newer upstream releases
-npm run guide          # rebuild the user guide from the code
+npm run guide          # rebuild the user guide and the Administration Guide from the code
 npm run guide:shots    # retake the guide's screenshots from a running server (headless Edge or Chrome)
 npm run architecture   # rebuild the architecture page
 npm run samples        # rebuild the sample project zips in samples/
@@ -239,7 +238,7 @@ server/src/             the server: engine, gateway, admin API, connectors, pale
 web/src/                the designer (React)
 web/admin/              the Admin Console (React)
 tools/                  builds of the guide, architecture page and sample zips; migrate-to-postgres
-docs/                   user guide, architecture page, deployment and design notes, guide screenshots
+docs/                   user guide, Administration Guide, architecture page, design notes, guide screenshots
 samples/                sample project zips (release zips with their files)
 deploy/                 Laragon and other deployment templates
 test/                   the test suites

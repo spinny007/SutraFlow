@@ -1053,14 +1053,20 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     return { acme: getAcmeStatus() };
   });
 
-  // ---------- user guide (docs/sutraflow-user-guide.html, built by npm run guide) ----------
-  app.get('/guide', async (_req, reply) => {
-    const f = path.join(rootDir, 'docs', 'sutraflow-user-guide.html');
-    if (!fs.existsSync(f)) return reply.code(404).type('text/plain').send('The user guide has not been built. Run: npm run guide');
+  // ---------- the guides (docs/sutraflow-user-guide.html and, since 2.1.2, docs/sutraflow-admin-guide.html; npm run guide) ----------
+  // Each also answers at its file name, so a link from one guide to a chapter of the other works when served and as files.
+  const guide = (file: string, what: string) => async (_req: any, reply: any) => {
+    const f = path.join(rootDir, 'docs', file);
+    if (!fs.existsSync(f)) return reply.code(404).type('text/plain').send(`The ${what} has not been built. Run: npm run guide`);
     return reply.type('text/html; charset=utf-8').header('cache-control', 'no-cache').send(fs.createReadStream(f));
-  });
+  };
+  for (const [route, file, what] of [['/guide', 'sutraflow-user-guide.html', 'user guide'], ['/admin-guide', 'sutraflow-admin-guide.html', 'Administration Guide']]) {
+    app.get(route, guide(file, what));
+    app.get(`/${file}`, guide(file, what));
+  }
 
   // ---------- architecture page (docs/sutraflow-architecture.html, built by npm run architecture) ----------
+  app.get('/sutraflow-architecture.html', async (_req, reply) => reply.redirect('/architecture'));
   app.get('/architecture', async (_req, reply) => {
     const f = path.join(rootDir, 'docs', 'sutraflow-architecture.html');
     if (!fs.existsSync(f)) return reply.code(404).type('text/plain').send('The architecture page has not been built. Run: npm run architecture');

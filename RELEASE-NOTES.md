@@ -1,16 +1,82 @@
-# SutraFlow 2.1.1 release notes
+# SutraFlow 2.1.2 release notes
 
 Prepared 2026-10-27. Copyright (c) 2026-27 Surya Partap Singh, MixAgile.com. AGPL-3.0-only; a commercial licence is available.
 
 | Download | For |
 |---|---|
-| `sutraflow-2.1.1-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
-| `sutraflow-2.1.1-windows-x64-offline.zip` | The same with the runtime packages inside, for servers without the npm registry |
-| `sutraflow-2.1.1-linux.tar.gz` | Linux (x64 or arm64); also macOS |
+| `sutraflow-2.1.2-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
+| `sutraflow-2.1.2-windows-x64-offline.zip` | The same with the runtime packages inside, for servers without the npm registry |
+| `sutraflow-2.1.2-linux.tar.gz` | Linux (x64 or arm64); also macOS |
 
 Each comes with a `.sha256` file to check the download: `sha256sum -c <archive>.sha256`, or on Windows `Get-FileHash <archive> -Algorithm SHA256`.
 
 ## In short
+
+A release on top of 2.1.1: a guide of its own for administrators, documentation in a clearer order, safer upgrades, and two installer conveniences.
+
+- **SutraFlow Administration Guide**, new, at `/admin-guide` and in the Admin Console: planning a server, the web installer page by page, silent installation, how an upgrade works, the launcher and settings, PostgreSQL, engines and clusters, sizing, the Admin Console, security, receiving releases, monitoring and troubleshooting, with new pictures of every page. It replaces `docs/deployment.md`.
+- **The user guide is for designers** and reads in order: what SutraFlow is and getting it, building Sutras, the palettes with their connections, AI, APIs and security, and releasing, under part headings in the contents.
+- **Upgrades are safer**: the engine beside the studio stops and starts with it, a folder in use by a web server, terminal or Explorer no longer stops it (a file held without sharing is found before anything changes, with the process that holds it), the way back restores only what an upgrade changes and always starts the old version again, and an SQLite file of its own is upgraded as SQLite.
+- **Connection pictures**: every common connection (HTTP, PostgreSQL and MySQL on this machine and remote, Kafka, RabbitMQ, ActiveMQ, MongoDB) shown filled in and tested, in its palette's chapter.
+- **Save the installer's answers as a config file** on the Review page, to install the next server silently with the same choices. The file holds no password.
+- **The web installer keeps a log**, in `data/logs/installer.log`, with a download link on its last page and when a step fails.
+
+## Install
+
+- **Web installer**: unpack, then `bin/sutraflow install` (Windows: `bin\sutraflow.cmd install`). It opens in the browser of that machine.
+- **Silent**: `bin/sutraflow install --config install.json`; the example is `docs/install-example.json`, or the file the web installer saved; `--dry-run` prints the plan.
+- **By hand**: `bin/sutraflow setup`, then `bin/sutraflow start`.
+
+Node.js 22.13 or later is needed (24 recommended).
+
+## Upgrade from 2.1.0 or 2.1.1
+
+Unpack 2.1.2 beside the installation and run `bin/sutraflow upgrade` from the new folder (or `upgrade --config upgrade.json`). It stops SutraFlow gracefully, backs it up, upgrades, compares the data and starts it again, and puts the previous version back if a step fails: the Administration Guide's *Upgrading* has every step with pictures. 2.1.2 changes no database tables and no settings.
+
+**What changes for you:**
+- **Nothing needs closing for an upgrade** but programs that hold SutraFlow's files without sharing: web servers, terminals and Explorer windows in the folder can stay. When a file is held, the upgrade says which and by which process before changing anything.
+- **`docs/deployment.md` is gone**: its content is in the Administration Guide (`/admin-guide`). Links and bookmarks to it should point there.
+- **Administration chapters moved** from the user guide to the Administration Guide; links between the two guides open the other one at the right chapter.
+
+## What is new in 2.1.2
+
+### Documentation
+- **SutraFlow Administration Guide** (`docs/sutraflow-admin-guide.html`, served at `/admin-guide`, **Admin guide** in the Admin Console, `sutraflow open admin-guide`): for the people who install and run SutraFlow. Parts: Getting started (what administrators do, planning a server), Installing and upgrading (each installer page with its picture, silent installation, how an upgrade works with its pictures, Laragon and Linux development machines), Running SutraFlow (the launcher and every server setting, data, PostgreSQL, monitoring), Engines and clusters, The Admin Console, Security and connections, Releases on servers, Reference and troubleshooting. The administration chapters moved here from the user guide, and `docs/deployment.md` is folded in and retired.
+- **New pictures** taken on a real installation by `tools/capture-admin-shots.mjs`: the installer pages, the upgrade pages from a real upgrade, and the Admin Console (overview, applications, tuning, traceability, releases, engines with the cluster name and May lead, alerts, gateway apps and traffic, users, roles, audit, runtime, database).
+- **User guide in parts**, for designers: Getting started, Building Sutras, Palettes and connections, AI, APIs security and approvals, Releasing, Reference. Release-specific chapters (strict boundaries, MongoDB) moved from the front to their topics. A link to a chapter that moved opens the Administration Guide there.
+- **Connection pictures** beside their palettes: HTTP in *Calling services*, PostgreSQL and MySQL in *Databases*, MongoDB in its chapter, Kafka, RabbitMQ and ActiveMQ in *Broker connections*. Remote ones take host, database and user from Project properties and the password from a Secret property.
+- **`sutraflow-2.1.2-docs.zip`**, new beside the archives: the user guide, the Administration Guide and the architecture page with an `index.html`, in one folder to upload to a website as it is. Every page holds its pictures and links to the others by file name.
+- **README** keeps Python with the palettes; the architecture page has a section on installing and upgrading, and its section titles no longer carry version numbers.
+
+### Installer
+- **Save answers as a config file** (Review page): `sutraflow-install.json` for `sutraflow install --config` on the next server. Passwords are written as `{"env": "SUTRA_INSTALL_ADMIN_PASSWORD"}` and, when one was given, `{"env": "SUTRA_INSTALL_DB_PASSWORD"}`: set those on that server first.
+- **Installer log**: every step of a web install or upgrade is written to `logs/installer.log` in the data folder of the installation it is for (an upgrade's in the upgraded installation's, not the new release's), as the silent install already did, and offered as a download on the Done page, which shows where it is kept, and next to an error.
+- **The engine beside the studio** starts with it when *Start SutraFlow when installed* is ticked; an upgrade stops it with the studio and starts it again when it was running.
+- **Upgrades work with the folder in use**: a folder a web server (Apache, IIS), a terminal or Explorer has open is copied into the backup and updated in place instead of moved. Program files are checked first (*Program files free*): a file held without sharing stops the upgrade before anything changes, with the file and, on Windows, the process id and name that hold it.
+- **The way back after a failed upgrade** restores only what an upgrade changes (the SQLite database, the installer lock, the settings and, for PostgreSQL, the database from its dump, waiting at most a minute for locks), tries each part on its own, always starts the old version again, and reports anything it could not put back.
+- The engine names on the installer's Cluster page are shown in full.
+
+### Fixes in 2.1.2
+
+| Seen | Cause | Now |
+|---|---|---|
+| The user guide opened with a 2.0.11 chapter and MongoDB before *What SutraFlow is* | New chapters were added at the front of the list | Chapters are listed by part; the build fails when a chapter is in no part or in two |
+| A failed web install left no log to send | Only the silent install wrote `installer.log` | The web installer writes it too and offers it for download |
+| `npm run architecture` stopped with "no description for tools/soak/RUNBOOK.md" | The soak runbook added in 2.1.1 had no entry in the file list | It has one |
+| Three 2.0.10 notes looked like releases of their own in these notes | Their headings were one level too high | They sit under 2.0.10 |
+| An upgrade of an installation with an engine beside the studio stopped only the studio; the engine ran on while the program and database changed, a failed upgrade's database restore waited for ever on the engine's tables, and after an upgrade only the studio started | The upgrader called the launcher's `stop` and `start`, which mean the studio only | It stops both, starts the engine again when it ran, and a restore waits at most a minute |
+| With *A headless engine beside it* and *Start when installed*, only the studio started | The same: `start` means the studio | Both start |
+| Upgrading a Laragon installation failed at "Move the old runtime aside: resource busy" after the backup | A console window had the folder's `bin` as its working folder, and Windows will not move a folder in use; web servers (Apache, IIS), terminals and Explorer windows can do the same | A folder in use is copied into the backup and updated in place; only a file held without sharing stops the upgrade, checked before anything changes (*Program files free*), naming the file and, on Windows, the process that holds it |
+| After that failure the way back stopped at "Access is denied" on a Git object, leaving SutraFlow stopped | It copied the whole data folder back, and Git keeps its objects read-only; one error ended the way back before the start | Only what an upgrade changes is restored, each part on its own, and the old version is always started again |
+| An installation on an SQLite file of its own (`shop.db`) could not be upgraded: the backup tried `pg_dump` | The upgrader took any `SUTRA_DB` for PostgreSQL, and that setting also names an SQLite file | Only a `postgres://` address is PostgreSQL |
+
+## 2.1.2 release gate
+
+See `docs/releases/2.1.2-packages.md`.
+
+## Previous release: 2.1.1
+
+### In short
 
 - **A web installer and upgrader**, page by page like a CMS installer, or silent from a JSON file. It covers SQLite or PostgreSQL (with pgvector checked and enabled), ports, Node memory and cluster engines. Upgrades from 2.1.0 on make a backup, compare the data and roll back on failure.
 - **Safe in a web folder**: unpacked under Laragon `www`, `htdocs` or IIS, a release shows only a page saying how to install it, never its settings or keys.
@@ -21,15 +87,9 @@ Each comes with a `.sha256` file to check the download: `sha256sum -c <archive>.
 - **Large messages are stored once**: a run with a 4 MB message took 93 ms instead of 536 ms.
 - **One soak test** for everything, including the regression suite against real servers.
 
-## Install
+For PostgreSQL, the installer requires pgvector unless you choose to go on without it (below).
 
-- **Web installer**: unpack, then `bin/sutraflow install` (Windows: `bin\sutraflow.cmd install`). It opens in the browser of that machine.
-- **Silent**: `bin/sutraflow install --config install.json`; the example is `docs/install-example.json`, and `--dry-run` prints the plan.
-- **By hand**: `bin/sutraflow setup`, then `bin/sutraflow start`.
-
-Node.js 22.13 or later is needed (24 recommended). For PostgreSQL, the installer requires pgvector unless you choose to go on without it (below).
-
-## Upgrade from 2.1.0
+### Upgrade from 2.1.0
 
 Unpack 2.1.1 beside the installation, then run from the new folder:
 
@@ -52,8 +112,6 @@ In a cluster, upgrade every engine's folder before starting any of them. Before 
 - **Secrets in connection forms are chosen from Secret properties.** Set or change their values under Configuration, Project variables, or in the Admin Console for engine properties. Connections that already reference a secret keep working.
 - **Number properties are checked when saved.** A project holding a malformed number, such as `12,5`, must have it corrected before it can be saved again.
 - **A site's own `.htaccess` and `web.config` are kept.** An installation without them gets the release's.
-
-## What is new in 2.1.1
 
 ### Web installer and upgrader
 - **`sutraflow install`** opens a page-by-page installer in the browser, on that machine only, at a one-time address:
@@ -310,7 +368,7 @@ Verification: 437 passed, 0 failed and 27 optional skips in the full suite (incl
 
 Prepared 2026-10-24. Copyright (c) 2026-27 Surya Partap Singh, MixAgile.com. AGPL-3.0-only; a commercial licence is available.
 
-## 25 October usability revision — verified for packaging
+### 25 October usability revision — verified for packaging
 
 Aggregate input follow-up: pipeline help and guide examples distinguish database stages from incoming records. Source lines recognize run/process aliases; previews require current-run context and discard obsolete responses. MongoDB design-time output shapes follow Find/Count/Distinct and Update operation choices, with declared result schemas exposed without collection sampling. Sample descriptions explicitly identify final Delete cleanup. Focused checks: eight passed plus one optional skipped; separate live M0 checks: eight passed. See [Aggregate input verification](docs/releases/2.0.10-aggregate-input-usability.md); this focused follow-up does not replace the earlier full-suite release evidence.
 
@@ -328,7 +386,7 @@ Follow-up project-variable correction: the variables Save button encrypts pendin
 - The updated sample imports a Secret MONGODB_URI project property and does not replace a customized existing property or connection. The usability revision was deployed to 4800 and Laragon 4810 on 25 October with fresh backups and preservation checks; see the [deployment receipt](docs/releases/2.0.10-usability-deployment.md).
 - Verification: 427 passed, 27 optional skipped, zero failures in the full regression; eight live M0 checks passed; final build/type checks and documentation generation passed; dependency audit found zero vulnerabilities. Live X.509 testing is explicitly deferred. P1/P2 MongoDB expansion remains in the backlog. See the dated verification amendment for scope and limitations.
 
-## Implemented for verification
+### Implemented for verification
 
 - Manual start has explicit strict schema validation. Engine admission rejects invalid configured/supplied input before creating a run; execution rechecks the actual payload. Off remains descriptive for existing flows, with an explicit warning.
 - Strict contracts are project-scoped, do not coerce/remove/default data, and reject unsupported JSON Schema validation keywords instead of silently ignoring them.
@@ -340,7 +398,7 @@ Follow-up project-variable correction: the variables Save button encrypts pendin
 - Credential-free, run-ID-scoped MongoDB sample with imported strict starter schema, query modes, update, aggregation and precise deletion. New typed mapping imports also enable strict starters; customized imports are not overwritten.
 - A regression inventory records every schema-aware activity/field so new contract fields require explicit review and negative tests.
 
-## Scope and verification status
+### Scope and verification status
 
 Live Atlas M0 seeded engine checks passed on MongoDB 8.0.34, including CRUD/query/aggregate behavior, duplicate-key rejection, strict invalid-input/no-write and invalid-output behavior, and the executable lifecycle sample. M0 driver-level probes also passed transaction rollback, change streams and a small GridFS round-trip; these are not finished/certified activities and are not exposed in the palette.
 

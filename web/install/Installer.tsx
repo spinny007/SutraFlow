@@ -22,7 +22,7 @@ interface Found { folder: string; version: string; exists: boolean; settings: bo
 interface MemoryInfo { machineMb: number; freeMb: number; nodeDefaultMb: number; suggestedMb: number }
 interface State { version: string; home: string; locked: boolean; system: Check[]; here: Found; memory: MemoryInfo; hostname: string; defaults: Record<string, number> }
 interface Step { step: string; state: string; detail?: string }
-interface Job { kind?: string; steps: Step[]; done: boolean; error?: string; result?: any }
+interface Job { kind?: string; steps: Step[]; done: boolean; error?: string; result?: any; logFile?: string }
 interface Engine { name: string; host: string; port: number; http: number; https: number; memoryMb: number; canLead: boolean }
 
 // The one-time token the installer printed comes with the address; every request carries it.
@@ -175,6 +175,19 @@ export function Installer() {
     try { setFound(await call('POST', '/api/detect', { folder })); } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
 
+  /** The answers as a config file for a silent install of the next server (2.1.2); passwords become environment variables. */
+  const saveAnswers = async () => {
+    try {
+      const file = await call<Record<string, unknown>>('POST', '/api/answers', { config: config() });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2) + '\n'], { type: 'application/json' }));
+      a.download = 'sutraflow-install.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e: any) { setErr(e.message); }
+  };
+  const logLink = <a href={`/api/log?t=${token}`}>Download the log</a>;
+
   const strength = admin.password.length >= 16 && /[^A-Za-z0-9]/.test(admin.password) ? 'strong' : admin.password.length >= 12 ? 'good' : admin.password ? 'too short' : '';
   const working = page === 'Install' || page === 'Upgrade';
 
@@ -299,6 +312,8 @@ export function Installer() {
             <dt>May lead</dt><dd>{leaders().join(', ') || 'none'}</dd>
           </dl>
           <label><input type="checkbox" checked={start} onChange={e => setStart(e.target.checked)} /> Start SutraFlow when installed</label>
+          <p><button className="i-btn" onClick={saveAnswers}>Save answers as a config file</button></p>
+          <p className="lead" style={{ fontSize: 13 }}>Installs the next server with the same choices: <span className="i-mono">sutraflow install --config sutraflow-install.json</span>. The file holds no password; set <span className="i-mono">SUTRA_INSTALL_ADMIN_PASSWORD</span>{db.kind === 'postgres' && db.password ? <> and <span className="i-mono">SUTRA_INSTALL_DB_PASSWORD</span></> : null} on that server first.</p>
         </>}
 
         {page === 'Installation' && <>
@@ -321,7 +336,7 @@ export function Installer() {
           <h2>{page === 'Install' ? 'Installing' : 'Upgrading'}</h2>
           <ul className="i-checks">{(job?.steps || []).map(s => <li key={s.step}>{mark(s.state)}<span><b>{s.step}</b>{s.detail && <><br /><small>{s.detail}</small></>}</span></li>)}</ul>
           {!job?.done && <p className="lead">Working…</p>}
-          {job?.error && <div className="i-msg err">{job.error}</div>}
+          {job?.error && <div className="i-msg err">{job.error} {logLink}</div>}
         </>}
 
         {page === 'Done' && <>
@@ -332,6 +347,7 @@ export function Installer() {
             <div className="i-msg info">The installer is locked now. Keep <span className="i-mono">data/master.key</span> safe and backed up: it unlocks the vault. To start SutraFlow with the machine: <span className="i-mono">sutraflow service</span>.</div>
           </>}
           {mode === 'upgrade' && job?.result && <p className="lead">{job.result.upgraded} in <span className="i-mono">{job.result.folder}</span>. The backup is in <span className="i-mono">{job.result.backup}</span>.</p>}
+          <p>{logLink} (also kept in <span className="i-mono">{job?.logFile || 'data/logs/installer.log'}</span>)</p>
           <p><button className="i-btn" onClick={() => call('POST', '/api/quit').then(() => window.close(), () => {})}>Close the installer</button></p>
         </>}
 

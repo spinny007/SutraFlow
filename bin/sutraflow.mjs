@@ -54,7 +54,7 @@ const HELP = `sutraflow <command>
   restart [engine]           Stops, then starts.
   status                     Studio and engine: running or not, ready, addresses, database.
   logs [engine] [--follow]   The last lines of the output log.
-  open [designer|admin|guide|architecture]
+  open [designer|admin|guide|admin-guide|architecture]
                              Opens the page in the browser.
   cli <sutra command ...>    The sutra command, pointed at this studio with the local admin token,
                              for example: sutraflow cli sutras list
@@ -225,7 +225,7 @@ async function logs(cfg, role, follow) {
 
 function openPage(cfg, what) {
   const b = base(cfg, cfg.roles.studio);
-  const url = { designer: b, admin: `${b}/admin`, guide: `${b}/guide`, architecture: `${b}/architecture` }[what || 'designer'];
+  const url = { designer: b, admin: `${b}/admin`, guide: `${b}/guide`, 'admin-guide': `${b}/admin-guide`, architecture: `${b}/architecture` }[what || 'designer'];
   if (!url) fail('Open designer, admin, guide or architecture');
   if (WIN) spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore' }).unref();
   else spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [url], { detached: true, stdio: 'ignore' }).on('error', () => out(url)).unref();

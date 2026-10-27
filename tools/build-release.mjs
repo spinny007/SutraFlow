@@ -48,7 +48,7 @@ const fail = m => { console.error(m); process.exit(1); };
 
 if (!fs.existsSync(path.join(HOME, 'dist', 'server', 'main.js'))) fail('Build first: npm run build');
 execFileSync(process.execPath, [path.join(HOME, 'tools', 'check-vendor.mjs')], { cwd: HOME, stdio: 'inherit' });
-for (const f of ['RELEASE-NOTES.md', 'LICENSE', 'docs/sutraflow-user-guide.html', 'docs/sutraflow-architecture.html']) if (!fs.existsSync(path.join(HOME, f))) fail(`Missing ${f}`);
+for (const f of ['RELEASE-NOTES.md', 'LICENSE', 'docs/sutraflow-user-guide.html', 'docs/sutraflow-admin-guide.html', 'docs/sutraflow-architecture.html']) if (!fs.existsSync(path.join(HOME, f))) fail(`Missing ${f}`);
 if (!fs.readFileSync(path.join(HOME, 'RELEASE-NOTES.md'), 'utf8').includes(VERSION)) fail(`RELEASE-NOTES.md does not describe ${VERSION}`);
 
 /** What the release holds: compiled/runtime folders and explicitly selected guides. */
@@ -60,7 +60,7 @@ const FILES = [
   // Apache and IIS: unpacked under a web root (Laragon www, htdocs, wwwroot) only the page that says how to
   // install and start SutraFlow is served; settings, data and keys never are.
   '.htaccess', 'web.config', 'install-sutraflow.html',
-  'docs/sutraflow-user-guide.html', 'docs/sutraflow-architecture.html', 'docs/deployment.md', 'docs/architecture.md', 'docs/install-example.json',
+  'docs/sutraflow-user-guide.html', 'docs/sutraflow-admin-guide.html', 'docs/sutraflow-architecture.html', 'docs/architecture.md', 'docs/install-example.json',
   'tools/migrate-to-postgres.mjs', 'tools/migrate-to-postgres.cmd', 'tools/migrate-to-postgres.sh',
 ];
 const skip = rel => /(^|\/)(node_modules|\.git)(\/|$)/.test(rel) || /\.(log|map)$/.test(rel);
@@ -126,17 +126,38 @@ function tar(list) {
 const { zipFiles } = await import(pathToFileURL(path.join(HOME, 'dist', 'server', 'bundles.js')).href);
 const outDir = path.join(HOME, 'release');
 fs.mkdirSync(outDir, { recursive: true });
-const write = (file, buf) => {
+const write = (file, buf, count = files.length) => {
   const p = path.join(outDir, file);
   fs.writeFileSync(p, buf);
   const sha = crypto.createHash('sha256').update(buf).digest('hex');
   fs.writeFileSync(`${p}.sha256`, `${sha}  ${file}\n`);
-  console.log(`Wrote release/${file}: ${files.length} files, ${(buf.length / 1048576).toFixed(1)} MB, SHA-256 ${sha}`);
+  console.log(`Wrote release/${file}: ${count} files, ${(buf.length / 1048576).toFixed(1)} MB, SHA-256 ${sha}`);
 };
 // --only windows|linux: one system's archives (the release workflow builds each on its own system).
 const only = (process.argv.find(a => a.startsWith('--only=')) || '').slice(7);
 if (only !== 'linux') write(`${top}-windows.zip`, zipFiles(entries));
 if (only !== 'windows') write(`${top}-linux.tar.gz`, zlib.gzipSync(tar(entries), { level: 9 }));
+
+// The documents for a website (2.1.2): one folder to upload as it is. Each page holds its pictures, and the
+// pages link to each other by file name, so they need nothing else and stay together in one folder.
+if (only !== 'linux') {
+  const pages = [['sutraflow-user-guide.html', 'User Guide', 'For designers: building Sutras, every palette and activity, connections, AI, APIs and releases.'],
+    ['sutraflow-admin-guide.html', 'Administration Guide', 'For administrators: installing, upgrading, running, engines and clusters, the Admin Console and security.'],
+    ['sutraflow-architecture.html', 'Architecture', 'How SutraFlow works inside: the engine, storage, clusters, every file, table and API route.']];
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const index = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SutraFlow ${esc(VERSION)} documentation</title>
+<style>:root{color-scheme:light dark}body{margin:0;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;line-height:1.55;background:Canvas;color:CanvasText}
+main{max-width:760px;margin:0 auto;padding:40px 16px}h1{margin:0 0 4px;font-size:2em}p.v{margin:0 0 28px;opacity:.7}
+a.doc{display:block;padding:16px 20px;margin:12px 0;border:1px solid color-mix(in srgb,CanvasText 18%,transparent);border-radius:14px;text-decoration:none;color:inherit}
+a.doc:hover{border-color:#0E7A62}a.doc b{display:block;font-size:1.15em;color:#0E7A62}</style></head>
+<body><main><h1>SutraFlow documentation</h1><p class="v">Version ${esc(VERSION)}</p>
+${pages.map(([f, t, d]) => `<a class="doc" href="${f}"><b>${esc(t)}</b>${esc(d)}</a>`).join('\n')}
+</main></body></html>
+`;
+  const docs = [[`${top}-docs/index.html`, Buffer.from(index)], ...pages.map(([f]) => [`${top}-docs/${f}`, fs.readFileSync(path.join(HOME, 'docs', f))])];
+  write(`${top}-docs.zip`, zipFiles(docs), docs.length);
+}
 
 if (process.argv.includes('--offline')) {
   // The runtime packages as `sutraflow setup` would install them, for this system.

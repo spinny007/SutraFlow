@@ -68,4 +68,6 @@ body { margin: 0; background: var(--surface); color: var(--ink); font-family: va
 .i-engines { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
 .i-engines th, .i-engines td { text-align: left; padding: 6px 6px; border-bottom: 1px solid var(--line); }
 .i-engines input { width: 100%; min-width: 60px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--card); color: var(--ink); font: inherit; }
+/* Engine names are read in full: computer names are long (2.1.2). */
+.i-engines td:first-child input { min-width: 170px; }
 @media (max-width: 560px) { .i-review { grid-template-columns: 1fr; } .i-steps li { min-width: 70px; font-size: 11px; } }
