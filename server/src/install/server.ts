@@ -94,6 +94,8 @@ const server = http.createServer(async (req, res) => {
         memory: memoryInfo(), hostname: os.hostname(), defaults: { studioPort: 4800, gatewayHttp: 8080, gatewayHttps: 8443, enginePort: 4801, engineHttp: 9080, engineHttps: 9443 } });
     }
     if (req.method === 'GET' && url.pathname === '/api/job') return send(res, 200, job ? { ...job, log: undefined } : { steps: [], done: true });
+    // The new master key and admin token are shown on the last page until the user says they are kept.
+    if (req.method === 'POST' && url.pathname === '/api/keys-kept') { if (job?.result?.newKeys) job.result.newKeys = {}; return send(res, 200, { ok: true }); }
     if (req.method === 'GET' && url.pathname === '/api/log') {
       if (!job) return send(res, 404, { error: 'Nothing has run yet' });
       res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'content-disposition': `attachment; filename="sutraflow-${job.kind}.log"`, 'cache-control': 'no-store' });

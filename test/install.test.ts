@@ -105,7 +105,12 @@ test('install: settings, data folder, tables and the administrator are made, the
   assert.equal(fs.existsSync(path.join(dir, 'sutraflow.env')), false, 'and changes nothing');
   const r: any = await core.install(config(), dir, (step, state) => { if (state !== 'run') steps.push(`${step}:${state}`); });
   assert.equal(r.address, 'http://127.0.0.1:47101');
-  assert.deepEqual(steps, ['System check:ok', 'Ports:ok', 'Database:ok', 'Settings file:ok', 'Tables and administrator:ok', 'Admin token:ok']);
+  assert.deepEqual(steps, ['System check:ok', 'Ports:ok', 'Database:ok', 'Settings file:ok', 'Master key:ok', 'Tables and administrator:ok', 'Admin token:ok']);
+  // 2.1.4: the new master key and admin token come back once for the last page, the same as their files.
+  assert.equal(r.newKeys.masterKey, fs.readFileSync(path.join(dir, 'data', 'master.key'), 'utf8'));
+  assert.equal(Buffer.from(r.newKeys.masterKey, 'base64').length, 32);
+  assert.equal(r.newKeys.adminToken, fs.readFileSync(path.join(dir, 'data', 'admin-token.txt'), 'utf8'));
+  assert.equal(r.keyFiles.masterKey, path.join(dir, 'data', 'master.key'));
   const env = core.readEnv(path.join(dir, 'sutraflow.env'));
   assert.deepEqual([env.STUDIO_PORT, env.STUDIO_GATEWAY_HTTP, env.STUDIO_GATEWAY_HTTPS, env.SUTRA_ENVIRONMENT, env.SUTRA_DB], ['47101', '47102', '47103', 'test', '']);
   const db = new DatabaseSync(path.join(dir, 'data', 'sutra.db'), { readOnly: true });

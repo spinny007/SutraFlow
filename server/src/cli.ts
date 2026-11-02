@@ -154,6 +154,8 @@ const HELP = `sutra <command> [options]
             Request limits of a plan.
   gateway   firewall [--allow "10.0.0.0/8,192.168.1.5"] [--deny "203.0.113.9"]
             Addresses allowed and refused; with no options, shows them.
+  gateway   proxies [--trusted "127.0.0.1,10.0.0.5"]
+            Reverse proxies whose X-Forwarded-For and X-Forwarded-Proto are believed ("" for none); with no options, shows them.
   gateway   openapi
             OpenAPI of the deployed services (JSON).
 
@@ -905,6 +907,12 @@ async function gateway(a: Args, call: Call): Promise<number> {
       out(`Allow: ${f.allow.join(', ') || 'every address'}\nDeny:  ${f.deny.join(', ') || 'none'}`);
       return 0;
     }
+    case 'proxies': {
+      let p = await call('GET', '/api/gateway/proxies');
+      if (str(a, 'trusted') !== undefined) p = await call('PUT', '/api/gateway/proxies', { trusted: list(str(a, 'trusted')) });
+      out(`Trusted proxies: ${p.trusted.join(', ') || 'none (callers are the addresses that connect)'}`);
+      return 0;
+    }
     case 'stats': {
       const s = await call('GET', `/api/gateway/stats?period=${encodeURIComponent(str(a, 'period') || '24h')}`);
       out(`${s.totals.requests} requests, ${s.totals.errors} errors (5xx), ${s.totals.refused} refused (4xx); p50 ${s.totals.p50Ms} ms, p95 ${s.totals.p95Ms} ms, p99 ${s.totals.p99Ms} ms`);
@@ -919,7 +927,7 @@ async function gateway(a: Args, call: Call): Promise<number> {
     }
     case 'openapi': out(await call('GET', '/api/gateway/openapi')); return 0;
   }
-  throw new Usage('Use: sutra gateway apps | plans | stats | log | app ... | key ... | plan ... | firewall | openapi');
+  throw new Usage('Use: sutra gateway apps | plans | stats | log | app ... | key ... | plan ... | firewall | proxies | openapi');
 }
 
 /** Plain-text answers (CSV) from the admin API. */

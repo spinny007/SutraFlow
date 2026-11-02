@@ -578,9 +578,14 @@ export class Engine {
     }
     this.notify(t.run_id);
     this.pump();
-    // Back pressure: a fast reader waits while more of this run's steps wait than the engine runs at once.
-    const limit = Math.max(4, this.concurrency * 2);
-    while (Number((await this.a.get<any>(`select count(*) n from tasks where run_id = ? and status = 'pending'`, t.run_id))?.n || 0) > limit) {
+    // Back pressure: a fast reader waits while more of this run's steps wait than the engine runs at once,
+    // or while the steps it handed on (waiting or running) hold more input than the stream buffer; one
+    // batch is always let through. The count alone let 32 workers learn 32 parts of 1 MB at once: about
+    // 300 MB of live heap for a 48 MB document, against 140 MB with a buffer of 8 MB at the same speed.
+    const limit = Math.max(4, this.concurrency * 2), buffer = config.streamBufferMb * 1048576;
+    for (;;) {
+      const r = await this.a.get<any>(`select count(*) f, count(case when status = 'pending' then 1 end) n, coalesce(sum(length(input)), 0) b from tasks where run_id = ? and id <> ? and status in ('pending', 'running')`, t.run_id, t.id);
+      if (Number(r?.n || 0) <= limit && (Number(r?.b || 0) <= buffer || Number(r?.f || 0) <= 1)) break;
       if (await this.wasCancelled(t.id)) throw new Error('Step was cancelled');
       await new Promise(r => setTimeout(r, 20));
     }

@@ -72,6 +72,7 @@ export function App() {
             <a className="btn small" href="/admin" title="Deployed projects, engines, users and audit">Admin Console</a>
             <a className="btn small" href="/approvals" target="_blank" rel="noopener" title="Approvals waiting for people: opens the Approval Center in a new tab">Approval Center</a>
             <a className="btn small" href="/guide" target="_blank" rel="noopener" title="Open the user guide in a new tab">Guide</a>
+            <a className="btn small" href="/design-guide" target="_blank" rel="noopener" title="Open the Sutra Design Guide in a new tab: design standards and a review checklist">Design guide</a>
             <button className="btn small" onClick={toggleTheme} aria-label="Switch light or dark theme">◐</button>
             <span className="muted" style={{ fontSize: 12 }}>{auth.user.username}</span>
             <button className="btn small" onClick={() => post('/api/auth/logout').then(check)}>Sign out</button>

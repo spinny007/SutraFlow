@@ -48,7 +48,7 @@ const fail = m => { console.error(m); process.exit(1); };
 
 if (!fs.existsSync(path.join(HOME, 'dist', 'server', 'main.js'))) fail('Build first: npm run build');
 execFileSync(process.execPath, [path.join(HOME, 'tools', 'check-vendor.mjs')], { cwd: HOME, stdio: 'inherit' });
-for (const f of ['RELEASE-NOTES.md', 'LICENSE', 'docs/sutraflow-user-guide.html', 'docs/sutraflow-admin-guide.html', 'docs/sutraflow-architecture.html']) if (!fs.existsSync(path.join(HOME, f))) fail(`Missing ${f}`);
+for (const f of ['RELEASE-NOTES.md', 'LICENSE', 'docs/sutraflow-user-guide.html', 'docs/sutraflow-admin-guide.html', 'docs/sutraflow-design-guide.html', 'docs/sutraflow-architecture.html']) if (!fs.existsSync(path.join(HOME, f))) fail(`Missing ${f}`);
 if (!fs.readFileSync(path.join(HOME, 'RELEASE-NOTES.md'), 'utf8').includes(VERSION)) fail(`RELEASE-NOTES.md does not describe ${VERSION}`);
 
 /** What the release holds: compiled/runtime folders and explicitly selected guides. */
@@ -60,7 +60,7 @@ const FILES = [
   // Apache and IIS: unpacked under a web root (Laragon www, htdocs, wwwroot) only the page that says how to
   // install and start SutraFlow is served; settings, data and keys never are.
   '.htaccess', 'web.config', 'install-sutraflow.html',
-  'docs/sutraflow-user-guide.html', 'docs/sutraflow-admin-guide.html', 'docs/sutraflow-architecture.html', 'docs/architecture.md', 'docs/install-example.json',
+  'docs/sutraflow-user-guide.html', 'docs/sutraflow-admin-guide.html', 'docs/sutraflow-design-guide.html', 'docs/sutraflow-architecture.html', 'docs/architecture.md', 'docs/install-example.json',
   'tools/migrate-to-postgres.mjs', 'tools/migrate-to-postgres.cmd', 'tools/migrate-to-postgres.sh',
 ];
 const skip = rel => /(^|\/)(node_modules|\.git)(\/|$)/.test(rel) || /\.(log|map)$/.test(rel);
@@ -143,6 +143,7 @@ if (only !== 'windows') write(`${top}-linux.tar.gz`, zlib.gzipSync(tar(entries),
 if (only !== 'linux') {
   const pages = [['sutraflow-user-guide.html', 'User Guide', 'For designers: building Sutras, every palette and activity, connections, AI, APIs and releases.'],
     ['sutraflow-admin-guide.html', 'Administration Guide', 'For administrators: installing, upgrading, running, engines and clusters, the Admin Console and security.'],
+    ['sutraflow-design-guide.html', 'Sutra Design Guide', 'For designers and reviewers: design standards for functions, APIs, web services, integration processes and microservices, with a review checklist.'],
     ['sutraflow-architecture.html', 'Architecture', 'How SutraFlow works inside: the engine, storage, clusters, every file, table and API route.']];
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
   const index = `<!doctype html>

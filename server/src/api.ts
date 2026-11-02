@@ -139,7 +139,9 @@ const loopDelay = monitorEventLoopDelay({ resolution: 20 });
 loopDelay.enable();
 
 export async function buildAdmin(): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false, bodyLimit: 20 * 1024 * 1024, forceCloseConnections: 'idle', keepAliveTimeout: config.keepAliveMs });
+  // Behind a reverse proxy the studio, like the gateway, believes forwarded addresses and HTTPS only from the trusted proxies.
+  const app = Fastify({ logger: false, trustProxy: (addr: string) => gwa.isTrustedProxy(addr), bodyLimit: 20 * 1024 * 1024, forceCloseConnections: 'idle', keepAliveTimeout: config.keepAliveMs });
+  app.addHook('onRequest', async () => { await gwa.refreshProxies(); });
   // SAML identity providers deliver their response with the HTTP-POST binding.
   app.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_req, body, done) => {
     try { done(null, Object.fromEntries(new URLSearchParams(body as string))); } catch (e: any) { done(e); }
@@ -521,6 +523,8 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.delete('/api/gateway/plans/:id', async (req: any) => wrap(() => { gwa.deletePlan(req.params.id); return { ok: true }; }));
   app.get('/api/gateway/firewall', async () => gwa.getFirewall());
   app.put('/api/gateway/firewall', async (req: any) => wrap(() => { const f = gwa.setFirewall(req.body || {}); refreshFirewall(); return f; }));
+  app.get('/api/gateway/proxies', async () => gwa.getProxies());
+  app.put('/api/gateway/proxies', async (req: any) => wrap(() => gwa.setProxies(req.body || {})));
   app.get('/api/gateway/options', async () => gwa.getGatewayOptions());
   app.put('/api/gateway/options', async (req: any) => wrap(() => gwa.setGatewayOptions(req.body || {})));
   app.get('/api/gateway/stats', async (req: any) => gwa.stats(String(req.query?.period || '24h'), access.visibleProjects(caller(req))));
@@ -1063,14 +1067,14 @@ export async function buildAdmin(): Promise<FastifyInstance> {
     return { acme: getAcmeStatus() };
   });
 
-  // ---------- the guides (docs/sutraflow-user-guide.html and, since 2.1.2, docs/sutraflow-admin-guide.html; npm run guide) ----------
+  // ---------- the guides (docs/sutraflow-user-guide.html, since 2.1.2 docs/sutraflow-admin-guide.html, since 2.1.4 docs/sutraflow-design-guide.html; npm run guide) ----------
   // Each also answers at its file name, so a link from one guide to a chapter of the other works when served and as files.
   const guide = (file: string, what: string) => async (_req: any, reply: any) => {
     const f = path.join(rootDir, 'docs', file);
     if (!fs.existsSync(f)) return reply.code(404).type('text/plain').send(`The ${what} has not been built. Run: npm run guide`);
     return reply.type('text/html; charset=utf-8').header('cache-control', 'no-cache').send(fs.createReadStream(f));
   };
-  for (const [route, file, what] of [['/guide', 'sutraflow-user-guide.html', 'user guide'], ['/admin-guide', 'sutraflow-admin-guide.html', 'Administration Guide']]) {
+  for (const [route, file, what] of [['/guide', 'sutraflow-user-guide.html', 'user guide'], ['/admin-guide', 'sutraflow-admin-guide.html', 'Administration Guide'], ['/design-guide', 'sutraflow-design-guide.html', 'Sutra Design Guide']]) {
     app.get(route, guide(file, what));
     app.get(`/${file}`, guide(file, what));
   }

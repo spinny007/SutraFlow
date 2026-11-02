@@ -57,6 +57,7 @@ pre { background: var(--code); padding: 10px 12px; border-radius: 9px; overflow-
     </div>
     <p class="muted">It opens in the browser of that machine, page by page: administrator, database (SQLite or PostgreSQL, with a connection test), ports and an optional cluster. It answers only on that machine, with a one-time address, so nobody else can take it over. Without a browser there: <code>install --no-open</code> prints the address, or <code>install --config install.json</code> installs from a file (see <code>docs/install-example.json</code>).</p>
     <p class="muted">Upgrading an installation from 2.1.0 on: unpack the new release beside it and run <code>upgrade</code> from the new folder.</p>
+    <p class="muted">The last page shows the new <b>master key</b> once: copy it into a password manager. It encrypts every password and key SutraFlow stores; without it (a lost disk, a move, a restore without it) they cannot be read again. Every engine of a cluster needs the same key. The <b>admin token</b> beside it lets the <code>sutra</code> command and scripts manage the server; keep it private.</p>
   </div>
 
   <div class="card">
@@ -76,7 +77,7 @@ pre { background: var(--code); padding: 10px 12px; border-radius: 9px; overflow-
     <p class="muted">Keep the designer and Admin Console behind your own access rules (VPN, single sign-on, an IP list). Deployed APIs are better forwarded to the gateway's HTTPS port (8443). The user guide, chapter <i>Install and start the server</i>, explains when a web server in front helps; it is in <code>docs/sutraflow-user-guide.html</code> in this folder, and at <code>/guide</code> once SutraFlow runs.</p>
   </div>
 
-  <p class="muted">SutraFlow 2.1.3 · AGPL-3.0-only, a commercial licence is available · MixAgile.com</p>
+  <p class="muted">SutraFlow 2.1.4 · AGPL-3.0-only, a commercial licence is available · MixAgile.com</p>
 </main>
 </body>
 </html>

@@ -2,14 +2,14 @@
 
 **A visual integration designer and engine.** Drag activities onto a canvas, map data between steps, test and debug, and deploy *Sutras* (integration processes) that run as REST, SOAP and MCP services, on schedules, or on events: files, queues, mail, cloud drives, chat messages and more.
 
-![Version](https://img.shields.io/badge/version-2.1.3-2f6fd8)
+![Version](https://img.shields.io/badge/version-2.1.4-2f6fd8)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Commercial licence available](https://img.shields.io/badge/commercial%20licence-available-orange)](COMMERCIAL-LICENSE.md)
 ![Node.js](https://img.shields.io/badge/node-%E2%89%A5%2022.13-339933?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-7-3178c6?logo=typescript&logoColor=white)
 ![Database](https://img.shields.io/badge/database-SQLite%20%7C%20PostgreSQL-4169e1?logo=postgresql&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Docker-555)
-![Tests](https://img.shields.io/badge/tests-532-success)
+![Tests](https://img.shields.io/badge/tests-538-success)
 
 ![The SutraFlow designer: palettes, canvas and the step inspector](docs/guide-images/designer.jpg)
 
@@ -39,7 +39,7 @@
 - **Memory tables**: small reference data (rates, codes, routing, reusable values) in each engine's memory for lookups without a database round trip, loaded from a query or filled by Sutras, with a failsafe copy, hot reload from the Admin Console and enforced limits.
 - **Connection limits**: protect a system behind a connection with Maximum concurrent activities, counted across all engines for Sutra steps (including connections used behind the scenes, such as a knowledge base's database), listener polls and scheduled refreshes; waiting steps keep their place without using retries; per-server values from Project properties; watched in the Admin Console with graphs.
 - **Big files on small servers**: CSV and line files of any size are streamed in batches of rows, each batch a step of its own, so memory depends on the batch, not the file.
-- **APIs and gateway**: REST, SOAP and WebSocket services with generated WSDL and OpenAPI; security policies (API keys, Basic, JWT, OAuth token introspection, HMAC-signed requests, mutual TLS, WS-Security UsernameToken, X.509 signatures and SAML assertions, encrypted SOAP, IP allow lists, rate limits, CORS); scopes per service and operation; bodies validated against JSON Schema or XSD; threat protection (depth, fields, sizes, no DOCTYPE); gateway apps with keys, OAuth client-credentials tokens, plans and a firewall; TLS with your own certificate or Let's Encrypt.
+- **APIs and gateway**: REST, SOAP and WebSocket services with generated WSDL and OpenAPI; security policies (API keys, Basic, JWT, OAuth token introspection, HMAC-signed requests, mutual TLS, WS-Security UsernameToken, X.509 signatures and SAML assertions, encrypted SOAP, IP allow lists, rate limits, CORS); scopes per service and operation; bodies validated against JSON Schema or XSD; threat protection (depth, fields, sizes, no DOCTYPE); gateway apps with keys, OAuth client-credentials tokens, plans and a firewall; trusted reverse proxies whose forwarded caller address and HTTPS are believed; TLS with your own certificate or Let's Encrypt.
 - **AI**: AI steps (prompt, classify, route, extract, summarize, translate, sentiment) on Claude, OpenAI, Gemini, Ollama and other providers; AI agents with tools, memory, guardrails, people in the loop and hand-offs; knowledge bases for RAG (built-in, pgvector, Qdrant, Chroma, Pinecone); Sutras published as MCP tools for Claude and other assistants; agents as chat pages, an OpenAI-compatible API and A2A.
 - **Connectors**: HTTP, SOAP with WS-Security, files, SFTP and FTP, PostgreSQL, MySQL, SQL Server, Oracle and SQLite, MongoDB (documents, aggregation and bulk write), Kafka, RabbitMQ and ActiveMQ, email, Firebase, Google Drive, Sheets and Docs, SharePoint and OneDrive, Dropbox, YouTube, Twitch, Discord, Telegram, Facebook Pages, Azure Data Factory, Databricks, Python, PowerShell and shell scripts, and any OAuth REST API.
 - **Operations**: an Admin Console for deployed applications (start, stop, tuning, runs, approvals, engines, alerts, gateway traffic, connection limits, users and roles, system accounts, audit log, releases, the database), with graphs drawn by Apache ECharts; clusters of engines on PostgreSQL with a leader, failover and graceful drain, each engine with its own Node memory, set and restarted from the Admin Console; Prometheus metrics, OpenTelemetry traces and JSON logs; single sign-on for people with OpenID Connect or SAML 2.0, with roles from identity-provider groups.
@@ -65,7 +65,7 @@ SutraFlow is a Node.js server: unpacking it under a web root (Laragon `www`, `ht
 
 ## Quick start
 
-**Requirements**: [Node.js](https://nodejs.org) 22.13 or later (24 recommended). Nothing else: the database is SQLite, built into Node. Python 3, PostgreSQL, Docker and AI models are optional. No web server is needed (no Apache, IIS, nginx, Laragon, WAMP or LAMP): SutraFlow serves its pages and APIs itself, with HTTPS and Let's Encrypt. Put one in front only to share ports 80/443 with other sites, balance several engines, or meet a company proxy rule; see the user guide, *Install and start the server*.
+**Requirements**: [Node.js](https://nodejs.org) 22.13 or later (24 recommended). Nothing else: the database is SQLite, built into Node. Python 3, PostgreSQL, Docker and AI models are optional. No web server is needed (no Apache, IIS, nginx, Laragon, WAMP or LAMP): SutraFlow serves its pages and APIs itself, with HTTPS and Let's Encrypt. Put one in front only to share ports 80/443 with other sites, balance several engines, or meet a company proxy rule, and list it under Gateway, Firewall, *Trusted proxies*; see the Administration Guide, *Planning a server*.
 
 ```bash
 git clone https://github.com/spinny007/SutraFlow.git
@@ -81,7 +81,7 @@ The `sutraflow` launcher is the one place for every command on Windows and Linux
 
 | Port | Default | For |
 |---|---|---|
-| Studio (admin) | `127.0.0.1:4800` | The designer, the Admin Console (`/admin`), the user guide (`/guide`), the Administration Guide (`/admin-guide`) and the admin API. Keep it private. |
+| Studio (admin) | `127.0.0.1:4800` | The designer, the Admin Console (`/admin`), the user guide (`/guide`), the Administration Guide (`/admin-guide`), the Sutra Design Guide (`/design-guide`) and the admin API. Keep it private. |
 | Gateway | `8080` (HTTP), `8443` (HTTPS) | The deployed Sutras: REST, SOAP, MCP, agents, `/oauth/token`, `/openapi.json`, `/health`. |
 | Headless engine | `4801`, gateway `9080` / `9443` | An engine without the designer, beside the studio or on other machines. |
 
@@ -91,6 +91,7 @@ The `sutraflow` launcher is the one place for every command on Windows and Linux
 |---|---|
 | [User guide](docs/sutraflow-user-guide.html) (also at `/guide`) | For designers: every screen, every activity with its settings, connection types with tested examples, functions; designing Sutras, how the engine runs them, AI, RAG step by step, the API gateway, releases and CI/CD. |
 | [Administration Guide](docs/sutraflow-admin-guide.html) (also at `/admin-guide`) | For administrators: planning a server, the web installer page by page, silent installation, how upgrades work, the launcher and settings, PostgreSQL, engines and clusters, sizing, the Admin Console, security, receiving releases, monitoring, troubleshooting. |
+| [Sutra Design Guide](docs/sutraflow-design-guide.html) (also at `/design-guide`) | For designers and reviewers: design standards for Sutras: principles and naming, functions and transformations, called Sutras, contracts, REST and SOAP design, API security, integration patterns, messaging, files, databases, error handling, logging, microservices, resilience, testing, releases, and a review checklist. |
 | [Architecture](docs/sutraflow-architecture.html) (also at `/architecture`) | How SutraFlow works inside: every source file, every table, every API route, the settings, with diagrams. |
 | [Engine design](docs/architecture.md) | Runs, tasks, checkpoints and the cluster in short. |
 | [Backlog](docs/backlog.md) | Release gates, planned capabilities, implementation guidance and completion criteria. |
@@ -206,6 +207,7 @@ Settings are environment variables, set in `sutraflow.env` for the launcher. The
 | `SUTRA_ADMIN_HOST`, `SUTRA_ADMIN_PORT` | `127.0.0.1`, `4800` | Studio and admin API |
 | `SUTRA_GATEWAY_HTTP_PORT`, `SUTRA_GATEWAY_HTTPS_PORT` | `8080`, `8443` | Gateway |
 | `SUTRA_WORKERS` | by machine | Steps one engine runs at once (4 on 1 vCPU / 1 GB, up to 32) |
+| `SUTRA_STREAM_BUFFER_MB` | 8 | A streaming step waits while the batches it handed on hold more input than this |
 | `STUDIO_MEMORY_MB`, `ENGINE_MEMORY_MB` | Node.js decides | Node memory of the studio and of an engine (launcher settings); also set in the Admin Console |
 | `SUTRA_PAYLOAD_STORE_KB` | `256` | A part of a run's input this big is stored once and referenced (not a size limit); 0 = never |
 

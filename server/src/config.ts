@@ -42,6 +42,8 @@ export const config = {
   workerConcurrency: Number(process.env.SUTRA_WORKERS || profileFor().workers),
   /** Steps at once for Sutras that run in memory (0 = the same as SUTRA_WORKERS). */
   memoryWorkers: Number(process.env.SUTRA_MEMORY_WORKERS || 0),
+  /** A streaming step (batches of a big file) waits while the steps it handed on hold more input than this, in MB. */
+  streamBufferMb: Math.max(1, Number(process.env.SUTRA_STREAM_BUFFER_MB || 8)),
   /**
    * How long the admin and gateway servers keep an idle connection open, in ms. Longer than the idle
    * time of a load balancer in front (60 s on most), so it never sends a request on a connection the

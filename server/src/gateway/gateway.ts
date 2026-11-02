@@ -35,7 +35,7 @@ import { NS } from '../security/wss.js';
 import { listOf } from '../palettes/common.js';
 import { acmeChallenge, getCert, getTls } from './tls.js';
 import { metrics } from '../metrics.js';
-import { firewallAllows, getFirewallAsync, getGatewayOptions, logRequest, openApi } from './apps.js';
+import { firewallAllows, getFirewallAsync, getGatewayOptions, isTrustedProxy, logRequest, openApi, refreshProxies } from './apps.js';
 import { agentMcpEndpoints, handleAgents, listAgents, rebuildAgents } from './agents.js';
 import { attachWebSockets, closeWebSockets, forgetStaleConnections, setWsRoutes, type WsRoute } from './websocket.js';
 import { parseRestBody, sendRest } from './rest.js';
@@ -371,9 +371,11 @@ export const refreshFirewall = () => { /* retained for the stable gateway API */
 
 function build(https?: any): FastifyInstance {
   // Idle keep-alive connections are closed on shutdown (not waited for), so a draining engine stops promptly.
-  const app = Fastify({ https, trustProxy: false, bodyLimit: 50 * 1024 * 1024, logger: false, forceCloseConnections: 'idle', keepAliveTimeout: config.keepAliveMs });
+  // Forwarded addresses and HTTPS are believed only from the trusted proxies (Admin Console, Gateway).
+  const app = Fastify({ https, trustProxy: (addr: string) => isTrustedProxy(addr), bodyLimit: 50 * 1024 * 1024, logger: false, forceCloseConnections: 'idle', keepAliveTimeout: config.keepAliveMs });
   app.removeAllContentTypeParsers();
   app.addContentTypeParser('*', { parseAs: 'string' }, (_req, body, done) => done(null, body));
+  app.addHook('onRequest', async () => { await refreshProxies(); });
   const secure = !!https;
   // Every answer carries the run's trace context, and is counted by kind and status.
   app.addHook('onSend', async (_req, reply, payload) => {
@@ -399,8 +401,9 @@ function build(https?: any): FastifyInstance {
       bytesIn: Number(req.headers['content-length']) || (typeof raw === 'string' ? Buffer.byteLength(raw) : 0), bytesOut: Number(reply.getHeader('content-length')) || 0,
     });
   });
-  app.all('/', (req, reply) => handle(req, reply, secure));
-  app.all('/*', (req, reply) => handle(req, reply, secure));
+  // HTTPS: this listener's own TLS, or a trusted proxy that ended TLS and says so in X-Forwarded-Proto.
+  app.all('/', (req, reply) => handle(req, reply, secure || req.protocol === 'https'));
+  app.all('/*', (req, reply) => handle(req, reply, secure || req.protocol === 'https'));
   attachWebSockets(app.server, secure);
   return app;
 }

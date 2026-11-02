@@ -66,6 +66,8 @@ async function main(): Promise<number> {
     const r = await install(c, HOME, (step, state, detail) => say(`${state === 'run' ? '…' : state === 'ok' ? '✓' : state === 'fail' ? '✗' : '-'} ${step}${detail ? `: ${detail}` : ''}`), { dryRun: flag('--dry-run') });
     if ((r as any).dryRun) { say(`Plan:\n${(r as any).plan.map((p: string) => `  - ${p}`).join('\n')}`); return 0; }
     say(`Installed ${(r as any).installed} in ${(r as any).folder}; open ${(r as any).address}`);
+    // The values are not printed (a silent install's output often ends up in a build log): only where they are.
+    say(`Keep a copy of the master key (${(r as any).keyFiles.masterKey}) and the admin token (${(r as any).keyFiles.adminToken}) in a safe place: the master key unlocks the vault, and without it the stored passwords cannot be read.`);
     for (const e of (r as any).cluster || []) { const f = path.join(HOME, `sutraflow-engine-${e.name}.env`); fs.writeFileSync(f, e.env, { mode: 0o600 }); say(`Settings for engine ${e.name}: ${f}`); }
     return 0;
   }

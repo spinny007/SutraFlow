@@ -225,6 +225,8 @@ export const RULES: Record<string, Rule> = {
   'DELETE /api/gateway/plans/:id': R('gateway'),
   'GET /api/gateway/firewall': R('gateway'),
   'PUT /api/gateway/firewall': R('gateway'),
+  'GET /api/gateway/proxies': R('gateway'),
+  'PUT /api/gateway/proxies': R('gateway'),
   'GET /api/gateway/options': R('gateway'),
   'PUT /api/gateway/options': R('gateway'),
   'GET /api/gateway/stats': R('gateway'),

@@ -62,6 +62,7 @@ export const SAMPLES: { id: string; name: string; desc: string; palettes: string
   { id: 'routing', name: 'Router, Switch and Merge', palettes: 'Flow control', desc: 'Routes on conditions (all matches), joins the branches with Merge, then switches on the status.' },
   { id: 'conditions', name: 'Connection conditions', palettes: 'Flow control', desc: 'Named connections taken when their condition on the output is true, and an otherwise connection.' },
   { id: 'channels', name: 'Channels between Sutras', palettes: 'General, Triggers', desc: 'One Sutra sends to a channel; a deployed Sutra with a Channel trigger receives each message.' },
+  { id: 'tracing', name: 'Traceability and notifications', palettes: 'Flow control, General, Triggers', desc: 'One order through three Sutras with one correlation id: intake calls a credit check, then announces the order on an internal channel; a notification hub receives it and decides whom to tell. Every log line carries the order number and correlation id, so the order can be followed from the project to each Sutra and run.', needs: 'the notification hub deployed for the channel step to reach it' },
   { id: 'counter', name: 'Counter, Wait and Sutra variables', palettes: 'General, Flow control', desc: 'A local variable set and read back in one run, a daily counter the server keeps across runs, and a pause; every step describes what it is for.' },
   { id: 'scripts', name: 'Scripts: PowerShell and Run program', palettes: 'Scripts', desc: 'A PowerShell disk report that hands JSON to the next step, and a program run with arguments; failures carry the exit code and error output.', needs: 'scripts allowed by an administrator in Admin Console > Server > Runtime' },
   { id: 'timer', name: 'Timer: nightly archive', palettes: 'Triggers, Files, Flow control', desc: 'Every night at 02:00, lists the CSV files in a folder (oldest first) and moves each one to an archive folder.' },
@@ -101,6 +102,10 @@ export const SAMPLES: { id: string; name: string; desc: string; palettes: string
   { id: 'skills', name: 'MCP skills: Write CSV file, Post to Facebook page', palettes: 'Triggers, AI, Files, Apps', desc: 'Two Sutras that AI assistants call as tools, on a sample MCP server.', needs: 'a security policy on the MCP server; a Facebook connection for posting' },
 ];
 
+/**
+ * Adds the chosen samples to a project, always as new Sutras with new ids: a sample Sutra whose name is
+ * taken gets a number ("... 2"). Connections are reused by name.
+ */
 export function addSamples(projectId: string, ids?: string[]) {
   const D = (n: FlowNode, description: string): FlowNode => ({ ...n, description });
   // want() also notes which sample is being built, so save() knows the folder of the Sutras it makes.
@@ -431,6 +436,56 @@ export function addSamples(projectId: string, ids?: string[]) {
       N('l', 'log', 'Log order', 700, 200, { level: 'info', message: 'Order {{trigger.orderId}} received; {{input.value}} so far' }),
     ],
     edges: [E('t', 'c'), E('c', 'l')],
+  });
+
+  // Traceability and notifications (2.1.4): one correlation id from intake through a called Sutra and a channel.
+  const traceOrder = { orderId: 'A-2001', customerId: 'C-7', amount: 1800, currency: 'INR' };
+  const traceCredit = want('tracing') && save({
+    name: 'Sample: Trace credit check',
+    description: 'Called by "Sample: Trace order intake" (Call Sutra): decides credit for an order up to 5,000 and returns the decision with the same correlation id, so its log lines and its run join the order. In Traceability its run is linked to the intake run that called it.',
+    nodes: [
+      D(N('s', 'start', 'Order', 60, 200, { payload: JSON.stringify({ ...traceOrder, correlationId: 'ord-A-2001' }, null, 2) }), 'The order the intake Sutra hands over, with its correlationId. A test uses this payload.'),
+      D(N('m', 'mapper', 'Decide credit', 320, 200, { start: 'empty', schema: '', mapping: { rules: {
+        orderId: { expr: '{input.orderId}' }, correlationId: { expr: '{input.correlationId}' },
+        approved: { expr: 'number({input.amount}) <= 5000' }, limit: { expr: '5000' }, checkedBy: { expr: '{run.name}' },
+      } } }), 'The rule: credit is approved up to 5,000. The correlation id is copied into the result, never made again here.'),
+      D(N('l', 'log', 'Log decision', 580, 200, { level: 'info', message: 'Credit for order {{input.orderId}}: approved {{input.approved}} [correlation {{input.correlationId}}, run {{run.id}}]' }), 'One line with the business key, the correlation id and this run id: search the project log for any of them.'),
+      D(N('r', 'return', 'Return decision', 840, 200, { source: 'value', value: '{{nodes.Decide credit}}' }), 'Hands the decision back to the intake Sutra.'),
+    ],
+    edges: [E('s', 'm'), E('m', 'l'), E('l', 'r')],
+  });
+  const traceHub = want('tracing') && save({
+    name: 'Sample: Trace notification hub',
+    description: 'Deploy it: starts for every event on the internal channel "sample-order-events" and decides whom to tell. An accepted order notifies the customer, a refused one the sales team; here both are log lines and a counter, where a real hub would call Send email, Telegram or a webhook. One hub for every notification keeps templates, channels and retries in one place.',
+    nodes: [
+      D(N('t', 'channelTrigger', 'On order event', 60, 200, { channel: 'sample-order-events', schema: '', testMessage: JSON.stringify({ event: 'order.accepted', orderId: 'A-2001', customerId: 'C-7', approved: true, correlationId: 'ord-A-2001', sourceRun: 'test' }, null, 2) }), 'Each message on the channel starts a run. The event carries the correlation id and the run that sent it.'),
+      D(N('i', 'if', 'Accepted', 320, 200, { left: '{{trigger.approved}}', op: 'equals', right: 'true' }), 'Who to tell depends on the decision.'),
+      D(N('c', 'log', 'Notify the customer', 580, 120, { level: 'info', message: 'Notify customer {{trigger.customerId}}: order {{trigger.orderId}} accepted [correlation {{trigger.correlationId}}, from run {{trigger.sourceRun}}, run {{run.id}}]' }), 'Stands for the customer message (email, SMS, push). The line carries both run ids, so the hub run and the intake run can be found from each other.'),
+      D(N('x', 'log', 'Notify sales', 580, 300, { level: 'warn', message: 'Notify sales: order {{trigger.orderId}} refused credit [correlation {{trigger.correlationId}}, from run {{trigger.sourceRun}}, run {{run.id}}]' }), 'Stands for a message to the sales team.'),
+      D(N('k', 'counter', 'Count notifications', 840, 200, { name: 'sample-notifications', op: 'increment', by: 1 }), 'How many notifications the hub has sent, kept across runs.'),
+    ],
+    edges: [E('t', 'i'), E('i', 'c', 'true'), E('i', 'x', 'false'), E('c', 'k'), E('x', 'k')],
+  });
+  const traceIntake = want('tracing') && save({
+    name: 'Sample: Trace order intake',
+    description: 'Gives the order a correlation id (ord-<order number>), logs it, calls "Sample: Trace credit check" and announces the result on the channel "sample-order-events" for the notification hub. Deploy the hub, test this Sutra, then in the Admin Console open Traceability and Find a run with A-2001: the intake run, the credit check it called and the hub run show; the project log lists every line with the same correlation id.',
+    nodes: [
+      D(N('s', 'start', 'Order', 60, 200, { payload: JSON.stringify(traceOrder, null, 2) }), 'The order as a caller would send it. Change the amount above 5,000 to see a refusal.'),
+      D(N('m', 'mapper', 'Add trace ids', 300, 200, { start: 'empty', schema: '', mapping: { rules: {
+        orderId: { expr: '{input.orderId}' }, customerId: { expr: '{input.customerId}' }, amount: { expr: '{input.amount}' }, currency: { expr: '{input.currency}' },
+        correlationId: { expr: "concat('ord-', {input.orderId})" }, intakeRun: { expr: '{run.id}' },
+      } } }), 'Made once, at the door: the correlation id from the business key, and this run id. Every later step and Sutra passes them on.'),
+      D(N('l1', 'log', 'Log received', 540, 200, { level: 'info', message: 'Order {{input.orderId}} received for {{input.amount}} {{input.currency}} [correlation {{input.correlationId}}, run {{run.id}}]' }), 'The business milestone, with the keys a support call would mention.'),
+      D(N('c', 'callProcess', 'Check credit', 780, 200, { process: traceCredit ? traceCredit.id : '', use: 'deployed (draft while testing)', wait: true, source: 'value', input: '{{nodes.Add trace ids}}', resultSchema: '' }), 'Calls the credit check and waits. Its run is linked to this one in Traceability (called by / calls).'),
+      D(N('ev', 'mapper', 'Order event', 1020, 200, { start: 'empty', schema: '', mapping: { rules: {
+        event: { expr: "if({input.approved}, 'order.accepted', 'order.refused')" }, orderId: { expr: '{nodes.Add trace ids.orderId}' }, customerId: { expr: '{nodes.Add trace ids.customerId}' },
+        approved: { expr: '{input.approved}' }, correlationId: { expr: '{nodes.Add trace ids.correlationId}' }, sourceRun: { expr: '{run.id}' },
+      } } }), 'The event other Sutras react to: what happened, the keys, the correlation id and the run that sent it.'),
+      D(N('p', 'channelPublish', 'Announce order', 1260, 200, { channel: 'sample-order-events', message: '{{input}}', required: false }), 'Tells every deployed Sutra listening on the channel (the notification hub). Not required: with no listener the order still goes on.'),
+      D(N('l2', 'log', 'Log announced', 1500, 200, { level: 'info', message: 'Order {{nodes.Order event.orderId}}: {{nodes.Order event.event}} sent to {{input.delivered}} listener(s) [correlation {{nodes.Add trace ids.correlationId}}, run {{run.id}}]' }), 'Says how many Sutras received the event.'),
+      D(N('x', 'log', 'Log credit failure', 1020, 380, { level: 'error', message: 'Credit check failed for order {{nodes.Add trace ids.orderId}}: {{input.error.message}} [correlation {{nodes.Add trace ids.correlationId}}, run {{run.id}}]' }), 'The called Sutra failed: the error with the same keys, so it is found with the rest of the order.'),
+    ],
+    edges: [E('s', 'm'), E('m', 'l1'), E('l1', 'c'), E('c', 'ev'), E('c', 'x', 'error'), E('ev', 'p'), E('p', 'l2')],
   });
 
   // Counter, Wait and Sutra variables.
@@ -1349,7 +1404,7 @@ export function addSamples(projectId: string, ids?: string[]) {
   // Connections made for the samples go to a Samples folder of Resources.
   for (const r of listResources(undefined, projectId)) if (!resourcesBefore.has(r.id) && !r.folder) setItemFolder('resources', r.id, 'Samples');
 
-  return [...typedMappings, ...validationFlows, functions, forEach, loops, tax, invoice, tryCatch, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, release, localAi, email, queue, xmlQueue, kafkaRest, kafkaRestSubscribe, rabbitRest, activeRest, timer, fileTrig, textFormats, dbUpd, dbProc, soapCall, emailIn, firebase, google, apps, aiMore,
+  return [...typedMappings, ...validationFlows, functions, forEach, loops, tax, invoice, tryCatch, traceIntake, traceCredit, traceHub, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, release, localAi, email, queue, xmlQueue, kafkaRest, kafkaRestSubscribe, rabbitRest, activeRest, timer, fileTrig, textFormats, dbUpd, dbProc, soapCall, emailIn, firebase, google, apps, aiMore,
     soapPublic, soapMock, soapMockCall, msCustomers, msStock, msOrders, sqlInstall, sqlService, ...sftp, ...ftp,
     toolOrder, toolStock, desk, ragWeb, ragSp, ragAsk, queueAgent, team, mcpAgent, docOne, docFeed, docApi, docTool, docAgent, adfRunS, adfAlert, dbxNb, dbxSql, pyInline, pyFile, ytPublish, ytReport, twLive, dcBot, tgBot, tgNotify]
     .filter((f): f is NonNullable<typeof f> & { id: string; name: string } => !!f)
@@ -1359,7 +1414,7 @@ export function addSamples(projectId: string, ids?: string[]) {
 /** Where each sample's Sutras go: Samples/<topic>. */
 const FOLDERS: Record<string, string[]> = {
   'Data and mapping': ['mappingtyped', 'validation', 'functions', 'foreach', 'loops', 'xml', 'transform', 'textformats'],
-  'Flow control': ['subsutra', 'trycatch', 'routing', 'conditions', 'counter', 'channels'],
+  'Flow control': ['subsutra', 'trycatch', 'routing', 'conditions', 'counter', 'channels', 'tracing'],
   'REST and microservices': ['rest', 'microservices'],
   'SOAP': ['soapcall', 'soappublic', 'soapmock'],
   'Files': ['csv', 'folder', 'filetrigger', 'timer'],
@@ -1382,7 +1437,7 @@ for (const s of SAMPLES) s.folder = folderOf(s.id);
 /** Sample Sutras by folder, to file the ones added before folders existed. A test keeps this list in step with addSamples(). */
 export const SAMPLE_SUTRAS: Record<string, string[]> = {
   'Samples/Data and mapping': ['Typed JSON mapping', 'Typed XML mapping', 'Renamed fields to XML', 'XML schema-backed mapping', 'JSON schema validation pipeline', 'XML schema validation pipeline', 'JSON schema expected rejection', 'XML schema expected rejection', 'Read JSON file with schema validation', 'Read XML file with schema validation', 'Validated REST service', 'Validated HTTP client', 'Validated SOAP service', 'Functions', 'For-Each mapping', 'Loop on an activity', 'XML in and out', 'JSONata, JavaScript and HTML', 'Parse JSON and CSV text'],
-  'Samples/Flow control': ['Calculate tax (called Sutra)', 'Invoice with a sub-Sutra', 'Try and catch with logs', 'Router, Switch and Merge', 'Connection conditions', 'Channel sender', 'Channel listener', 'Counter, Wait and Sutra variables'],
+  'Samples/Flow control': ['Calculate tax (called Sutra)', 'Invoice with a sub-Sutra', 'Try and catch with logs', 'Router, Switch and Merge', 'Connection conditions', 'Channel sender', 'Channel listener', 'Counter, Wait and Sutra variables', 'Trace order intake', 'Trace credit check', 'Trace notification hub'],
   'Samples/Apps': ['Skill: Write CSV file', 'Skill: Post to Facebook page', 'Firebase order to app', 'Google Drive and Sheets', 'Dropbox YouTube and any API'],
   'Samples/REST and microservices': ['REST API with validation', 'Microservice Customers', 'Microservice Stock', 'Microservice Orders'],
   'Samples/Files': ['CSV import and totals', 'Folder of files', 'Timer nightly archive', 'File trigger CSV drop folder'],

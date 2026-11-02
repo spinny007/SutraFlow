@@ -129,10 +129,13 @@ function tryLead(t: number) {
   return Number(r.changes) > 0;
 }
 
-/** Steps owned by engines that stopped beating go back to the queue. */
+/** Steps owned by engines that stopped beating go back to the queue. Their WebSocket connections are gone
+ *  too (the clients reconnect elsewhere): broadcasts stop being queued for them (2.1.4). */
 export function recoverOrphans(t = Date.now()) {
   const r = q.run(`update tasks set status = 'pending', owner = null
     where status = 'running' and owner is not null and owner not in (select id from engines where heartbeat_at >= ?)`, t - deadAfter());
+  q.run('delete from ws_connections where engine_id not in (select id from engines where heartbeat_at >= ?)', t - deadAfter());
+  q.run('delete from ws_outbox where engine_id not in (select id from engines where heartbeat_at >= ?)', t - deadAfter());
   return Number(r.changes);
 }
 

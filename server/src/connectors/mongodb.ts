@@ -37,8 +37,18 @@ const number = (value: unknown, fallback: number, min: number, max: number, labe
 /** Do not return raw driver errors: URIs, filters and document values can contain secrets. */
 export function mongoError(error: any): Error {
   const code = Number.isInteger(error?.code) ? error.code : undefined;
-  const category = /^query(?:Srv|Txt)\b/.test(String(error?.message || '')) ? 'DNS SRV/TXT resolution failed' : code === 11000 ? 'duplicate key' : code === 121 ? 'collection validation rejected the document' : code === 13 || code === 18 ? 'authorization/authentication failed' : error?.name === 'AbortError' ? 'cancelled' : 'operation failed';
-  const guidance = category === 'DNS SRV/TXT resolution failed' ? 'The DNS lookup failed before authentication; changing Secret references will not fix DNS. Ask an administrator to check the process DNS resolver (SUTRA_DNS_SERVERS), or use the Atlas-provided standard mongodb:// seed-list URI. TLS verification remains enabled.' : 'Review the connection, database-user permissions, network access and operation settings.';
+  // Server selection failures say why only in the driver text (not returned); read it for a category only.
+  const text = `${error?.message || ''} ${[...(error?.reason?.servers?.values?.() || [])].map((s: any) => s?.error?.message || '').join(' ')}`;
+  const selection = error?.name === 'MongoServerSelectionError';
+  const category = /^query(?:Srv|Txt)\b/.test(String(error?.message || '')) ? 'DNS SRV/TXT resolution failed'
+    : selection && /alert number 80|tlsv1 alert internal error/i.test(text) ? 'server refused the TLS connection'
+    : selection ? 'no server reachable within the server selection timeout'
+    : code === 11000 ? 'duplicate key' : code === 121 ? 'collection validation rejected the document' : code === 13 || code === 18 || code === 8000 ? 'authorization/authentication failed' : error?.name === 'AbortError' ? 'cancelled' : 'operation failed';
+  const guidance = category === 'DNS SRV/TXT resolution failed' ? 'The DNS lookup failed before authentication; changing Secret references will not fix DNS. Ask an administrator to check the process DNS resolver (SUTRA_DNS_SERVERS), or use the Atlas-provided standard mongodb:// seed-list URI. TLS verification remains enabled.'
+    // Atlas ends the TLS handshake with alert 80 for an address that is not on the project's IP access list (2.1.4).
+    : category === 'server refused the TLS connection' ? 'The servers were reached but ended the secure connection before sign-in. On MongoDB Atlas this means this server\'s public IP address is not on the project\'s Network Access list: add it there (addresses of home and mobile connections change). The user name and password were not checked yet.'
+    : category === 'no server reachable within the server selection timeout' ? 'No server of the cluster answered in time: check the host, that this server can reach port 27017 (firewall, proxy), the Atlas Network Access list, and that the cluster is running. The user name and password were not checked yet.'
+    : 'Review the connection, database-user permissions, network access and operation settings.';
   return Object.assign(new Error(`MongoDB ${category}${code ? ` (code ${code})` : ''}. ${guidance}`), { details: { connector: 'mongodb', ...(code ? { code } : {}), category } });
 }
 

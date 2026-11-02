@@ -898,10 +898,13 @@ for (let k = 0; k < 5; k++) {
   }, 1);
 }
 every('WebSocket broadcast', 30000, async () => {
-  wsState.broadcastsSent++;
-  wsState.broadcastsExpected += wsClients.filter(c => c.open).length;
+  // Counted only when the broadcast was accepted: one sent to the gateway being killed failed, yet its
+  // clients were counted as expecting it (the 2.1.0 soaks' 185 of 190).
+  const open = wsClients.filter(c => c.open).length;
   const r = await postJson(`${gw()}/soak/broadcast`, { id: `B-${++seq}` });
   expect(r.status === 200, `status ${r.status}`);
+  wsState.broadcastsSent++;
+  wsState.broadcastsExpected += open;
 });
 // Starting a run is not repeated when the answer is lost: that could start it twice.
 const runApi = (name, input, wait = 0) => api('POST', `/api/flows/${flowIds[name]}/run${wait ? `?wait=${wait}` : ''}`, { input }, 1);
