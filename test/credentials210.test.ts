@@ -76,6 +76,14 @@ test('project Secret API enforces design and Manage secrets permissions and neve
   assert.equal(accepted.statusCode,200,accepted.body);
   assert.equal(accepted.json().reference,'{{gv.API_SECRET}}');
   assert.ok(!accepted.body.includes('SyntheticNeverAuditValue'));
+  const duplicate = await server.admin.inject({method:'PUT',url,payload:{secretValue:'MustNotReplaceFromPicker',create:true,onlyCreate:true},headers:{'x-sutra':'1',cookie:cookies['secret-admin']}});
+  assert(duplicate.statusCode >= 400, 'inline property creation must not overwrite an existing name');
+  assert.equal(effectiveVariables(project.id).values.API_SECRET, 'SyntheticNeverAuditValue');
+  const created = await server.admin.inject({method:'PUT',url:url.replace('API_SECRET','PICKER_CREATED'),payload:{secretValue:'SyntheticPickerValue',create:true,onlyCreate:true},headers:{'x-sutra':'1',cookie:cookies['secret-admin']}});
+  assert.equal(created.statusCode,200,created.body);
+  assert.equal(created.json().reference,'{{gv.PICKER_CREATED}}');
+  assert(!JSON.stringify(getProject(project.id)).includes('SyntheticPickerValue'));
+
   assert.ok(!JSON.stringify(q.all('select * from audit')).includes('SyntheticNeverAuditValue'));
 });
 

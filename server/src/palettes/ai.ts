@@ -121,7 +121,7 @@ const ollamaActivity: Activity = {
       model: c.raw('model'), to: c.raw('to'), system: c.v('system') || undefined, prompt: asPrompt(c.v('prompt') ?? ''),
       messages: c.raw('messages') ? c.v('messages') : undefined, input: c.v('input'), images: list(c.v('images')).map(String),
       format: c.raw('format') || undefined, options, keepAlive: c.raw('keepAlive') || undefined, think: !!c.raw('think'),
-    }, c.signal);
+    }, c.signal, c.secret);
     if (op === 'generate' || op === 'chat' || op === 'embed') {
       const inT = out.prompt_eval_count ?? null, outT = out.eval_count ?? null;
       out.ai = { provider: r.name, engine: 'Ollama', model: out.model || c.raw('model') || r.config.model, inputTokens: inT, outputTokens: outT, totalTokens: inT != null && outT != null ? inT + outT : inT, ms: out.total_duration ? Math.round(out.total_duration / 1e6) : Date.now() - t0 };

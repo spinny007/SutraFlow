@@ -111,7 +111,7 @@ test('AI engines: OpenAI, Gemini, Ollama and a command-line tool return text plu
     const openai = mk('OpenAI', { engine: 'OpenAI API', apiKeySecret: 'AI_KEY', baseUrl: cap.url, model: 'gpt-5' });
     const gemini = mk('Gemini', { engine: 'Gemini API', apiKeySecret: 'AI_KEY', baseUrl: cap.url, model: 'gemini-3-pro-preview' });
     const ollama = mk('Local', { engine: 'Ollama', baseUrl: cap.url, model: 'llama3.3' });
-    const cli = mk('Claude CLI', { engine: 'Claude CLI', command: process.execPath, args: `"${fake}"` });
+    const cli = mk('Claude CLI', { engine: 'Claude CLI', command: process.execPath, args: `"${fake}"`, model: 'claude-sonnet-5-5' });
     const s = node('start', 'Start');
     const cls = node('aiClassify', 'Classify', { provider: openai, text: 'I want my money back', labels: 'refund, question' });
     const tr = node('aiPrompt', 'Gemini', { provider: gemini, system: 'Translate to French', prompt: 'Hello' });
@@ -267,7 +267,7 @@ test('more samples across the palettes run as tests (REST, files, database, XML,
   assert.equal(r.state.outputs['Send to channel'].delivered, 0);
 
   r = await ok(doc('Sample: Counter, Wait and Sutra variables'));
-  assert.match(logs(r), /batch-\d{4}: order number 1 today/);
+  assert.match(logs(r), /batch-\d{4}: order 1 today, counter sample-orders-/);
 
   // These need a connection, a local model or release rights: they are added and pass validation.
   for (const n of ['Sample: Local AI with Ollama', 'Sample: Email a report', 'Sample: Queue in and out']) {

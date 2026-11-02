@@ -152,6 +152,7 @@ export const ADMIN_ONLY_CHAPTERS: Chapter[] = [
 <p class="h">Deployed Sutras and work in flight</p>
 <ul>
 <li>Deployed Sutras stay deployed at their versions: they are in the database, which the upgrade keeps (and compares).</li>
+<li>Samples already added to projects are the projects' own copies and stay as they are. The new version's samples come from <em>New Sutra, Samples</em>, added beside the old ones with a number in their name.</li>
 <li>The stop is graceful: running steps finish first.</li>
 <li>Waiting work (approvals, timers, queued runs, steps waiting to retry, runs waiting for a connection) is kept in the database and taken up by the new version when it starts.</li>
 <li>During the upgrade the gateway does not answer: callers of REST, SOAP and MCP services get no reply for those minutes, and listeners pick up files and messages afterwards. Choose a quiet time. In a cluster, upgrade every engine's folder before starting any (below).</li>
@@ -236,6 +237,13 @@ export const ADMIN_ONLY_CHAPTERS: Chapter[] = [
     id: 'launcher', title: 'The sutraflow command and server settings',
     html: `
 <p>Every way of running SutraFlow uses one launcher: <code>bin/sutraflow</code> on Linux and macOS, <code>bin\\sutraflow.cmd</code> on Windows (<code>sutraflow</code> after <code>npm install -g</code>). Its settings are in <code>sutraflow.env</code> beside it, written by the installer (ports, <code>SUTRA_DATA_DIR</code>, <code>SUTRA_DB</code>, <code>SUTRA_NODE</code> and any other <code>SUTRA_</code> setting); <code>SUTRAFLOW_ENV</code> points it at another settings file.</p>
+<table class="t"><thead><tr><th>Where you type</th><th>How to run it</th></tr></thead><tbody>
+<tr><td>Windows PowerShell, in the SutraFlow folder</td><td><code>bin\\sutraflow.cmd status</code></td></tr>
+<tr><td>Windows PowerShell, in <code>bin</code></td><td><code>.\\sutraflow.cmd status</code>: PowerShell runs nothing from the current folder by its name alone, so <code>sutraflow status</code> there answers "not recognized"</td></tr>
+<tr><td>Windows Command Prompt</td><td><code>bin\\sutraflow status</code>, or <code>sutraflow status</code> in <code>bin</code></td></tr>
+<tr><td>Linux and macOS</td><td><code>bin/sutraflow status</code>, or <code>./sutraflow status</code> in <code>bin</code></td></tr>
+<tr><td>Anywhere</td><td><code>sutraflow status</code>, once <code>bin</code> is on the <code>PATH</code> or after <code>npm install -g</code></td></tr>
+</tbody></table>
 <table class="t"><thead><tr><th>Command</th><th>Does</th></tr></thead><tbody>
 <tr><td><code>install</code>, <code>upgrade</code></td><td>The web installer or the upgrade pages; with <code>--config file.json</code> silently (<a href="#ch-install">The web installer</a>, <a href="#ch-upgrade">Upgrading</a>)</td></tr>
 <tr><td><code>start</code>, <code>start engine</code></td><td>The studio, or a headless engine beside it on the same database, in the background; output in <code>&lt;data&gt;/logs/&lt;name&gt;.out.log</code>. <code>--foreground</code> keeps it in the terminal, for services and Laragon</td></tr>
@@ -347,6 +355,7 @@ sutra token create ci-orders --name github --expires-days 90</pre>
     id: 'admin-trouble', title: 'Troubleshooting servers',
     html: `
 <table class="t"><thead><tr><th>What you see</th><th>What to do</th></tr></thead><tbody>
+<tr><td>PowerShell: "The term 'sutraflow' is not recognized"</td><td>PowerShell runs nothing from the current folder by its name alone: in <code>bin</code> type <code>.\\sutraflow.cmd</code>, or from the SutraFlow folder <code>bin\\sutraflow.cmd</code> (<a href="#ch-launcher">The sutraflow command</a>).</td></tr>
 <tr><td>The installer says SutraFlow is already installed in this folder</td><td>It locked itself after the install (<code>data/install.lock</code>). To bring another installation up to this version, choose Upgrade; to install again here, <code>sutraflow install --reset</code> first.</td></tr>
 <tr><td>Test connection in the installer: pgvector is not installed</td><td>Install pgvector on the PostgreSQL server (<a href="#ch-install-dev">Development machines</a> for Laragon and Linux), or choose <em>Continue without pgvector</em> when no knowledge base will be kept in PostgreSQL.</td></tr>
 <tr><td>A port is in use</td><td>Another program, or another SutraFlow, listens there. Use the suggested free port; <code>sutraflow status</code> shows what each SutraFlow process uses.</td></tr>

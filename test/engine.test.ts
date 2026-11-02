@@ -71,8 +71,9 @@ test('Set Local Variable and Get Local Variables return the latest run-local val
   const one = node('getVar', 'One local', { what: 'one variable', name: 'customer' });
   const r = await run([s, set, all, one], [edge(s, set), edge(set, all), edge(all, one)]);
   assert.equal(r.status, 'done', r.error);
-  assert.deepEqual(r.state.outputs['All local'], { variables: { customer: 'C-100', attempts: '2' }, count: 2 });
-  assert.deepEqual(r.state.outputs['One local'], { name: 'customer', value: 'C-100', found: true });
+  // A step without a Record ID (as before 2.1.3) sets plain variables; both answers carry the run id (2.1.3).
+  assert.deepEqual(r.state.outputs['All local'], { runId: r.id, variables: { customer: 'C-100', attempts: '2' }, count: 2 });
+  assert.deepEqual(r.state.outputs['One local'], { runId: r.id, name: 'customer', value: 'C-100', found: true });
 });
 
 test('retries with backoff, then error branch handles the failure', async () => {

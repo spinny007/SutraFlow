@@ -251,7 +251,7 @@ function build(doc: Doc) {
   const refChapters = !doc.reference ? [] : [
     { id: 'activities', title: 'Activity reference', part: 'Reference', html: pals.map(p => `<h3 class="pal" id="pal-${p.id}">${esc(p.name)}</h3>${p.acts.map(activityEntry).join('')}`).join('') },
     { id: 'connections', title: 'Connection and security reference', html: `<p>Shared resources are created under Project &rarr; Resources. Settings that hold a secret take the <em>name</em> of a vault secret. Any text setting may use <code>{{gv.X}}</code> and <code>{{ev.X}}</code>, and the deployment config can override every setting per environment.</p>${RESOURCE_KINDS.map(connectionEntry).join('')}` },
-    { id: 'functions', title: 'Function reference', html: `<p>${functionCatalog().length} functions for formulas and mappings, grouped as in the mapper's function library. Names ignore case.</p>${functionsChapter()}` },
+    { id: 'functions', title: 'Function reference', html: `<p>${functionCatalog().length} functions for formulas and mappings, grouped as in the mapper's function library. Names ignore case. <em>Sample: Functions</em> (New Sutra, Samples) uses every one of them on an order, a Map data step per group with a Log of its results.</p>${functionsChapter()}` },
     { id: 'pipes', title: 'Template pipes', html: pipesChapter() },
   ];
   const all: Chapter[] = [...doc.chapters, ...refChapters];

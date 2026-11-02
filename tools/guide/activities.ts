@@ -251,15 +251,15 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     scope: ['Local variables for later steps in this run, read as <code>{vars.name}</code>. They survive durable waits and engine recovery with the run state.'],
     outScope: ['Values kept between runs: use an administrator-managed Project property, a Memory table or a database.'],
     use: ['Counters, a running total, a value chosen in one branch and used in another.'],
-    steps: ['Add a row per variable: name and value.'],
-    output: ['The input, unchanged.'],
+    steps: ['General offers <strong>Variable storage</strong>: choose declared/plain storage to update a Sutra variable (for example test), or record-by-ID storage for grouped values. Select a known name or enter a custom name, then its value on General; Input edits the same configuration and supports mapping.', 'Give a <strong>Record ID</strong> (new steps start with 1): every step with the same ID adds to one record, another ID makes another, so all values of a run sit in one structure: <code>{ "1": { "name": "Jane Doe", "role": "admin" }, "2": { "who": "jane.doe@example.com" } }</code>. An ID may come from the data, for example <code>{{input.orderId}}</code>, for one record per order in a For-Each.', 'Add a row per variable: name and value.', 'Read them later as <code>{vars.1.name}</code> in any formula, or with [[getVar]]: everything, or one ID.', 'Without a Record ID (steps made before 2.1.3) the variables are plain: <code>{vars.name}</code>.'],
+    output: ['The input, unchanged, so the steps after it still have the earlier data. What it set is written to its log, one line per variable (<code>1.batch = batch-0930</code>), shown on its Output tab under <em>Log</em> after a test.'],
   },
   getVar: {
     scope: ['A snapshot of every Local variable and its latest value, or one named Local variable.'],
     outScope: ['Project or Engine configuration: use [[getProperties]].'],
     use: ['Passing all calculated run values to a later mapping, child Sutra or response; checking whether one Local variable exists.'],
-    steps: ['Choose every variable or one variable.', 'For one variable, give its name and connect <em>missing</em> when absence is expected.'],
-    output: ['All: <code>variables</code> and <code>count</code>. One: <code>name</code>, <code>value</code> and <code>found</code>.'],
+    steps: ['General shows declared names and initial values. For one variable, choose its literal name (for example test), not its value or a reference that resolves to its value. Output shows name/value pairs from this Get activity’s own completed result.', 'Choose <em>all variables</em> (the whole structure of records), <em>one ID</em> (one record, for example 1) or <em>one variable</em> (a plain variable by name).', 'For one ID or variable, give it and connect <em>missing</em> when absence is expected.'],
+    output: ['All: <code>variables</code> (for example <code>{ "1": { … }, "2": { … } }</code>) and <code>count</code>. One: <code>name</code>, <code>value</code> and <code>found</code>. Both carry <code>runId</code>, the id of the run the variables belong to: each run has its own, so runs at the same time never share them.'],
   },
   getProperties: {
     scope: ['Administrator-managed Project properties for this project, or Engine properties shared by every project.', 'Every property or one named property. Project secret properties are never returned.'],
@@ -838,7 +838,7 @@ export const ACTIVITY_TEXT: Record<string, ActivityText> = {
     scope: ['A named number per project: increment, decrement, get, set, reset.', 'Kept across restarts; safe when many runs change it at once.'],
     outScope: ['Counters shared between projects: use a database; Engine properties are administrator-managed and read-only to Sutras.'],
     use: ['Sequence numbers for file names, daily totals, limits such as "at most 100 orders per hour".'],
-    steps: ['Set the counter name; a formula gives one counter per value, for example per day.', 'Choose the operation and the amount.'],
+    steps: ['Set the counter name; a formula gives one counter per value, for example per day.', 'Choose the operation and the amount. Everything is on the General tab: the counter takes no input, so its Input tab has nothing to map.', 'Unlike a Local variable, the number stays after the run: test twice and it has grown. <em>Sample: Counter, Wait and Sutra variables</em> shows both side by side.'],
     output: ['<code>name</code>, <code>value</code> (after the change) and <code>previous</code>.'],
   },
   powershell: {

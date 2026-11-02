@@ -1,12 +1,14 @@
 # SutraFlow planned backlog
 
-This is the canonical list of work that is intentionally not complete, prioritised with MoSCoW: **Must have** (the next release is not done without it), **Should have** (important, planned next), **Could have** (worth doing when there is room; proposals set aside for now land here), **Won't have (this time)** (decided against, recorded so they are not re-proposed by accident). Completed work belongs in `RELEASE-NOTES.md`, not here; an item that ships is removed in the same change. Updated for 2.1.2, 27 October 2026.
+This is the canonical list of work that is intentionally not complete, prioritised with MoSCoW: **Must have** (the next release is not done without it), **Should have** (important, planned next), **Could have** (worth doing when there is room; proposals set aside for now land here), **Won't have (this time)** (decided against, recorded so they are not re-proposed by accident). Completed work belongs in `RELEASE-NOTES.md`, not here; an item that ships is removed in the same change. Updated for 2.1.3, 29 October 2026.
 
 ## Must have
 
 - [ ] **24-hour remote-PostgreSQL soak — release gate.** Run `tools/soak.mjs` for 24 hours with PostgreSQL on a separate machine. Preserve the generated report and verify recovery, latency, memory, duplicate-step and database-log assertions. Include capped connections (steps, polls and a scheduled refresh) in the scenario.
 
 ## Should have
+
+- [ ] **2.1.3 hosted AI inference follow-up.** Gemini 3.1 Flash Lite and local Ollama passed real 4800 workflows. Gemini 4 Argon was discovered but its call was rejected by account quota (429); both supplied OpenAI keys passed model discovery but the current gpt-5.4-mini call was rejected for no credits (429). Retest successful inference after account quota/billing is available; never silently switch models. The deprecated gpt-4.1-nano response was surfaced explicitly. Credential-free evidence is retained outside the repository.
 
 - [ ] **Engine memory after a large knowledge document.** In the 8-hour 2.1.1 soak, the engine that learned a 50 MB document (about 54 parts) went from about 400 MB to 1.2 GB and stayed there for the last hour; it was steady for six and a half hours before. Find out whether it is held (a cache, the parsed text, embeddings) or only not yet returned by V8: learn one 50 MB document on its own and measure the heap after garbage collection, then bound what is kept.
 

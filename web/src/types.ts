@@ -19,7 +19,10 @@ export interface Field {
   label: string;
   type: 'text' | 'textarea' | 'code' | 'number' | 'select' | 'bool' | 'kv' | 'resource' | 'secret' | 'list' | 'schema' | 'mapping' | 'process';
   def?: any;
+  /** What a setting missing from a saved step means, when it differs from def (new steps get def). */
+  missing?: any;
   options?: string[];
+  optionLabels?: Record<string, string>;
   resourceKind?: string;
   tpl?: boolean;
   /** General-tab code/text area supports project and engine variable references. */

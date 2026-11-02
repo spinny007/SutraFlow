@@ -222,29 +222,46 @@ const flow: Activity[] = [
   },
   {
     type: 'setVar', palette: 'flow', name: 'Set Local Variable', glyph: '𝑥', ports: ['out'],
-    desc: 'Sets one or more variables local to this Sutra run. Later steps read their latest values; they survive a durable restart but are not shared with other runs. Passes its input through.',
-    fields: [F('vars', 'Variables', 'kv', [{ k: 'total', v: '{{input.amount}}' }], { tpl: true })],
+    desc: 'Sets variables local to this Sutra run, under a record ID: every Set Local Variable step with ID 1 adds to record 1, another ID makes another record, so many values stay in one structure ({ "1": { … }, "2": { … } }). Later steps read them as {vars.1.name}, or with Get Local Variables (everything, or one ID). They survive a durable restart and are never shared with other runs. Passes its input through; what it set is in its log, shown on the Output tab.',
+    fields: [
+      // New steps get ID 1; steps saved before 2.1.3 have none and keep setting plain variables ({vars.name}).
+      F('id', 'Record ID', 'text', '1', { missing: '', help: 'The record these variables belong to, for example 1, 2 or {input.orderId}. Steps with the same ID add to one record; read one as {vars.1.name}. Empty: plain variables, {vars.name}.' }),
+      F('vars', 'Variables', 'kv', [{ k: 'total', v: '{{input.amount}}' }], { tpl: true }),
+    ],
     passThrough: true,
     execute: c => {
-      for (const r of (c.raw('vars') as any[]) || []) if (r?.k) c.setVar(r.k, c.resolve(r.v));
+      const id = String(c.raw('id') ?? '').trim();
+      const record: Record<string, any> = {};
+      for (const r of (c.raw('vars') as any[]) || []) if (r?.k) {
+        const value = c.resolve(r.v);
+        if (id) record[r.k] = value; else c.setVar(r.k, value);
+        // The output is the input, passed on: the log line shows what was set (secrets masked in run logs).
+        c.log('info', `${id ? `${id}.` : ''}${r.k} = ${typeof value === 'string' ? value : JSON.stringify(value)}`);
+      }
+      if (id) {
+        const before = c.scope.vars?.[id];
+        c.setVar(id, { ...(before && typeof before === 'object' && !Array.isArray(before) ? before : {}), ...record });
+      }
       return { out: c.input };
     },
   },
   {
     type: 'getVar', palette: 'flow', name: 'Get Local Variables', glyph: '𝑥', ports: ['out', 'missing'],
-    desc: 'Returns a snapshot of every local variable with its latest value, or one named variable. Local variables belong only to this Sutra run.',
+    desc: 'Returns every local variable of this run as one structure ({ "1": { … }, "2": { … } } with the records Set Local Variable made), or one record by its ID, or one plain variable by name, with the id of the run they belong to. Local variables belong only to this Sutra run: runs at the same time never see each other\'s.',
     fields: [
-      F('what', 'Get', 'select', 'all variables', { options: ['all variables', 'one variable'] }),
-      F('name', 'Variable name', 'text', '', { showIf: { k: 'what', in: ['one variable'] }, tpl: true }),
+      F('what', 'Get', 'select', 'all variables', { options: ['all variables', 'one ID', 'one variable'] }),
+      F('name', 'Record ID or name', 'text', '1', { showIf: { k: 'what', in: ['one ID', 'one variable'] }, tpl: true, missing: '', help: 'The record ID given in Set Local Variable (1, 2, {input.orderId}), or the name of a plain variable.' }),
     ],
-    outputHint: { variables: {}, count: 0, name: '', value: null, found: true },
+    outputHint: { runId: '', variables: {}, count: 0, name: '', value: null, found: true },
     execute: c => {
+      // The run's own id (2.1.3): local variables are kept per run, so they always come with it.
+      const runId = c.runId;
       const vars = structuredClone(c.scope.vars || {});
-      if (c.raw('what') !== 'one variable') return { out: { variables: vars, count: Object.keys(vars).length } };
+      if (c.raw('what') !== 'one variable' && c.raw('what') !== 'one ID') return { out: { runId, variables: vars, count: Object.keys(vars).length } };
       const name = String(c.v('name') ?? '').trim();
-      if (!name) throw new Error('Variable name is empty');
+      if (!name) throw new Error(c.raw('what') === 'one ID' ? 'Record ID is empty' : 'Variable name is empty');
       const found = Object.prototype.hasOwnProperty.call(vars, name);
-      return found ? { out: { name, value: vars[name], found: true } } : { port: 'missing', out: { name, value: null, found: false } };
+      return found ? { out: { runId, name, value: vars[name], found: true } } : { port: 'missing', out: { runId, name, value: null, found: false } };
     },
   },
   {

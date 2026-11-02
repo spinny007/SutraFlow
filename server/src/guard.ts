@@ -163,6 +163,7 @@ export const RULES: Record<string, Rule> = {
   'GET /api/resources': R('view', 'queryProject'),
   'POST /api/resources/test': R('connections', 'bodyProject', true),
   'POST /api/resources/models': R('connections', 'bodyProject', true),
+  'POST /api/resources/ai/resolve': R('connections', 'bodyProject', true),
   'POST /api/resources/ollama/:action': R('server'),
   'POST /api/resources': R('connections', 'bodyProject'),
   'PUT /api/resources/:id': R('connections', 'resource'),

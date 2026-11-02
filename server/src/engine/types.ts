@@ -75,7 +75,14 @@ export interface Field {
   label: string;
   type: FieldType;
   def?: any;
+  /**
+   * What a setting missing from a saved step means (2.1.3), when that differs from def: def is given to
+   * new steps, while steps saved before the field existed run, and are shown, with this value.
+   */
+  missing?: any;
   options?: string[];
+  /** Human labels for stored select keys; omitted keys keep their original label. */
+  optionLabels?: Record<string, string>;
   /** For type resource: which resource kind to pick from. */
   resourceKind?: string;
   /** Value may contain {{ }} references. */
