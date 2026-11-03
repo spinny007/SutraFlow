@@ -102,13 +102,16 @@ export const ADMIN_ONLY_CHAPTERS: Chapter[] = [
 [[img:install-database|Database: PostgreSQL tested, with pgvector enabled in the new database.]]
 <p class="h">Server</p>
 <p>Where SutraFlow listens: <em>127.0.0.1</em> (this machine, recommended; put a proxy in front to reach it from elsewhere) or <em>0.0.0.0</em>; the environment (development, test or production: a production server takes Sutras only from releases); the studio port (4800) and the gateway ports (8080 and 8443). <em>A headless engine beside it</em> adds a second process on the same database, with its own ports. <strong>Check ports</strong> tests each one; a busy port gets a free one suggested, and <strong>Use the free ports</strong> takes them.</p>
+<p><strong>Server name and HTTPS</strong> (2.1.5): <em>Server name</em> is the address people and callers use when it is not the listening address, behind a proxy or a DNS name (<code>https://sutra.example.com</code>): single sign-on, OAuth and links use it (<code>SUTRA_PUBLIC_URL</code>). <em>Gateway certificate</em> chooses the HTTPS port's certificate: <em>Off</em>; <em>Self-signed</em> for testing; <em>My certificate files</em> (the certificate with its chain and the private key, as PEM files on this server: checked against each other, and the key kept encrypted in the vault); or <em>Let's Encrypt</em> with the domain names, a contact email, staging or production, and agreement to its subscriber agreement (the gateway's HTTP port must answer as port 80 for those names while the certificate is made and renewed). Everything is changed later in the Admin Console (Server, Gateway &amp; TLS).</p>
 <p><strong>Node memory</strong>: each engine is its own Node.js process with its own memory. 0 lets Node.js decide; the page shows this machine's memory and a suggested size, and <strong>Use N MB</strong> takes it. It can be changed later in the Admin Console (Engines, Tuning) and applies at a restart.</p>
 [[img:install-server|Server: ports checked free, an engine beside the studio, and Node memory.]]
 <p class="h">Cluster</p>
 <p>The engines that share the work through one database. The <strong>cluster name</strong> is shown in the Admin Console. Each engine has a name (this server's and the one beside it are filled in from the computer name) and <strong>May lead</strong>: the leader runs timers, listeners, recovery and housekeeping, and is elected among the engines that may lead; another takes over when it stops. Allowing only one fixes the leader, without failover, and the page says so. With PostgreSQL, <strong>Add an engine on another machine</strong> adds engines with their own ports and memory; each gets a settings file to copy to its machine. Names, the cluster name and who may lead are changed later in Admin Console, Engines.</p>
+<p><strong>Steps at once</strong> (2.1.5) per engine: how many steps it runs at the same moment; 0 takes the recommendation for that machine (written as <code>STUDIO_WORKERS</code>, <code>ENGINE_WORKERS</code>, and in each further engine's settings file). <strong>Heartbeat</strong>: how often each engine reports in; an engine silent for three beats is taken as stopped and its steps go to the others (<code>SUTRA_HEARTBEAT_MS</code>, 5 seconds by default). <strong>Finish steps on stop</strong>: how long a stopping engine lets its running steps finish (<code>SUTRA_DRAIN_MS</code>, 30 seconds). When the studio and an engine beside it start, the install checks that both beat in the shared database (<em>Engines see each other</em>).</p>
+<p>An engine added after the install gets its settings file from the installed server: <code>sutraflow engine-file shop-3 [--host 0.0.0.0] [--port 4801] [--http 9080] [--https 9443] [--workers 12]</code> writes <code>sutraflow-engine-shop-3.env</code> beside <code>sutraflow.env</code>: the same database address (without its password: set <code>SUTRA_DB_PASSWORD</code> on that machine), heartbeat, drain and environment, and the engine's own name and ports. Put it beside the same release on the new machine as <code>sutraflow.env</code>, copy <code>data/master.key</code>, and <code>sutraflow start engine</code>; it shows in Engines once it beats. PostgreSQL only.</p>
 [[img:install-cluster|Cluster: its name, the engines and who may lead, with an engine on another machine.]]
 <p class="h">Review</p>
-<p>Everything once more. <strong>Save answers as a config file</strong> (2.1.2) writes <code>sutraflow-install.json</code>: the same choices for a silent install of the next server (<a href="#ch-install-silent">Silent installation</a>). Its passwords are environment variables to set there, never the passwords themselves. <em>Start SutraFlow when installed</em> starts the studio, and the engine beside it when there is one.</p>
+<p>Everything once more, with the server name and the gateway certificate. <strong>Add the sample Sutras</strong> (2.1.5) makes a project named <em>Samples</em> with every sample to learn from (none is deployed), the same as adding them from New Sutra, Samples; they can be added or removed later with their data (<a href="#ch-samples-data">Samples and their data</a>). <strong>Save answers as a config file</strong> (2.1.2) writes <code>sutraflow-install.json</code>: the same choices for a silent install of the next server (<a href="#ch-install-silent">Silent installation</a>). Its passwords are environment variables to set there, never the passwords themselves. <em>Start SutraFlow when installed</em> starts the studio, and the engine beside it when there is one.</p>
 [[img:install-review|Review: the choices, saving them as a config file, and starting when installed.]]
 <p class="h">Install and Done</p>
 <p>Each step with its result: settings file, data folder, the master key, tables and the administrator, the admin token, and the start. When it is done the page gives the address to sign in at, a settings file for each further engine, and the installer's log (also kept in <code>data/logs/installer.log</code>; 2.1.2). The installer then locks itself (<code>data/install.lock</code>), so it cannot be run over a working installation; <code>sutraflow install --reset</code> removes the lock.</p>
@@ -131,7 +134,7 @@ export const ADMIN_ONLY_CHAPTERS: Chapter[] = [
   {
     id: 'install-silent', title: 'Silent installation',
     html: `
-<p>For scripts and many servers, the same steps run from a JSON file, without a browser:</p>
+<p>For scripts and many servers, the same steps run from a JSON or YAML file (2.1.5: a file ending in <code>.yaml</code> or <code>.yml</code>), without a browser:</p>
 <pre>bin/sutraflow install --config install.json [--dry-run]</pre>
 <p>Take the file the web installer saved on its Review page, or start from <code>docs/install-example.json</code> in the release, which shows every field. Passwords are never written in the file: give <code>{"env": "NAME"}</code> (an environment variable) or <code>{"file": "path"}</code> (a file holding only the password).</p>
 <pre>{
@@ -152,7 +155,57 @@ export const ADMIN_ONLY_CHAPTERS: Chapter[] = [
 <p class="h">Silent upgrade</p>
 <pre>bin/sutraflow upgrade --config upgrade.json [--dry-run]
 { "from": "/opt/sutraflow", "backupDir": "/backups/sutraflow", "start": true }</pre>
-<p>Run it from the new release's folder; the steps are those of <a href="#ch-upgrade">Upgrading</a>, with the same exit codes.</p>`,
+<p>Run it from the new release's folder; the steps are those of <a href="#ch-upgrade">Upgrading</a>, with the same exit codes.</p>
+<p class="h">Samples in scripts</p>
+<p>The install file's <code>"samples": true</code> adds the sample Sutras (default <code>false</code>: leave it off for production). The upgrade file takes <code>"samples"</code> (2.1.5): <code>keep</code> (default), <code>add</code> (when there are none), <code>remove</code> (the samples and their <code>sample_</code> data) or <code>refresh</code> (remove, then add the new version's). They run after the data has been compared, so a sample connection that cannot be reached does not undo the upgrade: it is reported, its sample data stays, and <code>sutraflow samples remove</code> can be run again.</p>
+<pre># Upgrade a production server and make sure no samples are left (Linux)
+cd /opt/releases/sutraflow-2.1.5
+cat > upgrade.json &lt;&lt;'JSON'
+{ "from": "/opt/sutraflow", "backupDir": "/backups/sutraflow", "samples": "remove", "start": true }
+JSON
+bin/sutraflow upgrade --config upgrade.json --dry-run   # the plan
+bin/sutraflow upgrade --config upgrade.json
+
+# Windows (PowerShell), a training server with the new samples
+Set-Content upgrade.json '{ "from": "C:/laragon/www/sutra", "samples": "refresh", "start": true }'
+binsutraflow.cmd upgrade --config upgrade.json
+
+# Afterwards, at any time, from the installed folder
+bin/sutraflow samples list
+bin/sutraflow samples remove</pre>`,
+  },
+  {
+    id: 'samples-data', title: 'Samples and their data',
+    html: `
+<p>The samples are Sutras to learn from. Everything they store is named <code>sample_&lt;objective&gt;</code> (2.1.5): the MySQL database <code>sample_sutraflow</code> with its tables <code>sample_sales_orders</code>, <code>sample_products</code>, <code>sample_customers</code> and <code>sample_orders</code>, the SQLite file <code>sample_sutraflow.sqlite</code>, the MongoDB collection <code>sample_orders</code>, counters such as <code>sample_channel_orders</code>, queues such as <code>sample_orders.in</code>, and the folders <code>sample_csv</code>, <code>sample_inbox</code>, <code>sample_outbox</code>, <code>sample_documents</code>, <code>sample_scripts</code> and <code>sample_validation</code> in the project's files folder (project properties such as <code>SAMPLE_CSV_FOLDER</code> name them). That is how the installer tells sample data from a site's own data. Sutras keep the names <em>Sample: ...</em> and connections <em>Sample ...</em>.</p>
+<p>A new install adds no samples unless <strong>Add the sample Sutras</strong> is ticked on its Review page; no knowledge base, no AI provider and no sample data is set up by default.</p>
+<p class="h">When to add them, and when not</p>
+<table class="t"><thead><tr><th>Server</th><th>Samples</th><th>Why</th></tr></thead><tbody>
+<tr><td>A designer's own machine, training, a proof of concept</td><td>Add</td><td>Working examples of every palette, ready to copy into real Sutras; the chat, knowledge and dashboard samples show how AI applications are put together (Design Guide, <em>Designing an AI application from the samples</em>).</td></tr>
+<tr><td>A shared development or test server</td><td>Add when the team learns from them; remove before the server is used for acceptance tests</td><td>Their Sutras, connections and <code>sample_</code> tables sit beside the team's work and can be removed in one go.</td></tr>
+<tr><td>Production</td><td>Do not add</td><td>Nothing in production should run demo Sutras or hold demo data and demo connections. A sample a team wants in production is copied into a project of its own, renamed without <code>sample_</code> names, reviewed and deployed like any other Sutra.</td></tr>
+<tr><td>A server that had them and goes live</td><td>Remove</td><td><code>sutraflow samples list</code>, check the list, then <code>sutraflow samples remove</code>, or choose <em>Remove</em> on the upgrade's Review page.</td></tr>
+<tr><td>A server upgraded with samples kept</td><td>Refresh when the new samples are wanted</td><td>Samples are the project's own copies and an upgrade keeps them; <em>Refresh</em> removes them and adds the new version's.</td></tr>
+</tbody></table>
+<p>Samples never send anything on their own: none is deployed when added, and the ones that need an outside service (a database, an AI provider, a broker) are placeholders until their <em>Sample ...</em> connection is filled in.</p>
+<p class="h">Adding or removing them later</p>
+<p>Run <code>bin/sutraflow install</code> and choose <strong>Samples</strong> on the first page (the installer of the same version as the installation). <strong>Installation</strong> finds it (this folder unless you give another); on <strong>Review</strong> choose <strong>Add</strong> or <strong>Remove</strong>, then <strong>List</strong>: it reads what is there and changes nothing.</p>
+<ul>
+<li><strong>Add</strong> makes the project <em>Samples</em> with every sample, as on install. A site that has them already is told so: remove them first to add them fresh.</li>
+<li><strong>Remove</strong> lists, and then deletes: the sample Sutras (deployed or not); the <em>Sample ...</em> connections nothing else uses, with their knowledge, AI memory and memory tables; sample schemas and counters; the project properties the samples added that nothing uses; <code>sample_</code> files and folders in each project's files folder and the data folder; the project <em>Samples</em> when it is empty. Through each <em>Sample ...</em> database, MongoDB, SFTP or FTP connection it drops the <code>sample_</code> databases, schemas, tables, views, procedures, collections, files and folders there. A database connection that names its database is worked in that database only.</li>
+<li>Kept: anything not named as sample data, and a <em>Sample ...</em> connection one of your own Sutras uses (listed as kept, with the Sutra).</li>
+<li>Earlier versions' sample names are recognised: the MySQL database <code>sutraflow_samples</code> (its sample tables and procedure, and the database when nothing else is in it), <code>samples.sqlite</code>, the collection <code>sutraflow_sample_orders</code>, counters <code>sample-...</code>, the folder <code>validation-samples</code>, the sample documents and script, <code>C:/sutra/samples</code>, <code>inbox</code> and <code>outbox</code>, and <code>outbox/orders.csv</code> and <code>archive/orders-*.csv</code> on a Sample SFTP or FTP server.</li>
+<li>Not reached: messages in sample queues and topics on brokers, and data in cloud services (Firebase, Dropbox, Google, YouTube); remove them there. Placeholder connections never filled in (an <code>example.com</code> host, no password) are skipped.</li>
+</ul>
+[[img:install-samples|The Samples mode: Remove, then List shows everything named as sample data before anything changes.]]
+<p>Tick <em>I have read the list</em> and choose <strong>Remove samples</strong>: SutraFlow is stopped (the studio and the engine beside it), the samples are removed, and it starts again. Removing cannot be undone: back up first if in doubt. Other engines of a cluster keep the sample Sutras they loaded until they restart.</p>
+<p class="h">From the command line</p>
+<pre>bin/sutraflow samples list   [--folder /opt/sutraflow]
+bin/sutraflow samples add    [--folder /opt/sutraflow] [--no-start]
+bin/sutraflow samples remove [--folder /opt/sutraflow] [--no-start]</pre>
+<p><code>list</code> prints what <code>remove</code> would delete. The exit code is 1 when something could not be reached or removed (its sample data stays), 2 for a wrong command.</p>
+<p class="h">Your own samples</p>
+<p>A Sutra you build from a sample for real use should drop the sample names: rename its tables, folders and queues, and the connections it uses. Data you keep under a <code>sample_</code> name is removed with the samples.</p>`,
   },
   {
     id: 'upgrade', title: 'Upgrading',
@@ -172,6 +225,7 @@ export const ADMIN_ONLY_CHAPTERS: Chapter[] = [
 <ul>
 <li>Deployed Sutras stay deployed at their versions: they are in the database, which the upgrade keeps (and compares).</li>
 <li>Samples already added to projects are the projects' own copies and stay as they are. Adding a sample again from <em>New Sutra, Samples</em> gives the new version, as new Sutras with new ids, beside the old ones.</li>
+<li><strong>Samples</strong> on the Review page (2.1.5): <em>Keep</em> (default), <em>Add when none</em>, <em>Remove</em> (the samples and their <code>sample_</code> data, after the upgrade) or <em>Refresh</em> (remove, then add this version's). Production servers choose <em>Remove</em> if they ever had samples; see <a href="#ch-samples-data">Samples and their data</a> for what is removed. Earlier versions' sample names are recognised.</li>
 <li>The stop is graceful: running steps finish first.</li>
 <li>Waiting work (approvals, timers, queued runs, steps waiting to retry, runs waiting for a connection) is kept in the database and taken up by the new version when it starts.</li>
 <li>During the upgrade the gateway does not answer: callers of REST, SOAP and MCP services get no reply for those minutes, and listeners pick up files and messages afterwards. Choose a quiet time. In a cluster, upgrade every engine's folder before starting any (below).</li>
@@ -192,7 +246,7 @@ export const ADMIN_ONLY_CHAPTERS: Chapter[] = [
 <p>Ports need not be given. The upgrade reads them, with the data folder and the database, from the installation's own <code>sutraflow.env</code>, uses them to stop and start it and to check that it answers, and keeps them. This holds for SutraFlow started through its launcher (<code>sutraflow start</code>, the Laragon Procfile, the Windows task or systemd unit of <code>sutraflow service</code>). A process started by hand with other settings in its environment cannot be reached by the upgrade: stop it yourself first.</p>
 [[img:upgrade-installation|Installation: the folder checked, with its version, database, data folder and address.]]
 <p class="h">Review</p>
-<p>The version from and to, and the backup folder: empty means <code>backups</code> inside the installation. Nothing changes until you choose <strong>Upgrade</strong>.</p>
+<p>The version from and to, the backup folder (empty means <code>backups</code> inside the installation) and what happens to the samples. Nothing changes until you choose <strong>Upgrade</strong>.</p>
 [[img:upgrade-review|Review: from and to, the backup folder, and starting it again.]]
 <p class="h">What the upgrade does</p>
 <ol>
@@ -203,6 +257,7 @@ export const ADMIN_ONLY_CHAPTERS: Chapter[] = [
 <li><strong>Move the old runtime aside</strong> into the backup, and <strong>install</strong> the new one. A folder another program is in cannot be moved on Windows: it is copied into the backup and its files are replaced in place instead, and the step says which. The data folder, <code>sutraflow.env</code> and a site's own <code>.htaccess</code> and <code>web.config</code> stay where they are.</li>
 <li><strong>New settings</strong> are added to <code>sutraflow.env</code> with their defaults; your values are kept.</li>
 <li><strong>Database changes</strong> of the new version, then <strong>Compare the data</strong> with the snapshot: every table must hold what it held.</li>
+<li><strong>Samples</strong> (when chosen): removed, added or refreshed; a problem here is reported and the upgrade is kept.</li>
 <li><strong>Start</strong> and <strong>Check</strong>: the studio, and the engine beside it if it was running, start again and must answer with the new version.</li>
 </ol>
 [[img:upgrade-progress|Upgrading: each step with its result.]]
@@ -292,6 +347,7 @@ export const ADMIN_ONLY_CHAPTERS: Chapter[] = [
 <tr><td><code>STUDIO_MEMORY_MB</code>, <code>ENGINE_MEMORY_MB</code></td><td>0</td><td>Node memory of each process; 0 lets Node.js decide</td></tr>
 <tr><td><code>SUTRA_WORKERS</code></td><td>by machine</td><td>Steps run at once (4 on 1 vCPU / 1 GB up to 32 on 8 cores); 0 = serve only</td></tr>
 <tr><td><code>SUTRA_MEMORY_WORKERS</code></td><td>0</td><td>Steps at once for Sutras that run in memory; 0 = as <code>SUTRA_WORKERS</code></td></tr>
+<tr><td><code>SUTRA_VISITOR_DAYS</code></td><td>30</td><td>How long a chat visitor's signed identity lasts (agent channels without a policy); renewed while the visitor keeps coming back (2.1.5).</td></tr>
 <tr><td><code>SUTRA_STREAM_BUFFER_MB</code></td><td>8</td><td>A streaming step (batches of a big file) waits while the steps it handed on hold more input than this, so many workers do not hold many big batches at once; one batch always goes on. Raise it for more batches in parallel, lower it to keep memory down.</td></tr>
 <tr><td><code>SUTRA_POLL_MS</code></td><td>by machine</td><td>How often an idle engine looks for due steps (200 to 500 ms)</td></tr>
 <tr><td><code>SUTRA_SETTINGS_REFRESH_MS</code></td><td>by machine</td><td>How long an engine keeps Project and Engine properties; 0 = every step</td></tr>
@@ -390,5 +446,191 @@ sutra token create ci-orders --name github --expires-days 90</pre>
 <tr><td>Every caller has the proxy's address in the request log, or one caller's rate limit stops everyone</td><td>The proxy is not trusted, so <code>X-Forwarded-For</code> is ignored: list its address under Gateway &rarr; Firewall &rarr; <em>Trusted proxies</em>.</td></tr>
 <tr><td>Let's Encrypt fails</td><td>Port 80 on the domain must reach the gateway's HTTP port.</td></tr>
 </tbody></table>`,
+  },
+  {
+    id: 'command-guide', title: 'The command line by task',
+    html: `
+<p>SutraFlow has two commands. This chapter groups them by the task you have, says what each does and when to use it, and gives an example you can copy. The full list of every option, read from the commands themselves, is in <a href="#ch-commands">Command reference</a>; <code>sutraflow help</code> and <code>sutra help</code> print it too.</p>
+<table class="t"><thead><tr><th>Command</th><th>Works on</th><th>Use it for</th></tr></thead><tbody>
+<tr><td><code>sutraflow</code></td><td>This machine: the SutraFlow folder, its processes and its settings file</td><td>Installing, upgrading, starting and stopping, logs, Docker, moving the database</td></tr>
+<tr><td><code>sutra</code></td><td>What is inside SutraFlow: projects, packages, people, secrets, deployed Sutras, runs, engines</td><td>Releases, people and secrets, and every Admin Console action from a shell or a pipeline</td></tr>
+</tbody></table>
+<p class="h">How to run them</p>
+<ul>
+<li><strong>sutraflow</strong>: <code>bin\\sutraflow.cmd</code> on Windows, <code>bin/sutraflow</code> on Linux and macOS, from the SutraFlow folder (or <code>sutraflow</code> after <code>npm install -g</code>).</li>
+<li><strong>sutra on this machine</strong>: <code>sutraflow cli &lt;command&gt;</code> runs it against the local studio, already signed in with the local admin token. Use this on the server itself.</li>
+<li><strong>sutra on another server</strong> (pipelines, a jump host): add <code>--server https://engine:4800 --token &lt;API token&gt;</code>, or set <code>SUTRA_SERVER</code> and <code>SUTRA_ADMIN_TOKEN</code> once. The token is an API token of a system account; it can do only what the account's roles allow.</li>
+<li><strong>Exit codes</strong>: 0 success, 1 failure, 2 wrong usage, so scripts and pipelines can stop on an error.</li>
+</ul>
+
+<p class="h">1. Installing and upgrading (sutraflow)</p>
+<table class="t"><thead><tr><th>Command</th><th>What it does</th><th>When to use it</th></tr></thead><tbody>
+<tr><td><code>sutraflow install</code></td><td>Opens the web installer on this machine: administrator, database with a connection test, ports, cluster, samples</td><td>A new server, by a person at the machine</td></tr>
+<tr><td><code>sutraflow install --config install.json [--dry-run]</code></td><td>The same without a browser, from a JSON file; <code>--dry-run</code> prints the plan and changes nothing</td><td>Servers built by scripts (Ansible, a golden image, a VM template)</td></tr>
+<tr><td><code>sutraflow upgrade --config upgrade.json [--dry-run]</code></td><td>Upgrades an installation from 2.1.0 on: backup, new files, data compared before and after, an automatic way back; keeps, adds, removes or refreshes the samples</td><td>Every new version; run with <code>--dry-run</code> first in a change window</td></tr>
+<tr><td><code>sutraflow samples list | add | remove</code></td><td>The samples of an installation and their <code>sample_</code> data: lists them, adds them, or removes them with their data</td><td>Add on designer and training machines; remove before a server goes live</td></tr>
+<tr><td><code>sutraflow setup [--ports]</code></td><td>Installs the packages and builds SutraFlow from a source folder; makes <code>sutraflow.env</code></td><td>Development machines working from the source</td></tr>
+<tr><td><code>sutraflow version</code></td><td>The installed version</td><td>Before and after an upgrade; in support requests</td></tr>
+</tbody></table>
+<pre>sutraflow install --config install.json --dry-run      # read the plan
+sutraflow install --config install.json                # install
+sutraflow upgrade --config upgrade.json --dry-run      # {"from": "/opt/sutraflow", "samples": "remove"}
+sutraflow samples remove --folder /opt/sutraflow       # going live: the samples and their data leave</pre>
+
+<p class="h">2. Starting, stopping and watching (sutraflow)</p>
+<table class="t"><thead><tr><th>Command</th><th>What it does</th><th>When to use it</th></tr></thead><tbody>
+<tr><td><code>sutraflow start [engine] [--foreground]</code></td><td>Starts the studio (designer, Admin Console, engine and gateway), or a headless engine beside it</td><td>After installing, after a restart of the machine, to add an engine on the same database</td></tr>
+<tr><td><code>sutraflow stop [engine|all] [--force]</code></td><td>Stops gracefully: no new work, running steps finish (up to 30 seconds)</td><td>Before maintenance, a database copy or an upgrade by hand</td></tr>
+<tr><td><code>sutraflow restart [engine]</code></td><td>Stops, then starts</td><td>After changing <code>sutraflow.env</code></td></tr>
+<tr><td><code>sutraflow status</code></td><td>Studio and engines: running, ready, addresses, database</td><td>The first look when something seems wrong</td></tr>
+<tr><td><code>sutraflow logs [engine] [--follow]</code></td><td>The last lines of the output log</td><td>An engine does not start, or stops on its own</td></tr>
+<tr><td><code>sutraflow open admin</code></td><td>Opens a page in the browser: designer, admin, guide, admin-guide, design-guide, architecture</td><td>On the server's desktop</td></tr>
+<tr><td><code>sutraflow service</code></td><td>Shows how to start SutraFlow with the machine (a systemd unit, a Windows task)</td><td>Once per server, so it survives reboots</td></tr>
+</tbody></table>
+<pre>sutraflow status
+sutraflow logs engine --follow
+sutraflow stop all && sutraflow start</pre>
+
+<p class="h">3. Engines, clusters and Docker (sutraflow)</p>
+<table class="t"><thead><tr><th>Command</th><th>What it does</th><th>When to use it</th></tr></thead><tbody>
+<tr><td><code>sutraflow engine-file &lt;name&gt; [--port] [--http] [--https] [--workers]</code></td><td>A settings file for one more engine on another machine joining this cluster (PostgreSQL only)</td><td>Adding an engine machine: copy the file and <code>data/master.key</code> there, then <code>sutraflow start engine</code></td></tr>
+<tr><td><code>sutraflow docker up | down | status | logs | build</code></td><td>The studio and an engine in Docker</td><td>Trying SutraFlow in containers on one machine</td></tr>
+<tr><td><code>sutraflow docker cluster up | down | status | logs</code></td><td>PostgreSQL, a studio and two engines in Docker</td><td>Testing a cluster, failover and draining</td></tr>
+</tbody></table>
+<pre>sutraflow engine-file engine-b --host 0.0.0.0 --port 4801 --http 9080 --https 9443
+sutraflow docker cluster up</pre>
+
+<p class="h">4. The database (sutraflow and sutra)</p>
+<table class="t"><thead><tr><th>Command</th><th>What it does</th><th>When to use it</th></tr></thead><tbody>
+<tr><td><code>sutraflow db info</code> / <code>sutra db info</code></td><td>Which database is in use, and its row counts</td><td>Before a move, and to check a move</td></tr>
+<tr><td><code>sutraflow db copy --to postgres://... [--replace]</code></td><td>Copies all data to another database (stop first)</td><td>Moving from SQLite to PostgreSQL, or to a new database server</td></tr>
+<tr><td><code>sutra db migrate [--url] [--write-env sutraflow.env]</code></td><td>Copies SQLite data to PostgreSQL, checks every table arrived, and points the settings file at it</td><td>The whole move in one step (also Admin Console, Database, Migrate now)</td></tr>
+</tbody></table>
+<pre>sutraflow stop all
+sutraflow db copy --to postgres://sutra@db1:5432/sutraflow
+sutra db migrate --url postgres://sutra@db1:5432/sutraflow --write-env sutraflow.env</pre>
+
+<p class="h">5. Releases: packaging, checking, deploying (sutra)</p>
+<table class="t"><thead><tr><th>Command</th><th>What it does</th><th>When to use it</th></tr></thead><tbody>
+<tr><td><code>sutra package --project &lt;name&gt; --version 1.4.0 --zip</code></td><td>A release zip of a project: every deployed Sutra at its version, a deployment config to fill in, a README and documentation</td><td>Handing a tested project to the team that runs test or production</td></tr>
+<tr><td><code>sutra package --from-git &lt;repository&gt; --ref v1.4.0 --out release.zip</code></td><td>The same from the project's Git repository, with no server or database</td><td>CI/CD pipelines: build on every tag</td></tr>
+<tr><td><code>sutra check &lt;release.zip&gt;</code></td><td>Checks a package against a server: activities it knows, secrets present, addresses already in use. Changes nothing.</td><td>Before every deploy, and in a pipeline as a gate</td></tr>
+<tr><td><code>sutra test &lt;release.zip&gt; [--secrets-from-env]</code></td><td>Installs the package in a throw-away server and runs every Sutra with its test data</td><td>In the pipeline before the package goes to any server</td></tr>
+<tr><td><code>sutra deploy &lt;release.zip&gt; [--config prod.json] [--keep-others]</code></td><td>Deploys a package with this server's deployment config; Sutras of the project not in it are undeployed unless <code>--keep-others</code></td><td>Putting a release on test, UAT or production</td></tr>
+<tr><td><code>sutra history --project &lt;name&gt;</code></td><td>The packages deployed to a project, newest first</td><td>Before a rollback; audits of what went live</td></tr>
+<tr><td><code>sutra rollback --project &lt;name&gt; [--to &lt;id&gt;]</code></td><td>Deploys the package before the current one (or the one named)</td><td>A release misbehaves in production</td></tr>
+<tr><td><code>sutra doc --project &lt;name&gt; | &lt;release.zip&gt; [--format html|md]</code></td><td>Documentation from the Sutras and their step descriptions</td><td>Reviews, hand-over, change records</td></tr>
+</tbody></table>
+<pre>sutra package --project "Orders" --version 1.4.0 --note "Faster lookup" --zip --out orders-1.4.0.zip
+sutra test orders-1.4.0.zip --secrets-from-env
+sutra check orders-1.4.0.zip --server https://prod:4800 --token $SUTRA_TOKEN
+sutra deploy orders-1.4.0.zip --config prod-config.json --server https://prod:4800 --token $SUTRA_TOKEN
+sutra rollback --project "Orders" --server https://prod:4800 --token $SUTRA_TOKEN</pre>
+
+<p class="h">6. People, system accounts, secrets and connections (sutra)</p>
+<table class="t"><thead><tr><th>Command</th><th>What it does</th><th>When to use it</th></tr></thead><tbody>
+<tr><td><code>sutra user add &lt;name&gt; --role &lt;role&gt; [--project] [--system]</code></td><td>Adds a person or a system account with a role, for all projects or one</td><td>The first administrator of a headless engine; accounts for pipelines</td></tr>
+<tr><td><code>sutra user list | password | disable | enable | unlock | sign-out | delete</code></td><td>People and their access</td><td>Joiners and leavers, a locked account, a lost laptop (sign-out ends every session)</td></tr>
+<tr><td><code>sutra token create &lt;account&gt; [--expires-days n] | list | revoke</code></td><td>API tokens of a system account (shown once)</td><td>A pipeline or a script needs to call the server; rotate them on a schedule</td></tr>
+<tr><td><code>sutra secret set &lt;NAME&gt; --from-env &lt;VAR&gt;</code></td><td>Saves a secret in the vault, encrypted</td><td>Before deploying a release that needs it; when a password changes</td></tr>
+<tr><td><code>sutra connect &lt;connection&gt; --project &lt;name&gt;</code></td><td>Signs in an OAuth connection (Google, Microsoft, YouTube) on a server without the studio</td><td>Production servers whose OAuth connections must be signed in once</td></tr>
+<tr><td><code>sutra python --set &lt;path&gt; | --clear</code></td><td>Which Python runs Python steps</td><td>After installing Python on the server</td></tr>
+</tbody></table>
+<pre>sutra user add admin --role administrator --password-from-env ADMIN_PASSWORD
+sutra user add ci-orders --system --role deployer --project "Orders"
+sutra token create ci-orders --name github --expires-days 90
+sutra secret set ORDERS_DB --from-env ORDERS_DB</pre>
+
+<p class="h">7. Operating what is deployed (sutra, needs --server)</p>
+<table class="t"><thead><tr><th>Command</th><th>What it does</th><th>When to use it</th></tr></thead><tbody>
+<tr><td><code>sutra status</code></td><td>Server health, readiness and engines</td><td>Monitoring scripts; after a deploy</td></tr>
+<tr><td><code>sutra sutras list | start | stop | restart | deploy | tune</code></td><td>Deployed Sutras: their state and runs today; stopping and starting their triggers; deploying an earlier version; runs at a time, priority, retries and retention</td><td>A partner system is down (stop its Sutra), a Sutra needs more room, going back one version</td></tr>
+<tr><td><code>sutra runs list | show | resubmit | cancel</code></td><td>Runs, one run step by step, running it again from its failed steps, cancelling it</td><td>Failed runs after an outage; a run stuck waiting</td></tr>
+<tr><td><code>sutra approvals list | approve | reject</code></td><td>Steps waiting for a person, and the decision</td><td>Decisions from a script or when the Approval Center is not at hand</td></tr>
+<tr><td><code>sutra engines list | drain | restart | lead | tune | machine | name | housekeeping</code></td><td>Engines of the cluster: stop one gracefully, choose which may lead, workers and limits, the advice for the machine, clearing old runs</td><td>Patching a machine (drain it first), sizing, a full disk</td></tr>
+<tr><td><code>sutra memory list | rows | reload | clear | set | remove</code></td><td>Memory tables and their rows</td><td>Reference data changed at its source (reload), a wrong value to fix now</td></tr>
+<tr><td><code>sutra agents conversations | clear-expired</code></td><td>Conversations of published agents; removes expired ones with their memory</td><td>On a schedule, so old conversations do not pile up</td></tr>
+<tr><td><code>sutra knowledge list | sync | runs</code></td><td>Server knowledge bases with grants and managed sources; Sync now (or <code>--reindex</code> to read everything again); the last syncs of a source</td><td>After loading new documents; when answers look out of date (<a href="#ch-knowledge-admin">Knowledge admin</a>)</td></tr>
+<tr><td><code>sutra audit [--actor] [--outcome] [--from] [--csv] | retention | clear</code></td><td>Who did what and when; how long entries are kept</td><td>Security reviews, auditors, a full disk</td></tr>
+</tbody></table>
+<pre>sutra sutras list --project "Orders"
+sutra sutras stop "Order feed" --project "Orders"           # the partner system is down
+sutra runs list --status failed --limit 20
+sutra runs resubmit 7f3c...                                 # after it is back
+sutra engines drain engine-b                                # before patching that machine
+sutra knowledge sync "Company knowledge" "HR folder" --reindex
+sutra agents clear-expired</pre>
+
+<p class="h">8. Alerts and the gateway (sutra, needs --server)</p>
+<table class="t"><thead><tr><th>Command</th><th>What it does</th><th>When to use it</th></tr></thead><tbody>
+<tr><td><code>sutra alerts [list | history] | ack | resolve | check | rules | channels | test</code></td><td>Open and past alerts, acknowledging and resolving them, checking the rules now, a test message to a channel</td><td>On call; after setting up a new channel (test it)</td></tr>
+<tr><td><code>sutra gateway apps | plans | stats | log</code></td><td>Apps that call your APIs, plans, traffic and the request log</td><td>A caller says it is refused; traffic reviews</td></tr>
+<tr><td><code>sutra gateway app add | disable | enable | delete</code>, <code>key create | revoke</code></td><td>Apps and their API keys</td><td>A new partner; a leaked key (revoke, then create)</td></tr>
+<tr><td><code>sutra gateway plan set | delete</code></td><td>Request limits per minute, hour, day and month</td><td>Partners with different contracts</td></tr>
+<tr><td><code>sutra gateway firewall | proxies</code></td><td>Addresses allowed and refused; reverse proxies whose forwarded headers are believed</td><td>Blocking an abusive address; a new load balancer</td></tr>
+<tr><td><code>sutra gateway openapi</code></td><td>OpenAPI of the deployed services</td><td>Publishing the API description to a developer portal</td></tr>
+</tbody></table>
+<pre>sutra gateway app add "Partner A" --scopes "orders:read" --plan Standard
+sutra gateway key create "Partner A" --expires-days 365
+sutra gateway firewall --deny "203.0.113.9"
+sutra alerts test ops-teams</pre>
+[[tip:Good practice|On the server, use <code>sutraflow cli</code>; from elsewhere, a system account with only the roles the job needs and a token that expires.<br>Run <code>--dry-run</code> (install, upgrade) and <code>sutra check</code> (releases) before the real thing.<br>Keep the commands a change needs in the change record: they are the exact steps, and the way back.]]`,
+  },
+  {
+    id: 'knowledge-admin', title: 'Knowledge admin: server knowledge bases (2.1.5)',
+    html: `
+<p>A knowledge base (RAG) is designed in a project: its store, its vector model, its passages. <strong>Knowledge admin</strong> in the Admin Console (Server permission) turns one into a <strong>server knowledge base</strong> that other projects use without copying it, keeps parts of it in step with where the documents live, and offers it to outside assistants. The project it was made in is its <em>home project</em> and keeps full use.</p>
+<p class="h">Areas</p>
+<p>An <strong>area</strong> is a folder of sources in the knowledge base: <code>products</code> holds <code>products/P-101</code>, <code>hr</code> holds <code>hr/Leave policy.pdf</code>. Grants, managed sources and the MCP tool each name an area; empty means the whole base. Steps keep working as before: a search with no filter searches every area the project may see.</p>
+<p class="h">Who may use it</p>
+<table class="t"><thead><tr><th>Setting</th><th>Search</th><th>Add and remove</th></tr></thead><tbody>
+<tr><td>Not a server knowledge base</td><td>Home project only</td><td>Home project only</td></tr>
+<tr><td>Server, <em>Every project</em></td><td>Every project, the whole base</td><td>Home project only</td></tr>
+<tr><td>Server, <em>Granted projects only</em></td><td>Each granted project, in its granted areas</td><td>Only in areas granted with <em>May add and remove</em></td></tr>
+</tbody></table>
+<p>Removing everything, rebuilding vectors and building the search index stay with the home project and administrators. The checks are made by the engine on every step, agent tool and API call, not by the designer: a Sutra that tries to change an area it was not granted fails with the reason. A granted knowledge base appears in the project's knowledge base lists marked with its home project and areas; its own connections (the pgvector database, the AI provider for vectors) are used through it and never offered to the project.</p>
+<p class="h">Managed sources</p>
+<p>A managed source keeps one area in step with where the documents or records live. It runs on the <strong>leader engine</strong> only, on its schedule (minutes, or a cron expression with seconds first) or when you press <em>Sync now</em>, one source after another. Each sync lists the items, reads only the new and changed ones (a file whose size and time did not change is not even read; a row whose text did not change makes no vectors), and removes the items gone from the source. An item that cannot be read keeps its passages and is named in the sync history. A listing that comes back empty while the area holds items removes nothing: a missing folder or a lost connection must not empty a knowledge base.</p>
+<table class="t"><thead><tr><th>Reads</th><th>Settings</th><th>Item</th></tr></thead><tbody>
+<tr><td>Files in a server folder</td><td>Full path, file names (<code>*.pdf</code>), sub-folders, largest file</td><td>The path in the folder</td></tr>
+<tr><td>SFTP or FTP folder</td><td>A connection of the home project, folder, file names, sub-folders</td><td>The path in the folder</td></tr>
+<tr><td>SharePoint or OneDrive</td><td>A Microsoft OAuth connection, site, library, folder, file names</td><td>The path in the library; its address kept for answers</td></tr>
+<tr><td>Google Drive folder</td><td>A Google OAuth connection, folder id, file names; Docs, Sheets and Slides read as text</td><td>The file name</td></tr>
+<tr><td>Web pages</td><td>The addresses, one per line</td><td>The address</td></tr>
+<tr><td>Database query</td><td>A database connection, the query, the key column, the text (<code>{name}. {description}</code>), the details kept</td><td>The key of the row</td></tr>
+<tr><td>HTTP API (JSON)</td><td>An HTTP connection or a full address, where the list is, the key field, the text, the details</td><td>The key of the element</td></tr>
+<tr><td>Sutra of a project</td><td>The project whose Sutras write the area</td><td>Whatever those Sutras add; nothing is synced here</td></tr>
+</tbody></table>
+<p>Connections are those of the home project, with its properties and connection limits. <em>History</em> shows the last 50 syncs of a source: found, added, changed, unchanged, removed and failed, with notes. <em>Re-index</em> forgets what was read and reads every item again, after you changed the text or details of a source. <em>Remove</em> takes the source and the passages it added. The same is on the command line: <code>sutra knowledge list</code>, <code>sutra knowledge sync "&lt;base&gt;" "&lt;source&gt;" [--reindex]</code>, <code>sutra knowledge runs "&lt;base&gt;" "&lt;source&gt;"</code>.</p>
+<p class="h">One writer per area</p>
+<p>Each area has one writer: an enabled managed source, a Sutra exported from one, or one project granted <em>May add and remove</em>. Knowledge admin refuses a second writer on the same area or on an area inside it, and says who writes it now. Two writers would undo each other's work: a sync removes what another writer added.</p>
+<p class="h">Export as Sutra</p>
+<p>Database, folder and web page sources can be exported as a Sutra of ordinary steps (Timer, read, For each, Add to knowledge, Remove knowledge keeping only what is still there) in the home project, for a designer to change: another filter, more details, a step that cleans the text. The managed sync of the source stops at once, and the exported Sutra may change <em>only</em> its area, although it runs in the home project; the engine enforces it. Deploy it to run on its schedule. For SharePoint, Google Drive, SFTP and APIs, start from the knowledge feed samples and use a <em>Sutra of a project</em> source to give that project the area.</p>
+<p class="h">The MCP search tool</p>
+<p>A server knowledge base can be a search tool on an MCP server connection of its home project, for Claude, ChatGPT, Copilot and other assistants: give the tool a name (<code>search_policies</code>), a description that tells the assistant when to use it, and an area. The MCP server must have a security policy: who passes it may search, and only that area. Assistants get the closest passages with their sources and write the answer themselves; no AI model is needed on the server.</p>
+<p class="h">Using a server knowledge base</p>
+<p><strong>From a granted project.</strong> The knowledge base appears in the project's knowledge base pickers as <em>Company knowledge (server knowledge from HR project: products)</em>, with <em>may change</em> after an area granted May add and remove; it is not copied and is not in the project's explorer. Steps use it like their own:</p>
+<table><tr><th>Step</th><th>Granted to search</th><th>Granted May add and remove</th></tr>
+<tr><td>[[knowledgeSearch]], [[knowledgeAsk]], an agent's knowledge tool</td><td>Finds passages in the granted areas only; a source filter outside them fails and lists the granted areas</td><td>The same</td></tr>
+<tr><td>[[knowledgeAdd]], [[knowledgeRemove]]</td><td>Fails: <em>may search the knowledge base but not change it</em></td><td>Works when the source is in the area (<code>products/P-101</code>); outside it fails and names the area</td></tr></table>
+<p>The search runs with the home project's connections (vector store, AI provider), so a granted project needs no connection of its own. How to build the steps is in the user guide, <a href="#ch-rag-build">Build RAG step by step</a>.</p>
+<p><strong>From an assistant (MCP).</strong> With the tool on an MCP server connection at <code>/mcp/knowledge</code> and a policy that asks for an API key in <code>X-API-Key</code>, the gateway answers at <code>https://&lt;gateway&gt;/mcp/knowledge</code>. Check it with curl:</p>
+<pre>curl -X POST https://sutra.example.com/mcp/knowledge -H "content-type: application/json" -H "accept: application/json, text/event-stream" -H "X-API-Key: %KB_KEY%" -d "{\\"jsonrpc\\":\\"2.0\\",\\"id\\":1,\\"method\\":\\"tools/list\\"}"
+curl -X POST https://sutra.example.com/mcp/knowledge -H "content-type: application/json" -H "accept: application/json, text/event-stream" -H "X-API-Key: %KB_KEY%" -d "{\\"jsonrpc\\":\\"2.0\\",\\"id\\":2,\\"method\\":\\"tools/call\\",\\"params\\":{\\"name\\":\\"search_products\\",\\"arguments\\":{\\"question\\":\\"warranty of P-101\\",\\"top\\":5}}}"</pre>
+<p>The tool takes <code>question</code> and an optional <code>top</code> (1 to 20, 5 when not given) and returns <code>passages</code>, each with <code>text</code>, <code>source</code>, <code>score</code> and, when known, <code>url</code> and <code>title</code>. A wrong key gets 401. Claude Desktop (<code>claude_desktop_config.json</code>), through the <code>mcp-remote</code> bridge, with the key from an environment variable:</p>
+<pre>{ "mcpServers": { "company-knowledge": { "command": "npx",
+  "args": ["-y", "mcp-remote", "https://sutra.example.com/mcp/knowledge", "--header", "X-API-Key:\${KB_KEY}"],
+  "env": { "KB_KEY": "the key from the policy" } } } }</pre>
+<p>More on MCP connections and assistants: user guide, <a href="#ch-mcp">AI skills over MCP</a>.</p>
+<p><strong>From the command line.</strong> <code>sutra knowledge list</code> shows each knowledge base with its home project, sharing, grants and sources; <code>sutra knowledge sync "Company knowledge" "Products table"</code> asks a sync; <code>sutra knowledge runs "Company knowledge" "Products table"</code> shows its last syncs (<a href="#ch-command-guide">The command line by task</a>).</p>
+<p class="h">Setting one up</p>
+<ol>
+<li>In the designer, make the knowledge base in the project that will own it (for example <em>Company knowledge</em>): a vector database such as PostgreSQL (pgvector) for anything large.</li>
+<li>Admin Console, <strong>Knowledge admin</strong>: <em>Manage</em>, turn on <em>Server knowledge base</em>, choose who may search it.</li>
+<li>Add a managed source per area (<code>hr</code> from the HR SharePoint library every hour, <code>products</code> from the product table every 30 minutes) and press <em>Sync now</em> once; read its history.</li>
+<li>Grant the projects that need it: the shop project <code>products</code> to search, the HR project <code>hr</code> to search.</li>
+<li>Optionally offer it as an MCP tool behind a policy.</li>
+</ol>
+[[tip:Good practice|Grant areas, not the whole base: a project sees only what its callers may see.<br>Keep personal and confidential documents in their own knowledge base, not an area of a shared one.<br>After changing the vector model, Rebuild vectors in Knowledge admin; searches find little until it ends.]]`,
   },
 ];

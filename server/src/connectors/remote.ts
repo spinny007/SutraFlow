@@ -51,6 +51,8 @@ interface Remote {
   exists(p: string): Promise<false | 'file' | 'dir'>;
   rename(from: string, to: string): Promise<void>;
   remove(p: string): Promise<void>;
+  /** A folder and everything in it (removing sample data, 2.1.5). */
+  removeDir(p: string): Promise<void>;
   mkdirp(dir: string): Promise<void>;
   stat(p: string): Promise<Entry>;
   close(): Promise<void>;
@@ -88,7 +90,7 @@ function limit<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
 /** Wraps every operation of a connection in its response time limit. */
 function timed(x: Remote, ms: number): Remote {
   const w = <A extends unknown[], T>(name: string, f: (...a: A) => Promise<T>) => (...a: A) => limit(f(...a), ms, `${name} ${String(a[0] ?? '')}`.trim());
-  return { ...x, list: w('Listing', x.list), get: w('Reading', x.get), put: w('Writing', x.put), append: w('Appending to', x.append), exists: w('Checking', x.exists), rename: w('Renaming', x.rename), remove: w('Deleting', x.remove), mkdirp: w('Creating folder', x.mkdirp), stat: w('Reading details of', x.stat) };
+  return { ...x, list: w('Listing', x.list), get: w('Reading', x.get), put: w('Writing', x.put), append: w('Appending to', x.append), exists: w('Checking', x.exists), rename: w('Renaming', x.rename), remove: w('Deleting', x.remove), removeDir: w('Deleting folder', x.removeDir), mkdirp: w('Creating folder', x.mkdirp), stat: w('Reading details of', x.stat) };
 }
 
 /** Sign-in and host key problems are not retried: trying again cannot help. */
@@ -121,6 +123,7 @@ async function openSftp(r: Resource, secret: (n: string, w?: string) => string):
     exists: async p => { const t = await client.exists(p); return t === 'd' ? 'dir' : t ? 'file' : false; },
     rename: async (a, b) => { await client.rename(a, b); },
     remove: async p => { await client.delete(p); },
+    removeDir: async p => { await client.rmdir(p, true); },
     mkdirp: async dir => { if (!(await client.exists(dir))) await client.mkdir(dir, true); },
     stat: async p => { const s = await client.stat(p); return { name: path.posix.basename(p), path: p, size: Number(s.size) || 0, modifiedAt: new Date(Number(s.modifyTime) || 0).toISOString(), isDir: !!s.isDirectory }; },
     close: async () => { await client.end().catch(() => {}); },
@@ -157,6 +160,7 @@ async function openFtp(r: Resource, secret: (n: string, w?: string) => string): 
     exists: async p => { const s = await statOf(p); return s ? (s.isDir ? 'dir' : 'file') : false; },
     rename: async (a, b) => { await client.rename(a, b); },
     remove: async p => { await client.remove(p); },
+    removeDir: async p => { await client.removeDir(p); await client.cd('/'); },
     mkdirp: async dir => { await client.ensureDir(dir); await client.cd('/'); },
     stat: async p => { const s = await statOf(p); if (!s) throw new Error(`${p} does not exist`); return s; },
     close: async () => { client.close(); },

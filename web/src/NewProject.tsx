@@ -19,7 +19,7 @@ import { get, post } from './api';
 import { Modal, useCatalog, useToast } from './ui';
 
 /** One choosable item: a sample, or a Sutra of a package or project. */
-export interface Choice { id: string; title: string; sub?: string; group?: string; note?: string }
+export interface Choice { id: string; title: string; sub?: string; group?: string; note?: string; link?: { label: string; href: string } }
 
 /**
  * A searchable list of checkboxes, grouped, nothing chosen until the person chooses. "Select shown"
@@ -49,7 +49,7 @@ export function ChoiceList({ items, chosen, onChange, label }: { items: Choice[]
             {shown.filter(i => (i.group || '') === g).map(i => (
               <label key={i.id} className="choice">
                 <input type="checkbox" checked={chosen.has(i.id)} onChange={() => toggle(i.id)} />
-                <span><strong>{i.title}</strong>{i.sub && <span className="muted xs"> {i.sub}</span>}{i.note && <span className="choicenote">{i.note}</span>}</span>
+                <span><strong>{i.title}</strong>{i.sub && <span className="muted xs"> {i.sub}</span>}{i.note && <span className="choicenote">{i.note}</span>}{i.link && <a className="choicenote" href={i.link.href} download onClick={e => e.stopPropagation()}>{i.link.label}</a>}</span>
               </label>
             ))}
           </div>
@@ -59,9 +59,9 @@ export function ChoiceList({ items, chosen, onChange, label }: { items: Choice[]
   );
 }
 
-interface Sample { id: string; name: string; desc: string; palettes: string; needs?: string }
+interface Sample { id: string; name: string; desc: string; palettes: string; needs?: string; download?: { label: string; href: string } }
 export const sampleChoices = (list: Sample[]): Choice[] =>
-  list.map(s => ({ id: s.id, title: s.name, group: s.palettes.split(',')[0].trim(), sub: s.palettes.includes(',') ? `(${s.palettes})` : undefined, note: s.desc + (s.needs ? ` Needs ${s.needs}.` : '') }));
+  list.map(s => ({ id: s.id, title: s.name, group: s.palettes.split(',')[0].trim(), sub: s.palettes.includes(',') ? `(${s.palettes})` : undefined, note: s.desc + (s.needs ? ` Needs ${s.needs}.` : ''), link: s.download }));
 
 type Source = 'empty' | 'samples' | 'package' | 'copy';
 

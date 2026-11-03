@@ -34,12 +34,12 @@ const placeFields = () => [
   F('site', 'Site address', 'text', 'https://contoso.sharepoint.com/sites/Policies', { ...when('location', 'SharePoint site'), tpl: true }),
   F('library', 'Document library', 'text', '', { ...when('location', 'SharePoint site'), help: 'Empty = the default library (Documents / Shared Documents).' }),
 ];
-type Call = (o: Parameters<typeof apiCall>[1]) => ReturnType<typeof apiCall>;
-const callerFor = (connection: string, signal?: AbortSignal): Call => o => apiCall(connection, { ...o, signal });
+export type Call = (o: Parameters<typeof apiCall>[1]) => ReturnType<typeof apiCall>;
+export const callerFor = (connection: string, signal?: AbortSignal): Call => o => apiCall(connection, { ...o, signal });
 const enc = (p: string) => p.split('/').filter(Boolean).map(encodeURIComponent).join('/');
 
 /** The drive (document library or OneDrive) the settings point at. */
-async function driveOf(call: Call, cfg: { location?: string; site?: string; library?: string }) {
+export async function driveOf(call: Call, cfg: { location?: string; site?: string; library?: string }) {
   if (cfg.location === 'OneDrive') return { drive: `${GRAPH}/me/drive`, label: 'OneDrive' };
   const u = new URL(/^https?:\/\//i.test(String(cfg.site || '')) ? String(cfg.site) : `https://${cfg.site}`);
   const site = (await call({ method: 'GET', url: `${GRAPH}/sites/${u.hostname}:${u.pathname.replace(/\/+$/, '') || '/'}` })).body;
@@ -63,7 +63,7 @@ async function children(call: Call, drive: string, folder: string) {
   }
   return out;
 }
-async function listFolder(call: Call, drive: string, folder: string, recursive: boolean, pattern: RegExp | null, depth = 0): Promise<ReturnType<typeof item>[]> {
+export async function listFolder(call: Call, drive: string, folder: string, recursive: boolean, pattern: RegExp | null, depth = 0): Promise<ReturnType<typeof item>[]> {
   const out: ReturnType<typeof item>[] = [];
   for (const x of await children(call, drive, folder)) {
     if (x.folder) { if (recursive && depth < 5) out.push(...await listFolder(call, drive, [folder, x.name].filter(Boolean).join('/'), true, pattern, depth + 1)); continue; }
@@ -71,10 +71,10 @@ async function listFolder(call: Call, drive: string, folder: string, recursive: 
   }
   return out;
 }
-const wildcard = (p: string) => (p && p !== '*' ? new RegExp('^' + p.split('*').map(s => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$', 'i') : null);
+export const wildcard = (p: string) => (p && p !== '*' ? new RegExp('^' + p.split('*').map(s => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$', 'i') : null);
 
 /** Downloads a file: its metadata gives a short-lived download address, fetched without the token. */
-async function download(call: Call, drive: string, path: string, signal?: AbortSignal) {
+export async function download(call: Call, drive: string, path: string, signal?: AbortSignal) {
   const meta = (await call({ method: 'GET', url: `${drive}/root:/${enc(path)}` })).body;
   if (meta.folder) throw new Error(`${path} is a folder`);
   const dl = meta['@microsoft.graph.downloadUrl'];

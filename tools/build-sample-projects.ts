@@ -56,7 +56,7 @@ const SAMPLE_PROJECTS = [
     name: 'AI document assistant',
     description: 'RAG over a folder of documents: every 15 minutes the PDF, Word, PowerPoint and Markdown files of the documents folder are read into a knowledge base (changed files again, deleted ones removed), and the documents answer as a REST API, an MCP tool for AI assistants such as Claude, and a chat agent. Sample documents of a tea shop are included.',
     samples: ['agentdocs'],
-    files: () => sampleDocuments().map(([n, b]) => [`files/documents/${n}`, b] as [string, Buffer]),
+    files: () => sampleDocuments().map(([n, b]) => [`files/sample_documents/${n}`, b] as [string, Buffer]),
   },
 ];
 

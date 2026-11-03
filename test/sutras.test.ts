@@ -267,7 +267,7 @@ test('more samples across the palettes run as tests (REST, files, database, XML,
   assert.equal(r.state.outputs['Send to channel'].delivered, 0);
 
   r = await ok(doc('Sample: Counter, Wait and Sutra variables'));
-  assert.match(logs(r), /batch-\d{4}: order 1 today, counter sample-orders-/);
+  assert.match(logs(r), /batch-\d{4}: order 1 today, counter sample_orders_/);
 
   // These need a connection, a local model or release rights: they are added and pass validation.
   for (const n of ['Sample: Local AI with Ollama', 'Sample: Email a report', 'Sample: Queue in and out']) {
@@ -286,8 +286,9 @@ test('samples for every starter and palette: timer, file trigger, text formats, 
 
   // Timer: archives the CSV files of the folder.
   fs.writeFileSync(path.join(dir, 'old.csv'), 'a,b\n1,2');
-  const timer = doc('Sample: Timer nightly archive');
-  timer.nodes[0].config.payload = JSON.stringify({ folder: dir.split(path.sep).join('/') });
+  // The samples' folders are project properties (${files}/sample_...): here, folders of the test.
+  const at = (d: any, from: string, to: string) => JSON.parse(JSON.stringify(d).split(from).join(to.split(path.sep).join('/')));
+  const timer = at(doc('Sample: Timer nightly archive'), '{{gv.SAMPLE_CSV_FOLDER}}', dir);
   let r = await ok(timer);
   assert.match(logs(r), /1 files archived/);
   assert.equal(fs.readdirSync(path.join(dir, 'archive')).length, 1);
@@ -296,8 +297,7 @@ test('samples for every starter and palette: timer, file trigger, text formats, 
   const inbox = path.join(dir, 'inbox');
   fs.mkdirSync(inbox);
   fs.writeFileSync(path.join(inbox, 'orders.csv'), 'id,amount\nA-1,300');
-  const ft = doc('Sample: File trigger CSV drop folder');
-  for (const n of ft.nodes) { if (n.config.folder === 'C:/sutra/inbox') n.config.folder = inbox; else if (n.config.folder) n.config.folder = path.join(dir, 'clean'); }
+  const ft = at(at(doc('Sample: File trigger CSV drop folder'), '{{gv.SAMPLE_INBOX_FOLDER}}', inbox), '{{gv.SAMPLE_CSV_FOLDER}}', dir);
   r = await ok(ft);
   assert.deepEqual(r.state.outputs['Largest first'].items.map((x: any) => x.id), ['A-2', 'A-1', 'A-3']);
   assert.ok(fs.existsSync(path.join(inbox, 'processed', 'orders.csv')));

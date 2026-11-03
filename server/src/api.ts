@@ -35,7 +35,7 @@ import { engine, runState } from './engine/engine.js';
 import * as flows from './flows.js';
 import { PALETTES } from './palettes/index.js';
 import { describeWsdl } from './palettes/soap.js';
-import { RESOURCE_KINDS, listResources, getResource, saveResource, deleteResource, inProject } from './resources.js';
+import { RESOURCE_KINDS, listResources, getResource, saveResource, deleteResource, inProject, knowledgeGranted } from './resources.js';
 import { getSecret, listSecrets, setSecret, deleteSecret, requireSecret } from './secrets.js';
 import { PIPES, resolve } from './template.js';
 import * as auth from './auth.js';
@@ -77,7 +77,7 @@ import { clusterStatus } from './cluster.js';
 import { prometheusText } from './metrics.js';
 import { tracingStats } from './tracing.js';
 import { housekeeping, clearTestRuns } from './housekeeping.js';
-import { buildBundle, readBundle, configFor } from './bundles.js';
+import { buildBundle, readBundle, configFor, folderFiles, zipFiles } from './bundles.js';
 import { sutraDocumentation, projectDocumentation } from './docs.js';
 import { buildPackage, checkPackage, deployPackage, packageHistory, readPackage, rollbackPackage, testPackage, importPackage, copyProject } from './packages.js';
 
@@ -439,6 +439,31 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   // Tuning: engine values for the cluster or one engine, and per deployed Sutra.
   app.get('/api/console/tuning', async () => ({ fields: { engine: ENGINE_FIELDS, sutra: SUTRA_FIELDS }, ...engineTuning() }));
   // This machine and the settings recommended for it (sizing.ts).
+  // Agent conversations (2.1.5): active and expired per agent; administrators clear expired ones with their memory.
+  app.get('/api/console/conversations', async () => {
+    const { conversationSummary } = await import('./security/conversation.js');
+    return conversationSummary();
+  });
+  app.post('/api/console/conversations/clear-expired', async (req: any) => {
+    const { clearExpiredConversations } = await import('./security/conversation.js');
+    return clearExpiredConversations(req.body?.agent ? String(req.body.agent) : undefined);
+  });
+  // Knowledge admin (2.1.5): server knowledge bases, grants to projects and areas, managed sources, sync, MCP tool, export as a Sutra.
+  const ka = () => import('./ai/knowledge-admin.js');
+  const kaWrap = async <T>(fn: () => T | Promise<T>) => { try { return await fn(); } catch (e: any) { throw bad(e.message); } };
+  app.get('/api/console/knowledge', async () => { const k = await ka(); return { bases: k.knowledgeOverview(), projects: k.grantableProjects(), kinds: k.SOURCE_LABELS, exportable: k.EXPORTABLE, syncing: k.syncing() }; });
+  app.get('/api/console/knowledge/:id/figures', async (req: any) => kaWrap(async () => (await ka()).knowledgeFigures(req.params.id)));
+  app.get('/api/console/knowledge/:id/connections', async (req: any) => kaWrap(async () => (await ka()).sourceConnections(req.params.id)));
+  app.put('/api/console/knowledge/:id', async (req: any) => kaWrap(async () => (await ka()).setKnowledgeAdmin(req.params.id, req.body || {}, caller(req).u)));
+  app.post('/api/console/knowledge/:id/rebuild', async (req: any) => kaWrap(async () => (await ka()).rebuildVectors(req.params.id)));
+  app.put('/api/console/knowledge/:id/grants', async (req: any) => kaWrap(async () => (await ka()).setGrant(req.params.id, req.body || {}, caller(req).u)));
+  app.post('/api/console/knowledge/:id/grants/remove', async (req: any) => kaWrap(async () => (await ka()).removeGrant(req.params.id, String(req.body?.projectId || ''), String(req.body?.area || ''))));
+  app.post('/api/console/knowledge/:id/sources', async (req: any) => kaWrap(async () => (await ka()).saveSource(req.params.id, { ...(req.body || {}), id: undefined }, caller(req).u)));
+  app.put('/api/console/knowledge/:id/sources/:sid', async (req: any) => kaWrap(async () => (await ka()).saveSource(req.params.id, { ...(req.body || {}), id: req.params.sid }, caller(req).u)));
+  app.delete('/api/console/knowledge/:id/sources/:sid', async (req: any) => kaWrap(async () => (await ka()).deleteSource(req.params.sid, String(req.query?.passages) === 'remove')));
+  app.post('/api/console/knowledge/:id/sources/:sid/sync', async (req: any) => kaWrap(async () => (await ka()).requestSync(req.params.sid, !!req.body?.reindex)));
+  app.get('/api/console/knowledge/:id/sources/:sid/runs', async (req: any) => kaWrap(async () => (await ka()).syncRuns(req.params.sid)));
+  app.post('/api/console/knowledge/:id/sources/:sid/export', async (req: any) => kaWrap(async () => (await ka()).exportSource(req.params.sid, caller(req).u)));
   // Memory tables: figures per table on this engine, reload and clear.
   app.get('/api/console/memory', async (req: any) => {
     // Filters: project, a name containing a text, failsafe or memory only.
@@ -592,6 +617,12 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   app.get('/api/engine-variables', async () => projects.listEngineVariables());
   /** Adds the sample Sutras (For-Each mapping, loops, sub-Sutra, try / catch) to a project. */
   app.get('/api/samples', async () => SAMPLES);
+  /** The website of the chat sample (Sutra Sample Shop), as a zip with its README (2.1.5). */
+  app.get('/api/samples/sutra-sample-shop.zip', async (_req, reply) => {
+    const dir = path.join(rootDir, 'samples', 'sutra-sample-shop');
+    if (!fs.existsSync(dir)) return reply.code(404).send({ error: 'The sample website is not in this installation (samples/sutra-sample-shop)' });
+    return reply.type('application/zip').header('content-disposition', 'attachment; filename="sutra-sample-shop.zip"').send(zipFiles(folderFiles(dir, 'sutra-sample-shop')));
+  });
   app.post('/api/projects/:id/samples', async (req: any) => {
     projects.requireProject(req.params.id);
     return addSamples(req.params.id, Array.isArray(req.body?.ids) ? req.body.ids.map(String) : undefined);
@@ -950,7 +981,16 @@ export async function buildAdmin(): Promise<FastifyInstance> {
   });
 
   // ---------- resources & secrets ----------
-  app.get('/api/resources', async (req: any) => { const ok = seen(req); return listResources(req.query?.kind, req.query?.projectId).filter((r: any) => ok(r.project_id)); });
+  app.get('/api/resources', async (req: any) => {
+    const ok = seen(req);
+    const own = listResources(req.query?.kind, req.query?.projectId).filter((r: any) => ok(r.project_id));
+    // Server knowledge bases granted to the project (Knowledge admin, 2.1.5): offered in its pickers, changed only in their home project.
+    const pid = req.query?.projectId ? String(req.query.projectId) : '';
+    if (!pid || (req.query?.kind && req.query.kind !== 'aiKnowledge')) return own;
+    const granted = listResources('aiKnowledge').filter(r => r.project_id && r.project_id !== pid && knowledgeGranted(r.id, pid))
+      .map(r => ({ ...r, granted: { home: projects.getProject(r.project_id!)?.name || '', areas: q.all<{ area: string; can_write: number }>('select area, can_write from kb_grants where kb_id = ? and project_id = ?', r.id, pid).map(g => ({ area: g.area, write: !!Number(g.can_write) })) } }));
+    return [...own, ...granted];
+  });
   /** Test connection: tries the settings as sent (saved or not) and reports the result. */
   app.post('/api/resources/test', async (req: any) => {
     if (!req.body?.kind) throw bad('kind is required');

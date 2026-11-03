@@ -101,6 +101,8 @@ export interface Field {
   /** Changing this field changes the step's output ports. */
   ports?: boolean;
   group?: string;
+  /** A resource left empty is a choice of its own (such as built-in rules instead of an AI model): samples leave it empty (2.1.5). */
+  emptyAllowed?: boolean;
   placeholder?: string;
   required?: boolean;
   /** For type mapping: the sibling schema field that defines the target tree. */

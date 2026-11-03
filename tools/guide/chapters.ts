@@ -270,7 +270,7 @@ const ALL_CHAPTERS: Chapter[] = [
 <p>A connection that is not taken counts as a skipped branch, so a [[merge]] after it still continues. For many routes, or for routes on the same message used in several places, a [[router]] activity keeps them in one place.</p>
 <p class="h">Sample Sutras</p>
 <p>Samples that need a connection get one in the project, named <em>Sample ...</em> (Sample MySQL, Sample SFTP, Sample SMTP and so on), already chosen in their activities. Fill in its address, user and password, click <strong>Test connection</strong>, and the sample runs. Adding more samples later reuses these connections. The SQL samples use Laragon's MySQL defaults (127.0.0.1:3306, user root, no password).</p>
-<p>Click <strong>+ New Sutra</strong>, then <strong>Choose samples</strong> to tick the ones you want, or <strong>Add all</strong>. Test each one and open its activities' Input and Output tabs to see how it is built. Samples that write files use <code>C:/sutra/samples</code>; change the folder to suit your machine.</p>
+<p>Click <strong>+ New Sutra</strong>, then <strong>Choose samples</strong> to tick the ones you want, or <strong>Add all</strong>. Test each one and open its activities' Input and Output tabs to see how it is built. Samples that write files use folders named <code>sample_...</code> in the project's files folder (project properties such as <code>SAMPLE_CSV_FOLDER</code>). Everything the samples store is named <code>sample_</code>, so an administrator can remove the samples with their data from the installer (<em>Samples</em>).</p>
 <p>To learn the formula language, start with <em>Sample: Functions</em>: every function on one order, a Map data step per group (text, conversion, encoding, variables, utility, dates, numbers, logic, sequences, lists) and a Log of its results after each. Open a Map data step to read the formulas, its Output tab for the values.</p>
 <p>Samples are built from SutraFlow's code each time they are added, so a new installation always gets the samples of its release, and every sample added becomes new Sutras with new ids in that project. A sample added to a project is the project's own copy: change it freely; upgrading SutraFlow leaves it as it is. To see a newer release's version, add the sample again: it goes beside the old one, named with a number (<em>Sample: Functions 2</em>); delete the old one when you no longer need it. Samples are for learning and as starting points: test and harden what you build from them before production (<a href="#ch-dg-packaging">Sutra Design Guide, Packaging</a>).</p>
 [[samples]]
@@ -355,7 +355,7 @@ const ALL_CHAPTERS: Chapter[] = [
 <li><strong>JSON schema validation pipeline</strong>: Parse JSON, Map JSON Data, Validate fields and Render JSON share a contract with required fields, an id pattern, email format, decimal/integer bounds, booleans, enum lists, unique items and no extra properties.</li>
 <li><strong>XML schema-backed mapping</strong>: Map XML Data builds a Receipt against an XSD and Render XML serializes it. <strong>XML schema validation pipeline</strong> exercises qualified namespaces, a reusable/repeating choice group, optional Age, a required enum attribute, XSD pattern, decimal bounds, boolean and date. Parse XML normalizes prefixes; Render XML uses the schema namespace, then Validate fields checks the serialized text.</li>
 <li><strong>JSON/XML schema expected rejection</strong>: deliberately invalid payloads take the invalid branch and log problems. A completed run means the rejection was handled correctly, not that invalid data passed. An unexpected valid branch throws an error.</li>
-<li><strong>Read JSON/XML file with schema validation</strong>: the first step writes a fixture, then Read file has <em>Strict schema validation</em> checked and the matching contract selected. Inspect <code>data</code> on the strict read output. Uncheck to keep parsing/mapping without contract enforcement. The files are <code>customer.json</code> and <code>customer.xml</code> under administrator-editable project property <code>VALIDATION_FOLDER</code> (default <code>&#36;{files}/validation-samples</code>); rerunning overwrites those sample files. To exercise rejection, read a malformed-contract file directly rather than rerunning the fixture writer first.</li>
+<li><strong>Read JSON/XML file with schema validation</strong>: the first step writes a fixture, then Read file has <em>Strict schema validation</em> checked and the matching contract selected. Inspect <code>data</code> on the strict read output. Uncheck to keep parsing/mapping without contract enforcement. The files are <code>customer.json</code> and <code>customer.xml</code> under administrator-editable project property <code>VALIDATION_FOLDER</code> (default <code>&#36;{files}/sample_validation</code>); rerunning overwrites those sample files. To exercise rejection, read a malformed-contract file directly rather than rerunning the fixture writer first.</li>
 <li><strong>Validated REST service</strong>, <strong>Validated HTTP client</strong> and <strong>Validated SOAP service</strong>: deploy the REST service before running the HTTP client. The REST route is <code>/samples/validation/customer</code>; SOAP is <code>/samples/validation/soap</code>, operation <code>User</code> in <code>urn:sutra:validation</code>. Invalid ingress gets 400/Client fault before a run starts. These local demonstration services have no authentication: choose an API security policy before exposing them publicly.</li>
 </ul>
 <p><strong>Preview mapped result</strong> evaluates the whole mapping and shows JSON or XML without running the selected activity or its downstream steps. It refreshes after edits. It uses the latest available test scope, labelled with its run id/time and a stale-data reminder; alternatively enter JSON sample input in the preview. Scope is limited to 256 KB and rendered output to 1 MB. Preview type mismatches are warnings about that sample, not proof about every possible runtime value.</p>
@@ -522,7 +522,19 @@ const ALL_CHAPTERS: Chapter[] = [
 <li>Editing after a deploy changes only the draft until you deploy again.</li>
 <li>Other systems start a deployed Sutra with the Run API: <code>POST /api/flows/{flowId}/run?wait=30000</code> with <code>{ "input": { ... } }</code>.</li>
 </ul>
-<p><strong>Deploy</strong> is for development and system test servers. A server with <code>SUTRA_ENVIRONMENT=production</code> refuses it: production receives whole projects as release zips (Releases, below), so what runs there is always a reviewed, versioned package.</p>`,
+<p><strong>Deploy</strong> is for development and system test servers. A server with <code>SUTRA_ENVIRONMENT=production</code> refuses it: production receives whole projects as release zips (Releases, below), so what runs there is always a reviewed, versioned package.</p>
+<p class="h">Exporting a Sutra application from the command line</p>
+<p>A Sutra application is a project: its Sutras, connections, schemas and properties. Designers export it as a package or a release zip with the <code>sutra</code> command (on the studio machine, <code>sutraflow cli</code> runs it already signed in), the same as <em>Project, Configuration, Releases</em> in the designer:</p>
+<table class="t"><thead><tr><th>To</th><th>Command</th></tr></thead><tbody>
+<tr><td>Export the whole project as a release zip (package, deployment config to fill in, README, documentation)</td><td><code>sutraflow cli package --project "Orders" --version 1.4.0 --note "Faster lookup" --zip --out orders-1.4.0.zip</code></td></tr>
+<tr><td>Export only some Sutras, with the connections and schemas they use</td><td><code>sutraflow cli package --project "Orders" --version 1.4.1 --sutras "Order lookup,Order feed" --zip</code></td></tr>
+<tr><td>Export the package file alone</td><td><code>sutraflow cli package --project "Orders" --version 1.4.0 --out orders-1.4.0.sutra</code></td></tr>
+<tr><td>Export from the project's Git repository, with no server (CI)</td><td><code>sutra package --from-git https://github.com/acme/orders.git --ref v1.4.0 --version 1.4.0 --out orders-1.4.0.zip</code></td></tr>
+<tr><td>Run every Sutra of the export with its test data in a throw-away server</td><td><code>sutra test orders-1.4.0.zip --secrets-from-env</code></td></tr>
+<tr><td>Make its documentation</td><td><code>sutra doc orders-1.4.0.zip --format html --out orders-1.4.0.html</code></td></tr>
+<tr><td>From a studio on another machine</td><td>add <code>--server https://studio:4800 --token $SUTRA_TOKEN</code> (an API token of a system account)</td></tr>
+</tbody></table>
+<p><strong>Deploying the export on test and production servers</strong> is an administrator's task: secrets in the server's vault, its deployment config, <code>sutra check</code>, <code>sutra deploy</code>, history and rollback are in the Administration Guide, <a href="#ch-deploy-releases">Receiving releases on a server</a>, and every command with when to use it in <a href="#ch-command-guide">The command line by task</a>.</p>`,
   },
   {
     id: 'documentation', title: 'Documenting Sutras',
@@ -1048,6 +1060,35 @@ ws.onopen = () =&gt; ws.send(JSON.stringify({ type: 'watch', orderId: 'A-1001' }
 </ol>`,
   },
   {
+    id: 'dashboards', title: 'Dashboards (2.1.5)',
+    html: `
+<p>A dashboard is a page of charts on the gateway, made by a Sutra: its data comes from your queries and APIs, its charts are drawn in the browser by Apache ECharts, which SutraFlow serves itself (no CDN, works offline).</p>
+<p class="h">Build one</p>
+<ol>
+<li>Start the Sutra with [[dashboardPage]]: a name (the page is <code>/dash/&lt;name&gt;</code>), a title, who may see it (a security policy), how often it refreshes, and whether the results are the same for everyone or kept per caller.</li>
+<li>Query the data: [[dbQuery]], [[mongoFind]], [[httpRequest]], a memory table, anything that gives rows. Branches run in parallel.</li>
+<li>A [[chart]] step per chart: rows, chart type (bar, horizontal bar, line, area, pie, donut, scatter, a number, a KPI card, a gauge, a table), the category field and the value fields, grouping, sorting, a limit, a unit and colours.</li>
+<li>A [[merge]] when there are branches, then [[dashboardReply]] with the charts in the order the page shows them.</li>
+<li>Deploy, and open <code>http://&lt;gateway&gt;/dash/&lt;name&gt;</code>.</li>
+</ol>
+<p class="h">Filters (slicers)</p>
+<p>The Dashboard page's <em>Filters</em> put controls at the top of the page, one per row: the field, then <code>list</code>, <code>multi list</code>, <code>date range</code>, <code>number range</code> or <code>search</code>; fixed choices after a colon (<code>list: North, South</code>). Without fixed choices, a list offers the <em>Filter choices</em> of [[dashboardReply]] (such as the rows of <code>SELECT DISTINCT region FROM orders</code>), else the values the charts show. The chosen values are in the page address (a link opens the same view), the page asks for new data at once, and a click on a bar, a slice or a table row sets the filter of that chart's category field; a second click clears it.</p>
+<ul>
+<li><strong>On a database</strong>: use <code>{{trigger.params.&lt;field&gt;}}</code> in the SQL; it is a bound parameter, never pasted into the SQL. Every filter is there, empty when nothing is chosen: <code>WHERE ({{trigger.params.region}} = '' OR region = {{trigger.params.region}})</code>. A multi list holds the values joined by commas (MySQL <code>FIND_IN_SET(category, {{trigger.params.category}}) &gt; 0</code>, PostgreSQL <code>category = ANY(string_to_array({{trigger.params.category}}, ','))</code>); a range is <code>&lt;field&gt;_from</code> and <code>&lt;field&gt;_to</code>. Return dates as text (<code>DATE_FORMAT</code>, <code>to_char</code>) so months do not shift with time zones, and connect the query's <em>empty</em> port to the charts too.</li>
+<li><strong>On JSON</strong> (an API, a file, a memory table): Chart steps apply <code>{{trigger.filters}}</code> to their rows themselves.</li>
+</ul>
+<p class="h">Raw rows, KPI cards and AI</p>
+<p>A Chart step groups raw rows by itself: <em>Group and add up</em> (sum, average, count, distinct count, min, max), <em>Dates by</em> (day, week, month, quarter, year) and <em>Split into series by</em> a field; nested fields are written <code>customer.city</code>, and <em>List inside</em> finds the list in an API answer. A <strong>KPI card</strong> shows the total, or the latest period with the change against the one before (or a value from another query), a small trend line and how far it is from a target. [[chartsFromAi]] plans a set of charts for rows it has never seen: an AI model chooses from the field names (and a few rows, when allowed), or built-in rules without a model; every chart is checked and the numbers come from the rows.</p>
+<p class="h">Refresh and cache</p>
+<p>The page asks for data every <em>Refresh every</em> seconds. The answer is kept on the server for that time and shared: a hundred viewers within a minute cause one run, and viewers arriving while a run is in progress wait for it rather than starting another. With <em>Results are the same for: each caller</em>, each signed-in caller has results of their own (a dashboard that shows each customer their own orders). The page's query parameters reach the Sutra as <code>{trigger.params}</code> and are part of the cache key.</p>
+<p class="h">Who may see it</p>
+<p>The page itself holds no data; the data request (<code>/dash/&lt;name&gt;/data</code>) goes through the dashboard's security policy like any API: API key, gateway app, a website's login (JWT) or single sign-on. To put a dashboard on another web page, add <code>&lt;script src="http://&lt;gateway&gt;/dash/&lt;name&gt;/embed.js" data-height="720px"&gt;&lt;/script&gt;</code>; a page with its own login sets <code>window.SutraDashboard = { token: () =&gt; accessToken }</code> first, as for the chat button. With no policy, anyone who reaches the gateway sees it.</p>
+<p class="h">AI-suggested charts</p>
+<p>An [[aiPrompt]] can be asked to choose the chart for some rows (type, title, category, values, colours) and answer as JSON; put that JSON in the Chart step's <em>Settings from a step</em>. Only known settings, chart types and palettes, and fields that are in the rows are used; anything else is refused, logged as a warning, and the step's own settings are used. The data always comes from the rows, never from the model.</p>
+<p class="h">Export</p>
+<p>Every chart has <strong>PNG</strong> and <strong>SVG</strong> buttons; numbers and tables are text on the page. <em>Sample: Sales dashboard</em> (New Sutra, Samples) has five charts from SQL queries and an AI-style suggestion that is partly refused; <em>Sample: Sales dashboard on a database</em> reads a MySQL orders table with filters for region, categories and dates, KPI cards and click-to-filter; <em>Sample: Dashboard from JSON</em> groups an API answer by itself, filters it, and adds charts planned by Charts from AI.</p>`,
+  },
+  {
     id: 'files', title: 'Files',
     html: `
 <p>File activities read and write text, CSV rows, lines, JSON, XML and binary (base64) in UTF-8, UTF-16, ISO-8859-1, Windows-1252 and other encodings.</p>
@@ -1275,12 +1316,22 @@ ws.onopen = () =&gt; ws.send(JSON.stringify({ type: 'watch', orderId: 'A-1001' }
 <tr><td>A2A</td><td><code>/a2a/&lt;name&gt;</code> and its agent card</td><td>Other agents</td></tr>
 </tbody></table>
 <p>Work that takes longer than <em>Answer within</em>, or waits for a person, answers at once with a job id; the caller fetches the answer later with it (<code>GET /chat/&lt;name&gt;/jobs/&lt;id&gt;</code>, the job argument of the MCP tool, <code>tasks/get</code> in A2A, or the message <code>status &lt;id&gt;</code> in the OpenAI API). The same agent can run on several servers; point them at one PostgreSQL database to share sessions.</p>
+<p class="h">Conversations and who is chatting (2.1.5)</p>
+<ul>
+<li><strong>Conversation tokens</strong>: every answer carries a token signed by SutraFlow (<code>sessionId</code> in the chat API, <code>X-Session-Id</code> for OpenAI-compatible clients, <code>contextId</code> in A2A, <code>session</code> for the MCP tool). Send it back to continue. It continues the conversation only for the caller who started it, and only for the agent channel's <em>Conversation lasts</em> time (24 hours by default); a missing, altered, someone else's or expired token, or a session id a client made up, starts a new conversation. The Sutra sees the conversation's id as <code>{trigger.sessionId}</code>. The chat page and widget keep the token for you. Clients that made up their own session ids before 2.1.5 must send back the token they are given.</li>
+<li><strong>Who is chatting</strong>: with a JWT policy on the entry point, the caller's verified claims and scopes reach the Sutra: <code>{trigger.caller.subject}</code>, <code>{trigger.caller.claims.name}</code>, <code>{trigger.caller.claims.role}</code>, <code>{trigger.caller.scopes}</code>. Branch on them (customers and support staff) and filter data by the subject.</li>
+<li><strong>A website's login in the chat button</strong>: a page with its own sign-in sets <code>window.SutraChat = { token: () =&gt; accessToken }</code> (a value, or a function that may fetch a fresh one) before the widget script. The chat sends it as a bearer token and asks again when it expires. Sample <em>Chat for customers and support</em> comes with a PHP website (<code>samples/sutra-sample-shop</code>) that does this; the Sutra Design Guide's <a href="#ch-dg-bp-chat">chat blueprint</a> explains the design.</li>
+<li><strong>Visitors</strong> (no policy) get a signed identity in their browser that expires after 30 days (<code>SUTRA_VISITOR_DAYS</code>) and is renewed while they keep coming back.</li>
+<li><strong>Expired conversations</strong> keep their memory until an administrator clears them: Admin Console, <em>Agent conversations</em>, or <code>sutra agents clear-expired</code>.</li>
+</ul>
 <p class="h">Knowledge bases (RAG)</p>
 <p>A knowledge base keeps documents as passages with vectors, so agents find them by meaning. Store them built-in or in a folder, or in PostgreSQL with pgvector, Qdrant, Chroma or Pinecone. Vectors come from a model (Ollama nomic-embed-text, OpenAI, Gemini) or, offline, from built-in word vectors.</p>
 <ul>
+<li><strong>From a database or an API</strong> (2.1.5): a timer, an [[dbQuery]] (or [[httpRequest]]) of the rows people may see, one text per row with its details, [[knowledgeAdd]] with a source per row (<code>products/&lt;id&gt;</code>) and <em>Same text as before: skip</em>, then [[knowledgeRemove]] <em>keep only these sources</em> for rows that went away. Sample <em>Knowledge feed from a database</em> does it with a MySQL product table; the Sutra Design Guide's <a href="#ch-dg-bp-knowledge">knowledge blueprint</a> has the rules and a Joomla example.</li>
 <li><strong>Fill it</strong> with a feed Sutra: a source ([[msFilesTrigger]], [[googleDriveTrigger]], [[fileTrigger]], [[remoteTrigger]], a list of web pages) &rarr; [[docText]] &rarr; [[knowledgeAdd]]. A removed file goes to [[knowledgeRemove]].</li>
 <li><strong>Use it</strong> with [[knowledgeAsk]] (answers only from the documents, with sources), [[knowledgeSearch]], or an agent with the knowledge base set.</li>
 <li><strong>Who sees what</strong>: store details with each source (for example <code>groups = finance</code>) and filter on them when searching.</li>
+<li><strong>Server knowledge bases</strong> (2.1.5): an administrator can share a knowledge base with other projects in the Admin Console (<a href="#ch-knowledge-admin">Knowledge admin</a>), for the whole base or areas of it (<code>products</code>, <code>hr</code>), to search or also to change, and keep areas in step with folders, SharePoint, Google Drive, web pages or a database without a feed Sutra. In a granted project it appears in the <em>Knowledge base</em> list with its home project and areas; the engine refuses a step that searches or changes outside them.</li>
 </ul>
 [[tip:Guidelines|Put rules before the agent: route refunds, cancellations and other decisions with an If, not by asking the model to choose.<br>Give small models few tools and short instructions; they look things up well but may wander.<br>Protect public entry points with a policy that has a rate limit.]]`,
   },
@@ -1320,7 +1371,7 @@ sudo -u postgres psql -d sutraflow -c "CREATE EXTENSION IF NOT EXISTS vector;"</
 </tbody></table>
 <p><em>Test connection</em> makes a vector, reaches the store and tells how many passages and sources it holds.</p>
 <p class="h">Step 4: the documents folder</p>
-<p>Add a project variable <code>DOCS_FOLDER</code> with the folder to read, for example <code>D:/Shared/Policies</code> or <code>/srv/docs</code>. The value <code>\${files}/documents</code> means the project's own files folder (<code>&lt;data&gt;/files/&lt;project&gt;/documents</code>): release zips carry files there, so the same project works on every server. Production overrides the value in its deployment config.</p>
+<p>Add a project variable <code>DOCS_FOLDER</code> with the folder to read, for example <code>D:/Shared/Policies</code> or <code>/srv/docs</code>. The value <code>\${files}/sample_documents</code> (the sample's) means the project's own files folder (<code>&lt;data&gt;/files/&lt;project&gt;/sample_documents</code>): release zips carry files there, so the same project works on every server. Production overrides the value in its deployment config.</p>
 <p class="h">Step 5: the feed, one document</p>
 <p>Make a Sutra <em>Add one document to knowledge</em> that handles one file; the folder feed calls it for each. With the file as its trigger, every step can say <code>{{trigger.relativePath}}</code>.</p>
 <ol>
@@ -1759,6 +1810,7 @@ sutra package --project "Orders" --version 1.4.0 --out orders-1.4.0.zip
 sutra package --from-git https://github.com/acme/orders.git --ref v1.4.0 --version 1.4.0 --out orders-1.4.0.zip</pre>
 <p><code>--sutras "A,B"</code> takes only those Sutras with the connections and schemas they use. From Git every Sutra in the repository is deployed by the release; the package records the repository (without credentials), the ref and the commit.</p>
 <p class="h">Prepare the target</p>
+<p>The steps below are usually done by the administrators of the target server; the Administration Guide covers them in full: <a href="#ch-deploy-releases">Receiving releases on a server</a> and <a href="#ch-command-guide">The command line by task</a>.</p>
 <ol>
 <li><strong>Secrets</strong>: add every name the README lists to the target's vault, from a secret store or the pipeline: <code>sutra secret set ORDERS_DB --from-env ORDERS_DB --server ... --token ...</code>, or Resources &rarr; Secrets.</li>
 <li><strong>Deployment config</strong>: hosts, folders and users of this environment; keep one file per environment in the pipeline or a config repository, with <code>\${env:...}</code> for values the server's environment gives.</li>
@@ -1987,6 +2039,8 @@ sutra deploy shop-1.4.0.sutra --server https://prod:4800 --token $SUTRA_TOKEN</p
 <ul>
 <li><strong>Overview</strong>: tiles for engines, deployed Sutras, runs of the last 24 hours, waiting approvals, the work queue and the gateway certificate, and the latest failed runs with <em>Resubmit</em>. Test runs from the designer are not counted.</li>
 <li><strong>Applications</strong>: every deployed project with its package version and its Sutras: version, started or stopped, what starts it (REST path, SOAP path, timer, skill), runs of the last day and the last run. <em>Stop</em> makes the Sutra's triggers start nothing (its address answers 404, timers and listeners pause) while it stays deployed; <em>Start</em> brings it back on every engine; <em>Restart</em> does both at once, so its address, timers and listeners start fresh with the current connections. <em>Runs</em> opens its runs with every step's result, <em>Resubmit</em> and <em>Cancel run</em>; <em>Versions</em> deploys an earlier version; <em>Tuning</em> sets how the Sutra runs (below); <em>Package history</em> rolls the project back to an earlier package.</li>
+<li><strong>Agent conversations</strong> (2.1.5; View permission to see, Server permission to clear): the conversations of every published agent, active and expired, with their messages and the time of the last one. A conversation token continues a conversation only until it expires (the agent channel's <em>Conversation lasts</em>); expired conversations keep their AI memory in the database until <em>Clear expired</em> removes them, with their messages and summaries, for one agent or all (<code>sutra agents clear-expired [--agent name]</code>). Active conversations are never touched. It is recorded in the audit log.</li>
+<li><strong>Knowledge admin</strong> (2.1.5; Server permission): every knowledge base with its home project; share one as a server knowledge base with every project or granted projects and areas, managed sources that keep areas in step (Sync now, Re-index, History, Export as Sutra), the MCP search tool and Rebuild vectors. See <a href="#ch-knowledge-admin">Knowledge admin</a>.</li>
 <li><strong>Traceability</strong> (View permission): every project you may see with its runs by outcome (done, failed, cancelled, open) over the last hour to 90 days. Open a project for its Sutras, deployed or not, with their ids, success rate, last run and last failure; open a Sutra for its runs. <em>Find a run</em> takes a run id (or its first characters), who started it, or a value anywhere in the data it started with, such as an order number. A run shows its ids (run, Sutra, project, each with Copy), who started it, what it started with, every step with its status, try, time, engine, error and full input and output (opened on request), its reply and log, and the runs it called or was called by (Call Sutra), each a click away. <em>Download</em> saves the whole run as JSON. <strong>Started by</strong> is a person (their account, for Run in the designer or Admin Console), an API client (the security policy's method and the caller it names: the token's subject, the API key's name or the user, with the address and gateway app; <em>anonymous</em> where the route has no policy), the system (a timer, listener, channel or alert), or another run. Runs from before 2.1.0 show only the kind of starter. What a step's data shows follows the Sutra's <em>Step data</em> tuning: all, only for failed runs, or none.</li>
 <li><strong>Approvals</strong>: what waits for a person and for whom (roles, accounts, progress, due time), with a button to open the <a href="#ch-approvals">Approval Center</a>, where the approvers decide.</li>
 <li><strong>Releases</strong>: deploy a release zip (or <code>.sutra</code> package): choose the file, see its Sutras, the secrets present or missing on this server, where it was built from and its deployment config, change the project or give another config, then <em>Deploy</em>. Below, every project's current package with its history: <em>Roll back</em>, or <em>Deploy again</em> for any earlier one. This is how a production server receives Sutras.</li>
@@ -2442,7 +2496,7 @@ docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=...
 export const PARTS: [string, string[]][] = [
   ['Getting started', ['overview', 'start', 'tour', 'projects']],
   ['Building Sutras', ['build', 'tabs', 'mapping', 'schemas', 'variables', 'debug', 'deploy', 'documentation', 'git', 'engine-inside', 'design', 'reliability211']],
-  ['Palettes and connections', ['call', 'apps', 'mongodb-m0', 'memory', 'files', 'messaging', 'broker-connections', 'message-processing', 'websocket', 'data-platforms', 'social', 'oauth-setup', 'code', 'python', 'connection-limits']],
+  ['Palettes and connections', ['call', 'apps', 'mongodb-m0', 'memory', 'files', 'messaging', 'broker-connections', 'message-processing', 'websocket', 'dashboards', 'data-platforms', 'social', 'oauth-setup', 'code', 'python', 'connection-limits']],
   ['AI', ['ai-concepts', 'mcp', 'agents', 'rag-build', 'ai-samples']],
   ['APIs, security and approvals', ['gateway', 'expose', 'approvals']],
   ['Releasing', ['releases', 'cicd', 'trouble']],
@@ -2454,13 +2508,13 @@ export const PARTS: [string, string[]][] = [
  */
 export const ADMIN_PARTS: [string, string[]][] = [
   ['Getting started', ['admin-role', 'plan']],
-  ['Installing and upgrading', ['install', 'install-silent', 'upgrade', 'install-dev']],
+  ['Installing and upgrading', ['install', 'install-silent', 'samples-data', 'upgrade', 'install-dev']],
   ['Running SutraFlow', ['launcher', 'data', 'move-postgres', 'monitoring']],
   ['Engines and clusters', ['production', 'cluster', 'sizing']],
-  ['The Admin Console', ['console']],
+  ['The Admin Console', ['console', 'knowledge-admin']],
   ['Security and connections', ['secrets', 'prod-connections']],
   ['Releases on servers', ['deploy-releases']],
-  ['Reference and troubleshooting', ['commands', 'admin-trouble']],
+  ['Reference and troubleshooting', ['command-guide', 'commands', 'admin-trouble']],
 ];
 
 /** Each guide's chapters by its parts. Every chapter is in exactly one part of one guide; the build fails otherwise. */

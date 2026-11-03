@@ -153,7 +153,7 @@ export class Executor {
         // A resumed step's outcome (a called Sutra's result) comes back whole too.
         const resumed = task.phase === 'resume' && task.wait ? await internalize(db, JSON.parse(task.wait).outcome ?? undefined) : undefined;
         // Calls the step makes to its limited connections are counted at the client (connection-limits.ts).
-        const once = () => inProject(run.row.project_id, () => runStepCalls({ db: asyncDatabase(), owner: config.engineId, holder: `Step ${node.name} of ${run.doc.name}`, project: run.row.project_id || '', signal: controller.signal, limits: task.connections || [] }, async () => withAiExecution({ timeoutMs: Number(settings.timeoutMs) > 0 ? Number(settings.timeoutMs) : undefined, log: message => logs.push({ t: now(), level: 'info', msg: message, step: node.name }) }, () => activity.execute({
+        const once = () => inProject({ projectId: run.row.project_id, flowId: run.row.flow_id }, () => runStepCalls({ db: asyncDatabase(), owner: config.engineId, holder: `Step ${node.name} of ${run.doc.name}`, project: run.row.project_id || '', signal: controller.signal, limits: task.connections || [] }, async () => withAiExecution({ timeoutMs: Number(settings.timeoutMs) > 0 ? Number(settings.timeoutMs) : undefined, log: message => logs.push({ t: now(), level: 'info', msg: message, step: node.name }) }, () => activity.execute({
           node, runId: task.run_id, input, scope, phase: task.phase, attempt: task.attempt, signal: controller.signal,
           resumed,
           raw: key => resolveSetting(activity.fields.find(field => field.k === key), node.config?.[key], scope),

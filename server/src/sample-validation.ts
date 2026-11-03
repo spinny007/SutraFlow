@@ -53,7 +53,7 @@ export function validationSamples(projectId: string, gateway: string): FlowDoc[]
   const document = '<User xmlns="urn:sutra:validation" status="active"><Code>AB-12</Code><Email>asha@example.com</Email><Phone>555-0100</Phone><Amount>12.5</Amount><Active>true</Active><Since>2026-10-24</Since><Age>20</Age></User>';
   const p = getProject(projectId)!;
   if (!p.config.variables.some(v => v.name === 'VALIDATION_FOLDER')) saveProject({ ...p, config: { ...p.config, variables: [...p.config.variables, {
-    name: 'VALIDATION_FOLDER', type: 'string', value: '${files}/validation-samples', description: 'Writable sample-only folder. Validation examples overwrite customer.json/customer.xml here; an administrator can change this per environment.',
+    name: 'VALIDATION_FOLDER', type: 'string', value: '${files}/sample_validation', description: 'Writable sample-only folder. Validation examples overwrite customer.json/customer.xml here; an administrator can change this per environment.',
   }] } });
   const n = (id: string, type: string, name: string, x: number, config: Record<string, any>, description: string, y = 180): FlowNode => ({ id, type, name, x, y, config, description });
   const edge = (from: string, to: string, port = 'out') => ({ id: `${from}-${port}-${to}`, from, to, port });

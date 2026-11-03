@@ -1,0 +1,3 @@
+# Local settings with the shared secret: never committed.
+config.local.php
+.env

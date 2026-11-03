@@ -129,7 +129,7 @@ export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gatew
   onProjectChange.push(() => { relisten(); bumpDeployGen(); });
   startCluster({
     becameLeader: () => { rebuildSchedules(); rebuildListeners().catch(e => console.error('Listeners:', e)); },
-    lostLeader: () => { stopSchedules(); stopListeners().catch(() => {}); },
+    lostLeader: () => { stopSchedules(); stopListeners().catch(() => {}); import('./ai/knowledge-admin.js').then(k => k.stopKnowledgeSync()).catch(() => {}); },
     deploymentsChanged: () => { forgetCachedSettings(); applyTuning(); rebuildRoutes(); reschedule(); relisten(); },
     gatewayChanged: () => { forgetCachedSettings(); startGateway().catch(e => console.error('Gateway settings:', e)); },
     tlsChanged: () => { forgetCachedSettings(); reloadTls(); },
@@ -145,6 +145,12 @@ export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gatew
     Promise.resolve().then(() => sampleConnectionUse(asyncDatabase(), listResources())).catch(e => console.error('Connection usage sample:', e?.message || e));
   }, connectionSampling.ms);
   sampler.unref?.();
+  // Knowledge admin (2.1.5): managed knowledge sources sync on the leader only, one after another.
+  const knowledgeSync = setInterval(() => {
+    if (!cluster.leader || lifecycle.draining) return;
+    import('./ai/knowledge-admin.js').then(k => k.knowledgeSyncTick(() => cluster.leader && !lifecycle.draining)).catch(e => console.error('Knowledge sync:', e?.message || e));
+  }, 15000);
+  knowledgeSync.unref?.();
   // Do not delay the server while an external source is unavailable; status/errors remain visible.
   void startMemTables();
   rebuildRoutes();
@@ -160,6 +166,8 @@ export async function boot(opts: { dbFile?: string; listenAdmin?: boolean; gatew
     // listeners. 3. Running steps finish, or go back to the queue for another engine. 4. Close.
     lifecycle.draining = true;
     clearInterval(sampler);
+    clearInterval(knowledgeSync);
+    (await import('./ai/knowledge-admin.js')).stopKnowledgeSync();
     leaveLeadership();
     stopSchedules();
     await stopListeners();

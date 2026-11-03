@@ -43,10 +43,10 @@ export const SOLUTION_CHAPTERS: Chapter[] = [
 <p class="h">Making a sample ready to package</p>
 <p>Samples are written to run at once on one machine, so several have values typed into steps. Before a sample becomes part of a solution:</p>
 <ol>
-<li><strong>Folders</strong>: <code>C:/sutra/samples</code> and <code>C:/sutra/inbox</code> in the file samples become properties (<code>{{gv.SALES_FOLDER}}</code>, <code>{{gv.INBOX_FOLDER}}</code>); the deployment config of each server sets the real path. Prefer <code>\${files}</code> (the project's files folder) for files that belong to the project.</li>
+<li><strong>Folders</strong>: the file samples write to properties in the project's files folder (<code>{{gv.SAMPLE_CSV_FOLDER}}</code> is <code>\${files}/sample_csv</code>, <code>{{gv.SAMPLE_INBOX_FOLDER}}</code>); give yours names of their own, and let the deployment config of each server set the real path. Prefer <code>\${files}</code> (the project's files folder) for files that belong to the project.</li>
 <li><strong>Addresses</strong>: <code>http://127.0.0.1:…</code> in the microservice Orders Sutra, the validated HTTP client and the SOAP callers becomes an HTTP connection with a base URL from a property; the step keeps only the path. The connection adds the timeout, circuit breaker and limit in one place.</li>
 <li><strong>Policies</strong>: the sample services have no security policy (they say so); add one before anything outside the machine can reach them.</li>
-<li><strong>Names</strong>: channels (<code>sample-orders</code>, <code>sample-order-events</code>) and queues (<code>orders.in</code>) become properties when they differ per environment, or at least lose the <em>sample</em> prefix.</li>
+<li><strong>Names</strong>: everything a sample stores is named <code>sample_</code>: channels (<code>sample_orders</code>, <code>sample_order_events</code>), queues (<code>sample_orders.in</code>), tables (<code>sample_sutraflow.sample_sales_orders</code>), counters and folders. A solution drops the prefix: the installer's <em>Remove samples</em> deletes what is named <code>sample_</code>. Names that differ per environment become properties.</li>
 <li><strong>Connections</strong>: rename <em>Sample SQLite</em>, <em>Sample SMTP</em>, <em>Local Ollama</em> to what they reach, and point them at the real systems; on a cluster use PostgreSQL rather than an SQLite file.</li>
 <li><strong>Tuning and errors</strong>: retries on calls out, an Error handler, <em>Step data in history</em> chosen per Sutra, a run time limit where something waits.</li>
 <li><strong>Remove what is only for learning</strong>: <em>expected rejection</em> branches, logs of whole payloads, the No operation placeholders.</li>
@@ -148,7 +148,145 @@ export const SOLUTION_CHAPTERS: Chapter[] = [
 <li>Retries on the sending steps; a failed notification is logged with the correlation id and does not fail the business run that asked for it.</li>
 <li>A counter or a table of what was sent, so "did the customer get the email?" has an answer.</li>
 </ol>
-<p><em>Sample: Trace notification hub</em> shows the shape: it starts for every event on <code>sample-order-events</code>, decides between the customer and sales, logs with both run ids and counts. Replace its log steps with real sending steps and its channel name with a property.</p>`,
+<p><em>Sample: Trace notification hub</em> shows the shape: it starts for every event on <code>sample_order_events</code>, decides between the customer and sales, logs with both run ids and counts. Replace its log steps with real sending steps and its channel name with a property.</p>`,
+  },
+  {
+    id: 'dg-bp-chat', title: 'Blueprint: chat agents for customers and support staff',
+    html: `
+<p>Two different things are both called "an AI agent". Decide which one you are building first.</p>
+<table class="t"><thead><tr><th></th><th>A public agent</th><th>Skills for an outside assistant (MCP)</th></tr></thead><tbody>
+<tr><td>Who talks to people</td><td>Your agent: on your website, app or chat page</td><td>Claude, ChatGPT, Copilot or Cursor; your Sutras are tools it calls</td></tr>
+<tr><td>Who owns the conversation and its memory</td><td>SutraFlow ([[agentChannel]], [[aiAgent]] with AI memory)</td><td>The outside assistant; a skill answers one call and keeps nothing unless it is designed to</td></tr>
+<tr><td>What you design</td><td>The whole dialogue: instructions, tools, guard, hand-off to people, replies</td><td>Small, well-described actions with schemas ([[mcpTool]], [[mcpReply]]), each checking its own input and caller</td></tr>
+<tr><td>Who signs in</td><td>Your customers and staff, through your website's login</td><td>The assistant's app or user, through a policy on the MCP server</td></tr>
+<tr><td>Samples</td><td><em>Chat for customers and support</em>, <em>AI agent: order desk</em></td><td><em>MCP skills</em>, <em>AI tool search documents</em></td></tr>
+</tbody></table>
+<p>A published agent can also be offered to outside assistants as the tool <code>ask_&lt;agent&gt;</code>; then each assistant user's conversation is bound to the gateway app and caller the assistant signed in with (below).</p>
+<p class="h">Who is chatting: the website's login, not the message</p>
+<p>A website or app that has its own sign-in (its own user table, or an identity provider such as Microsoft Entra ID, Okta, Auth0, Keycloak, Cognito or Firebase Auth) knows who is signed in. It gives the chat a token (a JWT) that says so: who (<code>sub</code>, a name) and what they may do (a role, groups or scopes). SutraFlow never sees their password.</p>
+<ol>
+<li><strong>The policy checks the token.</strong> The agent channel's chat policy is a JWT policy: with an identity provider, its JWKS address, issuer and audience; with a website that signs tokens itself, a shared secret (a Secret property) with issuer and audience. A missing, expired, altered or foreign token is refused before any Sutra runs.</li>
+<li><strong>The Sutra reads the person from the token</strong> (2.1.5): <code>{trigger.caller.subject}</code>, <code>{trigger.caller.claims.name}</code>, <code>{trigger.caller.claims.role}</code>, <code>{trigger.caller.scopes}</code>. Never from the message text: a customer typing "I am support" changes nothing.</li>
+<li><strong>The chat widget carries the login</strong> (2.1.5): the page sets <code>window.SutraChat = { token: () =&gt; currentAccessToken }</code> before loading <code>/chat/&lt;agent&gt;/widget.js</code>. Before each message the chat asks the page for the token (a function may fetch a fresh one), sends it as a bearer token, and asks again when SutraFlow refuses an expired one. The token goes only to the SutraFlow address the widget came from.</li>
+</ol>
+<p class="h">Customers and support staff: two designs</p>
+<table class="t"><thead><tr><th>Design</th><th>How</th><th>Use when</th></tr></thead><tbody>
+<tr><td>Separate entry points</td><td>A customer agent (<code>/chat/shop-help</code>) whose policy requires the customer scope or audience, and a staff agent (<code>/chat/support-desk</code>) whose policy requires the staff scope, or the company's own single sign-on. A customer token is refused at the staff desk before anything runs.</td><td>Staff and customers need different tools, instructions or data: the safest, and the easiest to review.</td></tr>
+<tr><td>One agent, branching on the role</td><td>One agent; an [[if]] or [[switch]] on <code>{trigger.caller.claims.role}</code> gives staff more (any customer's orders, refunds) and customers less (their own orders only). <em>Sample: Customer and support chat</em> does this.</td><td>The dialogue is mostly the same and only the data differs.</td></tr>
+</tbody></table>
+<p><strong>Must</strong>: data that belongs to a customer is filtered by <code>{trigger.caller.subject}</code> inside the Sutra (or the tool Sutra), even when the agent "should" only ask for the customer's own orders: the model is not an authorisation layer.</p>
+<p class="h">Conversations: signed tokens that expire</p>
+<ul>
+<li>Every answer carries a <strong>conversation token</strong> (2.1.5): signed by SutraFlow, bound to the agent and to the caller (policy and issuer, subject, gateway app, or the visitor). The caller sends it back to continue (<code>sessionId</code> in the chat API, <code>X-Session-Id</code> for OpenAI-compatible clients, <code>contextId</code> in A2A, <code>session</code> for the MCP tool). The chat page and widget do this for you.</li>
+<li>A token continues the conversation only for the caller who started it. A missing, altered or someone else's token, or a session id a client made up, starts a new conversation: knowing a token gives nobody else anything.</li>
+<li>It lasts the agent channel's <em>Conversation lasts</em> time (24 hours by default; the sample uses 8). The next message after that starts a new conversation. Choose it like a session timeout: long enough for one matter, short enough that an old device does not reopen it.</li>
+<li>Expired conversations keep their AI memory in the database until an administrator clears them: Admin Console, <strong>Agent conversations</strong>, <em>Clear expired</em> (or <code>sutra agents clear-expired</code>). Plan it like any retention task: weekly, or after each campaign.</li>
+<li>Visitors without a login (a public chat with no policy) get a signed visitor identity in their browser that expires after 30 days (<code>SUTRA_VISITOR_DAYS</code>) and is renewed while they keep coming back.</li>
+</ul>
+<p class="h">The example: a PHP website with its own sign-in</p>
+<p>Sample <em>Chat for customers and support</em> comes with a small PHP website, <em>Sutra Sample Shop</em> (<code>samples/sutra-sample-shop</code>, or <em>Download the website (zip)</em> in New Sutra, Samples): its own login (demo accounts for a customer and a support agent), <code>token.php</code> that signs a 15-minute token with the shared secret, the chat widget with <code>window.SutraChat</code>, and <code>check.php</code> to test the setup. <code>SUTRAFLOW_URL</code> in <code>config.local.php</code> points it at this SutraFlow or one on another server. The agent has eight skills (order status, tracking, returns and refunds, invoices, the delivery address, products and stock, a person, help), chosen by keywords: one Switch branch per skill, each applying the role from the token, so a customer sees only their own orders and the support desk every order. Replace <code>token.php</code> with your identity provider's access token, <em>Shop data</em> with your queries, and the keyword step with AI router when you have a model.</p>
+<p class="h">Checklist</p>
+<ul>
+<li>A policy on every chat entry point that people outside your company reach; Require HTTPS on in production.</li>
+<li>Roles and scopes from the identity provider, read from <code>{trigger.caller}</code>; customer data filtered by subject in the Sutra.</li>
+<li>Short-lived website tokens (minutes), refreshed by the page; conversation lifetime set per agent; expired conversations cleared on a schedule.</li>
+<li>[[aiGuard]] before an AI agent on public chats; [[askPerson]] before anything with risk (refunds, cancellations).</li>
+</ul>`,
+  },
+  {
+    id: 'dg-bp-knowledge', title: 'Blueprint: knowledge bases from databases, APIs and files',
+    html: `
+<p>A knowledge base does not have to come from documents. Products in a shop's MySQL tables, articles of a Joomla site, tickets in a helpdesk API, policies in SharePoint: anything that can be read can be learned. [[knowledgeAdd]] takes any text from any step; the source is only where the text came from.</p>
+<p class="h">The feed Sutra</p>
+<table class="t"><thead><tr><th>Step</th><th>Database (MySQL, PostgreSQL, SQL Server, Oracle)</th><th>API</th><th>Files</th></tr></thead><tbody>
+<tr><td>Start</td><td>[[timer]] (every 15 to 60 minutes)</td><td>[[timer]], or the API's webhook as a [[restService]]</td><td>[[fileTrigger]], [[msFilesTrigger]], [[googleDriveTrigger]], or a timer over a folder</td></tr>
+<tr><td>Read</td><td>[[dbQuery]]: only the rows people may see (<code>where published = 1</code>), with the table from a project property</td><td>[[httpRequest]], page by page</td><td>[[fileRead]] and [[docText]]</td></tr>
+<tr><td>Each item</td><td colspan="3">[[forEach]], then [[mapper]]: one text per item, with the fields a question would mention (name, category, price, description), and the details to keep</td></tr>
+<tr><td>Learn</td><td colspan="3">[[knowledgeAdd]]: source <code>products/&lt;id&gt;</code> (a stable key per item, so a change replaces it), details (category, price, link) for filters and answers that link, <em>Same text as before: skip</em> so only changed items make vectors</td></tr>
+<tr><td>Clean up</td><td colspan="3">[[knowledgeRemove]] <em>keep only these sources</em> with the current keys, under <code>products</code>: deleted or unpublished items leave the knowledge base</td></tr>
+</tbody></table>
+<p><em>Sample: Product knowledge feed</em> (Knowledge feed from a database) does exactly this with a MySQL product table; <em>Sample: Product search API</em> answers questions about the products by meaning. Tested on Laragon's MySQL and on a hosted remote MySQL.</p>
+<p class="h">Rules</p>
+<ul>
+<li><strong>Must</strong>: learn only what the people who will ask may see. Published products for a public chat; for staff, the internal fields too, in another knowledge base or with a detail (<code>audience = staff</code>) and a filter in the search.</li>
+<li><strong>Should</strong>: one source per item with a stable key; never one source for the whole table (a change would make every vector again).</li>
+<li><strong>Should</strong>: build the text the way a person would ask about it: "Assam tea, 250 g. Category: Tea. Price: 180 INR. Strong, malty black tea…". Codes and ids alone match nothing.</li>
+<li><strong>Should</strong>: details for what an answer needs to show or filter (category, price, link, language, date); the search returns them with each passage.</li>
+<li><strong>Should</strong>: the table, the query and the schedule from project properties, so the same feed reads test and production databases.</li>
+<li><strong>Should</strong>: big tables paged by key, or only the rows changed since the last feed (<code>where updated_at &gt; :last</code>, the mark kept in a counter or a table), with a full run with <em>keep only</em> now and then.</li>
+<li>Thousands of items and more: a pgvector knowledge base on PostgreSQL; the built-in store suits small catalogues.</li>
+</ul>
+<p class="h">A Joomla site</p>
+<p>Joomla keeps its articles in <code>#__content</code> (the prefix is the site's, for example <code>jos_</code>): <code>SELECT id, title, introtext, \`fulltext\`, catid, modified FROM jos_content WHERE state = 1 AND access = 1</code> gives the published, public articles; strip the HTML in the mapping (or with [[docText]]), use the article's link as a detail, and <code>articles/&lt;id&gt;</code> as the source. Shop extensions keep products in their own tables (VirtueMart, HikaShop, J2Store): read their product, price and category tables with a join. Give SutraFlow a database user that can only read those tables.</p>
+<p class="h">Answering from it</p>
+<ul>
+<li>[[knowledgeSearch]]: the closest passages with their details, no AI model needed: a search API, a "related products" list.</li>
+<li>[[knowledgeAsk]]: a written answer from the passages, with sources (an AI provider).</li>
+<li>An [[aiAgent]] with the knowledge base: a chat that can also use tools (stock, orders), as in <a href="#ch-dg-bp-chat">Blueprint: chat agents</a>.</li>
+</ul>
+<p class="h">One knowledge base for many projects</p>
+<p>When several projects need the same knowledge (products for the shop and the support desk, policies for HR and every chat), do not copy it: make it once in an owning project and ask an administrator to share it in <a href="#ch-knowledge-admin">Knowledge admin</a> (2.1.5). Design with areas from the start, one folder of sources per subject and audience (<code>products</code>, <code>hr</code>, <code>support/internal</code>): grants, feeds and the MCP tool all work by area. A plain feed (a folder, SharePoint, a table) can be a <em>managed source</em> with no Sutra at all; when it needs shaping, export it as a Sutra and change that. One writer per area: a feed Sutra and a managed source never write the same area.</p>`,
+  },
+  {
+    id: 'dg-bp-dashboards', title: 'Blueprint: dashboards',
+    html: `
+<ul>
+<li><strong>One dashboard, one question</strong>: "How are sales going?", "Is the warehouse keeping up?". Four to eight charts; a number for the headline, a line for the trend, a bar for the ranking, a table for the details.</li>
+<li><strong>Push the work down</strong>: aggregate in SQL (<code>group by month</code>), never fetch raw rows to count them in a Sutra.</li>
+<li><strong>Parallel queries</strong>: each chart's query on its own branch from [[dashboardPage]], joined by a [[merge]] before [[dashboardReply]].</li>
+<li><strong>Refresh to match the data</strong>: a minute for operations, an hour for sales by month. The shared cache means viewers cost nothing between refreshes; a dashboard that shows each caller their own data caches per caller.</li>
+<li><strong>Must</strong>: a security policy on every dashboard that shows anything not public. The page holds no data; the data request goes through the policy.</li>
+<li><strong>Should</strong>: read-only database accounts for dashboard queries, and connection limits on busy databases.</li>
+<li><strong>Filters</strong>: three to five slicers on the fields people ask by (region, product group, period). On a database, filter in SQL with bound parameters; on JSON, let the Chart steps filter. Give list filters their choices from a small DISTINCT query.</li>
+<li><strong>KPI cards first</strong>: two to four figures at the top, each with its comparison (the period before or a target), then the trend, then the breakdowns.</li>
+<li><strong>AI suggestions</strong>: let a model choose chart types and titles, never the data; the Chart step and Charts from AI check every suggestion against the allow-list. Send it only field names and kinds when the data is confidential.</li>
+<li><strong>Embedding</strong>: <code>/dash/&lt;name&gt;/embed.js</code> on an intranet or customer portal, with the portal's login passed as for the chat button (<a href="#ch-dg-bp-chat">Blueprint: chat agents</a>).</li>
+</ul>`,
+  },
+  {
+    id: 'dg-ai-app', title: 'Designing an AI application from the samples',
+    html: `
+<p>The AI samples fit together into one application: a website's signed-in people chat with an agent, the agent answers from a knowledge base and acts through tool Sutras, people approve what carries risk, and dashboards show how it is going. This chapter sets that project up from the samples, step by step, and then turns it into your own design. Nothing here needs an AI model until the step that adds one.</p>
+[[img:ai-app-shop|The Sutra Sample Shop: the support desk signed in, asking the chat about a customer's orders.]]
+<p class="h">The samples it uses</p>
+<table class="t"><thead><tr><th>Part of the application</th><th>Sample</th><th>What it adds</th></tr></thead><tbody>
+<tr><td>The chat, with the website's login</td><td><em>Chat for customers and support</em> and the website <em>Sutra Sample Shop</em></td><td>A published agent (<code>/chat/shop-help</code>), a JWT policy, eight skills by role</td></tr>
+<tr><td>Knowledge from the shop's data</td><td><em>Knowledge feed from a database</em></td><td>Products from MySQL into a knowledge base every 30 minutes, and a search API</td></tr>
+<tr><td>Knowledge from documents</td><td><em>AI document assistant over a folder</em></td><td>Files of <code>sample_documents</code> into a knowledge base, asked by REST, MCP and chat</td></tr>
+<tr><td>An agent with tools, memory and approval</td><td><em>AI agent: order desk with tools and memory</em></td><td>[[aiGuard]], tool Sutras, AI memory per conversation, [[askPerson]] before refunds</td></tr>
+<tr><td>Operations</td><td><em>Sales dashboard on a database, with filters</em>; <em>Dashboard from JSON</em></td><td><code>/dash/sales-db</code> with slicers and KPI cards; charts suggested by AI, checked by the allow-list</td></tr>
+<tr><td>Outside assistants</td><td><em>MCP skills</em></td><td>Sutras that Claude, ChatGPT or Copilot call as tools</td></tr>
+</tbody></table>
+<p>Everything they store is named <code>sample_</code> (the tables <code>sample_products</code> and <code>sample_sales_orders</code> in the database <code>sample_sutraflow</code>, the folder <code>sample_documents</code>, the queue <code>sample_agent.questions</code>), so the whole set is removed in one go when you are done: the installer's <em>Samples</em> mode, or <code>sutraflow samples remove</code>.</p>
+<p class="h">Setting up the project</p>
+<ol>
+<li><strong>A project of its own</strong>: <em>New project</em>, named for the application (<em>Shop assistant</em>). Keep it apart from the project <em>Samples</em> the installer may have made: this one is where you design.</li>
+<li><strong>Add the samples</strong>: <em>New Sutra, Samples</em>, tick the ones in the table and add them. Each becomes new Sutras with new ids in this project, with its <em>Sample ...</em> connections and project properties (<code>CHAT_SITE_SECRET</code>, <code>PRODUCTS_TABLE</code>, <code>ORDERS_TABLE</code>, <code>DOCS_FOLDER</code>).</li>
+<li><strong>Fill in the connections</strong>: <em>Sample MySQL</em> with a database server the samples may create tables on (a local Laragon or XAMPP MySQL is fine). Run <em>Sample: Sales orders install</em> and the knowledge feed's install Sutra once from the designer: they make the <code>sample_</code> tables and their rows.</li>
+<li><strong>The chat's secret</strong>: make a random secret of 32 characters or more, set it as the value of the Secret property <code>CHAT_SITE_SECRET</code> (Configuration, Project variables), and deploy <em>Sample: Customer and support chat</em>.</li>
+<li><strong>The website</strong>: <em>Download the website (zip)</em> beside the sample, unzip it into the web server (Laragon: <code>C:\\laragon\\www\\sutra-sample-shop</code>), copy <code>config.local.example.php</code> to <code>config.local.php</code> and set <code>CHAT_SECRET</code> (the same secret) and <code>SUTRAFLOW_URL</code> (the gateway as the visitors' browsers reach it: <code>http://127.0.0.1:8080</code> on one machine, <code>https://sutra.example.com</code> for a SutraFlow on another server). <code>check.php</code> must show every tick.</li>
+<li><strong>Try it as both roles</strong>: sign in as the customer (<code>asha</code> / <code>asha-demo</code>) and ask <em>Track A-1001</em>, then <em>Orders of C-9</em> (refused: not hers); sign in as the support desk (<code>ravi</code> / <code>ravi-demo</code>) and ask the same (answered). Open the run in <em>Runs</em>: the caller, the role and the skill of each answer are in the trace. Deploy the dashboards and open <code>/dash/sales-db</code>.</li>
+</ol>
+[[img:ai-app-dashboard|The sample dashboard on the MySQL table sample_sales_orders: KPI cards, slicers and charts.]]
+<p class="h">From the samples to your application</p>
+<ol>
+<li><strong>The login</strong>: replace <code>token.php</code> with your identity provider's access token (Entra ID, Okta, Auth0, Keycloak, Cognito, Firebase Auth) and the policy's shared secret with its JWKS address, issuer and audience. Roles and scopes come from the token's claims.</li>
+<li><strong>The data</strong>: replace <em>Shop data</em> with [[dbQuery]] steps on your tables, filtered by <code>{trigger.caller.subject}</code> for customers. The model is never the authorisation layer.</li>
+<li><strong>Understanding the question</strong>: the sample chooses a skill by keywords so it runs without a model. With a model, put [[aiRouter]] (or an [[aiAgent]] with the skills as tool Sutras) in place of the keyword step, and keep [[aiGuard]] in front on public chats.</li>
+<li><strong>Answers from knowledge</strong>: point the knowledge feed at your product table and the document feed at your documents; give the agent the knowledge base. Learn only what the askers may see (<a href="#ch-dg-bp-knowledge">Blueprint: knowledge bases</a>).</li>
+<li><strong>Actions with risk</strong>: refunds, cancellations and address changes go through [[askPerson]], or a tool Sutra that checks its input and its caller, as in the order desk sample.</li>
+<li><strong>Operations</strong>: a dashboard on the conversations and the actions (questions per skill, hand-offs to people, refunds approved), with a policy for staff only (<a href="#ch-dg-bp-dashboards">Blueprint: dashboards</a>).</li>
+<li><strong>Drop the sample names</strong>: rename the tables, folders, queues, connections and Sutras; data left under a <code>sample_</code> name is removed with the samples. Then package and release it like any other project (<a href="#ch-dg-packaging">Packaging</a>, <a href="#ch-dg-release">Versions, releases and environments</a>).</li>
+</ol>
+<p class="h">Design checklist for an AI application</p>
+<ul>
+<li>Which agent: a public agent that owns the conversation, or skills for an outside assistant (<a href="#ch-dg-bp-chat">Blueprint: chat agents</a>).</li>
+<li>Who is asking: from the login token, never the message; data filtered by subject.</li>
+<li>What the model may do: narrow steps, tools as Sutras, limits on steps, tokens and time; people before risk.</li>
+<li>What it knows: knowledge fed on a schedule with stable sources and <em>keep only</em>; nothing the askers may not see.</li>
+<li>How long it remembers: the conversation lifetime per agent, and expired conversations cleared on a schedule.</li>
+<li>How you know it works: runs traced, dashboards for operations, test questions for each role kept beside the project.</li>
+</ul>`,
   },
   {
     id: 'dg-tracing', title: 'Error handling through logs, and traceability',
@@ -227,8 +365,8 @@ export const SAMPLE_CHAPTERS: Chapter[] = [
       ['Router, Switch and Merge', 'A router taking every matching route, a Merge waiting for all branches (including those not taken), a Switch on the status.', 'All matches versus one value with many cases; Merge joins parallel branches.', 'Name branches by business meaning; put thresholds (the large-order amount) in properties.'],
       ['Connection conditions', 'Named connections taken when their condition holds, and an otherwise connection.', 'Simple routing without a router step.', 'Keep conditions short; several conditions on one output are easier to read as a Router.'],
       ['Counter, Wait and Sutra variables', 'Local variables as records 1 and 2, a counter per day, a pause, all variables read back with the run id.', 'Local variables live for one run; counters across runs.', 'Use counters for sequences and totals; never local variables between runs.'],
-      ['Channels between Sutras', 'A sender publishing to <code>sample-orders</code> and a deployed listener that counts and logs each message.', 'In-process publish and subscribe; the sender does not wait.', 'Channel name as a property; a schema on the channel; the listener deployed before senders run.'],
-      ['Traceability and notifications', 'An intake Sutra that makes a correlation id, calls a credit check and announces the result on <code>sample-order-events</code>; a notification hub that decides whom to tell; every log line with the order number, correlation id and run ids.', 'One correlation id through called Sutras and channels; a notification hub; how to trace an order from project to run (<a href="#ch-dg-tracing">Error handling through logs</a>).', 'Replace the hub\'s logs with email, push or chat steps; the channel (or a broker topic for other projects) as a property; the credit limit as a property.'],
+      ['Channels between Sutras', 'A sender publishing to <code>sample_orders</code> and a deployed listener that counts and logs each message.', 'In-process publish and subscribe; the sender does not wait.', 'Channel name as a property; a schema on the channel; the listener deployed before senders run.'],
+      ['Traceability and notifications', 'An intake Sutra that makes a correlation id, calls a credit check and announces the result on <code>sample_order_events</code>; a notification hub that decides whom to tell; every log line with the order number, correlation id and run ids.', 'One correlation id through called Sutras and channels; a notification hub; how to trace an order from project to run (<a href="#ch-dg-tracing">Error handling through logs</a>).', 'Replace the hub\'s logs with email, push or chat steps; the channel (or a broker topic for other projects) as a property; the credit limit as a property.'],
     ]),
   },
   {
@@ -245,7 +383,7 @@ export const SAMPLE_CHAPTERS: Chapter[] = [
   {
     id: 'dg-samples-files', title: 'Samples: files, SFTP, databases and MongoDB',
     html: samples([
-      ['CSV import and totals', 'Writes a CSV, reads it back as rows, keeps paid rows, totals per country.', 'Filter and Aggregate instead of code.', 'The folder <code>C:/sutra/samples</code> as a property; stream big files instead of reading them whole.'],
+      ['CSV import and totals', 'Writes a CSV, reads it back as rows, keeps paid rows, totals per country.', 'Filter and Aggregate instead of code.', 'The folder (<code>{{gv.SAMPLE_CSV_FOLDER}}</code>) named for the solution; stream big files instead of reading them whole.'],
       ['Folder of files', 'Lists CSV files with a wildcard, a For each per file, a count; the empty output when nothing matched.', 'A run per file; handle the empty case.', 'Folder as a property; a sub-Sutra per file for real work.'],
       ['Timer: nightly archive', 'Every night at 02:00 (Asia/Kolkata), lists CSV files oldest first and moves each to an archive.', 'A polling batch with a schedule and time zone.', 'Folders and time zone as properties; date in archive names; a run time limit.'],
       ['File trigger: CSV drop folder', 'Starts when a CSV arrives, sorts, writes a cleaned copy, moves the original to processed/.', 'Stable files, processed and error folders.', 'Inbox and output folders as properties; an error folder for files that fail.'],
@@ -258,7 +396,7 @@ export const SAMPLE_CHAPTERS: Chapter[] = [
   {
     id: 'dg-samples-messaging', title: 'Samples: queues, email and notifications',
     html: samples([
-      ['Queue in and out', 'JSON orders from <code>orders.in</code> with explicit acknowledgement and a duplicate guard, reshaped, published to <code>orders.out</code>, confirmed only after the broker accepted; the same for exact XML.', 'Consume, transform, publish, then confirm; deduplication.', 'Queue names and broker settings as properties; a dead-letter path after a few redeliveries (<a href="#ch-dg-bp-broker">Blueprint: broker</a>).'],
+      ['Queue in and out', 'JSON orders from <code>sample_orders.in</code> with explicit acknowledgement and a duplicate guard, reshaped, published to <code>sample_orders.out</code>, confirmed only after the broker accepted; the same for exact XML.', 'Consume, transform, publish, then confirm; deduplication.', 'Queue names and broker settings as properties; a dead-letter path after a few redeliveries (<a href="#ch-dg-bp-broker">Blueprint: broker</a>).'],
       ['Broker REST APIs', 'Publish and fetch through Kafka REST, RabbitMQ HTTP and ActiveMQ Jolokia, with every setting from properties and the password in the vault.', 'HTTP-only access to brokers.', 'Only where native connections are impossible.'],
       ['Email a report', 'An HTML report sent with Send email; a failure logged.', 'Templates and sending as separate steps.', 'Recipients as properties or input; the SMTP connection per environment; move into a notification hub.'],
       ['Email trigger: orders by email', 'A new email with "Order" in its subject; AI extract takes the order number and amount; the email marked read.', 'Unstructured input made structured at the door.', 'Validate what AI extracted before acting; a person for low-confidence cases.'],
@@ -269,12 +407,16 @@ export const SAMPLE_CHAPTERS: Chapter[] = [
   {
     id: 'dg-samples-ai', title: 'Samples: AI, agents and knowledge',
     html: samples([
+      ['Knowledge feed from a database', 'A product table in MySQL (made by an install script) read every 30 minutes; each published product becomes a passage with its category, price and link as details; unchanged products skipped, unpublished ones removed; a REST API searches the products by meaning. No AI model needed.', 'Any table or API can feed a knowledge base: one source per row, text written the way people ask, details for filters and links.', 'Your own table in PRODUCTS_TABLE and a read-only database user; only rows the askers may see; pgvector for big catalogues; changed rows only for big tables (<a href="#ch-dg-bp-knowledge">Blueprint: knowledge bases</a>).'],
+      ['Chat for customers and support', 'A published agent for the people signed in on a website: the PHP site in <code>samples/sutra-sample-shop</code> signs a token per person (role customer or support), the widget passes it on, the policy checks it, and the agent answers with eight skills (orders, tracking, returns, invoices, address, products, a person, help): customers about their own orders, staff about any order. No AI model needed.', 'Who is chatting comes from the website login, never from the message; conversation tokens that expire; data filtered by the subject.', 'The token of your identity provider instead of token.php; a database query instead of the order list; HTTPS and Require HTTPS on; an AI agent with a guard if wanted (<a href="#ch-dg-bp-chat">Blueprint: chat agents</a>).'],
       ['Local AI with Ollama', 'Classify, summarise and rate a customer email offline.', 'Small AI steps, each with one job.', 'An explicit model on the connection; rules (refunds) in ordinary steps.'],
       ['AI: translate, extract, route and reply', 'Models listed, a Spanish message translated, fields extracted, routed to a team, a reply drafted.', 'A chain of narrow AI steps beats one big prompt.', 'A person approves drafted replies before they go out.'],
       ['AI agent: order desk with tools and memory', 'A published agent (chat page, OpenAI-compatible API, MCP, A2A) with the AI guard, two tool Sutras, memory per conversation and a person before refunds.', 'Guard first, tools as Sutras, people for risk.', 'A policy on every entry point; limits on steps, tokens and time; tool Sutras that check their input.'],
       ['AI agent: knowledge base (RAG)', 'A knowledge base fed from web pages and a SharePoint library kept in step; a policy assistant answering only from it, with sources.', 'Answers grounded in your documents, with sources.', 'pgvector for volume; feeds on a schedule or trigger; the site and folder as properties.'],
       ['AI document assistant over a folder', 'Every 15 minutes, documents of <code>{{gv.DOCS_FOLDER}}</code> into a knowledge base (unchanged files skipped, deleted ones removed); answers by REST, MCP tool and chat agent.', 'One feed, three ways to ask; a called Sutra per file.', 'Big documents streamed in parts; a policy on the API and MCP server.'],
       ['AI agent: fed by a queue; supervisor; outside MCP tools', 'An agent worker on a broker queue; a supervisor handing questions to specialists; an agent using a file system MCP server\'s read-only tools.', 'Queues for slow AI work; hand-offs; least-rights tools.', 'Allow only the tools needed; sessions per sender.'],
+      ['Sales dashboard on a database, with filters', 'A dashboard on the MySQL table <code>sample_sales_orders</code> (made by <em>Sample: Sales orders install</em>) at <code>/dash/sales-db</code>: KPI cards, the trend, breakdowns, and slicers filtered in SQL with bound parameters.', 'Aggregate in SQL; parallel queries; filters as bound parameters; refresh with a shared cache.', 'Your table in ORDERS_TABLE, a read-only database user and a policy on the page (<a href="#ch-dg-bp-dashboards">Blueprint: dashboards</a>).'],
+      ['Dashboard from JSON (any API)', 'A dashboard from an API answer at <code>/dash/orders-json</code>: raw rows grouped by the Chart steps, and Charts from AI suggesting chart types and titles from the field names.', 'Any JSON can be charted; AI chooses the look, never the data, and every suggestion is checked against the allow-list.', 'Your API in place of the sample rows; only field names to the model when the data is confidential.'],
       ['MCP skills', 'Two Sutras AI assistants call as tools: write a CSV file, post to a Facebook page.', 'A skill is a Sutra with a schema and a description.', 'A policy on the MCP server; confirmation before posting publicly.'],
     ]),
   },

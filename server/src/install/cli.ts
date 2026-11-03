@@ -16,12 +16,13 @@
  * @end-sutra-file-overview */
 import fs from 'node:fs';
 import path from 'node:path';
-import { HOME, install, upgrade, validateInstall, checkPorts, testDatabase, systemCheck, type InstallConfig, type UpgradeConfig } from './core.js';
+import { HOME, install, upgrade, samples, validateInstall, checkPorts, testDatabase, systemCheck, type InstallConfig, type UpgradeConfig } from './core.js';
 
 /**
  * Silent install and upgrade from a config file (2.1.1), the same steps as the web installer:
  *   sutraflow install --config install.json [--dry-run]
  *   sutraflow upgrade --config upgrade.json [--dry-run]
+ *   sutraflow samples list|add|remove [--folder <installation>] [--no-start]   (2.1.5)
  * Passwords are never written in the file: give them as { "env": "NAME" } (an environment variable) or
  * { "file": "path" } (a file holding only the password). The whole file is checked first and every
  * problem reported before anything changes; --dry-run prints the plan. Progress and the result go to the
@@ -45,10 +46,25 @@ function secretOf(v: unknown, where: string, problems: string[]): string | undef
 }
 
 async function main(): Promise<number> {
+  // sutraflow samples list|add|remove [--folder <installation>] [--no-start] (2.1.5).
+  if (command === 'samples') {
+    const action = rest.find(a => !a.startsWith('--') && a !== opt('--folder'));
+    if (!['list', 'add', 'remove'].includes(String(action))) { console.error('sutraflow samples: list, add or remove'); return 2; }
+    const what = action === 'list' ? 'remove' : action as 'add' | 'remove';
+    const r: any = await samples({ folder: opt('--folder') || HOME, action: what, start: !flag('--no-start') }, (step, state, detail) => say(`${state === 'run' ? '…' : state === 'ok' ? '✓' : state === 'fail' ? '✗' : '-'} ${step}${detail ? `: ${detail}` : ''}`), { dryRun: action === 'list' });
+    if (action === 'add') { say(r.already ? `The project ${r.project} already has ${r.already} sample Sutras: remove them first to add them fresh.` : r.dryRun ? `${r.samples} samples would be added to the project ${r.project}.` : `Added ${r.added} sample Sutras to the project ${r.project}.`); return 0; }
+    const line = (i: any) => `  - ${i.where}: ${i.what} ${i.name}${i.old ? ' (earlier version)' : ''}${i.note ? ` (${i.note})` : ''}`;
+    say(`${action === 'list' ? 'Samples and their data' : 'Removed'} in ${r.folder}: ${r.items.length}${r.items.length ? `\n${r.items.map(line).join('\n')}` : ''}`);
+    if (r.kept?.length) say(`Kept (used by your own Sutras):\n${r.kept.map(line).join('\n')}`);
+    for (const p of r.problems || []) say(`Could not reach or remove: ${p}`);
+    for (const n of r.notes || []) say(n);
+    return r.problems?.length && action === 'remove' ? 1 : 0;
+  }
   const file = opt('--config');
-  if (!file) { console.error(`sutraflow ${command}: --config <file.json> is needed for a silent ${command} (without it, the web installer opens)`); return 2; }
+  if (!file) { console.error(`sutraflow ${command}: --config <file.json or file.yaml> is needed for a silent ${command} (without it, the web installer opens)`); return 2; }
   let raw: any;
-  try { raw = JSON.parse(fs.readFileSync(path.resolve(file), 'utf8')); } catch (e: any) { console.error(`${file}: ${e.message}`); return 2; }
+  // JSON, or YAML for a file ending in .yaml or .yml (2.1.5): the same fields either way.
+  try { const text = fs.readFileSync(path.resolve(file), 'utf8'); raw = /\.ya?ml$/i.test(file) ? (await import('yaml')).parse(text) : JSON.parse(text); } catch (e: any) { console.error(`${file}: ${e.message}`); return 2; }
   const problems: string[] = [];
   if (command === 'install') {
     const c: InstallConfig = { ...raw, admin: { ...raw.admin, password: secretOf(raw.admin?.password, 'admin.password', problems) },
@@ -74,9 +90,11 @@ async function main(): Promise<number> {
   if (command === 'upgrade') {
     const c: UpgradeConfig = raw;
     if (!c.from) { console.error('The config file is not ready (nothing was changed):\n  - from: the folder of the installation to upgrade'); return 2; }
+    if (c.samples && !['keep', 'add', 'remove', 'refresh'].includes(c.samples)) { console.error('The config file is not ready (nothing was changed):\n  - samples: keep, add, remove or refresh'); return 2; }
     const r = await upgrade(c, (step, state, detail) => say(`${state === 'run' ? '…' : state === 'ok' ? '✓' : state === 'fail' ? '✗' : '-'} ${step}${detail ? `: ${detail}` : ''}`), { dryRun: flag('--dry-run') });
     if ((r as any).dryRun) { say(`Plan:\n${(r as any).plan.map((p: string) => `  - ${p}`).join('\n')}`); return 0; }
     say(`Upgraded ${(r as any).upgraded} in ${(r as any).folder}; backup in ${(r as any).backup}`);
+    for (const n of (r as any).sampleNotes || []) say(`Samples: ${n}`);
     return 0;
   }
   console.error(`Unknown command: ${command}`);

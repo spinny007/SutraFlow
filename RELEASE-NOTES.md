@@ -1,17 +1,119 @@
-# SutraFlow 2.1.4 release notes
+# SutraFlow 2.1.5 release notes
 
-Prepared 2026-11-02. Copyright (c) 2026-27 Surya Partap Singh, MixAgile.com. AGPL-3.0-only; a commercial licence is available.
+Prepared 2026-11-03. Copyright (c) 2026-27 Surya Partap Singh, MixAgile.com. AGPL-3.0-only; a commercial licence is available.
 
 | Download | For |
 |---|---|
-| `sutraflow-2.1.4-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
-| `sutraflow-2.1.4-windows-x64-offline.zip` | The same with the runtime packages inside, for servers without the npm registry |
-| `sutraflow-2.1.4-linux.tar.gz` | Linux (x64 or arm64); also macOS |
-| `sutraflow-2.1.4-docs.zip` | The user guide, the Administration Guide, the Sutra Design Guide and the architecture page, to put on a website |
+| `sutraflow-2.1.5-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
+| `sutraflow-2.1.5-windows-x64-offline.zip` | The same with the runtime packages inside, for servers without the npm registry |
+| `sutraflow-2.1.5-linux.tar.gz` | Linux (x64 or arm64); also macOS |
+| `sutraflow-2.1.5-docs.zip` | The user guide, the Administration Guide, the Sutra Design Guide and the architecture page, to put on a website |
 
 Each comes with a `.sha256` file to check the download: `sha256sum -c <archive>.sha256`, or on Windows `Get-FileHash <archive> -Algorithm SHA256`.
 
 ## In short
+
+- **Dashboards**: a new Dashboards palette publishes a Sutra as a page of Apache ECharts charts on the gateway (`/dash/<name>`), on a database, an API or any JSON, behind a security policy, with filters (slicers) and click-to-filter, KPI cards, grouping of raw rows, refreshed on a schedule with results shared by every viewer, and PNG and SVG export; an AI may plan or suggest charts, used only after an allow-list check.
+- **Knowledge admin**: an administrator shares a project's knowledge base with other projects (every project to search, or granted projects by area, to search or also to change), keeps areas in step with folders, SFTP, SharePoint, Google Drive, web pages, a database or an API on the leader (only changed items get new vectors), offers it as an MCP search tool, and exports a source as a Sutra; one writer per area, enforced by the engine.
+- **Conversation tokens**: every answer of a published agent carries a token signed by SutraFlow. It continues the conversation only for the caller who started it, and only for a set time; administrators clear expired conversations and their memory.
+- **Who is chatting**: the caller's verified claims and scopes reach the agent (`{trigger.caller.claims.role}`), so one agent can serve customers and support staff differently; the chat button carries a website's own login.
+- **Knowledge from databases and APIs**: sample *Knowledge feed from a database* turns a MySQL product table into a knowledge base (changed rows again, unchanged skipped, unpublished removed) with a search API; tested on a local and a hosted remote MySQL.
+- **A chat example with a website**: sample *Chat for customers and support* with the PHP website *Sutra Sample Shop* (`samples/sutra-sample-shop`, also a download of its own) that signs people in and hands the chat their token; eight skills, and the website can use a SutraFlow on another server.
+- **Sample data named sample_**: everything the samples store is named `sample_<objective>` (tables, databases, collections, counters, queues, folders), and the installer's new *Samples* mode adds the samples to an installation or lists and removes them with their data, also through the *Sample ...* connections; earlier versions' sample names are recognised. No samples and no AI knowledge are set up unless chosen.
+- **Installer**: server name, the gateway certificate (self-signed, your files or Let's Encrypt), sample Sutras, steps at once per engine, heartbeat and drain, a check that the engines see each other, `sutraflow engine-file` for an engine joining later, and YAML install files.
+
+## Install and upgrade
+
+Install as for 2.1.4. Upgrade from 2.1.0 to 2.1.4: unpack 2.1.5 in a folder of its own and run `bin/sutraflow upgrade` from there. 2.1.5 adds one table (`agent_conversations`) and no required settings.
+
+**What changes for you:**
+- **Clients that made up their own session ids** for a published agent (the chat API, the OpenAI-compatible API, A2A `contextId`, the MCP tool's `session`) now get a new conversation each time, until they send back the token SutraFlow returns (`sessionId`, `X-Session-Id`, `contextId`, `session`). The chat page and widget already do. OpenAI-compatible clients that send the whole history are not affected.
+- **Conversations end** after the agent channel's *Conversation lasts* time (24 hours unless set); the next message starts a new one.
+- **Chat visitors** (no policy) get a new kind of signed identity; 2.1.4 identities are renewed on their next message, so nobody loses a conversation.
+
+## What is new in 2.1.5
+
+### Dashboards
+
+- **Dashboard page** (trigger): the page `/dash/<name>` while deployed, with a title, a description, filters (list, multi list, date range, number range, search: their values in the page address, `{{trigger.params.<field>}}` for SQL as bound parameters and `{{trigger.filters}}` for Chart steps; a click on a chart sets the filter of its category field), who may see it (a security policy: the page holds no data, its data request goes through the policy), a refresh time, whether results are the same for everyone or kept per caller, and the number of columns. `/dash/<name>/embed.js` puts it on another web page; a page with its own login passes it with `window.SutraDashboard = { token: () => accessToken }`.
+- **Chart**: rows to a chart: bar, horizontal bar, line, area, pie, donut, scatter, a number, a KPI card (the total or the latest period, the change against the one before, a trend line, a target), a gauge or a table, with category and value fields, stacking, sorting, a row limit, a unit and a colour palette. Rows from SQL, an API answer (*List inside*), any JSON; raw rows grouped and added up (sum, average, count, distinct count, min, max), dates by day, week, month, quarter or year, series split by a field, nested fields such as `customer.city`; the page filters applied to the rows. Plain JSON options only: no code, no links.
+- **Charts from AI** (new): plans the charts of a dashboard for rows of any shape. With an AI provider the model chooses from field names and kinds (and a few rows only when allowed); without one, built-in rules choose. Every chart passes the allow-list, and the numbers are worked out from the rows.
+- **Settings from a step**: a Chart takes its settings from an earlier step, such as an AI prompt asked to choose a chart, only when they pass the allow-list (known settings, chart types and palettes, fields that are in the rows); anything else is refused and logged, and the step's own settings are used. The data always comes from the rows.
+- **Dashboard reply**: the charts in the order the page shows them (a Charts from AI list counts as its charts), the choices of list filters, and a note. A dashboard run that ends without it (such as an SQL query with no rows whose *empty* port is not connected) now says so on the page.
+- **Refresh and cache**: the page asks for data every refresh time; the answer is kept on the server for that time and shared by every viewer (or per caller), and viewers arriving during a run wait for it instead of starting another. The page's query parameters reach the Sutra as `params`.
+- **Apache ECharts from SutraFlow itself**: `npm run build` copies ECharts (6.1.0, Apache-2.0, with its licence and notice) into `dist/web/vendor/echarts`; the gateway serves it at `/dash/vendor/echarts.min.js`. No CDN; dashboards work offline. Light and dark follow the viewer's system.
+- **Export**: PNG and SVG buttons on every chart.
+- **Sample: Sales dashboard on a database** (new, Samples/Dashboards): with *Sample: Sales orders install*, a MySQL table `sample_sutraflow.sample_sales_orders` (180 orders) and the page `/dash/sales-db`: filters for region, categories and dates as bound parameters, KPI cards with the change and a target, revenue by month split by region, click-to-filter by category and region, best customers and the latest orders.
+- **Sample: Dashboard from JSON** (new, Samples/Dashboards): `/dash/orders-json` from an API-style answer, grouped by month, split by channel, a nested field, four filters including a search, and three charts planned by Charts from AI.
+- **Sample: Sales dashboard** (new, Samples/Dashboards): five charts from SQL queries on the built-in SQLite file (total revenue, revenue by month, orders by category, top products, latest orders), and a suggestion step standing in for an AI whose unknown field is refused.
+
+### Knowledge admin
+
+- **Admin Console, Knowledge admin** (new page, Server permission): every knowledge base with its home project. *Server knowledge base* on: *Every project* may search the whole base, or *Granted projects only*, each grant naming the project, the area (a folder of sources such as `products`; empty = whole base) and whether it may add and remove there. The home project keeps full use; removing everything, rebuilding vectors and building the search index stay with it and administrators.
+- The engine checks every step, agent tool and API call: a project searches only its granted areas (a search without a filter searches all of them), and changing outside its areas fails with the reason. A granted knowledge base appears in the project's knowledge base lists marked with its home project and areas; its own connections are used through it, never offered to the project.
+- **Managed sources**: files in a server folder, an SFTP or FTP folder, SharePoint or OneDrive, a Google Drive folder, web pages, a database query or an HTTP API (JSON), each writing one area, on a schedule (minutes or cron) or *Sync now*, on the leader only and one after another. Only new and changed items are read and get vectors (files by size and time, rows by their text and details); items gone from the source are removed; an item that cannot be read keeps its passages; an empty listing removes nothing. *History* (the last 50 syncs), *Re-index*, *Remove* with its passages. A *Sutra of a project* source gives that project changes to one area.
+- **One writer per area**: an enabled managed source, a Sutra exported from one, or one granted project; a second writer on the same or an inner area is refused, naming the current one.
+- **Export as Sutra** (database, folder and web sources): a Sutra of ordinary steps in the home project; the managed sync stops, and the exported Sutra may change only its area.
+- **MCP search tool**: a server knowledge base as a tool on an MCP server connection of its home project, for an area; the MCP server must have a security policy.
+- `sutra knowledge list | sync <base> <source> [--reindex] | runs <base> <source>`. New tables `kb_admin`, `kb_grants`, `kb_sources`, `kb_source_items`, `kb_sync_runs` (made on upgrade; nothing changes for existing knowledge bases until an administrator shares one).
+
+### Agent conversations
+
+- A conversation token `c1.<id>.<expiry>.<signature>` is signed with a key derived from the master key over the conversation id, its expiry, the agent and the caller (policy and token issuer, subject, gateway app, or the visitor). A missing, altered, foreign or expired token, or a made-up session id, starts a new conversation. The Sutra sees the conversation id as `{trigger.sessionId}`; answers name the conversation by its token, with `conversationExpires`.
+- The same in every entry point: chat page and API, OpenAI-compatible API (without a token, the same conversation for the same first message until it expires), A2A, and the MCP tool `ask_<agent>`, where each assistant user's conversation is bound to the gateway app and caller the assistant signed in with. Jobs name their conversation again.
+- *Conversation lasts (hours)* on the Agent channel (24 by default).
+- **Admin Console, Agent conversations** (new page): every agent's conversations, active and expired, with their messages; *Clear expired* removes expired conversations with their AI memory (messages, summaries, queue places) for one agent or all, for administrators (Server permission), recorded in the audit log. `sutra agents conversations` and `sutra agents clear-expired [--agent name]` do the same. The new table `agent_conversations` keeps no message text.
+- Visitor identities (`v2`) expire after `SUTRA_VISITOR_DAYS` (30) and are renewed once half of that has passed while the visitor keeps coming back.
+
+### Who is chatting
+
+- The caller's verified claims and scopes reach the agent Sutra as `trigger.caller.claims` and `trigger.caller.scopes` (JWT, OAuth introspection and gateway apps), beside the subject.
+- The chat page and widget carry a website's login: the page sets `window.SutraChat = { token: () => accessToken }` before the widget script; the chat asks for it before each message, sends it as a bearer token, and asks again when it is refused as expired. The widget answers only its own frame and sends the token only to the SutraFlow address it came from. Without a login, the chat says to sign in on the website. `SutraChat.reload()` reopens the chat after a sign-in change.
+
+### Samples
+
+- **Sample data named sample_**: the samples' tables, databases, collections, counters, channels, queues and folders are named `sample_<objective>`: MySQL `sample_sutraflow` (tables `sample_sales_orders`, `sample_products`, `sample_customers`, `sample_orders`, procedure `sample_customer_orders`, was `sutraflow_samples`), SQLite `sample_sutraflow.sqlite` (was `samples.sqlite`), MongoDB `sample_orders`, queues `sample_orders.in`/`.out`, and folders in the project's files folder (`sample_csv`, `sample_inbox`, `sample_outbox`, `sample_documents`, `sample_scripts`, `sample_downloads`, `sample_validation`) through project properties instead of `C:/sutra/...`. Samples added before keep their old names until they are removed and added again.
+- **Knowledge feed from a database** (new, Samples/AI agents): *Sample: Product catalogue install* makes a product table in MySQL; *Sample: Product knowledge feed* reads the published rows of the table in the project property `PRODUCTS_TABLE` every 30 minutes, adds each product as a passage under `products/<id>` with its category, price and link as details (*Same text as before: skip*), and removes the products no longer published; *Sample: Product search API* (`POST /samples/products/search`) answers the closest products with their details. No AI model needed.
+- **Chat for customers and support** (new, Samples/AI agents): *Sample: Customer and support chat*, published as `shop-help`, with the policy *Sample chat website sign-in* (JWT with a shared secret in the Secret property `CHAT_SITE_SECRET`, issuer `sutra-sample-shop`). Eight skills chosen by keywords: order status, tracking a parcel, returns and refunds (within 30 days of delivery), invoices, the delivery address, products and stock, a person from the support desk, and help. Customers see only their own orders, the support desk every order and every order of a customer; no AI model needed.
+- **Sutra Sample Shop** (new): the PHP website for that sample, ready to ship as a repository of its own. Its own sign-in with two demo accounts, a 15-minute token per person, the chat button, a setup check page (`check.php`), settings in `config.local.php` or environment variables (never in the shipped files), and `SUTRAFLOW_URL` to use this SutraFlow or one on another server. Download it from *New Sutra*, *Samples* (*Download the website (zip)*), or as `sutra-sample-shop-<version>.zip` beside the release packages; its README is the install guide.
+
+### Installer
+
+- **Server page**: *Server name* (`SUTRA_PUBLIC_URL`) and *Gateway certificate*: off, self-signed, your certificate files (checked against the key; the key kept in the vault) or Let's Encrypt (domains, email, staging or production, agreement).
+- **Cluster page**: *Steps at once* per engine (`STUDIO_WORKERS`, `ENGINE_WORKERS`, and in further engines' files), *Heartbeat* (`SUTRA_HEARTBEAT_MS`) and *Finish steps on stop* (`SUTRA_DRAIN_MS`).
+- **Review page**: *Add the sample Sutras* in a project named Samples.
+- **Samples** (new, on the first page): add the samples to an installation of this version, or remove them and their data. *List* shows everything first (the sample Sutras and connections, their knowledge, memory, counters, properties and files, and the `sample_` tables, collections and files reached through *Sample ...* connections; what your own Sutras use is kept); SutraFlow is stopped while they change and started again. The same from the command line: `sutraflow samples list|add|remove [--folder <installation>]`.
+- **Samples on upgrade**: the upgrade's Review page and `upgrade.json` (`"samples": "keep" | "add" | "remove" | "refresh"`) keep, add, remove or refresh the samples after the upgrade; a sample connection that cannot be reached is reported and does not undo the upgrade. The Administration Guide says when to add samples (designers' machines, training, proofs of concept) and when not (production).
+- **Engines see each other**: after starting a studio and an engine beside it, the install checks that both beat in the shared database.
+- **`sutraflow engine-file <name>`**: a settings file for an engine joining the cluster later, from the installed server's settings, without the database password.
+- **YAML install files**: `sutraflow install --config install.yaml` (the same fields as JSON). The silent install takes the new fields too (`docs/install-example.json`).
+
+### Documentation
+
+- User guide: *Dashboards*. Sutra Design Guide: *Blueprint: dashboards*, *Blueprint: knowledge bases from databases, APIs and files* (the feed Sutra, rules, a Joomla example, answering from it), and *Blueprint: chat agents for customers and support staff*, with the two agent patterns (a public agent that owns the conversation, and skills for an outside assistant), who is chatting from a third-party login, customers and staff, conversation tokens and their expiry, and the PHP example.
+- User guide: conversations and who is chatting; the Agent conversations page. Administration Guide: the new installer choices, `engine-file`, YAML, `SUTRA_VISITOR_DAYS`.
+- Administration Guide: *Knowledge admin: server knowledge bases* (settings, sources, grants, and using it: from a granted project's steps, from an assistant over MCP with curl and Claude Desktop examples, from the command line), and *The command line by task*: every `sutraflow` and `sutra` command grouped by task (installing and upgrading, starting and watching, engines and Docker, the database, releases, people and secrets, operating, alerts and the gateway), with what each does, when to use it and examples. User guide: *Exporting a Sutra application from the command line* in *Deploying and versions*, with deployment on servers pointing to the Administration Guide; server knowledge bases in *AI agents and knowledge bases*. Sutra Design Guide: one knowledge base for many projects, designed by area.
+
+### Fixes in 2.1.5
+
+| Seen | Cause | Now |
+|---|---|---|
+| A client could choose any session id for a published agent and keep reusing it; conversations never ended | Session ids came from the caller and had no lifetime (each caller's memory was already kept apart) | Session ids are signed tokens issued by SutraFlow, bound to the caller, that expire |
+| A chat visitor's identity lasted for ever | Visitor tokens had no time in them | They expire after 30 days and renew while the visitor keeps coming back |
+| An agent could not tell a customer from a support agent signed in on the same website | Only the caller's subject, method and app reached the Sutra | The verified claims and scopes reach it too |
+| The built-in chat button worked only for anonymous visitors | It could not send a website's login | It asks the page for its token and sends it as a bearer token |
+| A knowledge base used by several projects had to be copied into each, and every copy fed again | A knowledge base belonged to one project only | An administrator shares it, by area, in Knowledge admin; managed sources feed it once |
+| The installer could not set the server name, the gateway certificate, steps at once, heartbeat or drain, nor add an engine later | Those were only in the Admin Console or `sutraflow.env` | The install pages, the silent install and `sutraflow engine-file` set them |
+| `sutra knowledge sync` with a misspelt knowledge base said the names were missing | Not found and not given shared one message | It names the knowledge base not found and lists the ones there are |
+| GitHub CI proved upgrades from 2.1.0 only | The previous release was written into the workflow | CI upgrades from the newest published release other than the one being built (2.1.4 for 2.1.5) |
+
+## 2.1.5 release gate
+
+See `docs/releases/2.1.5-packages.md`.
+
+## Previous release: 2.1.4
+
+### In short
 
 - **Trusted proxies**: behind Apache, nginx or IIS, SutraFlow now sees each caller's real address and the HTTPS the proxy ended, from the proxies you list, and from no one else.
 - **Big documents use less memory**: streaming a 48 MB document into a pgvector knowledge base with 32 workers peaks at about 140 MB of live heap instead of 300 MB, and is faster.
@@ -20,15 +122,13 @@ Each comes with a `.sha256` file to check the download: `sha256sum -c <archive>.
 - **A new book, the Sutra Design Guide**: design standards for Sutras, from naming and functions to REST, SOAP, integration patterns, messaging, error handling and microservices; blueprints for a microservices platform, mobile APIs, broker integration and notifications; tracing an order from project to Sutra to run; every sample explained with what to change before production; a review checklist.
 - **A new sample, Traceability and notifications**: one order through an intake Sutra, a called credit check and a notification hub on an internal channel, with one correlation id in every log line.
 
-## Install and upgrade
+### Install and upgrade
 
 Install as for 2.1.3: `bin/sutraflow install` in the unpacked folder (Windows `bin\sutraflow.cmd install`), or silently with `--config`. Upgrade from 2.1.0, 2.1.1, 2.1.2 or 2.1.3: unpack 2.1.4 in a folder of its own and run `bin/sutraflow upgrade` from there (the Administration Guide's *Upgrading*). 2.1.4 changes no database tables and adds no required settings.
 
 **What changes for you:**
 - **Behind a reverse proxy**: nothing changes until you list the proxy under Admin Console, Gateway, Firewall, *Trusted proxies*. Then the request log, firewall, IP rules, rate limits and sign-in attempts see the caller's address, and *Require HTTPS* accepts calls the proxy received over HTTPS. Make sure the proxy replaces `X-Forwarded-For` and `X-Forwarded-Proto` (the Administration Guide has the Apache, nginx and IIS settings).
 - **Streaming steps** (Read file or List with *Stream in batches*) may pause a little more often: they wait while the batches they handed on hold more than 8 MB of input. `SUTRA_STREAM_BUFFER_MB` raises or lowers it.
-
-## What is new in 2.1.4
 
 ### Trusted proxies
 

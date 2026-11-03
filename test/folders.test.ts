@@ -226,7 +226,7 @@ test('samples go to Samples/<topic> folders and get the connections they need', 
   for (const f of list) {
     for (const n of flows.getFlow(f.id)!.doc.nodes) {
       for (const fld of meta(n.type)?.fields || []) {
-        if (fld.type !== 'resource' || !['smtp', 'imap', 'database', 'kafka', 'rabbitmq', 'amqp1', 'firebase', 'sftp', 'ftp', 'aiProvider', 'oauthApp'].includes(fld.resourceKind!)) continue;
+        if (fld.type !== 'resource' || fld.emptyAllowed || !['smtp', 'imap', 'database', 'kafka', 'rabbitmq', 'amqp1', 'firebase', 'sftp', 'ftp', 'aiProvider', 'oauthApp'].includes(fld.resourceKind!)) continue;
         const shown = !fld.showIf || fld.showIf.in.includes(fld.showIf.k in n.config ? n.config[fld.showIf.k] : meta(n.type)!.fields.find(x => x.k === fld.showIf!.k)?.def);
         if (!shown) continue;
         const r = n.config[fld.k] ? getResource(n.config[fld.k]) : undefined;
@@ -293,7 +293,7 @@ test('SFTP sample runs every remote step against a server', async () => {
     const r = await run(flows.getFlow(f.id)!.doc, pid);
     assert.equal(r.status, 'done', r.error);
     assert.match(r.logs, /1 CSV files listed, 4 order lines read on 127.0.0.1/);
-    const archived = fs.readdirSync(path.join(root, 'archive'));
+    const archived = fs.readdirSync(path.join(root, 'sample_archive'));
     assert.equal(archived.length, 1, 'the copy is deleted, the dated file stays');
     assert.match(archived[0], /^orders-\d{8}-\d{6}\.csv$/);
   } finally { await sftp.close(); }
@@ -304,7 +304,7 @@ test('SQL install script and the procedure as a microservice (MySQL)', { skip: !
   const u = new URL(MYSQL!);
   const mysql = require('mysql2/promise');
   const admin = await mysql.createConnection({ host: u.hostname, port: Number(u.port) || 3306, user: decodeURIComponent(u.username), password: decodeURIComponent(u.password) || undefined });
-  const [had] = await admin.query("show databases like 'sutraflow_samples'");
+  const [had] = await admin.query("show databases like 'sample_sutraflow'");
   try {
     const pid = projects.saveProject({ name: 'SQL samples', config: { variables: [] } }).id;
     addSamples(pid, ['sqlinstall']);
@@ -326,7 +326,7 @@ test('SQL install script and the procedure as a microservice (MySQL)', { skip: !
     assert.equal(body.count, 2);
     assert.deepEqual(body.orders.map((o: any) => o.id), ['A-4', 'A-1'], 'largest first, the 300 order left out');
   } finally {
-    if (!(had as any[]).length) await admin.query('drop database if exists sutraflow_samples');
+    if (!(had as any[]).length) await admin.query('drop database if exists sample_sutraflow');
     await admin.end();
   }
 });

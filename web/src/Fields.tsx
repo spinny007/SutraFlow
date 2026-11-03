@@ -127,7 +127,7 @@ function FieldInput({ f, value, onChange, resources, secrets, onFocusField, inli
       input = (
         <select id={id} value={value} onChange={e => onChange(e.target.value)}>
           <option value="">(none)</option>
-          {opts.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+          {opts.map(r => <option key={r.id} value={r.id}>{r.granted ? `${r.name} (server knowledge from ${r.granted.home}: ${r.granted.areas.map(a => (a.area || 'whole base') + (a.write ? ', may change' : '')).join('; ') || 'search'})` : r.name}</option>)}
           {value && !opts.some(r => r.id === value) && <option value={value}>(missing resource)</option>}
         </select>
       );

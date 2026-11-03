@@ -41,7 +41,10 @@ export function ProjectExplorer({ flows, flowId, openFlow, newFlow, sel, setSel,
   flows: FlowSummary[]; flowId: string | null; openFlow(id: string): void; newFlow(): void;
   sel: ExplorerSel | null; setSel(s: ExplorerSel | null): void; onFlowsChanged(): void;
 }) {
-  const { meta, projects, projectId, setProjectId, resources, schemas, project, reload } = useCatalog();
+  const { meta, projects, projectId, setProjectId, resources: catalogResources, schemas, project, reload } = useCatalog();
+  // Server knowledge bases granted to this project are picked in steps, not listed among its own connections.
+  const resources = catalogResources.filter(r => !r.granted);
+  const granted = catalogResources.filter(r => r.granted);
   const toast = useToast();
   const [closed, setClosed] = useState<Record<string, boolean>>({});
   const [creating, setCreating] = useState(false);
@@ -91,6 +94,7 @@ export function ProjectExplorer({ flows, flowId, openFlow, newFlow, sel, setSel,
             const miss = missingInResource(r, project);
             return { id: r.id, name: r.name, folder: r.folder, icon: k?.icon || '⚙', title: k?.name, warn: miss.length ? `Project variables not defined: ${miss.join(', ')}` : undefined };
           })} />
+        {granted.length > 0 && <p className="muted xs" style={{ margin: '4px 6px' }} title="Granted by an administrator in the Admin Console, Knowledge admin">Server knowledge: {granted.map(r => `${r.name} (from ${r.granted!.home})`).join(', ')}</p>}
       </>)}
       {sec('sch', 'Schemas', schemas.filter(s => s.kind !== 'wsdl').length, () => setSel({ kind: 'newSchema', schemaKind: 'json' }),
         <FolderTree area="schemas" activeId={sel?.kind === 'schema' ? sel.id : null} onChanged={reload} open={id => setSel({ kind: 'schema', id })}

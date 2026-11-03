@@ -270,6 +270,17 @@ create table if not exists git_workspaces(id text primary key, project_id text n
   branch text not null, account_id text, trusted integer not null default 0, source_project_id text, created_at text not null, updated_at text not null);
 create table if not exists git_ids(workspace_id text not null, kind text not null, repo_id text not null, local_id text not null, primary key(workspace_id, repo_id));
 create index if not exists git_ids_local on git_ids(workspace_id, local_id);
+create table if not exists agent_conversations(id text primary key, agent text not null, project_id text, owner text not null, created_at text not null, last_at text not null, expires_at bigint not null, messages integer not null default 0);
+create index if not exists agent_conversations_expires on agent_conversations(expires_at);
+create table if not exists kb_admin(kb_id text primary key, access text not null default 'granted', mcp_server text, mcp_tool text, mcp_description text, mcp_area text, updated_at text not null, updated_by text);
+create table if not exists kb_grants(kb_id text not null, project_id text not null, area text not null default '', can_write integer not null default 0, created_at text not null, created_by text, primary key(kb_id, project_id, area));
+create table if not exists kb_sources(id text primary key, kb_id text not null, name text not null, description text, kind text not null, connection_id text, config text not null, area text not null default '',
+  schedule text, enabled integer not null default 1, exported_project text, exported_flow text, next_at bigint not null default 0, requested integer not null default 0, created_at text not null, updated_at text not null, updated_by text);
+create index if not exists kb_sources_kb on kb_sources(kb_id);
+create table if not exists kb_source_items(source_id text not null, item text not null, hash text not null, at text not null, primary key(source_id, item));
+create table if not exists kb_sync_runs(id text primary key, source_id text not null, kb_id text not null, engine text, started_at text not null, finished_at text, status text not null,
+  found integer not null default 0, added integer not null default 0, changed integer not null default 0, unchanged integer not null default 0, removed integer not null default 0, failed integer not null default 0, error text, started_by text, notes text);
+create index if not exists kb_sync_runs_source on kb_sync_runs(source_id, started_at);
 create table if not exists ai_agent_state(run_id text not null, node_id text not null, state text not null, updated_at text not null, primary key(run_id, node_id));
 create table if not exists gw_requests(
   id integer primary key autoincrement, at text not null, engine text, kind text, method text, path text, route text, flow_id text,

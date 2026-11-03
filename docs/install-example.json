@@ -29,14 +29,25 @@
     "studioMemoryMb": 2048,
     "_names": "engineId: this server's engine name (default <machine>-studio); studioMayLead: whether it may lead (default true).",
     "engineId": "web-1",
-    "studioMayLead": true
+    "studioMayLead": true,
+    "_workers": "Steps at once (2.1.5): studioWorkers for this server, engineWorkers for an engine beside it (with enginePort); 0 or absent = the recommendation for the machine.",
+    "studioWorkers": 0
   },
   "cluster": {
     "_comment": "name: the cluster's name, shown in the Admin Console. engines: further engines (PostgreSQL only), each with a settings file beside the installer (sutraflow-engine-<name>.env). canLead false: never the leader (the leader is elected among those that may; at least one must). All of it can be changed later in the Admin Console, Engines.",
     "name": "Production",
     "engines": [
-      { "name": "engine-2", "host": "0.0.0.0", "port": 4801, "http": 9080, "https": 9443, "memoryMb": 2048, "canLead": true }
-    ]
+      { "name": "engine-2", "host": "0.0.0.0", "port": 4801, "http": 9080, "https": 9443, "memoryMb": 2048, "canLead": true, "workers": 0 }
+    ],
+    "_timing": "heartbeatSeconds: how often engines report in (1 to 60, default 5); drainSeconds: how long a stopping engine lets running steps finish (5 to 3600, default 30). 2.1.5.",
+    "heartbeatSeconds": 5,
+    "drainSeconds": 30
   },
+  "_publicUrl": "The address people and callers use, behind a proxy or a DNS name (single sign-on, OAuth, links). 2.1.5.",
+  "publicUrl": "https://sutra.example.com",
+  "_tls": "The gateway certificate (2.1.5). mode: off, selfSigned, uploaded (certFile and keyFile: PEM files on this server) or acme (Let's Encrypt: domains, email, staging, agreeTos).",
+  "tls": { "mode": "off", "domains": ["sutra.example.com"] },
+  "_samples": "true adds the sample Sutras in a project named Samples (none deployed), for designers' machines, training and proofs of concept; keep false for production. Their data is named sample_<objective> and is removed with sutraflow samples remove. An upgrade file takes \"samples\": \"keep\" | \"add\" | \"remove\" | \"refresh\". 2.1.5.",
+  "samples": false,
   "start": true
 }

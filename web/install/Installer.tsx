@@ -2,7 +2,7 @@
  * SutraFlow
  * Copyright (c) 2026-27 Surya Partap Singh
  * Developer: Surya Partap Singh | Website: MixAgile.com
- * File version: 2.1.1
+ * File version: 2.1.5
  * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
  * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
  * SPDX-License-Identifier: AGPL-3.0-only
@@ -23,7 +23,7 @@ interface MemoryInfo { machineMb: number; freeMb: number; nodeDefaultMb: number;
 interface State { version: string; home: string; locked: boolean; system: Check[]; here: Found; memory: MemoryInfo; hostname: string; defaults: Record<string, number> }
 interface Step { step: string; state: string; detail?: string }
 interface Job { kind?: string; steps: Step[]; done: boolean; error?: string; result?: any; logFile?: string }
-interface Engine { name: string; host: string; port: number; http: number; https: number; memoryMb: number; canLead: boolean }
+interface Engine { name: string; host: string; port: number; http: number; https: number; memoryMb: number; canLead: boolean; workers: number }
 
 // The one-time token the installer printed comes with the address; every request carries it.
 const token = new URLSearchParams(location.search).get('t') || '';
@@ -36,6 +36,10 @@ async function call<T>(method: 'GET' | 'POST', url: string, body?: unknown): Pro
 
 const INSTALL = ['Welcome', 'Administrator', 'Database', 'Server', 'Cluster', 'Review', 'Install', 'Done'];
 const UPGRADE = ['Welcome', 'Installation', 'Review', 'Upgrade', 'Done'];
+const SAMPLES = ['Welcome', 'Installation', 'Review', 'Samples', 'Done'];
+interface SampleItem { where: string; what: string; name: string; old?: boolean; note?: string }
+/** What adding or removing the samples would do (the installer's dry run). */
+interface SampleList { action: 'add' | 'remove'; items?: SampleItem[]; kept?: SampleItem[]; problems?: string[]; notes?: string[]; already?: number; samples?: number; project?: string }
 
 function Steps({ names, at }: { names: string[]; at: number }) {
   return <ol className="i-steps" aria-label="Installer steps">{names.map((n, i) => <li key={n} className={i < at ? 'done' : i === at ? 'now' : ''} aria-current={i === at ? 'step' : undefined}>{n}</li>)}</ol>;
@@ -67,19 +71,29 @@ const mark = (s: string) => (s === 'ok' ? <span className="i-ok" aria-label="don
 export function Installer() {
   const [st, setSt] = useState<State | null>(null);
   const [err, setErr] = useState('');
-  const [mode, setMode] = useState<'install' | 'upgrade'>('install');
+  const [mode, setMode] = useState<'install' | 'upgrade' | 'samples'>('install');
+  const [sampleAction, setSampleAction] = useState<'add' | 'remove'>('add');
+  const [sampleList, setSampleList] = useState<SampleList | null>(null);
+  const [sureRemove, setSureRemove] = useState(false);
   const [at, setAt] = useState(0);
   const [admin, setAdmin] = useState({ username: 'admin', password: '', again: '', email: '' });
   const [db, setDb] = useState({ kind: 'sqlite' as 'sqlite' | 'postgres', host: '127.0.0.1', port: 5432, database: 'sutraflow', user: 'postgres', password: '', sslMode: 'off' as 'off' | 'require' | 'verify', create: true, pgvector: 'required' as 'required' | 'optional', file: 'sutra.db' });
   const [dbTest, setDbTest] = useState<{ ok: boolean; message: string; notes: string[] } | null>(null);
   const [server, setServer] = useState({ host: '127.0.0.1', studioPort: 4800, gatewayHttp: 8080, gatewayHttps: 8443, environment: 'development' as 'development' | 'test' | 'production', engine: false, enginePort: 4801, engineHttp: 9080, engineHttps: 9443, studioMemoryMb: 0, engineMemoryMb: 0, engineId: '', engineName: '', studioMayLead: true, engineMayLead: true });
   const [clusterName, setClusterName] = useState('');
+  // 2.1.5: the address people use, the gateway certificate, steps at once, heartbeat and drain, sample Sutras.
+  const [publicUrl, setPublicUrl] = useState('');
+  const [tls, setTls] = useState({ mode: 'off' as 'off' | 'selfSigned' | 'uploaded' | 'acme', domains: '', certFile: '', keyFile: '', email: '', staging: true, agreeTos: false });
+  const [workers, setWorkers] = useState({ studio: 0, engine: 0 });
+  const [timing, setTiming] = useState({ heartbeatSeconds: 5, drainSeconds: 30 });
+  const [samples, setSamples] = useState(false);
   const [ports, setPorts] = useState<{ port: number; free: boolean; suggest?: number }[] | null>(null);
   const [engines, setEngines] = useState<Engine[]>([]);
   const [start, setStart] = useState(true);
   const [folder, setFolder] = useState('');
   const [found, setFound] = useState<Found | null>(null);
   const [backupDir, setBackupDir] = useState('');
+  const [upSamples, setUpSamples] = useState<'keep' | 'add' | 'remove' | 'refresh'>('keep');
   const [job, setJob] = useState<Job | null>(null);
   const [busy, setBusy] = useState(false);
   const [moving, setMoving] = useState(false);
@@ -96,7 +110,7 @@ export function Installer() {
 
   const leaders = () => [...(server.studioMayLead ? [server.engineId || 'this server'] : []), ...(server.engine && server.engineMayLead ? [server.engineName || 'the engine beside it'] : []), ...engines.filter(e => e.canLead).map(e => e.name)];
   const totalEngines = () => 1 + (server.engine ? 1 : 0) + engines.length;
-  const names = mode === 'install' ? INSTALL : UPGRADE;
+  const names = mode === 'install' ? INSTALL : mode === 'samples' ? SAMPLES : UPGRADE;
   const page = names[at];
   const go = (n: number) => { setErr(''); setAt(n); window.scrollTo(0, 0); };
   const follow = (onDone: (j: Job) => void) => {
@@ -108,10 +122,13 @@ export function Installer() {
   const config = () => ({
     admin: { username: admin.username.trim(), password: admin.password, email: admin.email.trim() || undefined },
     database: db.kind === 'sqlite' ? { kind: 'sqlite', file: db.file.trim() || 'sutra.db' } : { kind: 'postgres', host: db.host, port: Number(db.port), database: db.database, user: db.user, password: db.password || undefined, sslMode: db.sslMode, create: db.create, pgvector: db.pgvector },
-    server: { host: server.host, studioPort: Number(server.studioPort), gatewayHttp: Number(server.gatewayHttp), gatewayHttps: Number(server.gatewayHttps), environment: server.environment, studioMemoryMb: Number(server.studioMemoryMb) || 0, engineId: server.engineId.trim() || undefined, studioMayLead: server.studioMayLead,
-      ...(server.engine ? { enginePort: Number(server.enginePort), engineHttp: Number(server.engineHttp), engineHttps: Number(server.engineHttps), engineMemoryMb: Number(server.engineMemoryMb) || 0, engineName: server.engineName.trim() || undefined, engineMayLead: server.engineMayLead } : {}) },
-    cluster: { name: clusterName.trim(), engines },
+    server: { host: server.host, studioPort: Number(server.studioPort), gatewayHttp: Number(server.gatewayHttp), gatewayHttps: Number(server.gatewayHttps), environment: server.environment, studioMemoryMb: Number(server.studioMemoryMb) || 0, engineId: server.engineId.trim() || undefined, studioMayLead: server.studioMayLead, studioWorkers: Number(workers.studio) || 0,
+      ...(server.engine ? { enginePort: Number(server.enginePort), engineHttp: Number(server.engineHttp), engineHttps: Number(server.engineHttps), engineMemoryMb: Number(server.engineMemoryMb) || 0, engineName: server.engineName.trim() || undefined, engineMayLead: server.engineMayLead, engineWorkers: Number(workers.engine) || 0 } : {}) },
+    cluster: { name: clusterName.trim(), engines, heartbeatSeconds: Number(timing.heartbeatSeconds) || undefined, drainSeconds: Number(timing.drainSeconds) || undefined },
     start,
+    ...(publicUrl.trim() ? { publicUrl: publicUrl.trim() } : {}),
+    ...(tls.mode !== 'off' ? { tls: { mode: tls.mode, domains: tls.domains.split(/[\s,]+/).filter(Boolean), ...(tls.mode === 'uploaded' ? { certFile: tls.certFile.trim(), keyFile: tls.keyFile.trim() } : {}), ...(tls.mode === 'acme' ? { email: tls.email.trim(), staging: tls.staging, agreeTos: tls.agreeTos } : {}) } } : {}),
+    samples,
   });
 
   // ---------- checks per page, before Next ----------
@@ -175,11 +192,28 @@ export function Installer() {
         follow(j => { if (!j.error) go(INSTALL.indexOf('Done')); });
         return;
       }
+      if (page === 'Installation' && mode === 'samples') {
+        if (!found?.exists) return setErr(found ? found.note : 'Find the installation first (Check).');
+        if (found.version !== st?.version) return setErr(`It runs ${found.version}: upgrade it to ${st?.version} first, then add or remove its samples.`);
+        setSampleList(null); setSureRemove(false);
+        return go(at + 1);
+      }
       if (page === 'Installation') {
         if (!found?.upgradable) return setErr(found ? found.note : 'Find the installation first (Check).');
       }
+      if (page === 'Review' && mode === 'samples') {
+        if (!sampleList || sampleList.action !== sampleAction) return setErr('List what would change first (List).');
+        if (sampleAction === 'add' && sampleList.already) return setErr(`The project ${sampleList.project} already has the samples: remove them first to add them fresh.`);
+        if (sampleAction === 'remove' && !sampleList.items?.length) return setErr('There is nothing to remove.');
+        if (sampleAction === 'remove' && !sureRemove) return setErr('Tick that you have read the list: removing cannot be undone.');
+        await call('POST', '/api/samples', { config: { folder: found!.folder, action: sampleAction, start } });
+        setJob({ steps: [], done: false });
+        go(at + 1);
+        follow(j => { if (!j.error) go(SAMPLES.indexOf('Done')); });
+        return;
+      }
       if (page === 'Review' && mode === 'upgrade') {
-        await call('POST', '/api/upgrade', { config: { from: found!.folder, backupDir: backupDir.trim() || undefined, start } });
+        await call('POST', '/api/upgrade', { config: { from: found!.folder, backupDir: backupDir.trim() || undefined, start, samples: upSamples } });
         setJob({ steps: [], done: false });
         go(at + 1);
         follow(j => { if (!j.error) go(UPGRADE.indexOf('Done')); });
@@ -187,6 +221,10 @@ export function Installer() {
       }
       go(at + 1);
     } catch (e: any) { setErr(e.message); }
+  };
+  const listSamples = async () => {
+    setBusy(true); setErr(''); setSampleList(null); setSureRemove(false);
+    try { setSampleList(await call<SampleList>('POST', '/api/samples', { dryRun: true, config: { folder: found!.folder, action: sampleAction } })); } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
   const detect = async () => {
     setBusy(true); setFound(null);
@@ -207,11 +245,11 @@ export function Installer() {
   const logLink = <a href={`/api/log?t=${token}`}>Download the log</a>;
 
   const strength = admin.password.length >= 16 && /[^A-Za-z0-9]/.test(admin.password) ? 'strong' : admin.password.length >= 12 ? 'good' : admin.password ? 'too short' : '';
-  const working = page === 'Install' || page === 'Upgrade';
+  const working = page === 'Install' || page === 'Upgrade' || page === 'Samples';
 
   return (
     <div className="i-shell">
-      <header className="i-head"><Logo /><div><h1>SutraFlow {st?.version || ''} installer</h1><p>{mode === 'install' ? 'Install SutraFlow on this server' : 'Upgrade an installation to this version'}{st ? ` · ${st.home}` : ''}</p></div></header>
+      <header className="i-head"><Logo /><div><h1>SutraFlow {st?.version || ''} installer</h1><p>{mode === 'install' ? 'Install SutraFlow on this server' : mode === 'samples' ? 'Add or remove the samples of an installation' : 'Upgrade an installation to this version'}{st ? ` · ${st.home}` : ''}</p></div></header>
       <Steps names={names} at={at} />
       <main className="i-card" aria-live="polite">
         {!st && !err && <p>Loading…</p>}
@@ -223,6 +261,7 @@ export function Installer() {
           <div className="i-choice" role="group" aria-label="What to do">
             <button type="button" aria-pressed={mode === 'install'} disabled={st.locked} onClick={() => setMode('install')}><b>Install</b><span>A new SutraFlow in this folder: administrator, database, ports, and optionally a cluster.</span></button>
             <button type="button" aria-pressed={mode === 'upgrade'} onClick={() => setMode('upgrade')}><b>Upgrade</b><span>An installation of 2.1.0 or later, to {st.version}: backed up first, put back if anything fails.</span></button>
+            <button type="button" aria-pressed={mode === 'samples'} onClick={() => { setMode('samples'); if (!folder) setFolder(st.home); }}><b>Samples</b><span>Add the sample Sutras to an installation of {st.version}, or remove them and their data (everything named sample_).</span></button>
           </div>
           {mode === 'install' && <><h3>System check</h3><ul className="i-checks">{st.system.map(c => <li key={c.name}>{c.ok ? <span className="i-ok">✓</span> : c.required ? <span className="i-bad">✗</span> : <span className="i-warn">!</span>}<span><b>{c.name}</b><br /><small>{c.detail}</small></span></li>)}</ul></>}
         </>}
@@ -279,6 +318,22 @@ export function Installer() {
               <Field label="Engine gateway HTTPS"><input type="number" value={server.engineHttps} onChange={e => { setServer({ ...server, engineHttps: Number(e.target.value) }); setPorts(null); }} /></Field>
             </>}
           </div>
+          <h3>Server name and HTTPS</h3>
+          <div className="i-grid">
+            <Field label="Server name (optional)" help="The address people and callers use, behind a proxy or a DNS name, such as https://sutra.example.com: used for single sign-on, OAuth and links (SUTRA_PUBLIC_URL)"><input value={publicUrl} placeholder="https://sutra.example.com" onChange={e => setPublicUrl(e.target.value)} /></Field>
+            <Field label="Gateway certificate" help="For the HTTPS port. Changed later in the Admin Console (Server, Gateway & TLS)"><select value={tls.mode} onChange={e => setTls({ ...tls, mode: e.target.value as any })}><option value="off">Off (HTTPS port not served)</option><option value="selfSigned">Self-signed (testing)</option><option value="uploaded">My certificate files</option><option value="acme">Let's Encrypt</option></select></Field>
+            {tls.mode !== 'off' && <Field label="Domain names" help="Comma separated, such as api.example.com"><input value={tls.domains} placeholder="api.example.com" onChange={e => setTls({ ...tls, domains: e.target.value })} /></Field>}
+            {tls.mode === 'uploaded' && <>
+              <Field label="Certificate file (PEM)" help="A path on this server: the certificate with its chain"><input value={tls.certFile} placeholder="C:\certs\fullchain.pem" onChange={e => setTls({ ...tls, certFile: e.target.value })} /></Field>
+              <Field label="Private key file (PEM)" help="Read once and kept encrypted in the vault"><input value={tls.keyFile} placeholder="C:\certs\privkey.pem" onChange={e => setTls({ ...tls, keyFile: e.target.value })} /></Field>
+            </>}
+            {tls.mode === 'acme' && <>
+              <Field label="Contact email" help="Let's Encrypt writes here about the certificate"><input value={tls.email} onChange={e => setTls({ ...tls, email: e.target.value })} /></Field>
+              <Field label="Let's Encrypt service"><select value={tls.staging ? 'staging' : 'production'} onChange={e => setTls({ ...tls, staging: e.target.value === 'staging' })}><option value="staging">Staging (test certificates)</option><option value="production">Production</option></select></Field>
+              <p style={{ alignSelf: 'end' }}><label><input type="checkbox" checked={tls.agreeTos} onChange={e => setTls({ ...tls, agreeTos: e.target.checked })} /> I agree to the Let's Encrypt subscriber agreement</label></p>
+            </>}
+          </div>
+          {tls.mode === 'acme' && <div className="i-msg info">The gateway's HTTP port must answer as port 80 for these names on the internet while the certificate is made and renewed.</div>}
           <h3>Node memory</h3>
           <p className="lead" style={{ fontSize: 13 }}>Each engine is its own Node.js process with its own memory. 0 lets Node.js decide{st ? ` (about ${st.memory.nodeDefaultMb} MB here)` : ''}. {st ? `This machine has ${st.memory.machineMb} MB (${st.memory.freeMb} MB free); about ${st.memory.suggestedMb} MB per engine suits it.` : ''} It can be changed later in the Admin Console (Engines, Tuning) and applies at a restart.</p>
           <div className="i-grid">
@@ -296,23 +351,27 @@ export function Installer() {
           <p className="lead">The engines that share the work through one database: this server, an engine beside it, and further engines on other machines (PostgreSQL only). The leader runs timers, listeners, recovery and housekeeping; it is elected among the engines that may lead, and another takes over when it stops.</p>
           <div className="i-grid">
             <Field label="Cluster name" help="Shown in the Admin Console, for example Production or Shop cluster"><input value={clusterName} maxLength={60} onChange={e => setClusterName(e.target.value)} /></Field>
+            <Field label="Heartbeat (seconds)" help="How often each engine reports in; an engine silent for three beats is taken as stopped and its steps are taken over"><input type="number" min={1} max={60} value={timing.heartbeatSeconds} onChange={e => setTiming({ ...timing, heartbeatSeconds: Number(e.target.value) })} /></Field>
+            <Field label="Finish steps on stop (seconds)" help="How long a stopping engine lets its running steps finish before handing the rest to the others"><input type="number" min={5} max={3600} value={timing.drainSeconds} onChange={e => setTiming({ ...timing, drainSeconds: Number(e.target.value) })} /></Field>
           </div>
-          <table className="i-engines"><thead><tr><th>Engine name</th><th>Where</th><th>Listen on</th><th>Port</th><th>Gateway HTTP</th><th>Gateway HTTPS</th><th>Memory (MB)</th><th>May lead</th><th /></tr></thead>
+          <table className="i-engines"><thead><tr><th>Engine name</th><th>Where</th><th>Listen on</th><th>Port</th><th>Gateway HTTP</th><th>Gateway HTTPS</th><th>Memory (MB)</th><th>Steps at once</th><th>May lead</th><th /></tr></thead>
             <tbody>
               <tr><td><input aria-label="This server's engine name" value={server.engineId} onChange={e => setServer({ ...server, engineId: e.target.value })} /></td><td className="muted">this server</td><td colSpan={5} className="muted">{server.host}:{server.studioPort}, gateway {server.gatewayHttp}/{server.gatewayHttps} (Server page)</td>
+                <td><input type="number" min={0} max={512} aria-label="This server's steps at once" value={workers.studio} onChange={e => setWorkers({ ...workers, studio: Number(e.target.value) })} /></td>
                 <td><input type="checkbox" aria-label="This server may lead" checked={server.studioMayLead} onChange={e => setServer({ ...server, studioMayLead: e.target.checked })} /></td><td /></tr>
               {server.engine && <tr><td><input aria-label="The engine beside it: name" value={server.engineName} onChange={e => setServer({ ...server, engineName: e.target.value })} /></td><td className="muted">beside it</td><td colSpan={5} className="muted">{server.host}:{server.enginePort}, gateway {server.engineHttp}/{server.engineHttps} (Server page)</td>
+                <td><input type="number" min={0} max={512} aria-label="The engine beside it: steps at once" value={workers.engine} onChange={e => setWorkers({ ...workers, engine: Number(e.target.value) })} /></td>
                 <td><input type="checkbox" aria-label="The engine beside it may lead" checked={server.engineMayLead} onChange={e => setServer({ ...server, engineMayLead: e.target.checked })} /></td><td /></tr>}
               {engines.map((e, i) => <tr key={i}>
                 <td><input aria-label={`Engine ${i + 1} name`} value={e.name} onChange={ev => setEngines(engines.map((x, j) => (j === i ? { ...x, name: ev.target.value } : x)))} /></td><td className="muted">another machine</td>
-                {(['host', 'port', 'http', 'https', 'memoryMb'] as const).map(k => <td key={k}><input aria-label={`Engine ${i + 1} ${k}`} value={(e as any)[k]} onChange={ev => setEngines(engines.map((x, j) => (j === i ? { ...x, [k]: k === 'host' ? ev.target.value : Number(ev.target.value) } : x)))} /></td>)}
+                {(['host', 'port', 'http', 'https', 'memoryMb', 'workers'] as const).map(k => <td key={k}><input aria-label={`Engine ${i + 1} ${k}`} value={(e as any)[k]} onChange={ev => setEngines(engines.map((x, j) => (j === i ? { ...x, [k]: k === 'host' ? ev.target.value : Number(ev.target.value) } : x)))} /></td>)}
                 <td><input type="checkbox" aria-label={`Engine ${i + 1} may lead`} checked={e.canLead} onChange={ev => setEngines(engines.map((x, j) => (j === i ? { ...x, canLead: ev.target.checked } : x)))} /></td>
                 <td><button className="i-btn" onClick={() => setEngines(engines.filter((_x, j) => j !== i))} aria-label={`Remove engine ${i + 1}`}>Remove</button></td></tr>)}
             </tbody></table>
-          <p><button className="i-btn" disabled={db.kind !== 'postgres'} onClick={() => setEngines([...engines, { name: `engine-${engines.length + 2}`, host: '0.0.0.0', port: 4801, http: 9080, https: 9443, memoryMb: 0, canLead: true }])}>Add an engine on another machine</button></p>
+          <p><button className="i-btn" disabled={db.kind !== 'postgres'} onClick={() => setEngines([...engines, { name: `engine-${engines.length + 2}`, host: '0.0.0.0', port: 4801, http: 9080, https: 9443, memoryMb: 0, canLead: true, workers: 0 }])}>Add an engine on another machine</button></p>
           {db.kind !== 'postgres' && <div className="i-msg info">Engines on other machines need PostgreSQL; this installation uses SQLite (this server, and an engine beside it).</div>}
           {leaders().length === 1 && totalEngines() > 1 && <div className="i-msg info">Only {leaders()[0]} may lead: it is always the leader, and timers, listeners and recovery stop while it is down. Allow a second engine for failover.</div>}
-          <p className="lead" style={{ fontSize: 13 }}>Change names, the cluster's name and who may lead later in the Admin Console (Engines). Memory 0 lets Node.js decide on that machine. Each further engine needs the same SutraFlow release, its settings file, and a copy of this server's <span className="i-mono">data/master.key</span> (the vault key); it joins when started with <span className="i-mono">sutraflow start engine</span>.</p>
+          <p className="lead" style={{ fontSize: 13 }}>Change names, the cluster's name and who may lead later in the Admin Console (Engines). Memory 0 lets Node.js decide on that machine; steps at once 0 takes the recommendation for that machine. An engine added later gets its settings file with <span className="i-mono">sutraflow engine-file &lt;name&gt;</span>. Each further engine needs the same SutraFlow release, its settings file, and a copy of this server's <span className="i-mono">data/master.key</span> (the vault key); it joins when started with <span className="i-mono">sutraflow start engine</span>.</p>
         </>}
 
         {page === 'Review' && mode === 'install' && <>
@@ -328,17 +387,21 @@ export function Installer() {
             <dt>Node memory</dt><dd>studio {server.studioMemoryMb ? `${server.studioMemoryMb} MB` : 'Node.js decides'}{server.engine ? `; engine ${server.engineMemoryMb ? `${server.engineMemoryMb} MB` : 'Node.js decides'}` : ''}</dd>
             <dt>Cluster</dt><dd>{clusterName.trim() || '(no name)'}: {[server.engineId || 'this server', ...(server.engine ? [server.engineName || 'the engine beside it'] : []), ...engines.map(e => `${e.name}${e.memoryMb ? ` (${e.memoryMb} MB)` : ''}`)].join(', ')}</dd>
             <dt>May lead</dt><dd>{leaders().join(', ') || 'none'}</dd>
+            <dt>Server name</dt><dd>{publicUrl.trim() || '(the listening address)'}</dd>
+            <dt>Gateway certificate</dt><dd>{({ off: 'Off', selfSigned: 'Self-signed', uploaded: 'My certificate files', acme: `Let's Encrypt (${tls.staging ? 'staging' : 'production'})` } as Record<string, string>)[tls.mode]}{tls.mode !== 'off' && tls.domains ? `: ${tls.domains}` : ''}</dd>
           </dl>
+          <p><label><input type="checkbox" checked={samples} onChange={e => setSamples(e.target.checked)} /> Add the sample Sutras (a project named Samples, with every sample to learn from; none is deployed)</label></p>
           <label><input type="checkbox" checked={start} onChange={e => setStart(e.target.checked)} /> Start SutraFlow when installed</label>
           <p><button className="i-btn" onClick={saveAnswers}>Save answers as a config file</button></p>
           <p className="lead" style={{ fontSize: 13 }}>Installs the next server with the same choices: <span className="i-mono">sutraflow install --config sutraflow-install.json</span>. The file holds no password; set <span className="i-mono">SUTRA_INSTALL_ADMIN_PASSWORD</span>{db.kind === 'postgres' && db.password ? <> and <span className="i-mono">SUTRA_INSTALL_DB_PASSWORD</span></> : null} on that server first.</p>
         </>}
 
         {page === 'Installation' && <>
-          <h2>Installation to upgrade</h2>
-          <p className="lead">The folder of a SutraFlow 2.1.0 or later installation. This package ({st?.version}) is installed into it; its data and settings stay.</p>
+          <h2>{mode === 'samples' ? 'Installation' : 'Installation to upgrade'}</h2>
+          <p className="lead">{mode === 'samples' ? `The folder of a SutraFlow ${st?.version} installation (this one, or another on this machine).` : `The folder of a SutraFlow 2.1.0 or later installation. This package (${st?.version}) is installed into it; its data and settings stay.`}</p>
           <div className="i-row"><div className="i-fld" style={{ flex: 1 }}><label>Folder<input value={folder} onChange={e => { setFolder(e.target.value); setFound(null); }} placeholder="C:\laragon\www\sutra" /></label></div><button className="i-btn" onClick={detect} disabled={busy || !folder.trim()}>{busy ? 'Looking…' : 'Check'}</button></div>
-          {found && <div className={`i-msg ${found.upgradable ? 'ok' : 'err'}`}>{found.note}</div>}
+          {found && mode !== 'samples' && <div className={`i-msg ${found.upgradable ? 'ok' : 'err'}`}>{found.note}</div>}
+          {found && mode === 'samples' && <div className={`i-msg ${found.exists && found.version === st?.version ? 'ok' : 'err'}`}>{!found.exists ? found.note : found.version === st?.version ? `SutraFlow ${found.version}: its samples can be added or removed.` : `It runs ${found.version}: upgrade it to ${st?.version} first.`}</div>}
           {found?.exists && <dl className="i-review"><dt>Version</dt><dd>{found.version}</dd><dt>Database</dt><dd className="i-mono">{found.database}</dd><dt>Data folder</dt><dd className="i-mono">{found.dataDir}</dd><dt>Address</dt><dd>http://{found.host === '0.0.0.0' ? '127.0.0.1' : found.host}:{found.port}</dd></dl>}
         </>}
 
@@ -347,24 +410,52 @@ export function Installer() {
           <p className="lead">SutraFlow {found.version} is stopped gracefully (running steps finish), backed up, upgraded to {st?.version}, checked and started again. If any step fails, the previous version is put back and started.</p>
           <dl className="i-review"><dt>Installation</dt><dd className="i-mono">{found.folder}</dd><dt>From</dt><dd>{found.version}</dd><dt>To</dt><dd>{st?.version}</dd></dl>
           <Field label="Backup folder" help="Empty: a backups folder inside the installation. It gets the data folder, the settings and the whole database."><input value={backupDir} onChange={e => setBackupDir(e.target.value)} placeholder={`${found.folder}${found.folder.includes('\\') ? '\\' : '/'}backups`} /></Field>
+          <Field label="Samples" help="Keep leaves the samples as they are. Remove deletes the sample Sutras and their sample_ data (the Samples mode lists them first). Refresh removes them and adds this version's. Production servers usually have none.">
+            <select value={upSamples} onChange={e => setUpSamples(e.target.value as any)}>
+              <option value="keep">Keep</option><option value="add">Add when none</option><option value="remove">Remove</option><option value="refresh">Refresh</option>
+            </select>
+          </Field>
           <p><label><input type="checkbox" checked={start} onChange={e => setStart(e.target.checked)} /> Start it again when upgraded</label></p>
         </>}
 
+        {page === 'Review' && mode === 'samples' && found && <>
+          <h2>Samples</h2>
+          <p className="lead">The samples are Sutras to learn from in a project named Samples. Everything they store is named <span className="i-mono">sample_</span> (tables, collections, counters, files), so it can be told apart from your own data and removed.</p>
+          <div className="i-choice" role="group" aria-label="Add or remove">
+            <button type="button" aria-pressed={sampleAction === 'add'} onClick={() => { setSampleAction('add'); setSampleList(null); }}><b>Add</b><span>Every sample in the project Samples, with "Sample ..." connections to fill in; none is deployed.</span></button>
+            <button type="button" aria-pressed={sampleAction === 'remove'} onClick={() => { setSampleAction('remove'); setSampleList(null); }}><b>Remove</b><span>The sample Sutras, their connections, knowledge, memory, counters and files, and sample_ tables, collections and files reached through "Sample ..." connections.</span></button>
+          </div>
+          <p><button className="i-btn" onClick={listSamples} disabled={busy}>{busy ? 'Listing…' : 'List'}</button> <small>Reads what is there; nothing changes.</small></p>
+          {sampleList && sampleAction === 'add' && <div className={`i-msg ${sampleList.already ? 'err' : 'ok'}`}>{sampleList.already ? `The project ${sampleList.project} already has ${sampleList.already} sample Sutras: remove them first to add them fresh.` : `${sampleList.samples} samples will be added to the project ${sampleList.project}.`}</div>}
+          {sampleList && sampleAction === 'remove' && <>
+            {!sampleList.items?.length ? <div className="i-msg ok">No samples and no sample data: nothing to remove.</div> : <>
+              <h3>To remove ({sampleList.items.length})</h3>
+              <table className="i-table"><thead><tr><th>Where</th><th>What</th><th>Name</th></tr></thead><tbody>{sampleList.items.map((i, n) => <tr key={n}><td>{i.where}</td><td>{i.what}</td><td className="i-mono">{i.name}{i.old ? ' (earlier version)' : ''}</td></tr>)}</tbody></table>
+            </>}
+            {!!sampleList.kept?.length && <><h3>Kept</h3><ul>{sampleList.kept.map((i, n) => <li key={n}>{i.where}: {i.what} <span className="i-mono">{i.name}</span>, {i.note}</li>)}</ul></>}
+            {!!sampleList.problems?.length && <div className="i-msg err">Not reached (its sample data stays): {sampleList.problems.join('; ')}</div>}
+            {(sampleList.notes || []).map((n, i) => <div key={i} className="i-msg info">{n}</div>)}
+            {!!sampleList.items?.length && <p><label><input type="checkbox" checked={sureRemove} onChange={e => setSureRemove(e.target.checked)} /> I have read the list: remove these (this cannot be undone)</label></p>}
+          </>}
+          <p><label><input type="checkbox" checked={start} onChange={e => setStart(e.target.checked)} /> Start SutraFlow again afterwards (it is stopped while the samples change)</label></p>
+        </>}
+
         {working && <>
-          <h2>{page === 'Install' ? 'Installing' : 'Upgrading'}</h2>
+          <h2>{page === 'Install' ? 'Installing' : page === 'Samples' ? (sampleAction === 'add' ? 'Adding the samples' : 'Removing the samples') : 'Upgrading'}</h2>
           <ul className="i-checks">{(job?.steps || []).map(s => <li key={s.step}>{mark(s.state)}<span><b>{s.step}</b>{s.detail && <><br /><small>{s.detail}</small></>}</span></li>)}</ul>
           {!job?.done && <p className="lead">Working…</p>}
           {job?.error && <div className="i-msg err">{job.error} {logLink}</div>}
         </>}
 
         {page === 'Done' && <>
-          <h2>{mode === 'install' ? 'SutraFlow is installed' : 'SutraFlow is upgraded'}</h2>
+          <h2>{mode === 'install' ? 'SutraFlow is installed' : mode === 'samples' ? (sampleAction === 'add' ? 'Samples added' : 'Samples removed') : 'SutraFlow is upgraded'}</h2>
           {mode === 'install' && job?.result && <>
             <p className="lead">Sign in as <b>{admin.username}</b> at <a href={job.result.address} target="_blank" rel="noreferrer">{job.result.address}</a>{start ? '' : ' after starting it (sutraflow start)'}.</p>
             {(job.result.cluster || []).length > 0 && <><h3>Engines of the cluster</h3><ul>{job.result.cluster.map((e: any) => <li key={e.name}>{e.name}: <a href={`/api/cluster-file?t=${token}&name=${encodeURIComponent(e.name)}`}>download its settings file</a></li>)}</ul></>}
             <NewKeys result={job.result} onKept={() => call('POST', '/api/keys-kept').then(() => setJob({ ...job, result: { ...job.result, newKeys: {} } }), () => {})} />
             <div className="i-msg info">The installer is locked now. Keep <span className="i-mono">data/master.key</span> safe and backed up: it unlocks the vault. To start SutraFlow with the machine: <span className="i-mono">sutraflow service</span>.</div>
           </>}
+          {mode === 'samples' && job?.result && <p className="lead">{sampleAction === 'add' ? `${job.result.added} sample Sutras in the project ${job.result.project}.` : `${job.result.items?.length || 0} removed.`}{job.result.problems?.length ? ` Not removed: ${job.result.problems.join('; ')}` : ''}</p>}
           {mode === 'upgrade' && job?.result && <p className="lead">{job.result.upgraded} in <span className="i-mono">{job.result.folder}</span>. The backup is in <span className="i-mono">{job.result.backup}</span>.</p>}
           <p>{logLink} (also kept in <span className="i-mono">{job?.logFile || 'data/logs/installer.log'}</span>)</p>
           <p><button className="i-btn" onClick={() => call('POST', '/api/quit').then(() => window.close(), () => {})}>Close the installer</button></p>
@@ -375,7 +466,7 @@ export function Installer() {
         {st && !working && page !== 'Done' && (
           <div className="i-foot">
             <button className="i-btn" onClick={() => go(at - 1)} disabled={at === 0}>Back</button>
-            <button className="i-btn primary" onClick={next} disabled={busy || moving || (page === 'Welcome' && mode === 'install' && !!st.locked)}>{moving ? 'Checking…' : page === 'Review' ? (mode === 'install' ? 'Install' : 'Upgrade') : 'Next'}</button>
+            <button className="i-btn primary" onClick={next} disabled={busy || moving || (page === 'Welcome' && mode === 'install' && !!st.locked)}>{moving ? 'Checking…' : page === 'Review' ? (mode === 'install' ? 'Install' : mode === 'samples' ? (sampleAction === 'add' ? 'Add samples' : 'Remove samples') : 'Upgrade') : 'Next'}</button>
           </div>
         )}
         {working && job?.done && job.error && <div className="i-foot"><button className="i-btn" onClick={() => go(at - 1)}>Back</button></div>}

@@ -127,6 +127,11 @@ const HELP = `sutra <command> [options]
             Loads a memory table again from its source on every engine (hot reload), or empties it.
   memory    set <table> --project <name> --row '{"code":"EUR","rate":1.08}' [--key EUR] | remove <table> --project <name> --key EUR
             Changes one value by hand, or removes it.
+  agents    conversations | clear-expired [--agent <name>]
+            Conversations of published agents, active and expired; clear-expired removes expired ones with their memory.
+  knowledge list | sync <knowledge base> <source> [--reindex] | runs <knowledge base> <source>
+            Server knowledge bases with their grants and managed sources; Sync now (on the leader, within 15 seconds),
+            optionally reading every item again; the last syncs of a source with what they added, changed and removed.
   token     create <system account> [--name text] [--expires-days n] | list <account> | revoke <account> <id>
             API tokens of a system account, for scripts and pipelines.
   audit     [--actor name] [--outcome ok|failed|denied] [--from 2026-10-01] [--csv]
@@ -604,7 +609,7 @@ async function main(argv: string[]) {
       out(`${system ? 'System account' : 'User'} ${name} added with role ${body.grants[0].role}${project ? ' on ' + str(a, 'project') : ' on all projects'}`);
       return 0;
     }
-    case 'sutras': case 'runs': case 'approvals': case 'engines': case 'token': case 'audit': case 'gateway': case 'alerts': case 'memory':
+    case 'sutras': case 'runs': case 'approvals': case 'engines': case 'token': case 'audit': case 'gateway': case 'alerts': case 'memory': case 'agents': case 'knowledge':
       if (!call) throw new Usage(`${cmd} needs --server and --token`);
       return operate(cmd, a, call);
     case 'status': {
@@ -655,6 +660,44 @@ const table = (rows: string[][]) => {
 async function operate(cmd: string, a: Args, call: Call): Promise<number> {
   const sub = a._[1], arg = a._[2];
   switch (`${cmd} ${sub}`) {
+    case 'agents conversations': {
+      const rows: any[] = await call('GET', '/api/console/conversations');
+      table([['AGENT', 'ACTIVE', 'EXPIRED', 'MESSAGES', 'LAST MESSAGE'], ...rows.map(r => [r.agent, String(r.active), String(r.expired), String(r.messages), String(r.lastAt || '')])]);
+      return 0;
+    }
+    case 'knowledge list': {
+      const r: any = await call('GET', '/api/console/knowledge');
+      const rows = [['KNOWLEDGE BASE', 'HOME PROJECT', 'SHARED', 'GRANTS', 'SOURCE', 'AREA', 'SCHEDULE', 'LAST SYNC']];
+      for (const k of r.bases) {
+        const grants = k.access === 'all' ? 'all projects' : k.grants.map((g: any) => `${g.projectName}${g.area ? ':' + g.area : ''}${g.write ? ' (writes)' : ''}`).join(', ');
+        const first = [k.name, k.projectName, k.server ? 'server' : 'project', grants || '-'];
+        if (!k.sources.length) rows.push([...first, '-', '', '', '']);
+        k.sources.forEach((x: any, i: number) => rows.push([...(i ? ['', '', '', ''] : first), x.name, x.area || '(whole)', x.exported ? 'exported' : x.schedule || 'Sync now', x.lastRun ? `${x.lastRun.status} ${x.lastRun.startedAt.slice(0, 16)}` : 'never']));
+      }
+      table(rows);
+      return 0;
+    }
+    case 'knowledge sync': case 'knowledge runs': {
+      const r: any = await call('GET', '/api/console/knowledge');
+      const kb = r.bases.find((k: any) => k.name.toLowerCase() === String(arg || '').toLowerCase());
+      if (!arg || !a._[3]) throw new Usage('Give the knowledge base and the source by name: sutra knowledge ' + sub + ' "Company handbook" "HR folder"');
+      if (!kb) throw new Error(`No knowledge base named "${arg}". Knowledge bases: ${r.bases.map((k: any) => k.name).join(', ') || 'none'}`);
+      const src = kb.sources.find((x: any) => x.name.toLowerCase() === String(a._[3] || '').toLowerCase());
+      if (!src) throw new Error(`No source named "${a._[3] || ''}" in ${kb.name}. Sources: ${kb.sources.map((x: any) => x.name).join(', ') || 'none'}`);
+      if (sub === 'sync') {
+        const x = await call('POST', `/api/console/knowledge/${kb.id}/sources/${src.id}/sync`, { reindex: !!a.reindex });
+        out(`${src.name}: ${a.reindex ? 'read again from the start' : 'sync asked'}. ${x.note}`);
+        return 0;
+      }
+      const runs: any[] = await call('GET', `/api/console/knowledge/${kb.id}/sources/${src.id}/runs`);
+      table([['STARTED', 'STATUS', 'BY', 'FOUND', 'ADDED', 'CHANGED', 'UNCHANGED', 'REMOVED', 'FAILED', 'ERROR'], ...runs.map(x => [x.startedAt.slice(0, 19).replace('T', ' '), x.status, x.by, String(x.found), String(x.added), String(x.changed), String(x.unchanged), String(x.removed), String(x.failed), x.error.slice(0, 80)])]);
+      return 0;
+    }
+    case 'agents clear-expired': {
+      const r = await call('POST', '/api/console/conversations/clear-expired', str(a, 'agent') ? { agent: str(a, 'agent') } : {});
+      out(`Cleared ${r.conversations} expired conversations and ${r.memorySessions} memory sessions`);
+      return 0;
+    }
     case 'sutras list': {
       const apps: any[] = await call('GET', '/api/console/apps');
       const rows = [['PROJECT', 'SUTRA', 'VERSION', 'STATE', 'RUNS 24H', 'FAILED']];

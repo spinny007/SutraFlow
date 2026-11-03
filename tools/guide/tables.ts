@@ -56,6 +56,12 @@ export const TABLE_TEXT: Record<string, string> = {
   ai_sessions: 'One row per conversation of an AI memory store: running summary, last turn number, counts, and which run holds it.',
   ai_memory: 'Turns of AI conversations kept in the built-in memory store (role, text or sealed text, tokens).',
   ai_session_queue: 'Runs waiting for a conversation, in arrival order; the first one holds it.',
+  agent_conversations: 'Conversations of published agents (2.1.5): the agent, the owner (a hash of the caller), when it began, its last message, when it expires and how many messages; no message text. Expired ones are cleared with their memory in Agent conversations.',
+  kb_admin: 'Server knowledge bases (Knowledge admin, 2.1.5): who may search each (every project or granted projects) and its MCP search tool (server, tool name, description, area).',
+  kb_grants: 'Grants of server knowledge bases: the project, the area (a folder of sources; empty = whole base) and whether it may change the area. Grants made by a "Sutra of a project" source are marked with that source.',
+  kb_sources: 'Managed knowledge sources: what each reads (folder, SFTP/FTP, SharePoint, Google Drive, web pages, database query, HTTP API, or Sutras of a project), its connection and settings, the area it writes, its schedule, whether it is paused or exported as a Sutra, and when it runs next.',
+  kb_source_items: 'What each managed source last added: the item (file, row key, address) and its fingerprint, so a sync makes vectors only for new and changed items and removes the items gone from the source.',
+  kb_sync_runs: 'Syncs of managed knowledge sources (the last 50 per source): when, who asked, the status, and how many items were found, added, changed, unchanged, removed and failed, with notes.',
   ai_agent_state: 'Progress of an AI agent step in a run (tool steps, tokens, the tool it waits for), removed when the step finishes.',
   ai_knowledge: 'Passages of built-in knowledge bases with their source, details and vector.',
   folders: 'Explorer folders of a project kept while nothing is in them, per area (sutras, resources, schemas, wsdl); each item keeps its own folder in a folder column.',
@@ -87,7 +93,7 @@ export const TABLE_GROUPS: [string, string[]][] = [
   ['Vault and server settings', ['secrets', 'settings']],
   ['API gateway', ['gw_apps', 'gw_keys', 'gw_plans', 'gw_usage', 'gw_requests', 'replay_guard', 'acme_challenges', 'ws_connections', 'ws_outbox']],
   ['Alerts', ['alert_rules', 'alert_channels', 'alerts']],
-  ['AI', ['ai_sessions', 'ai_memory', 'ai_session_queue', 'ai_agent_state', 'ai_knowledge']],
+  ['AI', ['ai_sessions', 'ai_memory', 'ai_session_queue', 'ai_agent_state', 'agent_conversations', 'ai_knowledge', 'kb_admin', 'kb_grants', 'kb_sources', 'kb_source_items', 'kb_sync_runs']],
   ['Git', ['git_accounts', 'git_workspaces', 'git_ids']],
 ];
 

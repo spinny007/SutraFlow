@@ -327,6 +327,7 @@ export const agentActivities: Activity[] = [
       F('a2a', 'Agent-to-agent (A2A)', 'bool', false, { group: 'Entry points' }),
       F('a2aPolicy', 'Who may call it', 'resource', '', { resourceKind: 'inboundPolicy', group: 'Entry points', ...when('a2a', true) }),
       F('waitSeconds', 'Answer within (seconds)', 'number', 50, { help: 'Callers wait this long for the answer. Longer work answers "working" with a job id; the caller asks again for the result.' }),
+      F('conversationHours', 'Conversation lasts (hours)', 'number', 24, { help: 'Every answer carries a signed conversation token; the caller sends it back to continue. A token continues the conversation only for the caller who started it, and only for this long after it began; then the next message starts a new conversation. Administrators clear expired conversations and their memory in Admin Console, Agent conversations.' }),
       F('testMessage', 'Test message (JSON)', 'code', '{\n  "message": "Where is order A-1001?",\n  "sessionId": "test-1"\n}'),
     ],
     outputHint: { message: '', sessionId: '', channel: '', caller: { subject: '', method: '' }, history: [{ role: '', content: '' }], agent: '' },

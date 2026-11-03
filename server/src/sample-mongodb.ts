@@ -17,12 +17,12 @@
 import type { FlowDoc, FlowNode } from './engine/types.js';
 /** Shipped fixtures contain neither credentials nor captured database data. */
 export function mongoSamples(connection: string): FlowDoc[] {
-  const common = { connection, collection: 'sutraflow_sample_orders' };
+  const common = { connection, collection: 'sample_orders' };
   const filter = '=object(\'_id\', {run.id})';
   const definitions: [string, string, Record<string, any>, string][] = [
     ['start', 'Order input', { payload: '{"name":"SutraFlow sample","amount":25}', validateSchema: true }, 'Strict input contract is imported with this sample. Supplies only explicit fixture data.'],
     ['mongoInsert', 'Insert this run order', { ...common, documents: '=object(\'_id\', {run.id}, \'name\', {input.name}, \'amount\', {input.amount}, \'lines\', list(object(\'sku\', \'A\', \'quantity\', 1), object(\'sku\', \'B\', \'quantity\', 2)))', ordered: true }, 'Inserts one document keyed by the current run ID. Configure the connection using separate credentials or a complete-URI secret.'],
-    ['mongoListCollections', 'List sample collection', { connection, filter: '{"name":"sutraflow_sample_orders"}' }, 'Lists authorized metadata for the sample collection, not its documents. Collection names are selected on each document activity; mapped Collection from input overrides the General value.'],
+    ['mongoListCollections', 'List sample collection', { connection, filter: '{"name":"sample_orders"}' }, 'Lists authorized metadata for the sample collection, not its documents. Collection names are selected on each document activity; mapped Collection from input overrides the General value.'],
     ['mongoFind', 'Read this run order', { ...common, filter, operation: 'findOne' }, 'Reads only this run-ID document. BSON types are preserved using Extended JSON.'],
     ['mongoFind', 'Count this run order', { ...common, filter, operation: 'count' }, 'Counts only this run-ID document. Expected count=1. Ordinary Find does not implicitly run a total count.'],
     ['mongoFind', 'Distinct order name', { ...common, filter, operation: 'distinct', field: 'name' }, 'Returns one distinct name value for this run-ID document only: SutraFlow sample.'],

@@ -616,7 +616,7 @@ export type { ActivityMeta };
 
 /** Working examples to add to the project, by scenario and palette. */
 function SamplePicker({ onAdd }: { onAdd(ids: string[]): void }) {
-  const [list, setList] = useState<{ id: string; name: string; desc: string; palettes: string; needs?: string }[]>([]);
+  const [list, setList] = useState<{ id: string; name: string; desc: string; palettes: string; needs?: string; download?: { label: string; href: string } }[]>([]);
   const [pick, setPick] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState(false);
   useEffect(() => { get<typeof list>('/api/samples').then(setList).catch(() => {}); }, []);

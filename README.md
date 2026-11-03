@@ -2,20 +2,21 @@
 
 **A visual integration designer and engine.** Drag activities onto a canvas, map data between steps, test and debug, and deploy *Sutras* (integration processes) that run as REST, SOAP and MCP services, on schedules, or on events: files, queues, mail, cloud drives, chat messages and more.
 
-![Version](https://img.shields.io/badge/version-2.1.4-2f6fd8)
+![Version](https://img.shields.io/badge/version-2.1.5-2f6fd8)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Commercial licence available](https://img.shields.io/badge/commercial%20licence-available-orange)](COMMERCIAL-LICENSE.md)
 ![Node.js](https://img.shields.io/badge/node-%E2%89%A5%2022.13-339933?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-7-3178c6?logo=typescript&logoColor=white)
 ![Database](https://img.shields.io/badge/database-SQLite%20%7C%20PostgreSQL-4169e1?logo=postgresql&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Docker-555)
-![Tests](https://img.shields.io/badge/tests-538-success)
+![Tests](https://img.shields.io/badge/tests-561-success)
 
-![The SutraFlow designer: palettes, canvas and the step inspector](docs/guide-images/designer.jpg)
+![The SutraFlow designer: the sample chat agent with its eight skills, the palettes and the step inspector](docs/guide-images/designer-ai-chat.jpg)
 
 ## Contents
 
 - [Features](#features)
+- [Screenshots](#screenshots)
 - [Download](#download)
 - [Quick start](#quick-start)
 - [Documentation](#documentation)
@@ -34,21 +35,32 @@
 
 ## Features
 
-- **Visual designer**: 129 activities in 20 palettes, drag-and-drop data mapping with For-Each, Where, Group by and Sort by, more than 100 formula functions, JSONata, live previews, step-by-step debugging with breakpoints, undo and redo, folders, and a description on every step.
+- **Visual designer**: 142 activities in 22 palettes, drag-and-drop data mapping with For-Each, Where, Group by and Sort by, more than 100 formula functions, JSONata, live previews, step-by-step debugging with breakpoints, undo and redo, folders, and a description on every step.
 - **Durable engine**: every step is checkpointed in the database; approvals and long waits cost nothing while they wait; runs survive restarts and resume where they stopped; retries with backoff, error branches, an Error handler, loops, Merge, sub-Sutras, and resubmitting failed runs from the failed step. Short request-reply Sutras can run **in memory** instead, saved once when they end, several times faster.
 - **Memory tables**: small reference data (rates, codes, routing, reusable values) in each engine's memory for lookups without a database round trip, loaded from a query or filled by Sutras, with a failsafe copy, hot reload from the Admin Console and enforced limits.
 - **Connection limits**: protect a system behind a connection with Maximum concurrent activities, counted across all engines for Sutra steps (including connections used behind the scenes, such as a knowledge base's database), listener polls and scheduled refreshes; waiting steps keep their place without using retries; per-server values from Project properties; watched in the Admin Console with graphs.
 - **Big files on small servers**: CSV and line files of any size are streamed in batches of rows, each batch a step of its own, so memory depends on the batch, not the file.
 - **APIs and gateway**: REST, SOAP and WebSocket services with generated WSDL and OpenAPI; security policies (API keys, Basic, JWT, OAuth token introspection, HMAC-signed requests, mutual TLS, WS-Security UsernameToken, X.509 signatures and SAML assertions, encrypted SOAP, IP allow lists, rate limits, CORS); scopes per service and operation; bodies validated against JSON Schema or XSD; threat protection (depth, fields, sizes, no DOCTYPE); gateway apps with keys, OAuth client-credentials tokens, plans and a firewall; trusted reverse proxies whose forwarded caller address and HTTPS are believed; TLS with your own certificate or Let's Encrypt.
 - **AI**: AI steps (prompt, classify, route, extract, summarize, translate, sentiment) on Claude, OpenAI, Gemini, Ollama and other providers; AI agents with tools, memory, guardrails, people in the loop and hand-offs; knowledge bases for RAG (built-in, pgvector, Qdrant, Chroma, Pinecone); Sutras published as MCP tools for Claude and other assistants; agents as chat pages, an OpenAI-compatible API and A2A.
+- **Chat for signed-in people**: published agents hand out signed conversation tokens that expire (administrators clear expired conversations), read who is chatting from a website's own login (claims and scopes), and the chat button carries that login; sample *Chat for customers and support* comes with *Sutra Sample Shop*, a PHP website with its own login and eight chat skills (orders, tracking, returns, invoices, address, products, a person, help), downloadable as a zip and pointed at a local or remote SutraFlow (`samples/sutra-sample-shop`).
+- **Dashboards**: gateway-hosted dashboard pages (`/dash/<name>`) drawn with Apache ECharts served by SutraFlow itself: charts from database queries or any JSON, KPI cards, slicers and filters (bound SQL parameters or JSON filtering), grouping of raw rows, chart settings suggested by AI and checked against an allow-list, a refresh interval with a cache shared by viewers, a security policy per dashboard, PNG/SVG export and an embed script.
+- **Knowledge admin**: one knowledge base shared by many projects, by area (`products`, `hr`), to search or also to change; managed sources keep areas in step with folders, SFTP, SharePoint, Google Drive, web pages, a database or an API (only changed items get new vectors); an MCP search tool per knowledge base; one writer per area, enforced by the engine.
+- **Samples**: 60 working samples to learn from, added from *New Sutra, Samples* or by the installer; everything they store is named `sample_<objective>`, so the installer's *Samples* mode and `sutraflow samples list|add|remove` add them or remove them with their data. None is installed unless chosen.
 - **Connectors**: HTTP, SOAP with WS-Security, files, SFTP and FTP, PostgreSQL, MySQL, SQL Server, Oracle and SQLite, MongoDB (documents, aggregation and bulk write), Kafka, RabbitMQ and ActiveMQ, email, Firebase, Google Drive, Sheets and Docs, SharePoint and OneDrive, Dropbox, YouTube, Twitch, Discord, Telegram, Facebook Pages, Azure Data Factory, Databricks, Python, PowerShell and shell scripts, and any OAuth REST API.
 - **Operations**: an Admin Console for deployed applications (start, stop, tuning, runs, approvals, engines, alerts, gateway traffic, connection limits, users and roles, system accounts, audit log, releases, the database), with graphs drawn by Apache ECharts; clusters of engines on PostgreSQL with a leader, failover and graceful drain, each engine with its own Node memory, set and restarted from the Admin Console; Prometheus metrics, OpenTelemetry traces and JSON logs; single sign-on for people with OpenID Connect or SAML 2.0, with roles from identity-provider groups.
-- **Installer and upgrader**: a page-by-page web installer (administrator, database with a connection test, ports checked free, Node memory, cluster engines) or a silent install from a JSON file; upgrades from 2.1.0 on with a backup, a before-and-after data comparison and an automatic way back; a release unpacked under a web root (Laragon `www`, `htdocs`, IIS) shows only a page saying how to install it, never its settings or keys.
+- **Installer and upgrader**: a page-by-page web installer (administrator, database with a connection test, ports checked free, Node memory, cluster engines) or a silent install from a JSON file; upgrades from 2.1.0 on with a backup, a before-and-after data comparison and an automatic way back, keeping, removing or refreshing the samples; a Samples mode that lists, adds and removes the samples and their `sample_` data; a release unpacked under a web root (Laragon `www`, `htdocs`, IIS) shows only a page saying how to install it, never its settings or keys.
 - **Certificates and keys**: every connection and security policy takes each certificate or key as a file on the server (Windows or Linux path), a Certificate or Private key property, or PEM text; secrets are chosen from Secret properties, never typed into a connection.
 - **Releases**: projects in Git from the designer; release zips with the deployment config, documentation and files; built by a CI/CD pipeline straight from Git with the `sutra` command; deployed by command line or the Admin Console, with history and rollback.
 - **Documentation from the design**: each Sutra and project produces its own documentation (HTML and Markdown) from its steps and their descriptions.
 
-![The Admin Console: deployed applications and their Sutras](docs/guide-images/console-apps.jpg)
+## Screenshots
+
+| | |
+|---|---|
+| ![Sutra Sample Shop: the support desk asks the chat about a customer's orders](docs/guide-images/ai-app-shop.jpg) | ![A dashboard on a MySQL table: KPI cards, slicers and charts](docs/guide-images/ai-app-dashboard.jpg) |
+| **Chat on a website with its own login**: the sample shop's support desk asking the agent; customers see only their own orders. | **Dashboards**: KPI cards, slicers and charts on a database table, at `/dash/sales-db`. |
+| ![The Admin Console: deployed applications and their Sutras](docs/guide-images/console-apps.jpg) | ![The installer's Samples mode listing the samples and their data before removing them](docs/guide-images/install-samples.jpg) |
+| **Admin Console**: deployed applications, engines, runs, approvals and traffic. | **Installer**: the Samples mode lists everything named `sample_` before it removes anything. |
 
 ## Download
 
@@ -75,7 +87,7 @@ bin/sutraflow start     # the studio, in the background
 bin/sutraflow open      # http://127.0.0.1:4800
 ```
 
-Create the administrator account on the first visit, then **+ New Sutra → Samples** for working examples, or **New project → Package file → Or a sample project** for a whole project (an AI document assistant over a folder of PDF, Word and PowerPoint files).
+Create the administrator account on the first visit, then **+ New Sutra → Samples** for working examples (on a designer's machine or a training server; production servers have none), or **New project → Package file → Or a sample project** for a whole project (an AI document assistant over a folder of PDF, Word and PowerPoint files).
 
 The `sutraflow` launcher is the one place for every command on Windows and Linux: `start [engine]`, `stop [engine|all]`, `restart`, `status`, `logs [--follow]`, `open`, `cli <sutra command>`, `db`, `service` (start with the machine) and `docker [cluster] up|down|status|logs|build`. Settings are in `sutraflow.env`.
 
@@ -90,8 +102,8 @@ The `sutraflow` launcher is the one place for every command on Windows and Linux
 | Document | What it covers |
 |---|---|
 | [User guide](docs/sutraflow-user-guide.html) (also at `/guide`) | For designers: every screen, every activity with its settings, connection types with tested examples, functions; designing Sutras, how the engine runs them, AI, RAG step by step, the API gateway, releases and CI/CD. |
-| [Administration Guide](docs/sutraflow-admin-guide.html) (also at `/admin-guide`) | For administrators: planning a server, the web installer page by page, silent installation, how upgrades work, the launcher and settings, PostgreSQL, engines and clusters, sizing, the Admin Console, security, receiving releases, monitoring, troubleshooting. |
-| [Sutra Design Guide](docs/sutraflow-design-guide.html) (also at `/design-guide`) | For designers and reviewers: design standards for Sutras: principles and naming, functions and transformations, called Sutras, contracts, REST and SOAP design, API security, integration patterns, messaging, files, databases, error handling, logging, microservices, resilience, testing, releases, and a review checklist. |
+| [Administration Guide](docs/sutraflow-admin-guide.html) (also at `/admin-guide`) | For administrators: planning a server, the web installer page by page, silent installation, samples and their data (when to add them and when not), how upgrades work, the launcher and settings, PostgreSQL, engines and clusters, sizing, the Admin Console (with Knowledge admin), security, receiving releases, monitoring, every command by task with when to use it and examples, troubleshooting. |
+| [Sutra Design Guide](docs/sutraflow-design-guide.html) (also at `/design-guide`) | For designers and reviewers: design standards for Sutras: principles and naming, functions and transformations, called Sutras, contracts, REST and SOAP design, API security, integration patterns, messaging, files, databases, error handling, logging, microservices, resilience, testing, releases, solution blueprints (chat agents, knowledge bases, dashboards), designing an AI application from the samples, every sample explained, and a review checklist. |
 | [Architecture](docs/sutraflow-architecture.html) (also at `/architecture`) | How SutraFlow works inside: every source file, every table, every API route, the settings, with diagrams. |
 | [Engine design](docs/architecture.md) | Runs, tasks, checkpoints and the cluster in short. |
 | [Backlog](docs/backlog.md) | Release gates, planned capabilities, implementation guidance and completion criteria. |
@@ -207,6 +219,7 @@ Settings are environment variables, set in `sutraflow.env` for the launcher. The
 | `SUTRA_ADMIN_HOST`, `SUTRA_ADMIN_PORT` | `127.0.0.1`, `4800` | Studio and admin API |
 | `SUTRA_GATEWAY_HTTP_PORT`, `SUTRA_GATEWAY_HTTPS_PORT` | `8080`, `8443` | Gateway |
 | `SUTRA_WORKERS` | by machine | Steps one engine runs at once (4 on 1 vCPU / 1 GB, up to 32) |
+| `SUTRA_VISITOR_DAYS` | 30 | How long a chat visitor identity lasts (agent channels without a policy) |
 | `SUTRA_STREAM_BUFFER_MB` | 8 | A streaming step waits while the batches it handed on hold more input than this |
 | `STUDIO_MEMORY_MB`, `ENGINE_MEMORY_MB` | Node.js decides | Node memory of the studio and of an engine (launcher settings); also set in the Admin Console |
 | `SUTRA_PAYLOAD_STORE_KB` | `256` | A part of a run's input this big is stored once and referenced (not a size limit); 0 = never |

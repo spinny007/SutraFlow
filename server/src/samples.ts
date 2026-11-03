@@ -44,7 +44,7 @@ const E = (from: string, to: string, port = 'out') => ({ id: `e${++e}`, from, po
 const D = (n: FlowNode, description: string): FlowNode => ({ ...n, description });
 
 /** The samples offered in "New Sutra"; needs = what must be set up before the sample can run; folder = where its Sutras go. */
-export const SAMPLES: { id: string; name: string; desc: string; palettes: string; needs?: string; folder?: string }[] = [
+export const SAMPLES: { id: string; name: string; desc: string; palettes: string; needs?: string; folder?: string; /** A file that goes with the sample, such as the website of the chat sample (2.1.5). */ download?: { label: string; href: string } }[] = [
   { id: 'mongodb', name: 'MongoDB document lifecycle (M0-tested baseline)', palettes: 'MongoDB', desc: 'Insert, list collections, find, array-filter/update, aggregate and delete a run-scoped document, with a strict starter contract and activity descriptions.', needs: 'A MongoDB connection with separate credentials or encrypted complete URI, and permitted server network access.' },
   { id: 'mappingtyped', name: 'Typed JSON and XML mapping', palettes: 'Data & mapping', desc: 'Shared typed JSON target and a manual XML root, required attribute, namespace and repeating elements; both rendered to text. No external connection required.' },
   { id: 'validation', name: 'JSON/XML schema validation and strict file reads', palettes: 'Data & mapping, Files, HTTP, Triggers', desc: 'Valid and intentionally invalid contracts, typed mapping, Parse/Render, Validate fields, strict JSON/XML file reads, REST/HTTP and SOAP services. Every activity explains its validation outcome.', needs: 'Writable project VALIDATION_FOLDER for file samples; deploy the REST service before the HTTP client. Services are local demonstrations without authentication.' },
@@ -86,6 +86,11 @@ export const SAMPLES: { id: string; name: string; desc: string; palettes: string
   { id: 'sqlinstall', name: 'SQL install script and procedure as a service', palettes: 'DB Ops, Triggers, HTTP', desc: 'A SQL script creates a MySQL database, two tables, seed rows and a stored procedure; a REST service then calls the procedure and returns its rows as JSON.', needs: 'MySQL (Laragon: 127.0.0.1:3306, user root, no password); the service deployed' },
   { id: 'sftp', name: 'SFTP: upload, list, read, archive', palettes: 'SFTP / FTP, Triggers', desc: 'Writes a CSV to an SFTP server, appends to it, lists and reads it back, copies it to an archive folder and deletes the copy; a Remote file trigger picks up new files in inbox/.', needs: 'an SFTP server: set the host, user and password of the "Sample SFTP" connection' },
   { id: 'ftp', name: 'FTP: upload, list, read, archive', palettes: 'SFTP / FTP, Triggers', desc: 'The same steps over FTP or FTPS: write, list with rows, read lines, move to a dated archive name; a Remote file trigger picks up new files and deletes them after the run.', needs: 'an FTP server: set the host, user and password of the "Sample FTP" connection' },
+  { id: 'dashboard', name: 'Sales dashboard', palettes: 'Dashboards, DB Ops', desc: 'A dashboard page on the gateway (/dash/sales): revenue by month, orders by category, total revenue, top products and the latest orders, from SQL queries; refreshed every minute and cached for all viewers; PNG and SVG export on every chart. One chart takes its settings from a suggestion step, as an AI would give them, and shows how a field that is not in the data is refused. No database to install.', needs: 'the dashboard deployed' },
+  { id: 'dashboarddb', name: 'Sales dashboard on a database, with filters', palettes: 'Dashboards, DB Ops', desc: 'A dashboard on a real MySQL table of orders (/dash/sales-db): filters for region, categories and dates at the top, KPI cards with the change against the month before and a target, revenue by month split by region, revenue by category (a click on a bar filters the whole page), the share of each region, the best customers and the latest orders. One SQL query takes the filters as bound parameters; the Chart steps group and add up its rows.', needs: 'MySQL (Laragon: 127.0.0.1:3306, user root, no password); the install Sutra run once; the dashboard deployed' },
+  { id: 'dashboardjson', name: 'Dashboard from JSON (any API)', palettes: 'Dashboards, Data, AI', desc: 'A dashboard from an API answer (/dash/orders-json): the orders list inside the answer, nested fields such as customer.city, dates grouped by month, series split by channel, KPI cards, filters including a search, and a Charts from AI step that plans more charts by itself (built-in rules without an AI provider; with one, the model chooses and every chart is checked). Replace the JSON step with an HTTP request to your own API.', needs: 'the dashboard deployed' },
+  { id: 'dbknowledge', name: 'Knowledge feed from a database', palettes: 'AI, DB Ops, Triggers, REST', desc: 'Products kept in a MySQL table (as a shop or a Joomla site keeps them) become a knowledge base: a timer reads the published products, each one becomes a passage with its category, price and link as details, unchanged products are skipped and removed ones taken out; a REST API searches the products by meaning. No AI model needed.', needs: 'MySQL (Laragon: 127.0.0.1:3306, user root, no password); the install script run once; the API deployed' },
+  { id: 'chatsupport', name: 'Chat for customers and support', palettes: 'AI, Triggers', desc: 'A chat agent on a website that already has its own sign-in (Sutra Sample Shop, a PHP website): the website issues a signed token for the signed-in person, the chat widget passes it on, and the agent answers with eight skills: order status, tracking, returns and refunds, invoices, the delivery address, products and stock, a person from the support desk, and help. Customers see only their own orders, the support desk any order. The website can use this SutraFlow or one on another server. No AI model needed.', needs: 'the agent deployed; the website\'s shared secret in the project Secret property CHAT_SITE_SECRET; PHP 8 for the website', download: { label: 'Download the website (zip)', href: '/api/samples/sutra-sample-shop.zip' } },
   { id: 'agentdesk', name: 'AI agent: order desk with tools and memory', palettes: 'AI', desc: 'A published agent (chat page, OpenAI API, MCP tool, A2A) that checks its input with the AI guard, looks orders and stock up with two AI tool Sutras, remembers each conversation, and asks a person before any refund.', needs: 'Ollama with a model (phi4-mini works); the three Sutras deployed to chat at /chat/order-desk' },
   { id: 'agentrag', name: 'AI agent: knowledge base (RAG)', palettes: 'AI, Apps', desc: 'Fills a knowledge base from web pages and from a SharePoint library (kept up to date by a trigger), and a policy assistant that answers only from it, with sources.', needs: 'Ollama with a model; for SharePoint, a Microsoft OAuth connection' },
   { id: 'agentqueue', name: 'AI agent: fed by a message queue', palettes: 'AI, Service Bus', desc: 'Takes questions from Kafka, RabbitMQ or ActiveMQ, keeps each conversation in its own AI-memory session, publishes the answer to the requested destination, then explicitly confirms.', needs: 'one configured Kafka, RabbitMQ or ActiveMQ connection; Ollama with a model' },
@@ -118,13 +123,24 @@ export function addSamples(projectId: string, ids?: string[]) {
   const save = (doc: any) => { attachSampleSchemas(projectId, doc); const f = saveFlow(undefined, { ...doc, name: name(doc.name) }, projectId); made.push({ id: f.id, sample: current }); return f; };
   const conn = (kind: string, cname: string, cfg: Record<string, any>) => listResources(kind, projectId).find(r => r.name === cname) || saveResource({ kind, name: cname, project_id: projectId, config: cfg });
   const gw = `http://127.0.0.1:${getSetting<{ httpPort?: number }>('gateway', {}).httpPort || config.gatewayHttpPort}`;
+  /** A project property the samples need, added once (an administrator may change its value). */
+  const ensureVar = (name: string, value: string, description: string) => {
+    const p = getProject(projectId);
+    if (p && !(p.config.variables || []).some((v: any) => v.name === name)) saveProject({ id: p.id, name: p.name, description: p.description, config: { ...p.config, variables: [...(p.config.variables || []), { name, type: 'string', value, description }] } });
+  };
+  // Folders the samples write to are project properties in the project's files folder, named sample_<objective>
+  // like all sample data, so the installer can find and remove them (2.1.5).
+  const wanted = (id: string) => !ids?.length || ids.includes(id);
+  if (['csv', 'folder', 'timer', 'filetrigger'].some(wanted)) ensureVar('SAMPLE_CSV_FOLDER', '${files}/sample_csv', 'Folder of the CSV file samples (sales.csv, archive/, clean/). ${files} is the project files folder.');
+  if (wanted('filetrigger')) ensureVar('SAMPLE_INBOX_FOLDER', '${files}/sample_inbox', 'Drop folder of Sample: File trigger CSV drop folder. ${files} is the project files folder.');
+  if (wanted('skills')) ensureVar('SAMPLE_OUTBOX_FOLDER', '${files}/sample_outbox', 'Folder the skill Write CSV file writes to. ${files} is the project files folder.');
   const typedMappings = want('mappingtyped') ? typedMappingSamples().map(save) : [];
   const wantMongo = want('mongodb');
   if (wantMongo) {
     const p = getProject(projectId)!;
     if (!p.config.variables.some(v => v.name === 'MONGODB_URI')) saveProject({ id: p.id, name: p.name, config: { variables: [...p.config.variables, { name: 'MONGODB_URI', type: 'secret', value: 'MONGODB_URI', description: 'Encrypted complete MongoDB URI. Enter its value in this Secret property, then select it on the sample connection.' }] } });
   }
-  const mongoFlows = wantMongo ? mongoSamples(conn('mongodb', 'Sample MongoDB M0', { authMode: 'URI secret', uriSecret: '{{gv.MONGODB_URI}}', database: 'sutraflow_test', maxPoolSize: 5, timeoutMs: 15000 }).id).map(save) : [];
+  const mongoFlows = wantMongo ? mongoSamples(conn('mongodb', 'Sample MongoDB M0', { authMode: 'URI secret', uriSecret: '{{gv.MONGODB_URI}}', database: 'sample_sutraflow', maxPoolSize: 5, timeoutMs: 15000 }).id).map(save) : [];
   typedMappings.push(...mongoFlows);
   const validationFlows = want('validation') ? validationSamples(projectId, gw).map(save) : [];
 
@@ -177,7 +193,7 @@ export function addSamples(projectId: string, ids?: string[]) {
         gross: { expr: 'round({iteration.value.amount} * 1.18, 2)' },
       } } }, { loop: 'for each item', loopOver: '{{input.orders}}', loopMax: 1000 }),
       N('l1', 'log', 'Log prices', 740, 120, { level: 'info', message: "=concat(count({input.iterations}), ' orders priced, total ', sum({input.iterations}, 'gross'))" }),
-      N('c', 'counter', 'Poll counter', 400, 320, { name: "=concat('sample-poll-', {sutra.id})", op: 'increment', by: 1 },
+      N('c', 'counter', 'Poll counter', 400, 320, { name: "=concat('sample_poll_', {sutra.id})", op: 'increment', by: 1 },
         { loop: 'repeat while', loopWhile: '={iteration.output.value} < 3', loopDelayMs: 300, loopMax: 10 }),
       N('l2', 'log', 'Log polls', 740, 320, { level: 'info', message: "=concat('Polled ', {input._iterations}, ' times; counter is ', {input.value})" }),
       N('g', 'merge', 'Both done', 1080, 220),
@@ -245,7 +261,7 @@ export function addSamples(projectId: string, ids?: string[]) {
         inputs: [{ k: 'fileName', v: 'The file name, for example orders-today.csv' }, { k: 'rows', v: 'array: the rows to write, each an object with the same fields' }],
         testArguments: JSON.stringify({ fileName: 'skill-test.csv', rows: [{ sku: 'TEA-250', qty: 4 }, { sku: 'CUP-12', qty: 2 }] }, null, 2),
       }),
-      N('w', 'fileWrite', 'Write the file', 400, 200, { folder: 'C:/sutra/outbox', path: '{{input.arguments.fileName}}', format: 'CSV from rows', rows: '{{input.arguments.rows}}', delimiter: ',', header: true, encoding: 'utf-8', lineEnding: 'LF', append: false, overwrite: true }),
+      N('w', 'fileWrite', 'Write the file', 400, 200, { folder: '{{gv.SAMPLE_OUTBOX_FOLDER}}', path: '{{input.arguments.fileName}}', format: 'CSV from rows', rows: '{{input.arguments.rows}}', delimiter: ',', header: true, encoding: 'utf-8', lineEnding: 'LF', append: false, overwrite: true }),
       N('ok', 'mcpReply', 'Reply with the file', 740, 140, { source: 'value', result: "=object('path', {input.path}, 'rows', {input.rowsWritten}, 'size', format-bytes({input.size}))" }),
       N('bad', 'mcpReply', 'Reply with the problem', 740, 320, { source: 'value', result: 'The file could not be written: {{input.error.message}}', isError: true }),
     ],
@@ -268,7 +284,7 @@ export function addSamples(projectId: string, ids?: string[]) {
     edges: [E('t', 'p'), E('p', 'ok'), E('p', 'bad', 'error')],
   });
 
-  const folder = 'C:/sutra/samples';
+  const folder = '{{gv.SAMPLE_CSV_FOLDER}}';
   const sales = [
     { orderId: 'A-1', customer: 'Asha Traders', country: 'IN', status: 'paid', amount: 1200 },
     { orderId: 'A-2', customer: 'Lanka Tea', country: 'LK', status: 'pending', amount: 300 },
@@ -328,7 +344,7 @@ export function addSamples(projectId: string, ids?: string[]) {
 
   // Database: SQLite file in the data folder; a transaction, then a query with a bound parameter.
   const dbConn = !want('database') ? null : listResources('database', projectId).find(r => r.name === 'Sample SQLite')
-    || saveResource({ kind: 'database', name: 'Sample SQLite', project_id: projectId, config: { driver: 'sqlite', file: 'samples.sqlite' } });
+    || saveResource({ kind: 'database', name: 'Sample SQLite', project_id: projectId, config: { driver: 'sqlite', file: 'sample_sutraflow.sqlite' } });
   const database = dbConn && save({
     name: 'Sample: Database (SQLite)',
     description: 'Uses the "Sample SQLite" connection (a file in the data folder). SQL transaction creates the table and saves the rows together; SQL query reads orders above an amount with a bound :min parameter.',
@@ -422,7 +438,7 @@ export function addSamples(projectId: string, ids?: string[]) {
     description: 'Sends each order to the channel "sample-orders". Deploy "Sample: Channel listener" first; then every test here starts it.',
     nodes: [
       N('s', 'start', 'Order', 60, 200, { payload: JSON.stringify({ orderId: 'A-11', amount: 300 }, null, 2) }),
-      N('p', 'channelPublish', 'Send to channel', 380, 200, { channel: 'sample-orders', message: '{{input}}', required: false }),
+      N('p', 'channelPublish', 'Send to channel', 380, 200, { channel: 'sample_orders', message: '{{input}}', required: false }),
       N('l', 'log', 'Log delivery', 700, 200, { level: 'info', message: 'Delivered to {{input.delivered}} listening Sutras' }),
     ],
     edges: [E('s', 'p'), E('p', 'l')],
@@ -431,12 +447,335 @@ export function addSamples(projectId: string, ids?: string[]) {
     name: 'Sample: Channel listener',
     description: 'Starts for each message sent to "sample-orders" while deployed, counts it, and logs it.',
     nodes: [
-      N('t', 'channelTrigger', 'On order', 60, 200, { channel: 'sample-orders', schema: '', testMessage: JSON.stringify({ orderId: 'A-11', amount: 300 }, null, 2) }),
-      N('c', 'counter', 'Count orders', 380, 200, { name: 'sample-channel-orders', op: 'increment', by: 1 }),
+      N('t', 'channelTrigger', 'On order', 60, 200, { channel: 'sample_orders', schema: '', testMessage: JSON.stringify({ orderId: 'A-11', amount: 300 }, null, 2) }),
+      N('c', 'counter', 'Count orders', 380, 200, { name: 'sample_channel_orders', op: 'increment', by: 1 }),
       N('l', 'log', 'Log order', 700, 200, { level: 'info', message: 'Order {{trigger.orderId}} received; {{input.value}} so far' }),
     ],
     edges: [E('t', 'c'), E('c', 'l')],
   });
+
+  // Sales dashboard (2.1.5): a Dashboard page, SQL queries, Chart steps and a Dashboard reply.
+  let dashboardSample: ReturnType<typeof save> | false = false;
+  if (want('dashboard')) {
+    const sqliteDash = conn('database', 'Sample SQLite', { driver: 'sqlite', file: 'sample_sutraflow.sqlite' });
+    const Q = (id: string, name: string, x: number, y: number, sql: string, d: string) => D(N(id, 'dbQuery', name, x, y, { connection: sqliteDash.id, params: [], maxRows: 1000, sql }), d);
+    const C = (id: string, name: string, x: number, y: number, cfg: Record<string, any>, d: string) => D(N(id, 'chart', name, x, y, { title: name, stack: false, sort: 'none', limit: 1000, unit: '', palette: 'SutraFlow', suggested: '', ...cfg }), d);
+    dashboardSample = save({
+      name: 'Sample: Sales dashboard',
+      description: 'Published at /dash/sales while deployed: five charts from SQL queries (here on the built-in SQLite file with the data written in the query; point the queries at your own tables). The page asks for data every minute; results are kept on the server for that minute and shared by every viewer. Every chart exports as PNG or SVG. "Orders by category" takes its settings from a suggestion step, standing in for an AI prompt asked to choose a chart: the suggestion names a field that is not in the data, so that part is refused and logged and the step\'s own settings are used. No security policy: local demonstration only.',
+      nodes: [
+        D(N('t', 'dashboardPage', 'Sales dashboard', 60, 300, { name: 'sales', title: 'Sales', description: 'Revenue and orders of the shop.', policy: '', refreshSeconds: 60, cachePer: 'everyone', columns: 2 }), 'The page /dash/sales. Choose a security policy before anyone outside this machine may see it.'),
+        Q('q1', 'Monthly sales', 300, 60, "WITH m(month, revenue, orders) AS (VALUES ('2026-06', 182000, 410), ('2026-07', 196500, 436), ('2026-08', 175200, 398), ('2026-09', 221900, 489), ('2026-10', 248300, 531)) SELECT month, revenue, orders FROM m ORDER BY month", 'Revenue and orders per month.'),
+        C('c1', 'Revenue by month', 540, 60, { rows: '{{input.rows}}', type: 'area', category: 'month', values: 'revenue', unit: 'INR' }, 'An area chart of revenue per month.'),
+        C('c2', 'Total revenue', 780, 60, { rows: '{{nodes.Monthly sales.rows}}', type: 'number', category: 'month', values: 'revenue', unit: 'INR' }, 'A number: the revenue of the months added up.'),
+        Q('q2', 'Orders per category', 300, 220, "WITH c(category, orders) AS (VALUES ('Tea', 1240), ('Cups', 486), ('Pots', 233), ('Spices', 305)) SELECT category, orders FROM c", 'Orders per product category.'),
+        D(N('sg', 'jsonata', 'Chart suggestion', 540, 220, { source: '{{input}}', expression: '{ "suggestion": { "type": "donut", "title": "Orders by category", "category": "category", "values": ["orders", "profit"] } }' }),
+          'Stands in for an AI prompt asked to choose a chart. It names "profit", which is not in the data: the check refuses that part, logs it and keeps the settings of the Chart step.'),
+        C('c3', 'Orders by category', 780, 220, { rows: '{{nodes.Orders per category.rows}}', type: 'pie', category: 'category', values: 'orders', suggested: '{{input.suggestion}}' }, 'Takes its settings from the suggestion when they pass the check: known settings and fields of the data only.'),
+        Q('q3', 'Product revenue', 300, 380, "WITH p(product, revenue) AS (VALUES ('Assam tea, 250 g', 96500), ('Glass tea mugs', 71200), ('Cast iron tea pot', 64800), ('Darjeeling first flush', 52300), ('Masala chai mix', 31900), ('Clay cups, 12', 22400)) SELECT product, revenue FROM p", 'Revenue per product.'),
+        C('c4', 'Top products', 540, 380, { rows: '{{input.rows}}', type: 'horizontal bar', category: 'product', values: 'revenue', sort: 'descending', limit: 5, unit: 'INR', palette: 'Calm' }, 'The five best-selling products, largest first.'),
+        Q('q4', 'Newest orders', 300, 540, "WITH o(order_no, customer, total, status) AS (VALUES ('A-2210', 'Asha Traders', 4200, 'shipped'), ('A-2209', 'Kandy Stores', 1850, 'packing'), ('A-2208', 'Pune Cafe', 9600, 'shipped'), ('A-2207', 'Hill Tea House', 2400, 'delivered')) SELECT order_no, customer, total, status FROM o", 'The newest orders.'),
+        C('c5', 'Latest orders', 540, 540, { rows: '{{input.rows}}', type: 'table', category: 'order_no', values: 'customer, total, status' }, 'A table of the newest orders.'),
+        D(N('m', 'merge', 'All charts', 1020, 300), 'Waits for every chart.'),
+        D(N('r', 'dashboardReply', 'Dashboard reply', 1260, 300, { note: 'Shop sales, refreshed every minute.', charts: [
+          { k: 'Total revenue', v: '{{nodes.Total revenue.chart}}' }, { k: 'Revenue by month', v: '{{nodes.Revenue by month.chart}}' },
+          { k: 'Orders by category', v: '{{nodes.Orders by category.chart}}' }, { k: 'Top products', v: '{{nodes.Top products.chart}}' }, { k: 'Latest orders', v: '{{nodes.Latest orders.chart}}' },
+        ] }), 'Sends the charts to the page, in this order.'),
+      ],
+      edges: [E('t', 'q1'), E('q1', 'c1'), E('c1', 'c2'), E('t', 'q2'), E('q2', 'sg'), E('sg', 'c3'), E('t', 'q3'), E('q3', 'c4'), E('t', 'q4'), E('q4', 'c5'), E('c2', 'm'), E('c3', 'm'), E('c4', 'm'), E('c5', 'm'), E('m', 'r')],
+    });
+  }
+
+  // Dashboards on a database and from JSON (2.1.5): page filters (slicers), KPI cards, grouping in Chart steps.
+  const dashboardMore: ReturnType<typeof save>[] = [];
+  if (want('dashboarddb')) {
+    const pr = getProject(projectId)!;
+    if (!pr.config.variables.some(v => v.name === 'ORDERS_TABLE')) saveProject({ id: pr.id, name: pr.name, config: { variables: [...pr.config.variables, { name: 'ORDERS_TABLE', type: 'string', value: 'sample_sutraflow.sample_sales_orders', description: 'The table the sales dashboard reads (database.table). Point it at your own orders table, with the deployment config per server.' }] } });
+    const mysqlDash = conn('database', 'Sample MySQL', { driver: 'mysql', host: '127.0.0.1', port: 3306, database: '', user: 'root', passwordSecret: '' });
+    // 180 orders from May to October 2026, the same every time.
+    const regions = ['North', 'South', 'East', 'West'], cats = ['Tea', 'Cups', 'Pots', 'Spices'], custs = ['Asha Traders', 'Kandy Stores', 'Pune Cafe', 'Hill Tea House', 'Delhi Deli', 'Chai Point', 'Mumbai Mart'];
+    const rowsSql = Array.from({ length: 180 }, (_, i) => {
+      const d = new Date(Date.UTC(2026, 4, 1) + Math.floor(i * 1.02) * 86400000).toISOString().slice(0, 10);
+      return `('S-${3000 + i}', '${d}', '${regions[(i * 3 + Math.floor(i / 7)) % 4]}', '${cats[(i * 5) % 4]}', '${custs[(i * 11) % 7]}', ${(350 + ((i * 53) % 29) * 85 + Math.floor(i / 30) * 120).toFixed(2)}, '${['delivered', 'shipped', 'packing'][i % 3]}')`;
+    }).join(',\n  ');
+    const filtered = "FROM {{gv.ORDERS_TABLE}}\nWHERE ({{trigger.params.region}} = '' OR region = {{trigger.params.region}})\n  AND ({{trigger.params.category}} = '' OR FIND_IN_SET(category, {{trigger.params.category}}) > 0)\n  AND ({{trigger.params.order_date_from}} = '' OR order_date >= {{trigger.params.order_date_from}})\n  AND ({{trigger.params.order_date_to}} = '' OR order_date <= {{trigger.params.order_date_to}})";
+    const C = (id: string, name: string, x: number, y: number, cfg: Record<string, any>, d: string) => D(N(id, 'chart', name, x, y, { rows: '{{nodes.Filtered orders.rows}}', listPath: '', title: name, stack: false, sort: 'none', limit: 1000, unit: 'INR', palette: 'SutraFlow', aggregate: 'sum', dateGroup: 'none', splitBy: '', kpi: 'total', previous: '', target: '', better: 'higher', filters: '{{trigger.filters}}', suggested: '', ...cfg }), d);
+    dashboardMore.push(
+      save({
+        name: 'Sample: Sales orders install',
+        description: 'Run once: makes the database sample_sutraflow and the table sample_sales_orders in the "Sample MySQL" connection (Laragon: 127.0.0.1:3306, root, no password) with 180 orders from May to October 2026. Safe to run again: the orders are written again.',
+        nodes: [
+          D(N('s', 'start', 'Install', 60, 220, { payload: '{}' }), 'Starts the install. Run it once before deploying the dashboard.'),
+          D(N('x', 'dbScript', 'Make the orders table', 340, 220, { connection: mysqlDash.id, onError: 'stop', params: [], sql: [
+            'CREATE DATABASE IF NOT EXISTS sample_sutraflow',
+            'CREATE TABLE IF NOT EXISTS sample_sutraflow.sample_sales_orders (\n  order_no VARCHAR(20) PRIMARY KEY,\n  order_date DATE NOT NULL,\n  region VARCHAR(20) NOT NULL,\n  category VARCHAR(20) NOT NULL,\n  customer VARCHAR(80) NOT NULL,\n  total DECIMAL(10,2) NOT NULL,\n  status VARCHAR(20) NOT NULL,\n  KEY order_date (order_date)\n)',
+            `REPLACE INTO sample_sutraflow.sample_sales_orders (order_no, order_date, region, category, customer, total, status) VALUES\n  ${rowsSql}`,
+          ].join('\n;\n') }), 'An orders table as a shop keeps it. Your own table needs a date, the fields you filter by, and the amounts.'),
+          D(N('l', 'log', 'Log install', 640, 160, { level: 'info', message: 'Orders table ready: {{input.ran}} statements in {{input.ms}} ms' }), 'Says it is done.'),
+          D(N('e', 'log', 'Log failure', 640, 300, { level: 'error', message: 'Install stopped: {{input.error.message}}' }), 'MySQL not running, or no rights to make a database.'),
+        ],
+        edges: [E('s', 'x'), E('x', 'l'), E('x', 'e', 'error')],
+      }),
+      save({
+        name: 'Sample: Sales dashboard on a database',
+        description: 'Published at /dash/sales-db while deployed. The filters at the top (region, categories, dates) reach the run as {{trigger.params.<field>}}: the query uses them as bound parameters (never pasted into the SQL), so the database does the filtering and the cache keeps one result per set of filter values. The Chart steps group and add up the rows: KPI cards with the change against the month before and a target, revenue by month split by region, revenue by category (a click on a bar sets the category filter), the share of each region, the best customers and the latest orders. The choices of the region and category filters come from two small queries. The table is the project property ORDERS_TABLE. No security policy: local demonstration only.',
+        nodes: [
+          D(N('t', 'dashboardPage', 'Sales on MySQL', 60, 340, { name: 'sales-db', title: 'Sales (MySQL)', description: 'Orders of the shop, from the database.', policy: '', refreshSeconds: 60, cachePer: 'everyone', columns: 3,
+            filters: [{ k: 'region', v: 'list' }, { k: 'category', v: 'multi list' }, { k: 'order_date', v: 'date range' }] }), 'The page /dash/sales-db with three filters. Choose a security policy before anyone outside this machine may see it.'),
+          D(N('q', 'dbQuery', 'Filtered orders', 300, 340, { connection: mysqlDash.id, params: [], maxRows: 5000, sql: `SELECT order_no, DATE_FORMAT(order_date, '%Y-%m-%d') AS order_date, region, category, customer, total, status\n${filtered}\nORDER BY order_date DESC, order_no DESC` }),
+            "One query with the filters as bound parameters: an empty filter matches every row. Its empty port goes to the charts too, so filters that match nothing show empty charts. Dates as text (DATE_FORMAT), so months do not shift with time zones. For PostgreSQL write category = ANY(string_to_array(..., ',')) instead of FIND_IN_SET."),
+          D(N('qr', 'dbQuery', 'Regions', 300, 520, { connection: mysqlDash.id, params: [], maxRows: 100, sql: 'SELECT DISTINCT region FROM {{gv.ORDERS_TABLE}} ORDER BY region' }), 'The choices of the region filter.'),
+          D(N('qc', 'dbQuery', 'Categories', 300, 660, { connection: mysqlDash.id, params: [], maxRows: 100, sql: 'SELECT DISTINCT category FROM {{gv.ORDERS_TABLE}} ORDER BY category' }), 'The choices of the category filter.'),
+          C('k1', 'Revenue this month', 560, 60, { type: 'kpi', category: 'order_date', values: 'total', dateGroup: 'month', kpi: 'latest', target: '120000' }, 'A KPI card: the revenue of the latest month, the change against the month before, the trend and a target.'),
+          C('k2', 'Orders', 560, 180, { type: 'kpi', category: 'order_date', values: '', aggregate: 'count', dateGroup: 'month', kpi: 'total', unit: '' }, 'A KPI card counting the orders, with the trend per month.'),
+          C('c1', 'Revenue by month and region', 560, 300, { type: 'bar', category: 'order_date', values: 'total', dateGroup: 'month', splitBy: 'region', stack: true }, 'Rows grouped by month and split into a series per region, stacked.'),
+          C('c2', 'Revenue by category', 560, 420, { type: 'bar', category: 'category', values: 'total', sort: 'descending', palette: 'Calm' }, 'A click on a bar sets the category filter, and every chart follows.'),
+          C('c3', 'Share by region', 560, 540, { type: 'donut', category: 'region', values: 'total' }, 'A click on a slice sets the region filter.'),
+          C('c4', 'Best customers', 560, 660, { type: 'horizontal bar', category: 'customer', values: 'total', sort: 'descending', limit: 5, palette: 'Bold' }, 'The five customers with the most revenue.'),
+          C('c5', 'Latest orders', 560, 780, { type: 'table', category: 'order_no', values: 'order_date, region, category, customer, total, status', aggregate: 'none', limit: 12, unit: '' }, 'The newest orders, as the query sorted them.'),
+          D(N('m', 'merge', 'All charts', 820, 340), 'Waits for every chart and both choice lists.'),
+          D(N('r', 'dashboardReply', 'Dashboard reply', 1060, 340, { note: '', charts: [
+            { k: 'Revenue this month', v: '{{nodes.Revenue this month.chart}}' }, { k: 'Orders', v: '{{nodes.Orders.chart}}' }, { k: 'Share by region', v: '{{nodes.Share by region.chart}}' },
+            { k: 'Revenue by month and region', v: '{{nodes.Revenue by month and region.chart}}' }, { k: 'Revenue by category', v: '{{nodes.Revenue by category.chart}}' },
+            { k: 'Best customers', v: '{{nodes.Best customers.chart}}' }, { k: 'Latest orders', v: '{{nodes.Latest orders.chart}}' },
+          ], choices: [{ k: 'region', v: '{{nodes.Regions.rows}}' }, { k: 'category', v: '{{nodes.Categories.rows}}' }] }), 'Sends the charts in this order, with the choices of the filters.'),
+        ],
+        edges: [E('t', 'q'), E('t', 'qr'), E('t', 'qc'), E('q', 'k1'), E('q', 'k2'), E('q', 'c1'), E('q', 'c2'), E('q', 'c3'), E('q', 'c4'), E('q', 'c5'),
+          ...['k1', 'k2', 'c1', 'c2', 'c3', 'c4', 'c5'].map(to => E('q', to, 'empty')),
+          E('k1', 'm'), E('k2', 'm'), E('c1', 'm'), E('c2', 'm'), E('c3', 'm'), E('c4', 'm'), E('c5', 'm'), E('qr', 'm'), E('qc', 'm'), E('m', 'r')],
+      }),
+    );
+  }
+  if (want('dashboardjson')) {
+    const J = (id: string, name: string, x: number, y: number, cfg: Record<string, any>, d: string) => D(N(id, 'chart', name, x, y, { rows: '{{nodes.Orders API}}', listPath: 'data.orders', title: name, stack: false, sort: 'none', limit: 1000, unit: 'INR', palette: 'SutraFlow', aggregate: 'sum', dateGroup: 'none', splitBy: '', kpi: 'total', previous: '', target: '', better: 'higher', filters: '{{trigger.filters}}', suggested: '', ...cfg }), d);
+    dashboardMore.push(save({
+      name: 'Sample: Dashboard from JSON',
+      description: 'Published at /dash/orders-json while deployed. "Orders API" stands in for an API answer: an object whose list of orders is at data.orders, each with a nested customer. Replace it with an HTTP request to your own API (the Chart steps read its body; set List inside to the path of the list). The Chart steps group the raw orders by month, split them by channel, add up nested fields (customer.city) and apply the page filters themselves, as the data is not in a database: region, channels, dates and a search on the city. Charts from AI plans more charts from the fields it finds: built-in rules here; choose an AI provider and the model chooses, every chart checked against the allow-list and the numbers worked out from the rows. No security policy: local demonstration only.',
+      nodes: [
+        D(N('t', 'dashboardPage', 'Orders from JSON', 60, 300, { name: 'orders-json', title: 'Orders (JSON)', description: 'Orders from an API answer.', policy: '', refreshSeconds: 120, cachePer: 'everyone', columns: 3,
+          filters: [{ k: 'region', v: 'list: North, South, East, West' }, { k: 'channel', v: 'multi list: Web, Shop, Phone' }, { k: 'order_date', v: 'date range' }, { k: 'customer.city', v: 'search' }] }), 'The page /dash/orders-json with four filters, their choices fixed in the step.'),
+        D(N('j', 'jsonata', 'Orders API', 300, 300, { source: '{{input}}', expression: [
+          '{',
+          '  "data": {',
+          '    "orders": $map([1..150], function($i) {',
+          '      {',
+          '        "id": "J-" & $string(1000 + $i),',
+          '        "order_date": $fromMillis($toMillis("2026-05-01T00:00:00Z") + $floor($i * 1.2) * 86400000, "[Y0001]-[M01]-[D01]"),',
+          '        "region": ["North", "South", "East", "West"][$i % 4],',
+          '        "channel": ["Web", "Shop", "Phone"][$i % 3],',
+          '        "category": ["Tea", "Cups", "Pots", "Spices"][($i * 7) % 4],',
+          '        "customer": { "name": ["Asha Traders", "Kandy Stores", "Pune Cafe", "Hill Tea House", "Delhi Deli", "Chai Point"][($i * 5) % 6], "city": ["Pune", "Kandy", "Pune", "Shimla", "Delhi", "Kolkata"][($i * 5) % 6] },',
+          '        "total": 400 + (($i * 37) % 23) * 95,',
+          '        "items": 1 + ($i % 5)',
+          '      }',
+          '    }),',
+          '    "page": 1',
+          '  }',
+          '}',
+        ].join('\n') }), 'Stands in for an API answer (150 orders). Replace it with an HTTP request to your own API.'),
+        J('k1', 'Revenue', 560, 60, { type: 'kpi', category: 'order_date', values: 'total', dateGroup: 'month', kpi: 'latest' }, 'A KPI card: the latest month, the change against the month before and the trend.'),
+        J('k2', 'Average order', 560, 180, { type: 'kpi', category: 'order_date', values: 'total', aggregate: 'average', dateGroup: 'month', kpi: 'latest' }, 'The average order value of the latest month.'),
+        J('c1', 'Revenue by month and channel', 560, 300, { type: 'line', category: 'order_date', values: 'total', dateGroup: 'month', splitBy: 'channel' }, 'Grouped by month, one line per channel.'),
+        J('c2', 'Revenue by city', 560, 420, { type: 'bar', category: 'customer.city', values: 'total', sort: 'descending' }, 'A nested field (customer.city) as the category.'),
+        J('c3', 'Orders by region', 560, 540, { type: 'pie', category: 'region', values: '', aggregate: 'count', unit: '' }, 'Counts the orders per region; a click on a slice sets the region filter.'),
+        D(N('ai', 'chartsFromAi', 'Suggested charts', 560, 680, { provider: '', rows: '{{nodes.Orders API}}', listPath: 'data.orders', question: 'The most important figures for a manager: totals, the trend over time, the best and worst categories.', most: 3, sampleRows: 5, palette: 'Calm', filters: '{{trigger.filters}}', effort: 'low' }),
+          'Plans three more charts from the fields it finds: built-in rules without an AI provider. With one, the model chooses; every chart is checked and the numbers come from the rows.'),
+        D(N('m', 'merge', 'All charts', 820, 300), 'Waits for every chart.'),
+        D(N('r', 'dashboardReply', 'Dashboard reply', 1060, 300, { note: '', choices: [], charts: [
+          { k: 'Revenue', v: '{{nodes.Revenue.chart}}' }, { k: 'Average order', v: '{{nodes.Average order.chart}}' }, { k: 'Orders by region', v: '{{nodes.Orders by region.chart}}' },
+          { k: 'Revenue by month and channel', v: '{{nodes.Revenue by month and channel.chart}}' }, { k: 'Revenue by city', v: '{{nodes.Revenue by city.chart}}' },
+          { k: 'Suggested charts', v: '{{nodes.Suggested charts.charts}}' },
+        ] }), 'Sends the charts in this order; the suggested charts come as one list.'),
+      ],
+      edges: [E('t', 'j'), E('j', 'k1'), E('j', 'k2'), E('j', 'c1'), E('j', 'c2'), E('j', 'c3'), E('j', 'ai'), E('k1', 'm'), E('k2', 'm'), E('c1', 'm'), E('c2', 'm'), E('c3', 'm'), E('ai', 'm'), E('m', 'r')],
+    }));
+  }
+
+  // Knowledge feed from a database (2.1.5): rows of a table (a shop's products, a Joomla site's articles) become
+  // passages of a knowledge base; changed rows again, unchanged ones skipped, removed ones taken out.
+  let dbKnowledge: ReturnType<typeof save>[] = [];
+  if (want('dbknowledge')) {
+    const pr = getProject(projectId)!;
+    if (!pr.config.variables.some(v => v.name === 'PRODUCTS_TABLE')) saveProject({ id: pr.id, name: pr.name, config: { variables: [...pr.config.variables, { name: 'PRODUCTS_TABLE', type: 'string', value: 'sample_sutraflow.sample_products', description: 'The table the knowledge feed reads (database.table). Point it at your own product table, with the deployment config per server.' }] } });
+    const mysqlKb = conn('database', 'Sample MySQL', { driver: 'mysql', host: '127.0.0.1', port: 3306, database: '', user: 'root', passwordSecret: '' });
+    const kbProducts = conn('aiKnowledge', 'Sample product knowledge', { store: 'built-in', embedWith: 'built-in', chunkTokens: 200, overlapTokens: 20 });
+    dbKnowledge = [
+      save({
+        name: 'Sample: Product catalogue install',
+        description: 'Run once: makes the database sample_sutraflow and the table sample_products in the "Sample MySQL" connection (Laragon: 127.0.0.1:3306, root, no password) with eight products and their descriptions. Safe to run again: existing rows are updated.',
+        nodes: [
+          D(N('s', 'start', 'Install', 60, 220, { payload: '{}' }), 'Starts the install. Run it once before the feed.'),
+          D(N('x', 'dbScript', 'Make the product table', 340, 220, { connection: mysqlKb.id, onError: 'stop', params: [], sql: [
+            'CREATE DATABASE IF NOT EXISTS sample_sutraflow',
+            'CREATE TABLE IF NOT EXISTS sample_sutraflow.sample_products (\n  id VARCHAR(20) PRIMARY KEY,\n  name VARCHAR(120) NOT NULL,\n  category VARCHAR(40) NOT NULL,\n  price DECIMAL(10,2) NOT NULL,\n  currency CHAR(3) NOT NULL,\n  url VARCHAR(200),\n  description TEXT,\n  published TINYINT NOT NULL DEFAULT 1\n)',
+            "INSERT INTO sample_sutraflow.sample_products (id, name, category, price, currency, url, description, published) VALUES\n  ('P-101', 'Assam tea, 250 g', 'Tea', 180.00, 'INR', 'https://shop.example.com/products/p-101', 'Strong, malty black tea from Assam. Brews a dark cup that takes milk and sugar well; good for breakfast and masala chai.', 1),\n  ('P-102', 'Darjeeling first flush, 100 g', 'Tea', 420.00, 'INR', 'https://shop.example.com/products/p-102', 'Light, floral black tea from the spring harvest in Darjeeling. Drink it plain, without milk, brewed for three minutes.', 1),\n  ('P-103', 'Green tea with tulsi, 25 bags', 'Tea', 150.00, 'INR', 'https://shop.example.com/products/p-103', 'Green tea with holy basil (tulsi). Low in caffeine, calming; brew at 80 degrees for two minutes.', 1),\n  ('P-201', 'Clay cups (kulhad), set of 12', 'Cups', 240.00, 'INR', 'https://shop.example.com/products/p-201', 'Hand-made terracotta cups for chai. Unglazed, so they add an earthy taste; not for the dishwasher.', 1),\n  ('P-202', 'Glass tea mugs, set of 2', 'Cups', 650.00, 'INR', 'https://shop.example.com/products/p-202', 'Double-walled borosilicate glass mugs that keep tea hot and hands cool. Dishwasher safe.', 1),\n  ('P-301', 'Cast iron tea pot, 800 ml', 'Pots', 1850.00, 'INR', 'https://shop.example.com/products/p-301', 'Japanese style cast iron pot with a steel infuser. Keeps tea hot for long; dry it after use so it does not rust.', 1),\n  ('P-302', 'Electric kettle with temperature control', 'Pots', 2400.00, 'INR', 'https://shop.example.com/products/p-302', 'Heats water to 70, 80, 90 or 100 degrees for green, white, oolong and black tea; keeps it warm for 30 minutes.', 1),\n  ('P-401', 'Masala chai spice mix, 100 g', 'Spices', 220.00, 'INR', 'https://shop.example.com/products/p-401', 'Cardamom, ginger, cinnamon, clove and black pepper, ground for masala chai. Add half a spoon per cup while boiling.', 1)\nON DUPLICATE KEY UPDATE name = VALUES(name), category = VALUES(category), price = VALUES(price), url = VALUES(url), description = VALUES(description), published = VALUES(published)",
+          ].join('\n;\n') }), 'A product table as a shop keeps it: name, category, price, a link and a description. Your own table only needs a key, the text columns and the details you want to filter by.'),
+          D(N('l', 'log', 'Log install', 640, 160, { level: 'info', message: 'Product table ready: {{input.ran}} statements in {{input.ms}} ms' }), 'Says it is done.'),
+          D(N('e', 'log', 'Log failure', 640, 300, { level: 'error', message: 'Install stopped: {{input.error.message}}' }), 'MySQL not running, or no rights to make a database.'),
+        ],
+        edges: [E('s', 'x'), E('x', 'l'), E('x', 'e', 'error')],
+      }),
+      save({
+        name: 'Sample: Product knowledge feed',
+        description: 'Every 30 minutes while deployed (or a test run now): reads the published products from {{gv.PRODUCTS_TABLE}}, turns each into a passage with its category, price and link as details, adds it under products/<id> (an unchanged product is skipped, so no vectors are made again), then removes from the knowledge base the products no longer published. The same shape feeds a knowledge base from any table or API: change the query, the text and the details.',
+        nodes: [
+          D(N('t', 'timer', 'Every 30 minutes', 60, 220, { mode: 'cron', cron: '0 */30 * * * *', timezone: 'Asia/Kolkata', payload: '{}' }), 'How often the knowledge base follows the table. A test run starts at once.'),
+          D(N('q', 'dbQuery', 'Published products', 300, 220, { connection: mysqlKb.id, params: [], maxRows: 10000, sql: 'SELECT id, name, category, price, currency, url, description\nFROM {{gv.PRODUCTS_TABLE}}\nWHERE published = 1\nORDER BY id' }),
+            'The table comes from the project property PRODUCTS_TABLE, so the same Sutra reads another table on another server. Only published rows: what customers may see.'),
+          D(N('c', 'jsonata', 'Current products', 540, 220, { source: '{{input}}', expression: '{ "rows": rows, "sources": rows.("products/" & id) }' }), 'The source name of every product still published, for the clean-up at the end.'),
+          D(N('f', 'forEach', 'Each product', 780, 220, { list: '{{input.rows}}', max: 10000 }), 'One product at a time on the item output; then done once.'),
+          D(N('m', 'mapper', 'Product as text', 1020, 120, { start: 'empty', schema: '', mapping: { rules: {
+            source: { expr: "concat('products/', {input.id})" },
+            text: { expr: "concat({input.name}, '. Category: ', {input.category}, '. Price: ', {input.price}, ' ', {input.currency}, '. ', {input.description})" },
+            category: { expr: '{input.category}' }, price: { expr: '{input.price}' }, url: { expr: '{input.url}' }, name: { expr: '{input.name}' },
+          } } }), 'What a search reads: the name, category, price and description in one text. The details (category, price, link) go along, for filters and answers that link to the product.'),
+          D(N('k', 'knowledgeAdd', 'Add the product', 1260, 120, { knowledge: kbProducts.id, source: '{{input.source}}', text: '{{input.text}}', unchanged: 'skip',
+            meta: [{ k: 'category', v: '{{input.category}}' }, { k: 'price', v: '{{input.price}}' }, { k: 'url', v: '{{input.url}}' }, { k: 'name', v: '{{input.name}}' }] }),
+            'Adds or replaces the product under products/<id>. Same text as before: skip, so a feed every 30 minutes makes vectors only for changed products.'),
+          D(N('r', 'knowledgeRemove', 'Remove unpublished products', 1020, 320, { knowledge: kbProducts.id, action: 'keep only these sources', keep: '{{nodes.Current products.sources}}', under: 'products' }),
+            'Products deleted or unpublished in the table leave the knowledge base too. Only sources under products/ are touched.'),
+          D(N('l', 'log', 'Log the feed', 1260, 320, { level: 'info', message: 'Product knowledge: {{nodes.Each product.count}} published, {{input.removed}} removed' }), 'One line per feed.'),
+        ],
+        edges: [E('t', 'q'), E('q', 'c'), E('c', 'f'), E('f', 'm', 'item'), E('m', 'k'), E('f', 'r', 'done'), E('r', 'l')],
+      }),
+      save({
+        name: 'Sample: Product search API',
+        description: 'POST /samples/products/search with {"question": "a tea for chai"} answers the three closest products with their details (category, price, link) and how close each is. Search by meaning and shared words, no AI model needed; give the passages to an AI agent or Ask knowledge for written answers. Deploy it after a feed run. No security policy: local demonstration only.',
+        nodes: [
+          D(N('t', 'restService', 'Product search', 60, 220, { method: 'POST', path: '/samples/products/search', policy: '', testRequest: JSON.stringify({ method: 'POST', path: '/samples/products/search', headers: {}, query: {}, body: { question: 'a strong tea for masala chai' } }, null, 2) }), 'The question comes in the body.'),
+          D(N('k', 'knowledgeSearch', 'Closest products', 320, 220, { knowledge: kbProducts.id, question: '{{trigger.body.question}}', top: 3, minScore: 0.05, sourceFilter: 'products' }), 'The three passages closest to the question, only from products/.'),
+          D(N('m', 'mapper', 'Shape the answer', 580, 160, { start: 'empty', schema: '', mapping: { rules: {
+            question: { expr: '{trigger.body.question}' },
+            products: { forEach: '{input.hits}' }, 'products/name': { expr: '{item.meta.name}' }, 'products/category': { expr: '{item.meta.category}' },
+            'products/price': { expr: '{item.meta.price}' }, 'products/url': { expr: '{item.meta.url}' }, 'products/score': { expr: 'round({item.score}, 3)' },
+          } } }), 'Only what a shop page or an app needs: the products with their details and score.'),
+          D(N('r', 'httpResponse', 'Reply 200', 840, 160, { status: '200', contentType: 'application/json', body: '{{input}}' }), 'The answer.'),
+          D(N('n', 'httpResponse', 'Reply 404', 580, 320, { status: '404', contentType: 'application/json', body: '{"error": {"code": "NO_MATCH", "message": "No product matches the question"}}' }), 'Nothing close enough: the standard error body.'),
+        ],
+        edges: [E('t', 'k'), E('k', 'm'), E('m', 'r'), E('k', 'n', 'empty')],
+      }),
+    ];
+  }
+
+  // Chat for customers and support (2.1.5): a website with its own sign-in (Sutra Sample Shop, samples/sutra-sample-shop)
+  // issues a signed token (HS256 with a shared secret); the agent channel's policy checks it; the agent reads the role
+  // and the subject from it. Keywords choose one of eight skills; each skill applies the role itself.
+  let chatSupport: ReturnType<typeof save> | false = false;
+  if (want('chatsupport')) {
+    const p = getProject(projectId)!;
+    if (!p.config.variables.some(v => v.name === 'CHAT_SITE_SECRET')) saveProject({ id: p.id, name: p.name, config: { variables: [...p.config.variables, { name: 'CHAT_SITE_SECRET', type: 'secret', value: 'CHAT_SITE_SECRET', description: 'The secret the website signs its chat tokens with (the same text as CHAT_SECRET in the website\'s settings). Set its value here; until then the chat refuses everyone.' }] } });
+    const policy = listResources('inboundPolicy', projectId).find(r => r.name === 'Sample chat website sign-in')
+      || saveResource({ kind: 'inboundPolicy', name: 'Sample chat website sign-in', project_id: projectId, config: { auth: 'jwt', jwtMode: 'sharedSecret', jwtSecret: '{{gv.CHAT_SITE_SECRET}}', jwtIssuer: 'sutra-sample-shop', jwtAudience: 'shop-help', jwtScopes: 'chat', requireHttps: false, rateLimitPerMinute: 60 } });
+    const shopData = String.raw`(
+  $day := function($ago) { $fromMillis($toMillis($now()) - $ago * 86400000, "[D1] [MNn] [Y0001]") };
+  $ahead := function($days) { $fromMillis($toMillis($now()) + $days * 86400000, "[D1] [MNn]") };
+  $merge([$$, {
+    "orders": [
+      {"id": "A-1001", "customer": "C-7", "customerName": "Asha", "item": "Assam tea, 4 packs", "total": 720, "status": "shipped", "eta": $ahead(2), "courier": "BlueDart", "awb": "77812290", "city": "Pune"},
+      {"id": "A-1002", "customer": "C-7", "customerName": "Asha", "item": "Clay cups, 12", "total": 240, "status": "packing", "eta": $ahead(4), "city": "Pune"},
+      {"id": "A-0988", "customer": "C-7", "customerName": "Asha", "item": "Glass tea mugs, set of 2", "total": 650, "status": "delivered", "delivered": $day(13), "daysAgo": 13, "city": "Pune"},
+      {"id": "A-2001", "customer": "C-9", "customerName": "Kandy Stores", "item": "Cast iron tea pot", "total": 1850, "status": "delivered", "delivered": $day(2), "daysAgo": 2, "city": "Kandy"},
+      {"id": "A-2002", "customer": "C-9", "customerName": "Kandy Stores", "item": "Masala chai mix, 3 packs", "total": 660, "status": "cancelled", "city": "Kandy"}
+    ],
+    "products": [
+      {"id": "P-101", "name": "Assam tea, 250 g", "category": "tea", "price": 180, "stock": 42},
+      {"id": "P-102", "name": "Darjeeling first flush tea, 100 g", "category": "tea", "price": 420, "stock": 0, "back": $ahead(9)},
+      {"id": "P-103", "name": "Green tea with tulsi, 25 bags", "category": "tea", "price": 150, "stock": 18},
+      {"id": "P-201", "name": "Clay cups (kulhad), set of 12", "category": "cups", "price": 240, "stock": 9},
+      {"id": "P-202", "name": "Glass tea mugs, set of 2", "category": "cups mugs", "price": 650, "stock": 14},
+      {"id": "P-301", "name": "Cast iron tea pot, 800 ml", "category": "pots", "price": 1850, "stock": 3},
+      {"id": "P-302", "name": "Electric kettle with temperature control", "category": "pots kettles", "price": 2400, "stock": 6},
+      {"id": "P-401", "name": "Masala chai spice mix, 100 g", "category": "spices chai", "price": 220, "stock": 25}
+    ]
+  }])
+)`;
+    const understand = String.raw`(
+  $m := $lowercase($$.message);
+  $asked := $match($uppercase($$.message), /A-[0-9]{4}/).match;
+  $visible := $$.role = 'support' ? $$.orders : $$.orders[customer = $$.subject];
+  $intent := $contains($m, /(^|[^a-z])(person|human|someone|complain|call me)([^a-z]|$)/) ? 'person'
+    : $contains($m, /return|refund|exchange|damaged|broken/) ? 'return'
+    : $contains($m, /invoice|bill|receipt|gst/) ? 'invoice'
+    : $contains($m, /address|deliver to|ship to/) ? 'address'
+    : $contains($m, /track|courier|parcel|awb|when will|arrive/) ? 'tracking'
+    : $count($asked) > 0 or $contains($m, /order|status|c-[0-9]+/) ? 'status'
+    : $contains($m, /price|cost|stock|available|buy|sell|recommend|do you have|tea|cup|mug|pot|kettle|spice|chai|darjeeling|assam|tulsi|kulhad|masala/) ? 'product'
+    : 'help';
+  $merge([$$, {"intent": $intent, "asked": [$asked], "visible": [$visible], "hit": [$visible[id in $asked]], "hidden": [$asked[$not($ in $visible.id)]]}])
+)`;
+    const refuse = (what: string) => `"I can only ${what} your own orders, and " & $join($$.hidden, ", ") & ($count($$.hidden) > 1 ? " are" : " is") & " not one of them."`;
+    const skills: [string, string, string, number, string][] = [
+      ['status', 'Order status', String.raw`(
+  $support := $$.role = 'support';
+  $line := function($o) { $o.id & ($support ? " for customer " & $o.customer & " (" & $o.customerName & ")" : "") & ": " & $o.item & ", " & $o.status & ($o.status = 'delivered' ? " on " & $o.delivered : $o.eta ? ", expected " & $o.eta : "") };
+  $cust := $match($uppercase($$.message), /C-[0-9]+/)[0].match;
+  {"answer": $count($$.hit) > 0 ? $join($map($$.hit, $line), "\n")
+    : $count($$.hidden) > 0 ? ${refuse('show')}
+    : $support and $cust ? "Orders of " & $cust & ":\n" & $join($map($$.orders[customer = $cust], $line), "\n")
+    : ($support ? "Support desk, signed in as " & $$.name & ". Every order:\n" : "Hello " & $$.name & ". Your orders:\n") & $join($map($$.visible, $line), "\n") & "\nAsk about one by its number, such as A-1001."}
+)`, 40, 'Where an order is: the customer\'s own orders only; the support desk sees any order, and all orders of a customer (orders of C-9).'],
+      ['tracking', 'Track a parcel', String.raw`(
+  $list := $count($$.hit) > 0 ? $$.hit : $$.visible[status in ['shipped', 'packing']];
+  $line := function($o) { $o.status = 'shipped' ? $o.id & " (" & $o.item & ") is with " & $o.courier & ", tracking number " & $o.awb & ": https://track.example.com/" & $o.awb & ". Expected " & $o.eta & "."
+    : $o.status = 'packing' ? $o.id & " (" & $o.item & ") is being packed and ships within a day; expected " & $o.eta & "."
+    : $o.status = 'delivered' ? $o.id & " was delivered on " & $o.delivered & "."
+    : $o.id & " was cancelled; nothing is on the way." };
+  {"answer": $count($$.hidden) > 0 ? ${refuse('track')} : $count($list) > 0 ? $join($map($list, $line), "\n") : "Nothing is on the way at the moment."}
+)`, 120, 'The courier, tracking number and expected day of shipped orders; what is still being packed.'],
+      ['return', 'Returns and refunds', String.raw`(
+  $list := $count($$.hit) > 0 ? $$.hit : $$.visible[status = 'delivered'];
+  $line := function($o) { $o.status = 'delivered' and $o.daysAgo <= 30
+      ? "Return request R-" & $substringAfter($o.id, "-") & " is open for " & $o.id & " (" & $o.item & "). A courier collects it within 3 working days; the refund of INR " & $string($o.total) & " goes back to the original payment within 7 days after it arrives. Returns for it are possible until " & $fromMillis($toMillis($now()) + (30 - $o.daysAgo) * 86400000, "[D1] [MNn]") & "."
+    : $o.status = 'delivered' ? $o.id & " was delivered more than 30 days ago and can no longer be returned. Ask for a person if it is faulty."
+    : $o.status = 'cancelled' ? $o.id & " was cancelled: nothing to return, and nothing was charged."
+    : $o.id & " has not been delivered yet. Once it arrives there are 30 days to return it; to cancel it now, ask for a person." };
+  {"answer": $count($$.hidden) > 0 ? ${refuse('start returns for')} : $count($list) > 0 ? ($count($$.hit) = 0 ? "Delivered orders that can be returned:\n" : "") & $join($map($list, $line), "\n") : "There are no delivered orders to return."}
+)`, 200, 'Opens a return for a delivered order within 30 days, with the refund amount; explains why other orders cannot be returned.'],
+      ['invoice', 'Invoices', String.raw`(
+  $list := $count($$.hit) > 0 ? $$.hit : $$.visible[status in ['shipped', 'delivered']];
+  $line := function($o) { $o.status = 'cancelled' ? $o.id & " was cancelled: no invoice." : $o.status = 'packing' ? $o.id & ": the invoice comes when it ships." : "Invoice INV-" & $substringAfter($o.id, "-") & " for " & $o.id & ", INR " & $string($o.total) & " including GST: https://shop.example.com/invoices/" & $o.id & ".pdf" };
+  {"answer": $count($$.hidden) > 0 ? ${refuse('send invoices for')} : $count($list) > 0 ? $join($map($list, $line), "\n") : "There are no invoices yet."}
+)`, 280, 'The invoice of a shipped or delivered order, as a link.'],
+      ['address', 'Delivery address', String.raw`(
+  $list := $count($$.hit) > 0 ? $$.hit : $$.visible[status = 'packing'];
+  $line := function($o) { $o.status = 'packing' ? $o.id & " has not shipped yet, so its address (" & $o.city & ") can still change: send the new address in full and the support desk updates it before it ships." : $o.id & " is " & $o.status & ", so its address can no longer change." };
+  {"answer": $count($$.hidden) > 0 ? ${refuse('change')} : $count($list) > 0 ? $join($map($list, $line), "\n") : "No order can change its address now: they have all shipped."}
+)`, 360, 'Whether an order\'s delivery address can still change (only before it ships).'],
+      ['product', 'Products and stock', String.raw`(
+  $stop := ["the", "and", "you", "have", "any", "what", "how", "much", "does", "price", "cost", "stock", "available", "sell", "buy", "there", "your", "for", "with", "recommend", "want", "need", "some", "good", "which", "can", "get"];
+  $words := $filter($map($split($lowercase($$.message), /[^a-z0-9]+/), function($w) { $replace($w, /s$/, "") }), function($w) { $length($w) > 2 and $not($w in $stop) });
+  $hits := $filter($$.products, function($p) { $count($filter($words, function($w) { $contains($lowercase($p.name & " " & $p.category), $w) })) > 0 });
+  $line := function($p) { $p.name & ": INR " & $string($p.price) & ($p.stock > 0 ? ", " & $string($p.stock) & " in stock" : ", out of stock, back on " & $p.back) };
+  {"answer": $count($hits) > 0 ? $join($map($hits, $line), "\n") : "We sell tea, cups, pots and kettles, and spices. Ask about one, such as: Do you have green tea?"}
+)`, 440, 'Products, prices and stock, found by the words of the question; when something is back in stock.'],
+      ['person', 'Talk to a person', String.raw`{"answer": $$.role = 'support' ? "You are signed in as the support desk." : "I have passed this to the support desk as ticket T-" & $substringAfter($$.subject, "-") & "-" & $string($$.count) & ". Someone will write to you within 4 working hours (Monday to Saturday, 9:00 to 18:00), and this conversation goes with it."}`, 520, 'Hands the conversation to the support desk with a ticket number. A real shop would create the ticket here (HTTP request, email, a database row).'],
+    ];
+    const help = String.raw`{"answer": "Hello " & $$.name & ". I can help with:\n- order status (Where is A-1001?)\n- tracking a parcel (Track my order)\n- returns and refunds (I want to return A-0988)\n- invoices (Invoice for A-1001)\n- the delivery address (Change the address of A-1002)\n- products, prices and stock (Do you have green tea?)\n- a person from the support desk (Talk to a person)" & ($$.role = 'support' ? "\nAs the support desk you can ask about any order or customer (orders of C-9)." : "")}`;
+    chatSupport = save({
+      name: 'Sample: Customer and support chat',
+      description: 'Published as the agent "shop-help": a chat for the people signed in on the website Sutra Sample Shop (samples/sutra-sample-shop, PHP; download it as a zip from New Sutra, Samples). The website signs a token for each person (issuer sutra-sample-shop, audience shop-help, scope chat, role customer or support) with the shared secret CHAT_SITE_SECRET; the policy "Sample chat website sign-in" checks it, so no one else can chat. Eight skills: order status, tracking, returns and refunds, invoices, the delivery address, products and stock, a person from the support desk, and help. Customers see only their own orders, the support desk any order. Every answer carries a conversation token that lasts 8 hours. No AI model needed: keywords choose the skill; replace "Understand the question" with AI router, or the skills with AI tool Sutras, when you have a model. Deploy it, set CHAT_SITE_SECRET, then open the website.',
+      nodes: [
+        D(N('t', 'agentChannel', 'Shop help chat', 60, 280, { agentName: 'shop-help', title: 'Sutra Sample Shop help', description: 'Orders, deliveries, returns, invoices and products, for customers and the support desk.', chat: true, chatPolicy: policy.id, openai: false, mcp: false, a2a: false, waitSeconds: 30, conversationHours: 8,
+          testMessage: JSON.stringify({ message: 'Where is my order A-1001?', sessionId: 'test-1', caller: { subject: 'C-7', method: 'jwt', claims: { name: 'Asha', role: 'customer' }, scopes: ['chat'] } }, null, 2) }),
+          'The chat page and widget at /chat/shop-help. Only callers with a valid website token reach it: their subject, claims (name, role) and scopes come as trigger.caller.'),
+        D(N('k', 'counter', 'Message in conversation', 260, 280, { name: "=concat('sample_chat_', {trigger.sessionId})", op: 'increment', by: 1 }),
+          'Counts the messages of this conversation: the conversation id comes from the conversation token, so a new conversation starts at 1.'),
+        D(N('m', 'mapper', 'Who is asking', 460, 280, { start: 'empty', schema: '', mapping: { rules: {
+          message: { expr: '{trigger.message}' }, subject: { expr: '{trigger.caller.subject}' },
+          name: { expr: "if(empty({trigger.caller.claims.name}), {trigger.caller.subject}, {trigger.caller.claims.name})" },
+          role: { expr: "if(empty({trigger.caller.claims.role}), 'customer', {trigger.caller.claims.role})" }, count: { expr: '{input.value}' },
+        } } }), 'The person from the verified token: the website said who it is (subject, name) and what it may do (role). Nothing here comes from the message text.'),
+        D(N('d', 'jsonata', 'Shop data', 660, 280, { source: '{{input}}', expression: shopData }), 'The shop\'s orders and products, written here so the sample needs nothing else. Replace it with SQL queries or HTTP requests to the shop.'),
+        D(N('u', 'jsonata', 'Understand the question', 860, 280, { source: '{{input}}', expression: understand }),
+          'Chooses the skill by keywords and works out the orders this person may see: their own, or every order for the support desk. Asked-about orders they may not see are kept apart, to refuse politely.'),
+        D(N('s', 'switch', 'Skill', 1060, 280, { value: '{{input.intent}}', cases: skills.map(x => x[0]).join(', ') }), 'One branch per skill; anything else gets the help text.'),
+        ...skills.map(([id, name, expression, y, d]) => D(N(`s-${id}`, 'jsonata', name, 1300, y, { source: '{{input}}', expression }), d)),
+        D(N('h', 'jsonata', 'Help', 1300, 600, { source: '{{input}}', expression: help }), 'What the chat can do, with an example question for each skill.'),
+        D(N('r', 'agentReply', 'Reply', 1560, 280, { answer: '{{input.answer}}\n(message {{nodes.Who is asking.count}} in this conversation)', status: 'answer', sessionId: '{{trigger.sessionId}}' }), 'Sends the answer back to the chat; the caller gets it with the conversation token.'),
+      ],
+      edges: [E('t', 'k'), E('k', 'm'), E('m', 'd'), E('d', 'u'), E('u', 's'), ...skills.map(([id]) => E('s', `s-${id}`, id)), E('s', 'h', 'default'), ...skills.map(([id]) => E(`s-${id}`, 'r')), E('h', 'r')],
+    });
+  }
 
   // Traceability and notifications (2.1.4): one correlation id from intake through a called Sutra and a channel.
   const traceOrder = { orderId: 'A-2001', customerId: 'C-7', amount: 1800, currency: 'INR' };
@@ -458,11 +797,11 @@ export function addSamples(projectId: string, ids?: string[]) {
     name: 'Sample: Trace notification hub',
     description: 'Deploy it: starts for every event on the internal channel "sample-order-events" and decides whom to tell. An accepted order notifies the customer, a refused one the sales team; here both are log lines and a counter, where a real hub would call Send email, Telegram or a webhook. One hub for every notification keeps templates, channels and retries in one place.',
     nodes: [
-      D(N('t', 'channelTrigger', 'On order event', 60, 200, { channel: 'sample-order-events', schema: '', testMessage: JSON.stringify({ event: 'order.accepted', orderId: 'A-2001', customerId: 'C-7', approved: true, correlationId: 'ord-A-2001', sourceRun: 'test' }, null, 2) }), 'Each message on the channel starts a run. The event carries the correlation id and the run that sent it.'),
+      D(N('t', 'channelTrigger', 'On order event', 60, 200, { channel: 'sample_order_events', schema: '', testMessage: JSON.stringify({ event: 'order.accepted', orderId: 'A-2001', customerId: 'C-7', approved: true, correlationId: 'ord-A-2001', sourceRun: 'test' }, null, 2) }), 'Each message on the channel starts a run. The event carries the correlation id and the run that sent it.'),
       D(N('i', 'if', 'Accepted', 320, 200, { left: '{{trigger.approved}}', op: 'equals', right: 'true' }), 'Who to tell depends on the decision.'),
       D(N('c', 'log', 'Notify the customer', 580, 120, { level: 'info', message: 'Notify customer {{trigger.customerId}}: order {{trigger.orderId}} accepted [correlation {{trigger.correlationId}}, from run {{trigger.sourceRun}}, run {{run.id}}]' }), 'Stands for the customer message (email, SMS, push). The line carries both run ids, so the hub run and the intake run can be found from each other.'),
       D(N('x', 'log', 'Notify sales', 580, 300, { level: 'warn', message: 'Notify sales: order {{trigger.orderId}} refused credit [correlation {{trigger.correlationId}}, from run {{trigger.sourceRun}}, run {{run.id}}]' }), 'Stands for a message to the sales team.'),
-      D(N('k', 'counter', 'Count notifications', 840, 200, { name: 'sample-notifications', op: 'increment', by: 1 }), 'How many notifications the hub has sent, kept across runs.'),
+      D(N('k', 'counter', 'Count notifications', 840, 200, { name: 'sample_notifications', op: 'increment', by: 1 }), 'How many notifications the hub has sent, kept across runs.'),
     ],
     edges: [E('t', 'i'), E('i', 'c', 'true'), E('i', 'x', 'false'), E('c', 'k'), E('x', 'k')],
   });
@@ -481,7 +820,7 @@ export function addSamples(projectId: string, ids?: string[]) {
         event: { expr: "if({input.approved}, 'order.accepted', 'order.refused')" }, orderId: { expr: '{nodes.Add trace ids.orderId}' }, customerId: { expr: '{nodes.Add trace ids.customerId}' },
         approved: { expr: '{input.approved}' }, correlationId: { expr: '{nodes.Add trace ids.correlationId}' }, sourceRun: { expr: '{run.id}' },
       } } }), 'The event other Sutras react to: what happened, the keys, the correlation id and the run that sent it.'),
-      D(N('p', 'channelPublish', 'Announce order', 1260, 200, { channel: 'sample-order-events', message: '{{input}}', required: false }), 'Tells every deployed Sutra listening on the channel (the notification hub). Not required: with no listener the order still goes on.'),
+      D(N('p', 'channelPublish', 'Announce order', 1260, 200, { channel: 'sample_order_events', message: '{{input}}', required: false }), 'Tells every deployed Sutra listening on the channel (the notification hub). Not required: with no listener the order still goes on.'),
       D(N('l2', 'log', 'Log announced', 1500, 200, { level: 'info', message: 'Order {{nodes.Order event.orderId}}: {{nodes.Order event.event}} sent to {{input.delivered}} listener(s) [correlation {{nodes.Add trace ids.correlationId}}, run {{run.id}}]' }), 'Says how many Sutras received the event.'),
       D(N('x', 'log', 'Log credit failure', 1020, 380, { level: 'error', message: 'Credit check failed for order {{nodes.Add trace ids.orderId}}: {{input.error.message}} [correlation {{nodes.Add trace ids.correlationId}}, run {{run.id}}]' }), 'The called Sutra failed: the error with the same keys, so it is found with the rest of the order.'),
     ],
@@ -497,7 +836,7 @@ export function addSamples(projectId: string, ids?: string[]) {
       D(N('s', 'start', 'Start', 60, 200, { payload: '{}' }), 'Starts the run. A test uses this empty message; deployed, a timer, an API call or a file would start it.'),
       D(N('v', 'setVar', 'Batch details', 300, 200, { id: '1', vars: [{ k: 'batch', v: "=concat('batch-', format-dateTime('HHmm', current-dateTime(), 'Asia/Kolkata'))" }, { k: 'startedAt', v: '=current-dateTime()' }] }),
         'Sets record 1 of the local variables: batch (for example batch-0930) and startedAt, for this run only. Its Output tab shows what it set under Log; it passes its input on unchanged.'),
-      D(N('c', 'counter', 'Orders today', 540, 200, { name: "=concat('sample-orders-', current-date())", op: 'increment', by: 1 }),
+      D(N('c', 'counter', 'Orders today', 540, 200, { name: "=concat('sample_orders_', current-date())", op: 'increment', by: 1 }),
         "Adds 1 to a counter the server keeps for this project: one counter per day, as its name ends with today's date. Its settings are on the General tab (it needs no input). Output: name, value (the count now) and previous."),
       D(N('v2', 'setVar', 'Count details', 780, 200, { id: '2', vars: [{ k: 'orders', v: '{{input.value}}' }, { k: 'counter', v: '{{input.name}}' }] }),
         'Sets record 2 of the local variables from the counter result: orders and counter. Records 1 and 2 now sit side by side in one structure.'),
@@ -553,18 +892,18 @@ export function addSamples(projectId: string, ids?: string[]) {
     name: 'Sample: Timer nightly archive',
     description: `While deployed, runs every night at 02:00 (Asia/Kolkata): lists ${folder}/*.csv oldest first and moves each file to ${folder}/archive. A test run starts it at once with the payload.`,
     nodes: [
-      N('t', 'timer', 'Every night 02:00', 60, 220, { mode: 'cron', cron: '0 0 2 * * *', every: 300, timezone: 'Asia/Kolkata', payload: JSON.stringify({ folder }, null, 2) }),
-      N('d', 'fileList', 'Files to archive', 380, 220, { location: '{{input.folder}}/*.csv', pattern: '', recursive: false, sort: 'oldest first', max: 500, format: 'do not read' }),
+      N('t', 'timer', 'Every night 02:00', 60, 220, { mode: 'cron', cron: '0 0 2 * * *', every: 300, timezone: 'Asia/Kolkata', payload: JSON.stringify({ archive: 'archive' }, null, 2) }),
+      N('d', 'fileList', 'Files to archive', 380, 220, { location: `${folder}/*.csv`, pattern: '', recursive: false, sort: 'oldest first', max: 500, format: 'do not read' }),
       N('fe', 'forEach', 'Each file', 700, 160, { list: '{{input.files}}', max: 500 }),
-      N('m', 'fileMove', 'Move to archive', 1020, 100, { folder: '{{trigger.folder}}', action: 'move', from: '{{input.name}}', to: "=concat('archive/', format-dateTime('YYYY-MM-DD', current-dateTime(), 'Asia/Kolkata'), '-', {input.name})", overwrite: true }),
+      N('m', 'fileMove', 'Move to archive', 1020, 100, { folder, action: 'move', from: '{{input.name}}', to: "=concat('archive/', format-dateTime('YYYY-MM-DD', current-dateTime(), 'Asia/Kolkata'), '-', {input.name})", overwrite: true }),
       N('l', 'log', 'Log archived', 1020, 260, { level: 'info', message: '{{input.count}} files archived' }),
-      N('n', 'log', 'Nothing to archive', 700, 380, { level: 'info', message: 'Nothing to archive in {{trigger.folder}}' }),
+      N('n', 'log', 'Nothing to archive', 700, 380, { level: 'info', message: `Nothing to archive in ${folder}` }),
     ],
     edges: [E('t', 'd'), E('d', 'fe'), E('fe', 'm', 'item'), E('fe', 'l', 'done'), E('d', 'n', 'empty')],
   });
 
   // File trigger: a CSV drop folder.
-  const inbox = 'C:/sutra/inbox';
+  const inbox = '{{gv.SAMPLE_INBOX_FOLDER}}';
   const fileTrig = want('filetrigger') && save({
     name: 'Sample: File trigger CSV drop folder',
     description: `While deployed, starts when a CSV file arrives in ${inbox}: sorts its rows by amount, writes a cleaned copy to ${folder}/clean, and moves the original to ${inbox}/processed. Test runs use the trigger's test event.`,
@@ -600,7 +939,7 @@ export function addSamples(projectId: string, ids?: string[]) {
 
   // SQL update (and a stored procedure, which needs a server database).
   const dbConn2 = !want('dbmore') ? null : listResources('database', projectId).find(r => r.name === 'Sample SQLite')
-    || saveResource({ kind: 'database', name: 'Sample SQLite', project_id: projectId, config: { driver: 'sqlite', file: 'samples.sqlite' } });
+    || saveResource({ kind: 'database', name: 'Sample SQLite', project_id: projectId, config: { driver: 'sqlite', file: 'sample_sutraflow.sqlite' } });
   const dbUpd = dbConn2 && save({
     name: 'Sample: SQL update',
     description: 'Adds to an order amount in the "Sample SQLite" database with bound parameters. "Fail when no row is affected" sends an unknown order id to the error output. Run "Sample: Database (SQLite)" first to create the table.',
@@ -665,8 +1004,8 @@ export function addSamples(projectId: string, ids?: string[]) {
     description: 'Saves the order as a Firestore document, sets its live status in the Realtime Database, and sends a push notification to the customer\'s device token. Pick a Firebase connection in all three.',
     nodes: [
       N('s', 'start', 'Order', 60, 220, { payload: JSON.stringify({ orderId: 'A-3003', customer: 'Asha', amount: 1450, deviceToken: 'paste-a-device-token' }, null, 2) }),
-      N('f', 'firestore', 'Save order', 380, 220, { connection: '', op: 'set', collection: 'orders', docId: '{{input.orderId}}', data: '{"customer": "{{input.customer}}", "amount": {{input.amount}}, "status": "confirmed"}', merge: true, where: [], orderBy: '', limit: 100 }),
-      N('r', 'firebaseRtdb', 'Live status', 700, 220, { connection: '', op: 'update', path: 'status/{{trigger.orderId}}', data: '{"state": "confirmed", "at": "{{now}}"}' }),
+      N('f', 'firestore', 'Save order', 380, 220, { connection: '', op: 'set', collection: 'sample_orders', docId: '{{input.orderId}}', data: '{"customer": "{{input.customer}}", "amount": {{input.amount}}, "status": "confirmed"}', merge: true, where: [], orderBy: '', limit: 100 }),
+      N('r', 'firebaseRtdb', 'Live status', 700, 220, { connection: '', op: 'update', path: 'sample_status/{{trigger.orderId}}', data: '{"state": "confirmed", "at": "{{now}}"}' }),
       N('p', 'firebaseNotify', 'Tell the customer', 1020, 220, { connection: '', target: 'token', to: '{{trigger.deviceToken}}', title: "=concat('Order ', {trigger.orderId}, ' confirmed')", body: 'Thank you, {{trigger.customer}}. We are packing it now.', image: '', data: [{ k: 'orderId', v: '{{trigger.orderId}}' }], link: '' }),
       N('l', 'log', 'Log sent', 1340, 160, { level: 'info', message: 'Order {{trigger.orderId}} saved and notified' }),
       N('x', 'log', 'Log failure', 1340, 320, { level: 'error', message: '{{input.error.step}}: {{input.error.message}}' }),
@@ -695,7 +1034,7 @@ export function addSamples(projectId: string, ids?: string[]) {
     nodes: [
       N('s', 'start', 'Topic', 60, 220, { payload: JSON.stringify({ q: 'Assam tea harvest', max: 5 }, null, 2) }),
       N('y', 'youtube', 'Search YouTube', 380, 220, { connection: '', op: 'search', q: '{{input.q}}', videoIds: '', max: 5 }),
-      N('d', 'dropbox', 'Save to Dropbox', 700, 220, { connection: '', op: 'upload', path: "=concat('/reports/youtube-', current-date(), '.json')", content: '{{input | json}}', encoding: 'text' }),
+      N('d', 'dropbox', 'Save to Dropbox', 700, 220, { connection: '', op: 'upload', path: "=concat('/sample_reports/youtube-', current-date(), '.json')", content: '{{input | json}}', encoding: 'text' }),
       N('a', 'oauthRequest', 'Who am I', 1020, 220, { connection: '', method: 'GET', url: 'https://www.googleapis.com/oauth2/v3/userinfo', query: [], body: '' }),
       N('l', 'log', 'Log', 1340, 220, { level: 'info', message: 'Saved {{nodes.Search YouTube.items | length}} videos for {{input.body.email}}' }),
     ],
@@ -777,9 +1116,9 @@ export function addSamples(projectId: string, ids?: string[]) {
     name: 'Sample: Queue in and out',
     description: 'A broker-safe consume-transform-publish pattern. Queue / topic trigger reads JSON orders from orders.in with explicit acknowledgement and a durable duplicate guard. Map data reshapes the order; Publish message waits until orders.out is accepted by Kafka, RabbitMQ or ActiveMQ; only then Confirm message acknowledges the input. Configure the matching Sample broker connection and select the same broker in both bus steps. On failure before Confirm, SutraFlow returns the input for redelivery up to the trigger ceiling. Kafka identifies deliveries by topic/partition/offset; RabbitMQ and AMQP use message id (or the configured Duplicate key).',
     nodes: [
-      N('t', 'busSubscribe', 'Orders in', 60, 200, { broker: 'amqp1', amqpConn: '', rabbitConn: '', kafkaConn: '', destinationType: 'queue', destination: 'orders.in', selector: '', durableName: '', groupId: 'sutraflow-orders', fromBeginning: false, declare: true, messageType: 'JSON', ackMode: 'explicit', deduplicate: 'on', duplicateKey: '{{body.orderId}}', withoutId: 'process', onFailure: 'requeue', maxRedeliveries: 5, concurrency: 1, testMessage: JSON.stringify({ body: { orderId: 'A-12', qty: 2 }, headers: { messageId: 'sample-order-A-12' }, properties: { source: 'sample' } }, null, 2) }),
+      N('t', 'busSubscribe', 'Orders in', 60, 200, { broker: 'amqp1', amqpConn: '', rabbitConn: '', kafkaConn: '', destinationType: 'queue', destination: 'sample_orders.in', selector: '', durableName: '', groupId: 'sample_orders', fromBeginning: false, declare: true, messageType: 'JSON', ackMode: 'explicit', deduplicate: 'on', duplicateKey: '{{body.orderId}}', withoutId: 'process', onFailure: 'requeue', maxRedeliveries: 5, concurrency: 1, testMessage: JSON.stringify({ body: { orderId: 'A-12', qty: 2 }, headers: { messageId: 'sample-order-A-12' }, properties: { source: 'sample' } }, null, 2) }),
       N('m', 'mapper', 'Reshape', 380, 200, { start: 'empty', schema: '', mapping: { rules: { id: { expr: '{input.body.orderId}' }, quantity: { expr: 'number({input.body.qty})' }, receivedAt: { expr: 'current-dateTime()' } } } }),
-      N('p', 'busPublish', 'Orders out', 700, 200, { broker: 'amqp1', amqpConn: '', rabbitConn: '', kafkaConn: '', destinationType: 'queue', destination: 'orders.out', exchange: '', messageType: 'JSON', body: '{{input}}', deliveryMode: 'persistent', priority: 4, timeToLive: 0, messageId: '', correlationId: '{{trigger.headers.messageId}}', replyTo: '', jmsType: 'Order', key: '{{input.id}}', acks: 'all', properties: [{ k: 'source', v: 'sutraflow' }] }),
+      N('p', 'busPublish', 'Orders out', 700, 200, { broker: 'amqp1', amqpConn: '', rabbitConn: '', kafkaConn: '', destinationType: 'queue', destination: 'sample_orders.out', exchange: '', messageType: 'JSON', body: '{{input}}', deliveryMode: 'persistent', priority: 4, timeToLive: 0, messageId: '', correlationId: '{{trigger.headers.messageId}}', replyTo: '', jmsType: 'Order', key: '{{input.id}}', acks: 'all', properties: [{ k: 'source', v: 'sutraflow' }] }),
       N('c', 'busConfirm', 'Confirm', 1020, 200, { action: 'confirm' }),
     ],
     edges: [E('t', 'm'), E('m', 'p'), E('p', 'c')],
@@ -789,8 +1128,8 @@ export function addSamples(projectId: string, ids?: string[]) {
     name: 'Sample: XML queue in and out',
     description: 'Receives and republishes exact XML text, preserving namespaces, attributes and Unicode. Select the same broker and connector on both message activities; configure xml.orders.in and xml.orders.out. Explicit confirmation happens only after the outgoing broker accepts the XML. Invalid XML fails the receiver run and follows its retry ceiling; DTD/entities are refused. Add Parse XML with an XSD contract before business processing when document validation is required. The starter test envelope avoids subscribing, but publishing still needs the configured broker.',
     nodes: [
-      D(N('t','busSubscribe','XML orders in',60,200,{broker:'amqp1',amqpConn:'',rabbitConn:'',kafkaConn:'',destinationType:'queue',destination:'xml.orders.in',messageType:'XML',ackMode:'explicit',deduplicate:'on',withoutId:'process',onFailure:'requeue',maxRedeliveries:5,concurrency:1,testMessage:JSON.stringify({body:'<o:Order xmlns:o="urn:orders" id="A-100"><o:quantity>2</o:quantity></o:Order>',headers:{messageId:'sample-xml-A-100'}})}),'Receives XML as exact text. Use Parse XML and an XSD to enforce a document contract.'),
-      D(N('p','busPublish','XML orders out',380,200,{broker:'amqp1',amqpConn:'',rabbitConn:'',kafkaConn:'',destinationType:'queue',destination:'xml.orders.out',messageType:'XML',body:'{{input.body}}',deliveryMode:'persistent',correlationId:'{{trigger.headers.messageId}}',acks:'all'}),'Publishes the unchanged XML with application/xml. Waits for broker acceptance, not downstream business completion.'),
+      D(N('t','busSubscribe','XML orders in',60,200,{broker:'amqp1',amqpConn:'',rabbitConn:'',kafkaConn:'',destinationType:'queue',destination:'sample_xml_orders.in',messageType:'XML',ackMode:'explicit',deduplicate:'on',withoutId:'process',onFailure:'requeue',maxRedeliveries:5,concurrency:1,testMessage:JSON.stringify({body:'<o:Order xmlns:o="urn:orders" id="A-100"><o:quantity>2</o:quantity></o:Order>',headers:{messageId:'sample-xml-A-100'}})}),'Receives XML as exact text. Use Parse XML and an XSD to enforce a document contract.'),
+      D(N('p','busPublish','XML orders out',380,200,{broker:'amqp1',amqpConn:'',rabbitConn:'',kafkaConn:'',destinationType:'queue',destination:'sample_xml_orders.out',messageType:'XML',body:'{{input.body}}',deliveryMode:'persistent',correlationId:'{{trigger.headers.messageId}}',acks:'all'}),'Publishes the unchanged XML with application/xml. Waits for broker acceptance, not downstream business completion.'),
       D(N('c','busConfirm','Confirm XML',700,200,{action:'confirm'}),'Acknowledges the input only after publishing succeeds. An error before confirmation follows the receiver failure policy.'),
     ],
     edges:[E('t','p'),E('p','c')],
@@ -820,7 +1159,7 @@ export function addSamples(projectId: string, ids?: string[]) {
     name: 'Sample: Kafka REST publish',
     description: 'Publishes one JSON record through a Kafka REST proxy (Aiven Karapace/Confluent-compatible API). Set KAFKA_REST_URL, KAFKA_REST_USER, KAFKA_REST_PASSWORD_SECRET and optionally KAFKA_REST_CA_PEM, then put the password in the vault. This is for an HTTP-only integration; use the native Kafka connection and Queue / topic trigger for consumer groups, offsets, retries and workflow acknowledgement.',
     nodes: [
-      N('s', 'start', 'Record', 60, 220, { payload: JSON.stringify({ topic: 'orders.rest', key: 'A-1001', value: { orderId: 'A-1001', amount: 1450 } }, null, 2) }),
+      N('s', 'start', 'Record', 60, 220, { payload: JSON.stringify({ topic: 'sample_orders.rest', key: 'A-1001', value: { orderId: 'A-1001', amount: 1450 } }, null, 2) }),
       N('p', 'httpRequest', 'Publish over Kafka REST', 400, 220, { connection: kafkaRestHttp.id, auth: kafkaRestAuth.id, method: 'POST', url: '/topics/{{input.topic | urlencode}}', query: [], headers: [{ k: 'Accept', v: 'application/vnd.kafka.v2+json' }, { k: 'Content-Type', v: 'application/vnd.kafka.json.v2+json' }], bodyType: 'json', body: '{\n  "records": [\n    { "key": {{input.key | json}}, "value": {{input.value | json}} }\n  ]\n}', parse: 'json', failOn: '4xx or 5xx' }),
       N('l', 'log', 'Log partition and offset', 760, 220, { level: 'info', message: 'Kafka REST accepted the record: {{input.body | json}}' }),
     ],
@@ -830,7 +1169,7 @@ export function addSamples(projectId: string, ids?: string[]) {
     name: 'Sample: Kafka REST subscribe',
     description: 'Shows the complete stateful Kafka REST consumer lifecycle: create a consumer instance, subscribe it to a topic, publish a sample record, poll records, commit its offsets and close it. Set the same Kafka REST project variables and vault secret as the publish sample. REST polling is useful for HTTP-only integration; use the native Queue / topic trigger for a continuously deployed consumer with partition concurrency, retries, duplicate protection and workflow acknowledgement.',
     nodes: [
-      N('s', 'start', 'Consumer settings', 40, 220, { payload: JSON.stringify({ topic: 'orders.rest', group: 'sutraflow-rest-sample', value: { orderId: 'A-REST-2001', amount: 625 } }, null, 2) }),
+      N('s', 'start', 'Consumer settings', 40, 220, { payload: JSON.stringify({ topic: 'sample_orders.rest', group: 'sample_rest_consumer', value: { orderId: 'A-REST-2001', amount: 625 } }, null, 2) }),
       N('c', 'httpRequest', 'Create consumer', 320, 220, { connection: kafkaRestHttp.id, auth: kafkaRestAuth.id, method: 'POST', url: '/consumers/{{input.group | urlencode}}', query: [], headers: [{ k: 'Accept', v: 'application/vnd.kafka.v2+json' }, { k: 'Content-Type', v: 'application/vnd.kafka.v2+json' }], bodyType: 'json', body: '{\n  "name": "sutraflow-{{sutraContext.id}}",\n  "format": "json",\n  "auto.offset.reset": "earliest",\n  "auto.commit.enable": "false"\n}', parse: 'json', failOn: '4xx or 5xx' }),
       N('u', 'httpRequest', 'Subscribe to topic', 600, 220, { connection: kafkaRestHttp.id, auth: kafkaRestAuth.id, method: 'POST', url: '{{nodes.Create consumer.body.base_uri}}/subscription', query: [], headers: [{ k: 'Content-Type', v: 'application/vnd.kafka.v2+json' }], bodyType: 'json', body: '{ "topics": [{{trigger.topic | json}}] }', parse: 'auto', failOn: '4xx or 5xx' }),
       N('p', 'httpRequest', 'Publish sample record', 880, 220, { connection: kafkaRestHttp.id, auth: kafkaRestAuth.id, method: 'POST', url: '/topics/{{trigger.topic | urlencode}}', query: [], headers: [{ k: 'Accept', v: 'application/vnd.kafka.v2+json' }, { k: 'Content-Type', v: 'application/vnd.kafka.json.v2+json' }], bodyType: 'json', body: '{ "records": [{ "value": {{trigger.value | json}} }] }', parse: 'json', failOn: '4xx or 5xx' }),
@@ -845,7 +1184,7 @@ export function addSamples(projectId: string, ids?: string[]) {
     name: 'Sample: RabbitMQ HTTP publish and fetch',
     description: 'Declares a durable sample queue, publishes JSON through RabbitMQ\'s management HTTP API, fetches and acknowledges one message, then deletes the sample queue. Set RABBITMQ_HTTP_URL, RABBITMQ_HTTP_USER and RABBITMQ_HTTP_PASSWORD_SECRET as project properties and put that named password in the vault. RabbitMQ recommends AMQP for real messaging: use the native RabbitMQ connection and Queue / topic trigger for efficient consumers, publisher confirms, redelivery and explicit workflow acknowledgement.',
     nodes: [
-      N('s', 'start', 'Message', 60, 220, { payload: JSON.stringify({ queue: 'sutraflow.rest.sample', body: { orderId: 'R-1001', amount: 725 } }, null, 2) }),
+      N('s', 'start', 'Message', 60, 220, { payload: JSON.stringify({ queue: 'sample_rest_queue', body: { orderId: 'R-1001', amount: 725 } }, null, 2) }),
       N('q', 'httpRequest', 'Declare queue', 360, 220, { connection: rabbitRestHttp.id, auth: rabbitRestAuth.id, method: 'PUT', url: '/api/queues/%2F/{{input.queue | urlencode}}', query: [], headers: [], bodyType: 'json', body: '{ "durable": true, "auto_delete": false, "arguments": {} }', parse: 'json', failOn: '4xx or 5xx' }),
       N('p', 'httpRequest', 'Publish over RabbitMQ HTTP', 680, 220, { connection: rabbitRestHttp.id, auth: rabbitRestAuth.id, method: 'POST', url: '/api/exchanges/%2F/amq.default/publish', query: [], headers: [], bodyType: 'json', body: '{\n  "properties": { "content_type": "application/json", "message_id": {{trigger.body.orderId | json}} },\n  "routing_key": {{trigger.queue | json}},\n  "payload": {{trigger.body | json | json}},\n  "payload_encoding": "string"\n}', parse: 'json', failOn: '4xx or 5xx' }),
       N('g', 'httpRequest', 'Fetch one over HTTP', 1000, 220, { connection: rabbitRestHttp.id, auth: rabbitRestAuth.id, method: 'POST', url: '/api/queues/%2F/{{trigger.queue | urlencode}}/get', query: [], headers: [], bodyType: 'json', body: '{ "count": 1, "ackmode": "ack_requeue_false", "encoding": "auto", "truncate": 50000 }', parse: 'json', failOn: '4xx or 5xx' }),
@@ -858,7 +1197,7 @@ export function addSamples(projectId: string, ids?: string[]) {
     name: 'Sample: ActiveMQ REST publish and fetch',
     description: 'Uses ActiveMQ Classic\'s supported Jolokia management REST endpoint to create a sample queue, send JSON, browse it, remove that exact message and delete the queue. Set ACTIVEMQ_REST_URL, ACTIVEMQ_REST_ORIGIN, ACTIVEMQ_REST_USER and ACTIVEMQ_REST_PASSWORD_SECRET as project properties and put that named password in the vault. Classic 6.3 disables the deprecated MessageServlet by default because it is unmaintained and has security issues; this sample does not enable it. Use AMQP 1.0 for SutraFlow Queue / topic triggers and OpenWire/JMS for Java clients when you need durable subscription and workflow acknowledgement semantics.',
     nodes: [
-      N('s', 'start', 'Message', 40, 220, { payload: JSON.stringify({ brokerName: 'localhost', queue: 'sutraflow.rest.sample', body: { orderId: 'A-REST-1001', amount: 990 } }, null, 2) }),
+      N('s', 'start', 'Message', 40, 220, { payload: JSON.stringify({ brokerName: 'localhost', queue: 'sample_rest_queue', body: { orderId: 'A-REST-1001', amount: 990 } }, null, 2) }),
       N('q', 'httpRequest', 'Create queue', 300, 220, { connection: activeRestHttp.id, auth: activeRestAuth.id, method: 'POST', url: '/api/jolokia/', query: [], headers: [], bodyType: 'json', body: '{ "type": "exec", "mbean": "org.apache.activemq:type=Broker,brokerName={{input.brokerName}}", "operation": "addQueue(java.lang.String)", "arguments": [{{input.queue | json}}] }', parse: 'json', failOn: '4xx or 5xx' }),
       N('p', 'httpRequest', 'Publish over Jolokia', 580, 220, { connection: activeRestHttp.id, auth: activeRestAuth.id, method: 'POST', url: '/api/jolokia/', query: [], headers: [], bodyType: 'json', body: '{ "type": "exec", "mbean": "org.apache.activemq:type=Broker,brokerName={{trigger.brokerName}},destinationType=Queue,destinationName={{trigger.queue}}", "operation": "sendTextMessage(java.lang.String)", "arguments": [{{trigger.body | json | json}}] }', parse: 'json', failOn: '4xx or 5xx' }),
       N('b', 'httpRequest', 'Browse message', 860, 220, { connection: activeRestHttp.id, auth: activeRestAuth.id, method: 'POST', url: '/api/jolokia/', query: [], headers: [], bodyType: 'json', body: '{ "type": "exec", "mbean": "org.apache.activemq:type=Broker,brokerName={{trigger.brokerName}},destinationType=Queue,destinationName={{trigger.queue}}", "operation": "browse()", "arguments": [] }', parse: 'json', failOn: '4xx or 5xx' }),
@@ -950,17 +1289,17 @@ export function addSamples(projectId: string, ids?: string[]) {
   const mysql = !want('sqlinstall') ? null : conn('database', 'Sample MySQL', { driver: 'mysql', host: '127.0.0.1', port: 3306, database: '', user: 'root', passwordSecret: '' });
   const sqlInstall = mysql && save({
     name: 'Sample: SQL install script',
-    description: 'SQL script runs an install script on the "Sample MySQL" connection (Laragon defaults: 127.0.0.1:3306, root, no password): creates the database sutraflow_samples, the tables customers and orders, seed rows, and the stored procedure customer_orders(customer, min_total). Safe to run again. Then deploy "Sample: Procedure as a microservice".',
+    description: 'SQL script runs an install script on the "Sample MySQL" connection (Laragon defaults: 127.0.0.1:3306, root, no password): creates the database sample_sutraflow, the tables sample_customers and sample_orders, seed rows, and the stored procedure customer_orders(customer, min_total). Safe to run again. Then deploy "Sample: Procedure as a microservice".',
     nodes: [
       N('s', 'start', 'Install', 60, 220, { payload: JSON.stringify({ seedCity: 'Pune' }, null, 2) }),
       N('x', 'dbScript', 'Install schema', 380, 220, { connection: mysql.id, onError: 'stop', params: [{ k: 'city', v: '{{input.seedCity}}' }], sql: [
-        'CREATE DATABASE IF NOT EXISTS sutraflow_samples',
-        'CREATE TABLE IF NOT EXISTS sutraflow_samples.customers (\n  id VARCHAR(20) PRIMARY KEY,\n  name VARCHAR(100) NOT NULL,\n  city VARCHAR(60)\n)',
-        'CREATE TABLE IF NOT EXISTS sutraflow_samples.orders (\n  id VARCHAR(20) PRIMARY KEY,\n  customer_id VARCHAR(20) NOT NULL,\n  total DECIMAL(10,2) NOT NULL,\n  status VARCHAR(20) NOT NULL,\n  INDEX (customer_id)\n)',
-        "INSERT IGNORE INTO sutraflow_samples.customers (id, name, city) VALUES\n  ('C-1', 'Asha Traders', :city),\n  ('C-2', 'Kandy Stores', 'Colombo')",
-        "INSERT IGNORE INTO sutraflow_samples.orders (id, customer_id, total, status) VALUES\n  ('A-1', 'C-1', 1200.00, 'paid'),\n  ('A-2', 'C-1', 300.00, 'open'),\n  ('A-3', 'C-2', 2450.50, 'paid'),\n  ('A-4', 'C-1', 5400.00, 'paid')",
-        'DROP PROCEDURE IF EXISTS sutraflow_samples.customer_orders',
-        'CREATE PROCEDURE sutraflow_samples.customer_orders(IN p_customer VARCHAR(20), IN p_min DECIMAL(10,2))\nBEGIN\n  SELECT o.id, c.name AS customer, o.total, o.status\n  FROM sutraflow_samples.orders o JOIN sutraflow_samples.customers c ON c.id = o.customer_id\n  WHERE o.customer_id = p_customer AND o.total >= p_min\n  ORDER BY o.total DESC;\nEND',
+        'CREATE DATABASE IF NOT EXISTS sample_sutraflow',
+        'CREATE TABLE IF NOT EXISTS sample_sutraflow.sample_customers (\n  id VARCHAR(20) PRIMARY KEY,\n  name VARCHAR(100) NOT NULL,\n  city VARCHAR(60)\n)',
+        'CREATE TABLE IF NOT EXISTS sample_sutraflow.sample_orders (\n  id VARCHAR(20) PRIMARY KEY,\n  customer_id VARCHAR(20) NOT NULL,\n  total DECIMAL(10,2) NOT NULL,\n  status VARCHAR(20) NOT NULL,\n  INDEX (customer_id)\n)',
+        "INSERT IGNORE INTO sample_sutraflow.sample_customers (id, name, city) VALUES\n  ('C-1', 'Asha Traders', :city),\n  ('C-2', 'Kandy Stores', 'Colombo')",
+        "INSERT IGNORE INTO sample_sutraflow.sample_orders (id, customer_id, total, status) VALUES\n  ('A-1', 'C-1', 1200.00, 'paid'),\n  ('A-2', 'C-1', 300.00, 'open'),\n  ('A-3', 'C-2', 2450.50, 'paid'),\n  ('A-4', 'C-1', 5400.00, 'paid')",
+        'DROP PROCEDURE IF EXISTS sample_sutraflow.sample_customer_orders',
+        'CREATE PROCEDURE sample_sutraflow.sample_customer_orders(IN p_customer VARCHAR(20), IN p_min DECIMAL(10,2))\nBEGIN\n  SELECT o.id, c.name AS customer, o.total, o.status\n  FROM sample_sutraflow.sample_orders o JOIN sample_sutraflow.sample_customers c ON c.id = o.customer_id\n  WHERE o.customer_id = p_customer AND o.total >= p_min\n  ORDER BY o.total DESC;\nEND',
       ].join('\n;\n') }),
       N('l', 'log', 'Log install', 700, 160, { level: 'info', message: '{{input.ran}} statements ran on {{input.connection}} in {{input.ms}} ms' }),
       N('e', 'log', 'Log failure', 700, 320, { level: 'error', message: 'Install stopped: {{input.error.message}}' }),
@@ -972,7 +1311,7 @@ export function addSamples(projectId: string, ids?: string[]) {
     description: `GET /samples/sql/customers/:id/orders?min=500 calls the stored procedure customer_orders (made by "Sample: SQL install script") and answers its rows as JSON. Deploy it, then open ${gw}/samples/sql/customers/C-1/orders?min=500`,
     nodes: [
       N('t', 'restService', 'Customer orders API', 60, 220, { method: 'GET', path: '/samples/sql/customers/:id/orders', policy: '', maxBodyKb: 16, bodySchema: '', testRequest: JSON.stringify({ method: 'GET', params: { id: 'C-1' }, query: { min: '500' }, headers: {}, body: null }, null, 2) }),
-      N('p', 'dbProcedure', 'customer_orders', 380, 220, { connection: mysql.id, procedure: 'sutraflow_samples.customer_orders', params: [{ k: 'p_customer', v: '{{input.params.id}}' }, { k: 'p_min', v: "=coalesce({input.query.min}, '0')" }] }),
+      N('p', 'dbProcedure', 'customer_orders', 380, 220, { connection: mysql.id, procedure: 'sample_sutraflow.sample_customer_orders', params: [{ k: 'p_customer', v: '{{input.params.id}}' }, { k: 'p_min', v: "=coalesce({input.query.min}, '0')" }] }),
       N('ok', 'httpResponse', 'Reply 200', 700, 140, { status: '200', contentType: 'application/json', bodySource: 'template', body: '{"customer": "{{trigger.params.id}}", "count": {{input.rowCount}}, "orders": {{input.rows | json}}, "ms": {{input.ms}}}', headers: [] }),
       N('bad', 'httpResponse', 'Reply 500', 700, 320, { status: '500', contentType: 'application/json', bodySource: 'template', body: '{"error": {{input.error.message | json}}}', headers: [] }),
     ],
@@ -985,18 +1324,18 @@ export function addSamples(projectId: string, ids?: string[]) {
     const tag = proto.toLowerCase();
     const steps = save({
       name: `Sample: ${proto} upload list read archive`,
-      description: `Uses the "Sample ${proto}" connection (set its host, user and password first; servers far away may need longer time limits there). Writes outbox/orders.csv, appends a line, lists the CSV files with their rows, reads the file as lines, copies it to archive/, moves the original to a dated name and deletes the copy.`,
+      description: `Uses the "Sample ${proto}" connection (set its host, user and password first; servers far away may need longer time limits there). Writes sample_outbox/orders.csv, appends a line, lists the CSV files with their rows, reads the file as lines, copies it to sample_archive/, moves the original to a dated name and deletes the copy.`,
       nodes: [
         N('s', 'start', 'Orders', 60, 220, { payload: JSON.stringify({ rows: sales.slice(0, 3), more: 'A-9,Late Shop,IN,paid,75' }, null, 2) }),
-        N('w', 'remoteWrite', 'Write CSV', 340, 220, { ...k, path: 'outbox/orders.csv', format: 'CSV from rows', rows: '{{input.rows}}', delimiter: ',', header: true, encoding: 'utf-8', lineEnding: 'LF', append: false, overwrite: true }),
-        N('a', 'remoteWrite', 'Append a line', 620, 220, { ...k, path: 'outbox/orders.csv', format: 'text', content: '{{trigger.more}}', encoding: 'utf-8', append: true, newline: true }),
-        N('l', 'remoteList', 'List CSV files', 900, 220, { ...k, folder: 'outbox', pattern: '*.csv', recursive: false, sort: 'newest first', max: 100, format: 'CSV rows', encoding: 'utf-8', delimiter: ',', header: true, skipRows: 0, trimValues: true, decimal: '.' }),
-        N('r', 'remoteRead', 'Read as lines', 1180, 220, { ...k, path: 'outbox/orders.csv', format: 'lines', encoding: 'utf-8', skipRows: 1, maxMb: 50 }),
-        N('c', 'remoteMove', 'Copy to archive', 1460, 220, { ...k, action: 'copy', from: 'outbox/orders.csv', to: 'archive/orders-copy.csv', overwrite: true }),
-        N('m', 'remoteMove', 'Move to dated name', 1740, 220, { ...k, action: 'move', from: 'outbox/orders.csv', to: "=concat('archive/orders-', current-timestamp('YYYYMMDD-HHmmss'), '.csv')", overwrite: true }),
-        N('d', 'remoteMove', 'Delete the copy', 2020, 220, { ...k, action: 'delete', from: 'archive/orders-copy.csv' }),
+        N('w', 'remoteWrite', 'Write CSV', 340, 220, { ...k, path: 'sample_outbox/orders.csv', format: 'CSV from rows', rows: '{{input.rows}}', delimiter: ',', header: true, encoding: 'utf-8', lineEnding: 'LF', append: false, overwrite: true }),
+        N('a', 'remoteWrite', 'Append a line', 620, 220, { ...k, path: 'sample_outbox/orders.csv', format: 'text', content: '{{trigger.more}}', encoding: 'utf-8', append: true, newline: true }),
+        N('l', 'remoteList', 'List CSV files', 900, 220, { ...k, folder: 'sample_outbox', pattern: '*.csv', recursive: false, sort: 'newest first', max: 100, format: 'CSV rows', encoding: 'utf-8', delimiter: ',', header: true, skipRows: 0, trimValues: true, decimal: '.' }),
+        N('r', 'remoteRead', 'Read as lines', 1180, 220, { ...k, path: 'sample_outbox/orders.csv', format: 'lines', encoding: 'utf-8', skipRows: 1, maxMb: 50 }),
+        N('c', 'remoteMove', 'Copy to archive', 1460, 220, { ...k, action: 'copy', from: 'sample_outbox/orders.csv', to: 'sample_archive/orders-copy.csv', overwrite: true }),
+        N('m', 'remoteMove', 'Move to dated name', 1740, 220, { ...k, action: 'move', from: 'sample_outbox/orders.csv', to: "=concat('sample_archive/orders-', current-timestamp('YYYYMMDD-HHmmss'), '.csv')", overwrite: true }),
+        N('d', 'remoteMove', 'Delete the copy', 2020, 220, { ...k, action: 'delete', from: 'sample_archive/orders-copy.csv' }),
         N('g', 'log', 'Log done', 2300, 220, { level: 'info', message: '{{nodes.List CSV files.count}} CSV files listed, {{nodes.Read as lines.count}} order lines read on {{nodes.Read as lines.server}}' }),
-        N('n', 'log', 'Log nothing listed', 900, 380, { level: 'warn', message: 'No CSV files in outbox/' }),
+        N('n', 'log', 'Log nothing listed', 900, 380, { level: 'warn', message: 'No CSV files in sample_outbox/' }),
         N('x', 'log', 'Log failure', 620, 520, { level: 'error', message: '{{input.error.step}}: {{input.error.message}}' }),
       ],
       edges: [E('s', 'w'), E('w', 'a'), E('a', 'l'), E('l', 'r'), E('r', 'c'), E('c', 'm'), E('m', 'd'), E('d', 'g'), E('l', 'n', 'empty'),
@@ -1004,10 +1343,10 @@ export function addSamples(projectId: string, ids?: string[]) {
     });
     const trig = save({
       name: `Sample: ${proto} file trigger`,
-      description: `While deployed, checks inbox/ on the "Sample ${proto}" server every 60 seconds for new *.csv files that have stopped growing, reads each as CSV rows, logs the total, and ${proto === 'SFTP' ? 'moves the file to inbox/done/' : 'deletes the file'} after a successful run.`,
+      description: `While deployed, checks sample_inbox/ on the "Sample ${proto}" server every 60 seconds for new *.csv files that have stopped growing, reads each as CSV rows, logs the total, and ${proto === 'SFTP' ? 'moves the file to sample_inbox/done/' : 'deletes the file'} after a successful run.`,
       nodes: [
-        N('t', 'remoteTrigger', 'New CSV in inbox', 60, 220, { ...k, folder: 'inbox', pattern: '*.csv', pollSeconds: 60, after: proto === 'SFTP' ? 'move to a folder' : 'delete', moveTo: 'inbox/done', format: 'CSV rows', encoding: 'utf-8', delimiter: ',', header: true, skipRows: 0, trimValues: true, decimal: '.', maxMb: 50,
-          testEvent: JSON.stringify({ name: 'orders.csv', path: '/inbox/orders.csv', relativePath: 'inbox/orders.csv', size: 120, server: `${tag}.example.com`, rows: [{ id: 'A-1', amount: 300 }, { id: 'A-2', amount: 1200 }], count: 2 }, null, 2) }),
+        N('t', 'remoteTrigger', 'New CSV in inbox', 60, 220, { ...k, folder: 'sample_inbox', pattern: '*.csv', pollSeconds: 60, after: proto === 'SFTP' ? 'move to a folder' : 'delete', moveTo: 'sample_inbox/done', format: 'CSV rows', encoding: 'utf-8', delimiter: ',', header: true, skipRows: 0, trimValues: true, decimal: '.', maxMb: 50,
+          testEvent: JSON.stringify({ name: 'orders.csv', path: '/sample_inbox/orders.csv', relativePath: 'sample_inbox/orders.csv', size: 120, server: `${tag}.example.com`, rows: [{ id: 'A-1', amount: 300 }, { id: 'A-2', amount: 1200 }], count: 2 }, null, 2) }),
         N('a', 'aggregate', 'Total', 380, 220, { list: '{{input.rows}}', field: 'amount', fn: 'sum', groupBy: '' }),
         N('l', 'log', 'Log file', 700, 220, { level: 'info', message: '{{trigger.name}} from {{trigger.server}}: {{trigger.count}} rows, total {{input.result}}' }),
       ],
@@ -1099,7 +1438,7 @@ export function addSamples(projectId: string, ids?: string[]) {
     name: 'Sample: Agent fed by a queue',
     description: 'A reliable broker-facing AI worker for Kafka, RabbitMQ or ActiveMQ. Queue / topic trigger receives {sessionId, message, replyTo} on agent.questions with explicit acknowledgement. AI Agent uses sessionId to isolate conversation memory per caller. Publish message waits for the answer destination to accept the result, using sessionId as the Kafka key; Confirm then acknowledges the question. A failure before Confirm returns the message for redelivery, while the durable delivery guard prevents a leader change from starting the same broker delivery twice.',
     nodes: [
-      N('t', 'busSubscribe', 'Questions', 60, 220, { broker: 'amqp1', amqpConn: '', rabbitConn: '', kafkaConn: '', destinationType: 'queue', destination: 'agent.questions', groupId: 'sutraflow-agent-questions', fromBeginning: false, messageType: 'JSON', ackMode: 'explicit', deduplicate: 'on', duplicateKey: '{{body.sessionId}}:{{body.message}}', withoutId: 'process', onFailure: 'requeue', maxRedeliveries: 5, concurrency: 4, declare: true, testMessage: JSON.stringify({ body: { sessionId: 'cust-42', message: 'Is Assam tea in stock?', replyTo: 'agent.answers' }, headers: { messageId: 'sample-question-1' }, properties: { source: 'sample' } }, null, 2) }),
+      N('t', 'busSubscribe', 'Questions', 60, 220, { broker: 'amqp1', amqpConn: '', rabbitConn: '', kafkaConn: '', destinationType: 'queue', destination: 'sample_agent.questions', groupId: 'sample_agent_questions', fromBeginning: false, messageType: 'JSON', ackMode: 'explicit', deduplicate: 'on', duplicateKey: '{{body.sessionId}}:{{body.message}}', withoutId: 'process', onFailure: 'requeue', maxRedeliveries: 5, concurrency: 4, declare: true, testMessage: JSON.stringify({ body: { sessionId: 'cust-42', message: 'Is Assam tea in stock?', replyTo: 'agent.answers' }, headers: { messageId: 'sample-question-1' }, properties: { source: 'sample' } }, null, 2) }),
       N('a', 'aiAgent', 'Agent', 380, 220, { provider: ai.id, instructions: 'You answer customer questions for Asha Traders in one or two sentences.', task: '{{input.body.message}}', memory: memStore!.id, session: '{{input.body.sessionId}}', tools: 'all AI tools of this project', canAsk: false, maxSteps: 6, effort: 'low' }),
       N('p', 'busPublish', 'Answer', 700, 220, { broker: 'amqp1', amqpConn: '', rabbitConn: '', kafkaConn: '', destinationType: 'queue', destination: "=coalesce({trigger.body.replyTo}, 'agent.answers')", messageType: 'JSON', body: '{"sessionId": "{{trigger.body.sessionId}}", "answer": {{input.answer | json}}}', deliveryMode: 'persistent', correlationId: '{{trigger.headers.messageId}}', key: '{{trigger.body.sessionId}}', acks: 'all' }),
       N('c', 'busConfirm', 'Confirm', 1020, 220, { action: 'confirm' }),
@@ -1139,13 +1478,13 @@ export function addSamples(projectId: string, ids?: string[]) {
   const aiDocs = docsWanted ? (ai || conn('aiProvider', 'Local Ollama', { engine: 'Ollama', model: '', baseUrl: '', maxTokens: 800, ollamaApi: 'chat' })) : null;
   const kbDocs = aiDocs && conn('aiKnowledge', 'Sample document knowledge base', { store: 'built-in', embedWith: 'built-in', chunkTokens: 200, overlapTokens: 40 });
   if (aiDocs) {
-    // The documents (PDF, Word, PowerPoint, Markdown) go in the project's files folder, ${files}/documents,
+    // The documents (PDF, Word, PowerPoint, Markdown) go in the project's files folder, ${files}/sample_documents,
     // named by the project variable DOCS_FOLDER: the same on every server, and carried by release zips.
     const p = getProject(projectId);
     if (p) {
-      writeSampleDocuments(path.join(projectFilesDir(p.name), 'documents'));
+      writeSampleDocuments(path.join(projectFilesDir(p.name), 'sample_documents'));
       if (!(p.config.variables || []).some((v: any) => v.name === 'DOCS_FOLDER')) {
-        saveProject({ id: p.id, name: p.name, description: p.description, config: { ...p.config, variables: [...(p.config.variables || []), { name: 'DOCS_FOLDER', type: 'string', value: '${files}/documents', description: 'Folder of documents the knowledge base is fed from (PDF, Word, PowerPoint, Excel, OpenDocument, HTML, text, Markdown). ${files} is the project files folder; use any folder of this server instead.' }] } });
+        saveProject({ id: p.id, name: p.name, description: p.description, config: { ...p.config, variables: [...(p.config.variables || []), { name: 'DOCS_FOLDER', type: 'string', value: '${files}/sample_documents', description: 'Folder of documents the knowledge base is fed from (PDF, Word, PowerPoint, Excel, OpenDocument, HTML, text, Markdown). ${files} is the project files folder; use any folder of this server instead.' }] } });
       }
     }
   }
@@ -1217,10 +1556,6 @@ export function addSamples(projectId: string, ids?: string[]) {
 
   // ---------- data platforms, Python and social media ----------
   /** Adds a project variable once (kept when the project has it already). */
-  const ensureVar = (name: string, value: string, description: string) => {
-    const p = getProject(projectId);
-    if (p && !(p.config.variables || []).some((v: any) => v.name === name)) saveProject({ id: p.id, name: p.name, description: p.description, config: { ...p.config, variables: [...(p.config.variables || []), { name, type: 'string', value, description }] } });
-  };
   const adfC = want('adf') ? conn('azureDataFactory', 'Sample Azure Data Factory', { auth: 'service principal (client secret)', tenantId: '', clientId: '', clientSecretSecret: 'ADF_CLIENT_SECRET', subscriptionId: '', resourceGroup: '', factoryName: '', pollSeconds: 15, cloud: 'Azure (global)' }) : null;
   const adfRunS = adfC && save({
     name: 'Sample: ADF run pipeline and wait',
@@ -1275,12 +1610,12 @@ export function addSamples(projectId: string, ids?: string[]) {
   if (want('python')) {
     const p = getProject(projectId);
     if (p) {
-      const dir = path.join(projectFilesDir(p.name), 'scripts');
+      const dir = path.join(projectFilesDir(p.name), 'sample_scripts');
       fs.mkdirSync(dir, { recursive: true });
       const f = path.join(dir, 'sales_report.py');
       if (!fs.existsSync(f)) fs.writeFileSync(f, '"""Sales report: reads the amounts given as parameters and prints a summary as JSON."""\nimport json\nimport os\nimport statistics\nimport sys\n\nparams = json.load(open(os.environ["SUTRA_PARAMS_FILE"]))\namounts = [float(a) for a in params.get("amounts", [])]\nif not amounts:\n    print("No amounts given", file=sys.stderr)\n    sys.exit(2)\nprint(json.dumps({\n    "region": params.get("region", ""),\n    "count": len(amounts),\n    "total": round(sum(amounts), 2),\n    "average": round(statistics.mean(amounts), 2),\n    "median": round(statistics.median(amounts), 2),\n    "mode": sys.argv[1] if len(sys.argv) > 1 else "full",\n}))\n', 'utf8');
     }
-    ensureVar('SCRIPTS_FOLDER', '${files}/scripts', 'Folder of the Python scripts the Sutras run. ${files} is the project files folder.');
+    ensureVar('SCRIPTS_FOLDER', '${files}/sample_scripts', 'Folder of the Python scripts the Sutras run. ${files} is the project files folder.');
   }
   const pyInline = want('python') && save({
     name: 'Sample: Python script with parameters',
@@ -1304,7 +1639,7 @@ export function addSamples(projectId: string, ids?: string[]) {
     edges: [E('s', 'p'), E('p', 'l')],
   });
   const ytC = want('youtube') ? conn('oauthApp', 'Sample Google (Drive and YouTube)', { provider: 'google', clientId: '', clientSecretSecret: '', scopes: 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly https://www.googleapis.com/auth/spreadsheets', refreshTokenSecret: '' }) : null;
-  if (ytC) ensureVar('DOWNLOADS', '${files}/downloads', 'Folder where files from Google Drive are saved before upload. ${files} is the project files folder.');
+  if (ytC) ensureVar('DOWNLOADS', '${files}/sample_downloads', 'Folder where files from Google Drive are saved before upload. ${files} is the project files folder.');
   const ytPublish = ytC && save({
     name: 'Sample: Publish Drive videos to YouTube',
     description: 'While deployed, watches the Google Drive folder "Videos to publish": each new video is saved to a server file (streamed, so large videos are fine), uploaded to YouTube as private with its file name as the title, and the server copy is removed. Set the folder id, connect the Sample Google connection with the Drive and YouTube scopes, and choose the privacy you want.',
@@ -1404,7 +1739,7 @@ export function addSamples(projectId: string, ids?: string[]) {
   // Connections made for the samples go to a Samples folder of Resources.
   for (const r of listResources(undefined, projectId)) if (!resourcesBefore.has(r.id) && !r.folder) setItemFolder('resources', r.id, 'Samples');
 
-  return [...typedMappings, ...validationFlows, functions, forEach, loops, tax, invoice, tryCatch, traceIntake, traceCredit, traceHub, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, release, localAi, email, queue, xmlQueue, kafkaRest, kafkaRestSubscribe, rabbitRest, activeRest, timer, fileTrig, textFormats, dbUpd, dbProc, soapCall, emailIn, firebase, google, apps, aiMore,
+  return [...typedMappings, ...validationFlows, functions, forEach, loops, tax, invoice, tryCatch, traceIntake, traceCredit, traceHub, chatSupport, ...dbKnowledge, dashboardSample, ...dashboardMore, csvSkill, fbSkill, rest, csv, filesFolder, database, xml, transform, routing, conditions, chSend, chListen, counter, scripts, release, localAi, email, queue, xmlQueue, kafkaRest, kafkaRestSubscribe, rabbitRest, activeRest, timer, fileTrig, textFormats, dbUpd, dbProc, soapCall, emailIn, firebase, google, apps, aiMore,
     soapPublic, soapMock, soapMockCall, msCustomers, msStock, msOrders, sqlInstall, sqlService, ...sftp, ...ftp,
     toolOrder, toolStock, desk, ragWeb, ragSp, ragAsk, queueAgent, team, mcpAgent, docOne, docFeed, docApi, docTool, docAgent, adfRunS, adfAlert, dbxNb, dbxSql, pyInline, pyFile, ytPublish, ytReport, twLive, dcBot, tgBot, tgNotify]
     .filter((f): f is NonNullable<typeof f> & { id: string; name: string } => !!f)
@@ -1416,6 +1751,7 @@ const FOLDERS: Record<string, string[]> = {
   'Data and mapping': ['mappingtyped', 'validation', 'functions', 'foreach', 'loops', 'xml', 'transform', 'textformats'],
   'Flow control': ['subsutra', 'trycatch', 'routing', 'conditions', 'counter', 'channels', 'tracing'],
   'REST and microservices': ['rest', 'microservices'],
+  'Dashboards': ['dashboard', 'dashboarddb', 'dashboardjson'],
   'SOAP': ['soapcall', 'soappublic', 'soapmock'],
   'Files': ['csv', 'folder', 'filetrigger', 'timer'],
   'SFTP and FTP': ['sftp', 'ftp'],
@@ -1426,7 +1762,7 @@ const FOLDERS: Record<string, string[]> = {
   'Apps': ['firebase', 'google', 'apps', 'skills'],
   'Queues': ['queue', 'brokerrest'],
   'Operations': ['scripts', 'release'],
-  'AI agents': ['agentdesk', 'agentrag', 'agentqueue', 'agentteam', 'agentmcp', 'agentdocs'],
+  'AI agents': ['dbknowledge', 'chatsupport', 'agentdesk', 'agentrag', 'agentqueue', 'agentteam', 'agentmcp', 'agentdocs'],
   'Azure and Databricks': ['adf', 'databricks'],
   'Python': ['python'],
   'Social media': ['youtube', 'twitch', 'discord', 'telegram'],
@@ -1436,6 +1772,7 @@ for (const s of SAMPLES) s.folder = folderOf(s.id);
 
 /** Sample Sutras by folder, to file the ones added before folders existed. A test keeps this list in step with addSamples(). */
 export const SAMPLE_SUTRAS: Record<string, string[]> = {
+  'Samples/Dashboards': ['Sales dashboard', 'Sales orders install', 'Sales dashboard on a database', 'Dashboard from JSON'],
   'Samples/Data and mapping': ['Typed JSON mapping', 'Typed XML mapping', 'Renamed fields to XML', 'XML schema-backed mapping', 'JSON schema validation pipeline', 'XML schema validation pipeline', 'JSON schema expected rejection', 'XML schema expected rejection', 'Read JSON file with schema validation', 'Read XML file with schema validation', 'Validated REST service', 'Validated HTTP client', 'Validated SOAP service', 'Functions', 'For-Each mapping', 'Loop on an activity', 'XML in and out', 'JSONata, JavaScript and HTML', 'Parse JSON and CSV text'],
   'Samples/Flow control': ['Calculate tax (called Sutra)', 'Invoice with a sub-Sutra', 'Try and catch with logs', 'Router, Switch and Merge', 'Connection conditions', 'Channel sender', 'Channel listener', 'Counter, Wait and Sutra variables', 'Trace order intake', 'Trace credit check', 'Trace notification hub'],
   'Samples/Apps': ['Skill: Write CSV file', 'Skill: Post to Facebook page', 'Firebase order to app', 'Google Drive and Sheets', 'Dropbox YouTube and any API'],
@@ -1449,7 +1786,7 @@ export const SAMPLE_SUTRAS: Record<string, string[]> = {
   'Samples/Queues': ['Queue in and out', 'XML queue in and out', 'Kafka REST publish', 'Kafka REST subscribe', 'RabbitMQ HTTP publish and fetch', 'ActiveMQ REST publish and fetch'],
   'Samples/SOAP': ['Call a SOAP service', 'Call a public SOAP service', 'Mock SOAP weather service', 'Call the mock SOAP service'],
   'Samples/SFTP and FTP': ['SFTP upload list read archive', 'SFTP file trigger', 'FTP upload list read archive', 'FTP file trigger'],
-  'Samples/AI agents': ['AI tool order status', 'AI tool stock check', 'Order desk agent', 'Knowledge feed from web pages', 'Knowledge feed from SharePoint', 'Policy assistant', 'Agent fed by a queue', 'Supervisor agent', 'Agent with outside MCP tools', 'Add one document to knowledge', 'Document feed from a folder', 'Document questions API', 'AI tool search documents', 'Document assistant'],
+  'Samples/AI agents': ['Product catalogue install', 'Product knowledge feed', 'Product search API', 'Customer and support chat', 'AI tool order status', 'AI tool stock check', 'Order desk agent', 'Knowledge feed from web pages', 'Knowledge feed from SharePoint', 'Policy assistant', 'Agent fed by a queue', 'Supervisor agent', 'Agent with outside MCP tools', 'Add one document to knowledge', 'Document feed from a folder', 'Document questions API', 'AI tool search documents', 'Document assistant'],
   'Samples/Azure and Databricks': ['ADF run pipeline and wait', 'ADF alert on failed runs', 'Databricks notebook with parameters', 'Databricks SQL and code block'],
   'Samples/Python': ['Python script with parameters', 'Python script file'],
   'Samples/Social media': ['Publish Drive videos to YouTube', 'YouTube weekly analytics to Google Sheets', 'Twitch going live announcement', 'Discord order status bot', 'Telegram order status bot', 'Telegram team alerts'],
@@ -1519,7 +1856,7 @@ function linkConnections(projectId: string, made: { id: string }[], conn: (kind:
     for (const n of f.doc.nodes) {
       const act = allActivities.find(a => a.type === n.type);
       for (const fld of act?.fields || []) {
-        if (fld.type !== 'resource' || !fld.resourceKind || !kinds.has(fld.resourceKind) || n.config[fld.k]) continue;
+        if (fld.type !== 'resource' || !fld.resourceKind || !kinds.has(fld.resourceKind) || n.config[fld.k] || fld.emptyAllowed) continue;
         const make = SAMPLE_CONNECTIONS[fld.resourceKind];
         const busAlternative = n.type === 'busPublish' || n.type === 'busSubscribe';
         if (!make || (!shown(fld, n.config, act!.fields) && !busAlternative)) continue;

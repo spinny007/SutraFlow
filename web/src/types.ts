@@ -93,7 +93,9 @@ export interface FlowSummary {
   deployed: { version: number; enabled: boolean; deployed_at: string } | null;
 }
 
-export interface Resource { id: string; kind: string; name: string; project_id?: string; config: Record<string, any>; updated_at?: string; folder?: string }
+export interface Resource { id: string; kind: string; name: string; project_id?: string; config: Record<string, any>; updated_at?: string; folder?: string;
+  /** A server knowledge base of another project granted to this one (Knowledge admin, 2.1.5): usable in steps, changed in its home project. */
+  granted?: { home: string; areas: { area: string; write: boolean }[] } }
 
 export interface SNode {
   name: string;

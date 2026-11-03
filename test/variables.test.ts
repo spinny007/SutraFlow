@@ -42,7 +42,7 @@ test('every palette uses the common project-variable resolver for General settin
 });
 
 test('every process starter is identified consistently in the Designer palette', () => {
-  const expected = ['start', 'timer', 'restService', 'soapService', 'channelTrigger', 'wsService', 'wsClientTrigger', 'fileTrigger', 'remoteTrigger', 'busSubscribe', 'emailTrigger', 'googleDriveTrigger', 'msFilesTrigger', 'twitchLiveTrigger', 'discordTrigger', 'telegramTrigger', 'adfRunTrigger', 'agentChannel', 'mcpTool'];
+  const expected = ['start', 'timer', 'restService', 'soapService', 'channelTrigger', 'wsService', 'wsClientTrigger', 'fileTrigger', 'remoteTrigger', 'busSubscribe', 'emailTrigger', 'googleDriveTrigger', 'msFilesTrigger', 'twitchLiveTrigger', 'discordTrigger', 'telegramTrigger', 'adfRunTrigger', 'agentChannel', 'mcpTool', 'dashboardPage'];
   assert.deepEqual(allActivities.filter(a => a.trigger).map(a => a.type).sort(), expected.sort());
   const designer = fs.readFileSync(new URL('../web/src/Designer.tsx', import.meta.url), 'utf8');
   assert.match(designer, /a\.trigger\s*&&\s*<span className="starter-mark"/, 'trigger activities carry the play marker even outside the Triggers group');

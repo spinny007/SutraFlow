@@ -2,7 +2,7 @@
  * SutraFlow
  * Copyright (c) 2026-27 Surya Partap Singh
  * Developer: Surya Partap Singh | Website: MixAgile.com
- * File version: 2.1.1
+ * File version: 2.1.5
  * License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
  * A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
  * SPDX-License-Identifier: AGPL-3.0-only
@@ -21,10 +21,13 @@
  * JSON on stdout ({ ok, ... } or { ok: false, error }).
  *
  *   init      opens the database (making its tables), the master key, and the first administrator when
- *             there is none; records the installed version
+ *             there is none; records the installed version; the gateway TLS choice and the sample Sutras (2.1.5)
+ *   engines   the engines beating in the database, with the age of their last heartbeat (join check, 2.1.5)
  *   backup    copies the whole database to a SQLite file (any engine database: SQLite or PostgreSQL)
  *   restore   copies such a file back over the database (way back after a failed upgrade)
  *   migrate   opens the database, which applies the changes of this version
+ *   samples   lists the samples and their data (sample-data.ts) with list, or adds them (action add) or
+ *             removes them (action remove); the installer stops SutraFlow first for a change (2.1.5)
  */
 const op = process.argv[2];
 const args = JSON.parse(process.argv[3] || '{}');
@@ -51,7 +54,28 @@ async function main() {
       // The cluster (2.1.1): its name, and the engines that never lead (the Admin Console changes both later).
       if (typeof args.clusterName === 'string') db.setSetting('clusterName', args.clusterName.trim().slice(0, 60));
       if (Array.isArray(args.neverLead)) db.setSetting('leadersDenied', Object.fromEntries(args.neverLead.map((id: string) => [String(id), true])));
-      return { version, users: access.listUsers('user').length, created };
+      // The gateway's certificate (2.1.5), kept as the Admin Console keeps it (Server, Gateway & TLS).
+      const t = args.tls;
+      if (t && t.mode && t.mode !== 'off') {
+        const tls = await import('../gateway/tls.js');
+        const domains = Array.isArray(t.domains) && t.domains.length ? t.domains.map(String) : ['localhost'];
+        if (t.mode === 'uploaded') tls.storeCert((await import('node:fs')).readFileSync(String(t.certFile), 'utf8'), (await import('node:fs')).readFileSync(String(t.keyFile), 'utf8'), 'uploaded');
+        if (t.mode === 'selfSigned') await tls.makeSelfSigned(domains);
+        tls.setTls({ mode: t.mode, domains, ...(t.mode === 'acme' ? { email: String(t.email || ''), staging: t.staging !== false, agreeTos: !!t.agreeTos } : {}) });
+      }
+      // The sample Sutras (2.1.5), in a project of their own.
+      let samples = 0;
+      if (args.samples) {
+        const projects = await import('../projects.js');
+        const p = projects.listProjects().find((x: any) => x.name === 'Samples') || projects.saveProject({ name: 'Samples', config: { variables: [] } });
+        samples = (await import('../samples.js')).addSamples(p.id).length;
+      }
+      return { version, users: access.listUsers('user').length, created, samples };
+    }
+    case 'engines': {
+      db.openDb();
+      const t = Date.now();
+      return { engines: db.q.all<any>('select id, heartbeat_at from engines').map(e => ({ id: e.id, ageMs: t - Number(e.heartbeat_at) })) };
     }
     case 'backup': {
       db.openDb();
@@ -72,6 +96,19 @@ async function main() {
       db.setSetting('installedVersion', version);
       db.setSetting('upgradedAt', new Date().toISOString());
       return { version, kind: db.dbKind() };
+    }
+    case 'samples': {
+      db.openDb();
+      const projects = await import('../projects.js');
+      if (args.action === 'add') {
+        // Added once: a site that has them already is told so (remove them first to add them fresh).
+        const p = projects.listProjects().find((x: any) => x.name === 'Samples');
+        const already = p ? db.q.get<{ n: number }>("select count(*) n from flows where project_id = ? and name like 'Sample:%'", p.id)!.n : 0;
+        if (already || args.list) return { added: 0, already, project: 'Samples', samples: (await import('../samples.js')).SAMPLES.length };
+        const target = p || projects.saveProject({ name: 'Samples', config: { variables: [] } });
+        return { added: (await import('../samples.js')).addSamples(target.id).length, already: 0, project: 'Samples' };
+      }
+      return (await import('../sample-data.js')).sampleData({ remove: !args.list });
     }
     default: throw new Error(`Unknown installer task: ${op}`);
   }

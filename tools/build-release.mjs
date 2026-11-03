@@ -27,6 +27,9 @@
  *
  *   npm run build && npm run guide && npm run architecture && node tools/build-release.mjs
  *
+ * Also release/sutra-sample-shop-<version>.zip: the website of the chat sample, with its README, to ship
+ * on its own (2.1.5).
+ *
  * --offline also builds sutraflow-<version>-<os>-<cpu>-offline.zip (Windows) or .tar.gz (Linux, macOS)
  * with the runtime packages inside, for servers without access to the npm registry. They are made
  * for the system they are built on (the GitHub release workflow builds them on each system).
@@ -63,7 +66,8 @@ const FILES = [
   'docs/sutraflow-user-guide.html', 'docs/sutraflow-admin-guide.html', 'docs/sutraflow-design-guide.html', 'docs/sutraflow-architecture.html', 'docs/architecture.md', 'docs/install-example.json',
   'tools/migrate-to-postgres.mjs', 'tools/migrate-to-postgres.cmd', 'tools/migrate-to-postgres.sh',
 ];
-const skip = rel => /(^|\/)(node_modules|\.git)(\/|$)/.test(rel) || /\.(log|map)$/.test(rel);
+// A local settings file with a secret (the sample website's config.local.php) is never shipped.
+const skip = rel => /(^|\/)(node_modules|\.git)(\/|$)/.test(rel) || /\.(log|map)$/.test(rel) || /(^|\/)config\.local\.php$/.test(rel);
 
 const files = [];
 const walk = rel => {
@@ -123,7 +127,7 @@ function tar(list) {
   return Buffer.concat(blocks);
 }
 
-const { zipFiles } = await import(pathToFileURL(path.join(HOME, 'dist', 'server', 'bundles.js')).href);
+const { zipFiles, folderFiles } = await import(pathToFileURL(path.join(HOME, 'dist', 'server', 'bundles.js')).href);
 const outDir = path.join(HOME, 'release');
 fs.mkdirSync(outDir, { recursive: true });
 const write = (file, buf, count = files.length) => {
@@ -158,6 +162,12 @@ ${pages.map(([f, t, d]) => `<a class="doc" href="${f}"><b>${esc(t)}</b>${esc(d)}
 `;
   const docs = [[`${top}-docs/index.html`, Buffer.from(index)], ...pages.map(([f]) => [`${top}-docs/${f}`, fs.readFileSync(path.join(HOME, 'docs', f))])];
   write(`${top}-docs.zip`, zipFiles(docs), docs.length);
+}
+
+// The website of the chat sample (Sutra Sample Shop), to ship on its own with its README (2.1.5).
+if (only !== 'linux') {
+  const shop = folderFiles(path.join(HOME, 'samples', 'sutra-sample-shop'), 'sutra-sample-shop');
+  write(`sutra-sample-shop-${VERSION}.zip`, zipFiles(shop), shop.length);
 }
 
 if (process.argv.includes('--offline')) {

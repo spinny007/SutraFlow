@@ -89,9 +89,9 @@ test('adding the sample writes the documents, sets DOCS_FOLDER and makes five de
   const made = addSamples(pid, ['agentdocs']);
   assert.deepEqual(made.map(m => m.name).sort(), ['Sample: AI tool search documents', 'Sample: Add one document to knowledge', 'Sample: Document assistant', 'Sample: Document feed from a folder', 'Sample: Document questions API']);
   assert.ok(made.every(m => m.folder === 'Samples/AI agents'));
-  assert.equal(projects.getProject(pid)!.config.variables.find((v: any) => v.name === 'DOCS_FOLDER')!.value, '${files}/documents');
+  assert.equal(projects.getProject(pid)!.config.variables.find((v: any) => v.name === 'DOCS_FOLDER')!.value, '${files}/sample_documents');
   const dir = projects.effectiveVariables(pid).values.DOCS_FOLDER;
-  assert.equal(path.resolve(dir), path.resolve(config.dataDir, 'files', 'Docs', 'documents'));
+  assert.equal(path.resolve(dir), path.resolve(config.dataDir, 'files', 'Docs', 'sample_documents'));
   assert.deepEqual(fs.readdirSync(dir).sort(), ['faq.md', 'returns-policy.pdf', 'shipping-guide.docx', 'tea-catalogue.pptx']);
   for (const m of made) {
     const doc = flows.getFlow(m.id)!.doc;
@@ -176,12 +176,12 @@ test('the sample project zip imports as a new project with its documents, and it
   assert.ok(list.some((entry: { file: string }) => entry.file === 'ai-document-assistant.zip'), 'document assistant remains available regardless of catalogue order');
   const zip = (await srv.admin.inject({ method: 'GET', url: '/api/sample-projects/ai-document-assistant.zip', headers: H })).rawPayload;
   const opened = (await srv.admin.inject({ method: 'POST', url: '/api/packages/open', payload: { zip: zip.toString('base64') }, headers: H })).json();
-  assert.deepEqual(opened.files.sort(), ['documents/faq.md', 'documents/returns-policy.pdf', 'documents/shipping-guide.docx', 'documents/tea-catalogue.pptx']);
+  assert.deepEqual(opened.files.sort(), ['sample_documents/faq.md', 'sample_documents/returns-policy.pdf', 'sample_documents/shipping-guide.docx', 'sample_documents/tea-catalogue.pptx']);
   const r = await srv.admin.inject({ method: 'POST', url: '/api/projects/import', payload: { zip: zip.toString('base64'), project: 'Shop documents', asDrafts: true }, headers: H });
   assert.equal(r.statusCode, 200, r.body);
   const imported = r.json().project.id;
   const dir = projects.effectiveVariables(imported).values.DOCS_FOLDER;
-  assert.equal(path.resolve(dir), path.resolve(projects.projectFilesDir('Shop documents'), 'documents'));
+  assert.equal(path.resolve(dir), path.resolve(projects.projectFilesDir('Shop documents'), 'sample_documents'));
   assert.deepEqual(fs.readdirSync(dir).sort(), ['faq.md', 'returns-policy.pdf', 'shipping-guide.docx', 'tea-catalogue.pptx']);
   const feed = flows.listFlows(imported).find(x => x.name === 'Sample: Document feed from a folder')!;
   const id = await engine.startRun({ doc: flows.getFlow(feed.id)!.doc, flowId: feed.id, projectId: imported, source: 'test' });

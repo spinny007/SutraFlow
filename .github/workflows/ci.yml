@@ -87,14 +87,24 @@ jobs:
       - run: npm run build
       - run: node tools/build-release.mjs
       - name: The previous release, when published
+        # 2.1.5: the newest published release other than this version (was fixed at 2.1.0), so each
+        # upgrade is proven from the release people run now.
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release download v2.1.0 --pattern 'sutraflow-2.1.0-linux.tar.gz' --dir previous || echo "No 2.1.0 release to upgrade from"
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          PREV=$(gh release list --exclude-drafts --exclude-pre-releases --limit 20 --json tagName --jq '.[].tagName' | grep -vx "v$VERSION" | head -1 || true)
+          if [ -n "$PREV" ]; then
+            gh release download "$PREV" --pattern "sutraflow-${PREV#v}-linux.tar.gz" --dir previous || echo "No Linux archive in $PREV"
+          else
+            echo "No earlier release to upgrade from"
+          fi
       - name: Runtime check
         run: |
           VERSION=$(node -p "require('./package.json').version")
           FROM=""
-          if [ -f previous/sutraflow-2.1.0-linux.tar.gz ]; then FROM="--from previous/sutraflow-2.1.0-linux.tar.gz"; fi
+          OLD=$(ls previous/sutraflow-*-linux.tar.gz 2>/dev/null | head -1 || true)
+          if [ -n "$OLD" ]; then FROM="--from $OLD"; fi
           node tools/runtime-check.mjs --archive release/sutraflow-$VERSION-linux.tar.gz $FROM --work "$RUNNER_TEMP/runtime"
 
   windows:
