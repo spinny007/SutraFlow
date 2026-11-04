@@ -71,8 +71,11 @@ export interface InstallConfig {
   samples?: boolean;
 }
 /** samples (2.1.5): keep (default) leaves them as they are; add adds the project Samples when it has none; remove
- * removes the samples and their sample_ data; refresh removes them and adds this version's. */
-export interface UpgradeConfig { from: string; backupDir?: string; start?: boolean; samples?: 'keep' | 'add' | 'remove' | 'refresh' }
+ * removes the samples and their sample_ data; refresh removes them and adds this version's.
+ * reinstall (2.1.6): an installation of this same version gets this package's program files again (a repair
+ * of damaged or changed files), through the same safe steps as an upgrade. Asked for on purpose, never implied.
+ */
+export interface UpgradeConfig { from: string; backupDir?: string; start?: boolean; samples?: 'keep' | 'add' | 'remove' | 'refresh'; reinstall?: boolean }
 
 const version = (folder: string) => { try { return String(JSON.parse(fs.readFileSync(path.join(folder, 'package.json'), 'utf8')).version || ''); } catch { return ''; } };
 export const thisVersion = () => version(HOME);
@@ -548,7 +551,10 @@ export async function detectInstall(folder: string) {
     database: isPostgres(env) ? env.SUTRA_DB.replace(/\/\/([^:@/]+):[^@/]*@/, '//$1:***@') : `SQLite: ${sqliteNameOf(env.SUTRA_DB || '')} in the data folder`,
     port: Number(env.STUDIO_PORT || 4800), host: env.SUTRA_ADMIN_HOST || '127.0.0.1',
     upgradable: !!v && cmpVersion(v, '2.1.0') >= 0 && cmpVersion(v, thisVersion()) < 0,
-    note: !v ? 'No SutraFlow installation in this folder.' : cmpVersion(v, '2.1.0') < 0 ? `${v} is older than 2.1.0: upgrade it with the manual steps in its release receipt, then use this upgrader.` : cmpVersion(v, thisVersion()) >= 0 ? `It already runs ${v} (this package is ${thisVersion()}).` : `${v} can be upgraded to ${thisVersion()}.`,
+    // The same version can be reinstalled (2.1.6): its program files replaced by this package's, data and settings kept.
+    // A damaged one counts too: its launcher may be gone, its settings file is not.
+    reinstallable: !!v && cmpVersion(v, thisVersion()) === 0 && (fs.existsSync(path.join(folder, 'bin', 'sutraflow.mjs')) || fs.existsSync(path.join(folder, 'sutraflow.env'))),
+    note: !v ? 'No SutraFlow installation in this folder.' : cmpVersion(v, '2.1.0') < 0 ? `${v} is older than 2.1.0: upgrade it with the manual steps in its release receipt, then use this upgrader.` : cmpVersion(v, thisVersion()) === 0 ? `It already runs ${v}, the version of this package. Reinstall replaces its program files with this package's (a repair of damaged or changed files); its data and settings stay.` : cmpVersion(v, thisVersion()) > 0 ? `It runs ${v}, newer than this package (${thisVersion()}): an installation is never taken back to an older version.` : `${v} can be upgraded to ${thisVersion()}.`,
   };
 }
 
@@ -662,13 +668,15 @@ public static class Rm {
 export async function upgrade(c: UpgradeConfig, progress: Progress = () => {}, o: { dryRun?: boolean } = {}) {
   const from = path.resolve(c.from);
   const found = await detectInstall(from);
-  if (!found.exists) throw new Error(`No SutraFlow installation in ${from}`);
-  if (!found.upgradable) throw new Error(found.note);
+  const again = !found.upgradable && found.reinstallable;
+  if (!found.exists && !again) throw new Error(`No SutraFlow installation in ${from}`);
+  if (again && !c.reinstall) throw new Error(`It already runs ${found.version}, the version of this package: to replace its program files (a repair), reinstall it (in a config file: "reinstall": true).`);
+  if (!found.upgradable && !again) throw new Error(found.note);
   if (path.resolve(HOME) === from) throw new Error('Unpack the new release in a folder of its own and run its upgrader from there; it upgrades the installation you name.');
   const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
   const backup = path.resolve(c.backupDir || path.join(from, 'backups', `${found.version}-${stamp}`));
   const dataInside = path.relative(from, found.dataDir).split(path.sep)[0];
-  const plan = [`stop SutraFlow ${found.version} in ${from}`, `back up its data folder, settings and database to ${backup}`, `move the ${found.version} runtime to ${path.join(backup, 'runtime')}`, `install ${thisVersion()} from ${HOME}`, 'add new settings with their defaults', 'apply the database changes and compare the data', ...(c.samples && c.samples !== 'keep' ? [`${c.samples} the samples (${c.samples === 'add' ? 'when it has none' : 'with their sample_ data'})`] : []), c.start === false ? 'leave it stopped' : 'start it and check its address'];
+  const plan = [`stop SutraFlow ${found.version} in ${from}`, `back up its data folder, settings and database to ${backup}`, `move the ${found.version} runtime to ${path.join(backup, 'runtime')}`, again ? `reinstall ${thisVersion()} from ${HOME}` : `install ${thisVersion()} from ${HOME}`, 'add new settings with their defaults', 'apply the database changes and compare the data', ...(c.samples && c.samples !== 'keep' ? [`${c.samples} the samples (${c.samples === 'add' ? 'when it has none' : 'with their sample_ data'})`] : []), c.start === false ? 'leave it stopped' : 'start it and check its address'];
   if (o.dryRun) return { dryRun: true, plan, found };
   const env = targetEnv(from);
   const done: string[] = [];
@@ -683,7 +691,13 @@ export async function upgrade(c: UpgradeConfig, progress: Progress = () => {}, o
   let before: any;
   try {
     before = await step('Snapshot of the data', () => snapshotDb(from));
-    await step('Stop', () => launcher(from, 'stop', 'all'));
+    await step('Stop', () => launcher(from, 'stop', 'all').catch(async (x: any) => {
+      // A damaged installation may not run its own launcher: a reinstall goes on when nothing of it runs.
+      if (!again) throw x;
+      const up = engineRunning(from) || await health(from, 2).then(() => true, () => false);
+      if (up) throw x;
+      return `its launcher did not run (${x?.message || x}); SutraFlow is not running`;
+    }));
     await step('Program files free', () => {
       // A file another program has open without sharing cannot be replaced: found here, before anything
       // changes, with the program that holds it (2.1.2). A folder that is only open (a web server such as
@@ -730,7 +744,7 @@ export async function upgrade(c: UpgradeConfig, progress: Progress = () => {}, o
       }
       return `${moved.length} entries${inPlace.length ? `; ${inPlace.join(', ')} open in another program as a folder, so copied and updated in place` : ''}`;
     });
-    await step(`Install ${thisVersion()}`, () => {
+    await step(`${again ? 'Reinstall' : 'Install'} ${thisVersion()}`, () => {
       for (const f of fs.readdirSync(HOME)) {
         // A site's own .htaccess or web.config stays; an installation without one gets the release's.
         if (KEEP_IN_FOLDER.has(f) && !(['.htaccess', 'web.config'].includes(f) && !fs.existsSync(path.join(from, f)))) continue;
@@ -748,17 +762,17 @@ export async function upgrade(c: UpgradeConfig, progress: Progress = () => {}, o
       const have = readEnv(path.join(from, 'sutraflow.env'));
       const example = readEnv(path.join(from, 'sutraflow.env.example'));
       const add = Object.fromEntries(Object.entries(example).filter(([k]) => !(k in have)));
-      if (Object.keys(add).length) writeEnv(path.join(from, 'sutraflow.env'), add, `Added by the ${thisVersion()} upgrade with their defaults`);
+      if (Object.keys(add).length) writeEnv(path.join(from, 'sutraflow.env'), add, `Added by the ${thisVersion()} ${again ? 'reinstall' : 'upgrade'} with their defaults`);
       return Object.keys(add).length ? `added ${Object.keys(add).join(', ')}` : 'none needed';
     });
     await step('Database changes', async () => `${(await runTask(from, 'migrate', {}, env)).version}`);
     await step('Compare the data', async () => {
       const after = await snapshotDb(from);
       const diff = Object.keys(before).filter(t => before[t].rows !== after[t]?.rows || before[t].hash !== after[t]?.hash);
-      if (diff.length) throw new Error(`Changed by the upgrade: ${diff.join(', ')}`);
+      if (diff.length) throw new Error(`Changed by the ${again ? 'reinstall' : 'upgrade'}: ${diff.join(', ')}`);
       return 'unchanged';
     });
-    fs.writeFileSync(lockFile(from), JSON.stringify({ version: thisVersion(), at: new Date().toISOString(), by: 'upgrade', from: found.version }, null, 2));
+    fs.writeFileSync(lockFile(from), JSON.stringify({ version: thisVersion(), at: new Date().toISOString(), by: again ? 'reinstall' : 'upgrade', from: found.version }, null, 2));
     // Samples after the upgrade (2.1.5): the upgrade is done and kept even when a sample cannot be reached.
     const sampleNotes: string[] = [];
     const soft = async (name: string, fn: () => Promise<string>) => {
@@ -778,7 +792,7 @@ export async function upgrade(c: UpgradeConfig, progress: Progress = () => {}, o
       await step('Start', () => startAll(from, engineUp));
       await step('Check', async () => { const v = await health(from); if (v !== thisVersion()) throw new Error(`It answers ${v}, not ${thisVersion()}`); return `answers ${v}`; });
     }
-    return { upgraded: `${found.version} to ${thisVersion()}`, folder: from, backup, steps: done, ...(sampleNotes.length ? { sampleNotes } : {}) };
+    return { upgraded: again ? `${thisVersion()} reinstalled` : `${found.version} to ${thisVersion()}`, reinstalled: again, folder: from, backup, steps: done, ...(sampleNotes.length ? { sampleNotes } : {}) };
   } catch (e: any) {
     // The way back: the old runtime, data and database as they were, then the old version started.
     progress('Putting the previous version back', 'run');

@@ -169,9 +169,11 @@ function localStore(kb: Resource): Store {
     // In the database, through the connection pool and in batches: a document of many passages does
     // not hold the engine while it is written.
     const db = asyncDatabase();
-    // A source and the sources in its folder ("Policies" and "Policies/..."), with LIKE wildcards escaped.
-    const inFolder = ` and (source = ? or source like ? escape '\\')`;
-    const folderOf = (src: string) => [src, `${src.replace(/[\\%_]/g, '\\$&')}/%`];
+    // A source and the sources in its folder ("Policies" and "Policies/..."), compared exactly as the
+    // access checks compare them: SQLite's LIKE ignores case, so "Products/private" matched a removal
+    // of "products" (2.1.6). substr counts characters on SQLite and PostgreSQL alike.
+    const inFolder = ` and (source = ? or substr(source, 1, ?) = ?)`;
+    const folderOf = (src: string) => [src, [...src].length + 1, `${src}/`];
     const rows = async (f: Filter) => {
       const src = f.source && !f.all ? f.source : '';
       const list = await db.all<any>(`select id, source, chunk, text, meta, vector, at from ai_knowledge where kb_id = ?${src ? inFolder : ''}`, kb.id, ...(src ? folderOf(src) : []));

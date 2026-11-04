@@ -12,12 +12,14 @@
 # License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
 # A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
 # SPDX-License-Identifier: AGPL-3.0-only
-# syntax=docker/dockerfile:1
 # SutraFlow: one image for the studio and for headless engines (SUTRA_MODE=studio | engine).
 #
-#   docker build -t sutraflow:2.1.0 .
-#   docker run -p 4800:4800 -p 8080:8080 -v sutra-data:/data sutraflow:2.1.0
-#   docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:2.1.0
+#   docker build --build-arg VERSION=2.1.6 -t sutraflow:2.1.6 .
+#   docker run -p 4800:4800 -p 8080:8080 -v sutra-data:/data sutraflow:2.1.6
+#   docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:2.1.6
+#
+# The release workflow publishes it as ghcr.io/<owner>/sutraflow:<version> (2.1.6); any registry works
+# (docker tag and docker push). Without internet: sutraflow image build, from a release package.
 
 FROM node:24-bookworm-slim AS build
 WORKDIR /app
@@ -28,6 +30,10 @@ COPY . .
 RUN npm run build && npm prune --omit=dev --no-audit --no-fund
 
 FROM node:24-bookworm-slim
+ARG VERSION=dev
+ARG REVISION=unknown
+ARG SOURCE=https://github.com/spinny007/SutraFlow
+LABEL org.opencontainers.image.title="SutraFlow"       org.opencontainers.image.description="Visual integration designer and engine: Sutras, gateway, AI agents"       org.opencontainers.image.version="${VERSION}"       org.opencontainers.image.revision="${REVISION}"       org.opencontainers.image.source="${SOURCE}"       org.opencontainers.image.vendor="MixAgile.com"       org.opencontainers.image.licenses="AGPL-3.0-only"
 ENV NODE_ENV=production \
     SUTRA_MODE=studio \
     SUTRA_DATA_DIR=/data \
@@ -42,11 +48,21 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends tini ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
  && mkdir -p /data /deploy \
- && chown node:node /data /deploy
+ && chown node:node /data /deploy \
+# The sutra command (2.1.6): `docker exec <container> sutra ...` talks to this container's own server
+# with its SUTRA_ADMIN_TOKEN, unless SUTRA_SERVER is set (empty: work on the database directly).
+ && printf '#!/bin/sh\n[ -z "${SUTRA_SERVER+x}" ] && export SUTRA_SERVER="http://127.0.0.1:${SUTRA_ADMIN_PORT:-4800}"\nexec node --disable-warning=ExperimentalWarning /app/dist/server/cli.js "$@"\n' > /usr/local/bin/sutra \
+ && chmod 755 /usr/local/bin/sutra
 COPY --from=build --chown=node:node /app/package.json ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
+# Runtime vendors (vendor/vendor-lock.json, ship: true) are file: packages that npm links into
+# node_modules: the link points here, so the folder comes along (2.1.6: the image did not start
+# without it).
+COPY --from=build --chown=node:node /app/vendor/acme-client ./vendor/acme-client
 COPY --from=build --chown=node:node /app/dist ./dist
-COPY --from=build --chown=node:node /app/docs/sutraflow-user-guide.html ./docs/sutraflow-user-guide.html
+# The guides and the architecture page (/guide, /admin-guide, /design-guide, /architecture) and the release notes.
+COPY --from=build --chown=node:node /app/docs/sutraflow-user-guide.html /app/docs/sutraflow-admin-guide.html /app/docs/sutraflow-design-guide.html /app/docs/sutraflow-architecture.html ./docs/
+COPY --from=build --chown=node:node /app/RELEASE-NOTES.md /app/LICENSE ./
 COPY --from=build --chown=node:node /app/samples ./samples
 USER node
 VOLUME ["/data"]

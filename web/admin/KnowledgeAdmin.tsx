@@ -123,12 +123,13 @@ function KbDetail({ kb, data, run, setConfirm, onSource, onRuns }: {
             <select id={`acc-${kb.id}`} value={kb.access || 'granted'} onChange={e => run({ label: `Access of knowledge base ${kb.name}`, method: 'PUT', url: base, body: settings({ access: e.target.value }) }, 'Access saved')}>
               <option value="granted">Granted projects only</option><option value="all">Every project (to search)</option>
             </select>
-            <div className="hint">Every project: all projects may search the whole base, none may change it. Granted projects: each grant names the project, the area and whether it may change it.</div></div>}
+            <div className="hint">Every project: all projects may search the whole base; only projects granted May add and remove change it, in their area. Granted projects: each grant names the project, the area and whether it may change it.</div></div>}
         </div>
       )}
 
-      {kb.server && kb.access !== 'all' && <>
+      {kb.server && <>
         <h3>Grants</h3>
+        {kb.access === 'all' && <p className="muted xs">Every project searches the whole base. Grants here give a project changes in an area (May add and remove).</p>}
         {!kb.grants.length && <p className="muted xs">No project is granted this knowledge base yet.</p>}
         {kb.grants.length > 0 && <table className="t c-table">
           <thead><tr><th>Project</th><th>Area</th><th>May</th><th /></tr></thead>

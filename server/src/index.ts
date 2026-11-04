@@ -83,7 +83,8 @@ function deployFolderLocked(dir: string) {
     const project = listProjects().find(p => p.name.toLowerCase() === pkg.project.name.toLowerCase());
     if (project && packageHistory(project.id)[0]?.checksum === pkg.checksum) { console.log(`Package ${f}: already deployed`); continue; }
     try {
-      const r = deployPackage(pkg, { by: 'deploy folder' });
+      // A package put in the deploy folder is the approval: the pipeline that put it there had a person approve it (2.1.6).
+      const r = deployPackage(pkg, { by: 'deploy folder', approved: true });
       console.log(`Package ${f}: ${r.package.name} ${r.package.version} deployed (${r.sutras.length} Sutras${r.undeployed.length ? `, ${r.undeployed.length} undeployed` : ''})`);
     } catch (e: any) { throw new Error(`${f}: ${e.message}`); }
   }

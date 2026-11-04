@@ -21,7 +21,7 @@ import { HOME, install, upgrade, samples, validateInstall, checkPorts, testDatab
 /**
  * Silent install and upgrade from a config file (2.1.1), the same steps as the web installer:
  *   sutraflow install --config install.json [--dry-run]
- *   sutraflow upgrade --config upgrade.json [--dry-run]
+ *   sutraflow upgrade --config upgrade.json [--dry-run]   ("reinstall": true for the same version, 2.1.6)
  *   sutraflow samples list|add|remove [--folder <installation>] [--no-start]   (2.1.5)
  * Passwords are never written in the file: give them as { "env": "NAME" } (an environment variable) or
  * { "file": "path" } (a file holding only the password). The whole file is checked first and every
@@ -91,9 +91,10 @@ async function main(): Promise<number> {
     const c: UpgradeConfig = raw;
     if (!c.from) { console.error('The config file is not ready (nothing was changed):\n  - from: the folder of the installation to upgrade'); return 2; }
     if (c.samples && !['keep', 'add', 'remove', 'refresh'].includes(c.samples)) { console.error('The config file is not ready (nothing was changed):\n  - samples: keep, add, remove or refresh'); return 2; }
+    if (c.reinstall !== undefined && typeof c.reinstall !== 'boolean') { console.error('The config file is not ready (nothing was changed):\n  - reinstall: true (the same version again, a repair) or false'); return 2; }
     const r = await upgrade(c, (step, state, detail) => say(`${state === 'run' ? '…' : state === 'ok' ? '✓' : state === 'fail' ? '✗' : '-'} ${step}${detail ? `: ${detail}` : ''}`), { dryRun: flag('--dry-run') });
     if ((r as any).dryRun) { say(`Plan:\n${(r as any).plan.map((p: string) => `  - ${p}`).join('\n')}`); return 0; }
-    say(`Upgraded ${(r as any).upgraded} in ${(r as any).folder}; backup in ${(r as any).backup}`);
+    say(`${(r as any).reinstalled ? 'Reinstalled' : 'Upgraded'} ${(r as any).upgraded.replace(/ reinstalled$/, '')} in ${(r as any).folder}; backup in ${(r as any).backup}`);
     for (const n of (r as any).sampleNotes || []) say(`Samples: ${n}`);
     return 0;
   }

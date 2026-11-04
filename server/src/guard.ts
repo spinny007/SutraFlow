@@ -63,6 +63,10 @@ export const RULES: Record<string, Rule> = {
   'POST /api/packages/check': R('deploy', 'package', true),
   'POST /api/packages/deploy': R('deploy', 'package'),
   'POST /api/packages/test': R('deploy', undefined, true),
+  // Configuration as files (2.1.6): the handler checks what the file holds (configNeeds).
+  'POST /api/config/export': R(null, undefined, true),
+  'POST /api/config/check': R(null, undefined, true),
+  'POST /api/config/apply': R(null),
   'GET /api/projects/:id/packages': R('view', 'project'),
   'GET /api/projects/:id/release': R('view', 'project'),
   'GET /api/sample-projects': R(null),
@@ -299,6 +303,12 @@ export const RULES: Record<string, Rule> = {
 };
 
 /** Routes reachable before sign-in. */
+// Headless engines: what the Admin Console and automation need (packages, deployed Sutras, runs,
+// approvals, secrets, engines, access, audit); no designer API.
+// 2.1.6: config files are applied to engines too (sutra config export | check | apply).
+export const ENGINE_API: RegExp[] = [/^\/api\/packages\//, /^\/api\/config\/(export|check|apply)$/, /^\/api\/projects\/?$/, /^\/api\/projects\/[^/]+\/(packages|rollback)$/, /^\/api\/engine\//, /^\/api\/runs/, /^\/api\/secrets/, /^\/api\/meta$/,
+  /^\/api\/access\//, /^\/api\/audit/, /^\/api\/auth\//, /^\/api\/console\//, /^\/api\/gateway\//, /^\/api\/alerts/, /^\/api\/approvals/, /^\/api\/flows\/[^/]+\/(versions|deploy)$/, /^\/api\/oauth\//, /^\/api\/scripts\/python$/, /^\/api\/server\/database/, /^\/api\/resources(\?|$)/];
+
 export const OPEN_ROUTES = new Set(['GET /api/auth/status', 'POST /api/auth/setup', 'POST /api/auth/login', 'POST /api/auth/logout', 'GET /api/oauth/callback', 'GET /api/auth/sso/start', 'GET /api/auth/sso/callback', 'POST /api/auth/sso/callback']);
 
 const SERVER_PERMS = new Set(PERMISSIONS.filter(p => p.scope === 'server').map(p => p.id));

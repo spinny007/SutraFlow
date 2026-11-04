@@ -1,0 +1,53 @@
+# SutraFlow
+# Copyright (c) 2026-27 Surya Partap Singh
+# Developer: Surya Partap Singh | Website: MixAgile.com
+# File version: 2.1.6
+# License: GNU Affero General Public License v3.0 only (AGPL-3.0-only); see LICENSE.
+# A commercial licence is available for use without the AGPL terms: see COMMERCIAL-LICENSE.md.
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+# The SutraFlow image made from an unpacked release package (2.1.6), with no npm registry and no
+# internet: `sutraflow image build` runs it with the package folder as the build context. Only the
+# base image must be on the machine (docker pull once, or docker load from a file). The image is the
+# same as the published one, except that Node runs as process 1 without tini (no apt here); SutraFlow
+# handles SIGTERM itself and drains running steps.
+#
+#   docker build -f deploy/docker/Dockerfile.package --build-arg VERSION=2.1.6 -t sutraflow:2.1.6 .
+#
+# Settings, data, logs and backups never go into the image: see Dockerfile.package.dockerignore.
+
+ARG BASE=node:24-bookworm-slim
+FROM ${BASE}
+ARG VERSION=dev
+ARG REVISION=package
+ARG SOURCE=https://github.com/spinny007/SutraFlow
+LABEL org.opencontainers.image.title="SutraFlow" \
+      org.opencontainers.image.description="Visual integration designer and engine: Sutras, gateway, AI agents" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.source="${SOURCE}" \
+      org.opencontainers.image.vendor="MixAgile.com" \
+      org.opencontainers.image.licenses="AGPL-3.0-only"
+ENV NODE_ENV=production \
+    SUTRA_MODE=studio \
+    SUTRA_DATA_DIR=/data \
+    SUTRA_DEPLOY_DIR=/deploy \
+    SUTRA_ADMIN_HOST=0.0.0.0 \
+    SUTRA_ADMIN_PORT=4800 \
+    SUTRA_GATEWAY_HTTP_PORT=8080 \
+    SUTRA_GATEWAY_HTTPS_PORT=8443 \
+    SUTRA_LOG_FORMAT=json
+WORKDIR /app
+COPY --chown=node:node . .
+RUN mkdir -p /data /deploy && chown node:node /data /deploy \
+ && test -f dist/server/main.js && test -d node_modules/fastify \
+# The sutra command (2.1.6): `docker exec <container> sutra ...` talks to this container's own server
+# with its SUTRA_ADMIN_TOKEN, unless SUTRA_SERVER is set (empty: work on the database directly).
+ && printf '#!/bin/sh\n[ -z "${SUTRA_SERVER+x}" ] && export SUTRA_SERVER="http://127.0.0.1:${SUTRA_ADMIN_PORT:-4800}"\nexec node --disable-warning=ExperimentalWarning /app/dist/server/cli.js "$@"\n' > /usr/local/bin/sutra \
+ && chmod 755 /usr/local/bin/sutra
+USER node
+VOLUME ["/data"]
+EXPOSE 4800 8080 8443
+HEALTHCHECK --interval=15s --timeout=3s --start-period=30s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.SUTRA_ADMIN_PORT||4800)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+CMD ["node", "--disable-warning=ExperimentalWarning", "dist/server/main.js"]

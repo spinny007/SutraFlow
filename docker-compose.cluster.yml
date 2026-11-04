@@ -22,7 +22,7 @@
 # Every engine must use the same SUTRA_MASTER_KEY (the vault is in the shared database).
 # Put a load balancer in front of the engines' gateway ports (8080/8443) and point it at /ready.
 x-engine: &engine
-  image: sutraflow:1.0.0
+  image: ${SUTRA_IMAGE:-sutraflow}:${SUTRA_VERSION:-latest}
   depends_on:
     postgres: { condition: service_healthy }
   environment: &engine-env
@@ -36,7 +36,8 @@ x-engine: &engine
 
 services:
   postgres:
-    image: postgres:17
+    # pgvector included, for knowledge bases kept in PostgreSQL (2.1.6).
+    image: pgvector/pgvector:pg17
     environment:
       POSTGRES_USER: sutra
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
@@ -50,7 +51,7 @@ services:
 
   studio:
     build: .
-    image: sutraflow:1.0.0
+    image: ${SUTRA_IMAGE:-sutraflow}:${SUTRA_VERSION:-latest}
     depends_on:
       postgres: { condition: service_healthy }
     environment:

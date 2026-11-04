@@ -83,7 +83,11 @@ test('a headless engine deploys the packages in its folder and serves them, with
   assert.equal((await fetch(`${e.admin}/api/projects`, { headers: { authorization: 'Bearer nope' } })).status, 401);
   assert.equal((await fetch(`${e.admin}/api/projects`, { headers: H })).status, 200);
   assert.equal((await fetch(`${e.admin}/api/flows`, { headers: H })).status, 404, 'no editing API');
-  const J = { 'content-type': 'application/json', 'x-sutra': '1' };
+  // 2.1.6: config files are applied to engines (the image smoke test found them refused).
+  const cfg = await fetch(`${e.admin}/api/config/check`, { method: 'POST', headers: { ...H, 'content-type': 'application/json' }, body: JSON.stringify({ config: { projects: [{ name: 'Headless config', properties: [{ name: 'A', value: '1' }] }] } }) });
+  assert.equal(cfg.status, 200, await cfg.clone().text());
+  assert.ok((await cfg.json()).creates.some((c: any) => c.what === 'project' && c.name === 'Headless config'));
+  const J ={ 'content-type': 'application/json', 'x-sutra': '1' };
   assert.equal((await fetch(`${e.admin}/api/auth/setup`, { method: 'POST', headers: J, body: JSON.stringify({ username: 'grab', password: 'Grab-this-engine-1' }) })).status, 403, 'nobody claims a fresh engine');
 
   // The Admin Console: the first administrator comes from the sutra command on the server; then sign-in works.

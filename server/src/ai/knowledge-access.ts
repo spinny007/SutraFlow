@@ -64,10 +64,12 @@ export function kbAccess(kb: Resource): KbAccess {
   if (a === undefined) {
     const admin = q.get<{ access: string }>('select access from kb_admin where kb_id = ?', kb.id);
     if (!admin) a = `The knowledge base ${kb.name} belongs to another project. An administrator can grant it to this project in the Admin Console, Knowledge admin.`;
-    else if (admin.access === 'all') a = { read: [''], write: [], whole: false };
     else {
       const g = q.all<{ area: string; can_write: number }>('select area, can_write from kb_grants where kb_id = ? and project_id = ?', kb.id, pid);
-      a = g.length ? { read: g.map(x => areaOf(x.area)), write: g.filter(x => Number(x.can_write)).map(x => areaOf(x.area)), whole: false }
+      const write = g.filter(x => Number(x.can_write)).map(x => areaOf(x.area));
+      // Every project may search: the whole base to read, and a project's own write grants still apply (2.1.6).
+      if (admin.access === 'all') a = { read: [''], write, whole: false };
+      else a = g.length ? { read: g.map(x => areaOf(x.area)), write, whole: false }
         : `The knowledge base ${kb.name} is not granted to this project. An administrator grants it in the Admin Console, Knowledge admin.`;
     }
     cache.set(key, { at: Date.now(), a });

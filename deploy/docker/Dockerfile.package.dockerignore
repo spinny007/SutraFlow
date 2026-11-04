@@ -1,0 +1,22 @@
+# What stays out of an image made from a release package (sutraflow image build, 2.1.6).
+# Settings and secrets: given to the container at run time (environment, mounted files).
+sutraflow.env
+sutraflow-engine-*.env
+.env
+.env.*
+*.key
+install.json
+upgrade.json
+install*.yaml
+install*.yml
+# State of an installation in this folder: the data folder lives in the /data volume.
+data
+backups
+logs
+*.log
+*.sutra
+# Not needed to run.
+release
+docs/guide-images
+web.config
+.htaccess

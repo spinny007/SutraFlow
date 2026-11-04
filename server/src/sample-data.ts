@@ -151,9 +151,24 @@ export async function sampleData(o: { remove: boolean }): Promise<SampleReport> 
   for (const f of sqliteFiles) file('data folder', f);
   if (process.platform === 'win32') for (const d of OLD_SAMPLE_DATA.windowsFolders) file('this computer', path.resolve(d), true);
 
-  // The Samples project goes when nothing else is left in it.
+  // The Samples project goes only when nothing else is left in it: deleting a project takes all its
+  // connections, schemas and folders, so a connection, schema or property someone added there, which
+  // this list does not name, keeps the project (2.1.6).
   const samplesProject = listProjects().find(p => p.name === 'Samples');
-  const projectGoes = !!samplesProject && !others.some(f => f.project_id === samplesProject.id);
+  let projectGoes = !!samplesProject && !others.some(f => f.project_id === samplesProject.id);
+  if (samplesProject && projectGoes) {
+    const goneConns = new Set(conns.map(r => r.id)), goneSchemas = new Set(schemas.map(s => s.id));
+    const goneProps = new Set(props.filter(x => x.projectId === samplesProject.id).map(x => x.name));
+    const own = [
+      ...resources.filter(r => r.project_id === samplesProject.id && !goneConns.has(r.id)).map(r => `connection ${r.name}`),
+      ...q.all<{ id: string; name: string }>('select id, name from schemas where project_id = ?', samplesProject.id).filter(s => !goneSchemas.has(s.id)).map(s => `schema ${s.name}`),
+      ...(samplesProject.config.variables || []).filter(v => !goneProps.has(v.name)).map(v => `project property ${v.name}`),
+    ];
+    if (own.length) {
+      projectGoes = false;
+      kept.push({ where: 'Samples', what: 'project', name: 'Samples', note: `holds ${own.slice(0, 5).join(', ')}${own.length > 5 ? ` and ${own.length - 5} more` : ''}` });
+    }
+  }
   if (projectGoes) add({ where: 'Samples', what: 'project', name: 'Samples' });
 
   if (!o.remove) return { items, kept, problems, notes, removed: false };

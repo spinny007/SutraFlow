@@ -1,0 +1,55 @@
+// SutraFlow (2.1.6): release pipeline for Jenkins (Docker Pipeline plugin). Copy to Jenkinsfile in
+// the repository that holds your SutraFlow project files.
+//
+// Credentials (Secret text): sutraflow-server, sutraflow-token (a system account's token), and one
+// per ${env:NAME} your env/prod.yaml names. The input step shows the plan and asks a person to type
+// its id: the deployment replaces exactly what that person saw.
+pipeline {
+  agent { docker { image 'ghcr.io/spinny007/sutraflow:2.1.6'; args '--user 0:0 --entrypoint=' } }
+  environment {
+    SUTRA = 'node /app/dist/server/cli.js'
+    SUTRA_SERVER = credentials('sutraflow-server')
+    SUTRA_ADMIN_TOKEN = credentials('sutraflow-token')
+  }
+  stages {
+    stage('Build') {
+      steps {
+        sh '$SUTRA package --from-git . --version "${TAG_NAME#v}" --out release.zip'
+        sh '$SUTRA test release.zip --secrets-from-env'
+        archiveArtifacts artifacts: 'release.zip'
+      }
+    }
+    stage('Check') {
+      steps {
+        sh '$SUTRA config check config/sutraflow.yaml --env config/env/prod.yaml --checklist config-checklist.md'
+        sh '$SUTRA check release.zip --keep-others --checklist plan.md'
+        sh '$SUTRA check release.zip --keep-others --json > plan.json'
+        archiveArtifacts artifacts: 'plan.md,config-checklist.md'
+        script {
+          env.PLAN_ID = sh(script: "node -e \"console.log(require('./plan.json').plan.planId)\"", returnStdout: true).trim()
+          env.PLAN_TEXT = readFile('plan.md')
+        }
+      }
+    }
+    stage('Approve') {
+      steps {
+        script {
+          def typed = input(message: "Deploy plan ${env.PLAN_ID}?\n\n${env.PLAN_TEXT}", ok: 'Deploy',
+            parameters: [string(name: 'PLAN', description: 'Type the plan id shown above to approve it')])
+          if (typed.trim() != env.PLAN_ID) error("The plan id typed (${typed}) is not ${env.PLAN_ID}: not deployed")
+        }
+      }
+    }
+    stage('Deploy') {
+      environment {
+        ERP_DB_PASSWORD = credentials('erp-db-password')
+        SUTRA_CI_USER = "${env.BUILD_USER_ID ?: 'jenkins'}"
+      }
+      steps {
+        sh '$SUTRA config apply config/sutraflow.yaml --env config/env/prod.yaml --yes --checklist config-checklist.md'
+        sh '$SUTRA deploy release.zip --keep-others --approve "$PLAN_ID"'
+        archiveArtifacts artifacts: 'config-checklist.md'
+      }
+    }
+  }
+}

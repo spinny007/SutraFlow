@@ -22,7 +22,7 @@
 services:
   studio:
     build: .
-    image: sutraflow:1.0.0
+    image: ${SUTRA_IMAGE:-sutraflow}:${SUTRA_VERSION:-latest}
     environment:
       SUTRA_MODE: studio
       SUTRA_ADMIN_TOKEN: ${SUTRA_ADMIN_TOKEN:?set SUTRA_ADMIN_TOKEN}
@@ -31,7 +31,7 @@ services:
     restart: unless-stopped
 
   engine:
-    image: sutraflow:1.0.0
+    image: ${SUTRA_IMAGE:-sutraflow}:${SUTRA_VERSION:-latest}
     depends_on: [studio]
     environment:
       SUTRA_MODE: engine

@@ -19,7 +19,7 @@ import path from 'node:path';
 import type { Activity, ExecCtx } from '../engine/types.js';
 import { F, when } from './common.js';
 import { listProjects, getProject, releasesAllowed } from '../projects.js';
-import { buildPackage, checkPackage, deployPackage, readPackage, rollbackPackage } from '../packages.js';
+import { buildPackage, checkPackage, deployPackage, planDeploy, readPackage, rollbackPackage } from '../packages.js';
 
 /**
  * Release palette: a Sutra that builds, checks, deploys and rolls back project packages, on this
@@ -118,7 +118,7 @@ export const releaseActivities: Activity[] = [
       guard();
       const pkg = packageOf(c);
       const project = String(c.v('project') || '').trim() || undefined;
-      const r = c.raw('target') === 'remote server' ? await remote(c, 'POST', '/api/packages/check', { package: pkg, project }) : checkPackage(pkg, { project });
+      const r = c.raw('target') === 'remote server' ? await remote(c, 'POST', '/api/packages/check', { package: pkg, project }) : { ...checkPackage(pkg, { project }), plan: planDeploy(pkg, { project }) };
       return { port: r.ok ? 'ok' : 'problems', out: { ...r, package: pkg } };
     },
   },
@@ -130,6 +130,7 @@ export const releaseActivities: Activity[] = [
       F('project', 'Deploy as project', 'text', '', { tpl: true, help: 'Empty = the package\'s project name.' }),
       F('keepOthers', 'Keep Sutras that are not in the package deployed', 'bool', false),
       F('opsFile', 'Deployment config file', 'text', '', { tpl: true, help: 'Optional: a JSON deployment config on this server, applied with the package.' }),
+      F('approve', 'Approved plan', 'text', '', { tpl: true, help: 'Needed when the package replaces or undeploys Sutras already deployed: the plan id from Check package (plan.planId), after a person approved it, for example in an Approval step. Without it the deployment stops and lists what it would replace.' }),
     ],
     outputHint: { project: { id: '', name: '', created: false }, package: { name: '', version: '', checksum: '' }, sutras: [{ name: '', action: '', version: 0, deployed: true }], undeployed: [''], unchanged: false, warnings: [''] },
     execute: async c => {
@@ -140,8 +141,8 @@ export const releaseActivities: Activity[] = [
       const ops = opsPath ? JSON.parse(fs.readFileSync(opsPath, 'utf8')) : undefined;
       const keepOthers = !!c.raw('keepOthers');
       const r = c.raw('target') === 'remote server'
-        ? await remote(c, 'POST', '/api/packages/deploy', { package: pkg, project, ops, keepOthers })
-        : deployPackage(pkg, { project, ops, keepOthers, by: `Sutra ${c.scope.sutra?.name ?? ''}`.trim() });
+        ? await remote(c, 'POST', '/api/packages/deploy', { package: pkg, project, ops, keepOthers, approve: String(c.v('approve') || '').trim() || undefined })
+        : deployPackage(pkg, { project, ops, keepOthers, by: `Sutra ${c.scope.sutra?.name ?? ''}`.trim(), approve: String(c.v('approve') || '').trim() || undefined });
       c.log('info', `Deployed ${r.package.name} ${r.package.version} to ${r.project.name}${r.unchanged ? ' (nothing changed)' : ''}`);
       return { out: r };
     },

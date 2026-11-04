@@ -24,6 +24,345 @@ import type { Chapter } from './chapters.js';
 
 export const ADMIN_ONLY_CHAPTERS: Chapter[] = [
   {
+    id: 'redeploy-approval', title: 'Redeploying needs a person (2.1.6)',
+    html: `
+<p>A newer version of a Sutra is the point of a release, so a deployment may replace what is deployed, but never without someone seeing what is replaced and saying yes. Before anything changes, every deployment works out its <strong>plan</strong>:</p>
+<table class="t"><thead><tr><th>Each Sutra is</th><th>Meaning</th><th>Needs approval</th></tr></thead><tbody>
+<tr><td><b>new</b></td><td>Not on this server yet</td><td>No</td></tr>
+<tr><td><b>unchanged</b></td><td>The same content as the version deployed here</td><td>No</td></tr>
+<tr><td><b>deployed again</b></td><td>The same content as here, not deployed now</td><td>No</td></tr>
+<tr><td><b>replaces</b></td><td>On this server with other content: the version here is replaced</td><td>Yes</td></tr>
+<tr><td><b>undeployed</b></td><td>Deployed here and not in the release (unless <em>keep others</em>)</td><td>Yes</td></tr>
+</tbody></table>
+<p>A changed schema also needs approval. The plan ends with a <strong>plan id</strong>: a short hash of the release and of what is on this server now. If someone changes a Sutra on the server after the plan was read, its id changes.</p>
+<p class="h">Approving</p>
+<ul>
+<li><strong>Admin Console, Releases</strong>, and the designer's Releases page: the plan is shown under the release. When it replaces or undeploys something, <em>Deploy</em> stays off until the project's name is typed.</li>
+<li><strong>Terminal</strong>: <code>sutra deploy release.zip</code> shows the plan and asks you to type <code>yes</code>. Anything else stops it.</li>
+<li><strong>Pipeline</strong>: <code>sutra check release.zip</code> prints the plan and its id, a person approves it at the pipeline's manual gate, then <code>sutra deploy release.zip --approve &lt;plan id&gt;</code> deploys. Without <code>--approve</code>, a deployment that replaces something stops with <strong>exit code 3</strong>. With an id that no longer matches, it is refused and nothing changes.</li>
+<li><strong>Release palette</strong>: the <em>Check package</em> step outputs <code>plan</code>; give <code>plan.planId</code> to <em>Deploy package</em>'s <em>Approved plan</em>, after an Approval step.</li>
+</ul>
+<p>Packages in <code>SUTRA_DEPLOY_DIR</code>, <code>sutra test</code> and rollbacks count as approved: the person who put the file there, or asked for the rollback, approved it. Every deployment records who approved it, and the plan id, in the audit log.</p>
+<p class="h">Connections and properties are never overwritten</p>
+<p>A deployment creates the connections, project properties and logging settings that are missing. Those already on the server are kept exactly as they are and listed in the plan's <strong>checklist</strong>: name, type, where it points (host, address or file, without credentials) and which fields the release or config file has different values for. Values are never shown. <code>--checklist checklist.md</code> writes the checklist as Markdown for the team that verifies it.</p>
+[[tip:Good practice|Read the checklist after every deploy to a new environment: a connection kept from before may point at the wrong host.<br>Approve in the pipeline, not by hand on the server: the approval is then recorded with the run.]]`,
+  },
+  {
+    id: 'config-files', title: 'Configuration as files (2.1.6)',
+    html: `
+<p>A server's settings and its projects' connections can be kept in Git as a config file (YAML or JSON) and put on any server with one command. This lets the team that runs servers set up test and production the same way, from a pipeline.</p>
+<table class="t"><thead><tr><th>Part</th><th>Holds</th></tr></thead><tbody>
+<tr><td><code>server</code></td><td>Engine properties, roles, system accounts (without tokens), connections shared by all projects, gateway options, firewall, trusted proxies, script and release policies, gateway plans and apps (without keys), alert channels and rules, server knowledge bases and their grants</td></tr>
+<tr><td><code>projects</code></td><td>Each project's properties, logging and connections</td></tr>
+</tbody></table>
+<p>People are never in a config file: they come from single sign-on or the Admin Console. Single sign-on and certificates are set on each server.</p>
+<p class="h">Commands</p>
+<pre>sutra config export --server-settings --project "Orders" --out config/sutraflow.yaml   # what is set now
+sutra config check config/sutraflow.yaml --env config/env/prod.yaml                   # what would be created; changes nothing
+sutra config apply config/sutraflow.yaml --env config/env/prod.yaml --checklist checklist.md</pre>
+<ul>
+<li><strong>Apply creates only what is missing.</strong> Everything to create is created together: if one item cannot be created (an unknown kind, a connection naming one that does not exist, a Sutra not deployed yet), the apply stops with an error and <em>nothing</em> is created.</li>
+<li><strong>What is already there is never changed.</strong> It is listed in the checklist (name, type, where it points, the fields with other values) for a person to check by hand. <code>--checklist</code> writes it as Markdown.</li>
+<li><strong>Check</strong> runs the same steps and then undoes them, so it finds every error an apply would. Use it in pull requests.</li>
+<li>In a terminal, apply shows what it will create and asks first; <code>--yes</code> skips the question in pipelines. Each item created is written to the audit log.</li>
+<li>Permissions follow what the file holds: Deploy on its projects, Users and roles for roles and system accounts, Gateway for plans, apps and the firewall, Alerts for alerts, Server settings for the rest.</li>
+</ul>
+<p class="h">Environment files and secrets</p>
+<p>Keep one config file for what every environment has, and a small environment file per environment (<code>--env env/prod.yaml</code>) for what differs: hosts, users, folders, secrets. The environment file is merged over the config file; lists are matched by name. A value can be:</p>
+<table class="t"><thead><tr><th>Written as</th><th>Example</th><th>Read</th></tr></thead><tbody>
+<tr><td>The value</td><td><code>value: s3cret</code></td><td>As it is; for a secret, <code>config check</code> warns unless <code>--allow-plain-secrets</code></td></tr>
+<tr><td><code>\${env:NAME}</code></td><td><code>value: \${env:ERP_DB_PASSWORD}</code></td><td>From the environment where <code>sutra config</code> runs: the CI system's secret variables</td></tr>
+<tr><td><code>file:/path</code></td><td><code>value: file:/run/secrets/erp-db</code></td><td>For secret, private key and certificate properties: from a file, such as a Kubernetes or Docker secret</td></tr>
+<tr><td><code>$\${env:NAME}</code></td><td><code>value: $\${env:REGION}</code></td><td>Kept as the reference <code>\${env:NAME}</code>, read on the server when Sutras run</td></tr>
+</tbody></table>
+<p>Secret values go into the target server's vault, encrypted with its master key. Messages and checklists name secrets but never show their values, and <code>config export</code> writes secrets as <code>\${env:SUTRA_&lt;PROJECT&gt;_&lt;NAME&gt;}</code> placeholders. A missing environment variable or file stops <code>check</code> and <code>apply</code> before anything is sent.</p>
+<pre># config/sutraflow.yaml
+sutraflow: config
+version: 1
+server:
+  gateway:
+    trustedProxies: [10.0.0.0/8]
+  systemAccounts:
+    - name: ci-deployer
+      roles: [{ role: Deployer, project: Orders }]
+projects:
+  - name: Orders
+    properties:
+      - { name: REGION, type: string, value: eu-1 }
+      - { name: ERP_DB_PASS, type: secret, value: \${env:ERP_DB_PASSWORD} }
+    connections:
+      - name: ERP
+        kind: database
+        settings: { driver: postgres, host: erp-test.internal, database: erp, user: sutra, password: "{{gv.ERP_DB_PASS}}" }
+
+# config/env/prod.yaml: only what differs
+projects:
+  - name: Orders
+    properties: [{ name: REGION, value: eu-prod }]
+    connections: [{ name: ERP, settings: { host: erp.internal } }]</pre>
+<p><code>sutra deploy release.zip --config prod.yaml --env env/prod.yaml</code> also takes an environment file, merged over the release's deployment config.</p>`,
+  },
+  {
+    id: 'docker-basics', title: 'Docker in plain words, and making the image',
+    html: `
+<p>This chapter is for administrators and DevOps engineers who have not used Docker before. It explains the words, what is inside the SutraFlow image and what is not, how to make the image, and the handful of commands you need every day. The chapters after it use these words.</p>
+<p class="h">The words</p>
+<table class="t"><thead><tr><th>Word</th><th>What it is</th><th>For SutraFlow</th></tr></thead><tbody>
+<tr><td><b>Image</b></td><td>A program packed with everything it needs to run (here Node.js 24 and the SutraFlow program), as one read-only file. It has a name and a tag, the version.</td><td><code>sutraflow:2.1.6</code>, or <code>ghcr.io/spinny007/sutraflow:2.1.6</code>. One image per SutraFlow version.</td></tr>
+<tr><td><b>Container</b></td><td>A running copy of an image, like a process. It can be stopped, removed and made again from the image at any time.</td><td>Each studio or engine is one container. Many containers can run from the same image.</td></tr>
+<tr><td><b>Volume</b></td><td>A folder Docker keeps outside the container. It survives when the container is removed and made again.</td><td>Mounted at <code>/data</code>: logs and work files, and the SQLite database and <code>master.key</code> when there is no PostgreSQL.</td></tr>
+<tr><td><b>Environment variables</b></td><td>Settings given to a container when it starts.</td><td><code>SUTRA_MODE</code>, <code>SUTRA_DB</code>, <code>SUTRA_MASTER_KEY</code>, <code>SUTRA_ADMIN_TOKEN</code>, <code>SUTRA_ENGINE_ID</code></td></tr>
+<tr><td><b>Registry</b></td><td>A store for images that servers pull from.</td><td>GitHub (GHCR) for the official image; your own (Docker Hub, Azure, AWS, Google, Harbor, GitLab) for copies.</td></tr>
+<tr><td><b>Compose</b></td><td>A file that lists containers to start together on one machine, with their settings.</td><td><code>deploy/docker/compose.yml</code> (studio and engine), <code>compose.cluster.yml</code> (PostgreSQL, studio, two engines)</td></tr>
+<tr><td><b>Kubernetes</b></td><td>Runs containers over several machines: restarts them when they fail, spreads them, adds more under load.</td><td><code>deploy/kubernetes</code></td></tr>
+<tr><td><b>Pod, Deployment</b></td><td>A pod is Kubernetes' running unit (here one container). A Deployment keeps a number of identical pods running.</td><td>The <code>sutraflow-engine</code> Deployment: 2 engines in base, 3 in prod.</td></tr>
+<tr><td><b>Service, Ingress</b></td><td>A Service is one stable address for all pods of a kind, spread over them. An Ingress is the public door: host names and TLS.</td><td><code>sutraflow-engine</code> Service (gateway and admin ports); the prod Ingress for callers of your APIs.</td></tr>
+<tr><td><b>Secret, ConfigMap</b></td><td>Settings kept by Kubernetes and given to pods as environment variables or files: secret ones and ordinary ones.</td><td>Secret <code>sutraflow</code> (token, master key, database address); ConfigMap <code>sutraflow</code> (mode, environment, workers).</td></tr>
+</tbody></table>
+<p class="h">What is in the image, and what is not</p>
+<table class="t"><thead><tr><th>In the image</th><th>Not in the image (it stays per environment)</th></tr></thead><tbody>
+<tr><td>The SutraFlow program (studio, engine, gateway, Admin Console, the <code>sutra</code> command), Node.js 24, the guides, the samples</td><td>Your projects and Sutras, connections, properties, secrets, people, runs: all in the <strong>database</strong>. Releases come with <code>sutra deploy</code>, settings with <code>sutra config apply</code>.</td></tr>
+</tbody></table>
+<p><strong>The image is the same for every project and every environment.</strong> You never build an image per project, per application or per environment. Development, test and production run the same <code>sutraflow:2.1.6</code>; what differs is the database each one points at, its master key, and the releases and settings deployed into it.</p>
+<table class="t"><thead><tr><th>When this changes</th><th>New image?</th><th>What to do instead</th></tr></thead><tbody>
+<tr><td>A new Sutra, or a new version of one</td><td>No</td><td>Deploy a release (<a href="#ch-add-application">Adding an application</a>)</td></tr>
+<tr><td>A new project (application)</td><td>No</td><td>Deploy its release; apply its config file</td></tr>
+<tr><td>A connection, property or secret</td><td>No</td><td><code>sutra config apply</code>, or the Admin Console</td></tr>
+<tr><td>Number of engines</td><td>No</td><td>Start more containers from the same image</td></tr>
+<tr><td>A new SutraFlow version</td><td>Yes: its tag</td><td>Pull or build <code>sutraflow:&lt;new version&gt;</code>, then upgrade (below)</td></tr>
+<tr><td>Your company's CA certificates, fonts, an extra tool</td><td>Optional</td><td>Mount them as files, or build your own image <code>FROM sutraflow:2.1.6</code></td></tr>
+</tbody></table>
+<p class="h">Making the image</p>
+<p>Pick one. They give the same image.</p>
+<table class="t"><thead><tr><th>Way</th><th>Commands</th><th>When</th></tr></thead><tbody>
+<tr><td><b>Pull the official one</b></td><td><code>docker pull ghcr.io/spinny007/sutraflow:2.1.6</code></td><td>The server can reach GitHub. Signed; <code>deploy/docker/README.md</code> has the <code>cosign verify</code> command.</td></tr>
+<tr><td><b>Build from a release package</b></td><td>Unpack <code>sutraflow-2.1.6-linux.tar.gz</code> (or the Windows zip), then in that folder <code>bin/sutraflow image build</code> (Windows: <code>bin\\sutraflow.cmd image build</code>)</td><td>No registry, or your own build. Needs Docker only, no npm or internet beyond the base image. Makes <code>sutraflow:2.1.6</code>.</td></tr>
+<tr><td><b>Build from the source folder</b></td><td><code>docker build -t sutraflow:2.1.6 .</code> in the SutraFlow repository (or <code>sutraflow image build</code>)</td><td>Developers of SutraFlow itself, and the release pipeline.</td></tr>
+<tr><td><b>Carry it to a server without internet</b></td><td><code>sutraflow image save sutraflow-2.1.6.tar</code>, copy the file, then on the server <code>docker load -i sutraflow-2.1.6.tar</code></td><td>Closed networks.</td></tr>
+<tr><td><b>Put it in your registry</b></td><td><code>docker tag sutraflow:2.1.6 registry.example.com/sutraflow:2.1.6</code> then <code>docker push registry.example.com/sutraflow:2.1.6</code></td><td>Kubernetes and other servers pull from there; set the name in the overlay's <code>images:</code> or in <code>.env</code> (<code>SUTRA_IMAGE</code>).</td></tr>
+</tbody></table>
+<p>On Windows, Docker Desktop runs Linux containers inside WSL 2: install it, start it once, and the commands above work in PowerShell. On a Linux server, install Docker Engine from your distribution or docker.com.</p>
+<p class="h">Your first container, on your own machine</p>
+<ol>
+<li>Make the image (above) and check it is there: <code>docker images sutraflow</code>.</li>
+<li>Start a studio with a volume for its data:<br><code>docker run -d --name sutra-studio -p 4800:4800 -p 8080:8080 -v sutra-studio:/data -e SUTRA_ADMIN_TOKEN=&lt;a long random text&gt; sutraflow:2.1.6</code></li>
+<li>Open <code>http://localhost:4800</code>. The first visit creates the administrator, as with the web installer.</li>
+<li>Design and run a Sutra as usual. Its REST services answer on <code>http://localhost:8080</code>.</li>
+<li>Stop it with <code>docker stop sutra-studio</code> (it drains: running steps finish first) and start it again with <code>docker start sutra-studio</code>. The data is in the <code>sutra-studio</code> volume, so <code>docker rm</code> and a new <code>docker run</code> with the same volume keep everything.</li>
+</ol>
+<p>For a studio and an engine together, or a cluster with PostgreSQL, use the Compose files instead: copy <code>deploy/docker/env.example</code> to <code>.env</code>, fill it in, and run <code>docker compose -f deploy/docker/compose.cluster.yml --env-file .env up -d</code>. From a release package, <code>sutraflow docker cluster up</code> does the same and makes the <code>.env</code> for you.</p>
+<p class="h">Commands you need every day</p>
+<table class="t"><thead><tr><th>Command</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>docker ps</code></td><td>Running containers, their ports, and <em>healthy</em> once <code>/health</code> answers</td></tr>
+<tr><td><code>docker logs -f sutra-studio</code></td><td>A container's log (JSON lines); Ctrl+C stops following. With Compose, by service name: <code>docker compose logs -f engine-1</code></td></tr>
+<tr><td><code>docker exec sutra-studio sutra status</code></td><td>Runs the <code>sutra</code> command inside the container: engines, leader, queue. Any <code>sutra</code> command works this way, against that container's own server with its <code>SUTRA_ADMIN_TOKEN</code>; no address or token to type. With Compose: <code>docker compose exec engine-1 sutra status</code></td></tr>
+<tr><td><code>docker stop</code> / <code>docker start</code> / <code>docker restart</code></td><td>Stops gracefully (drains), starts, restarts one container</td></tr>
+<tr><td><code>docker compose ... up -d</code> / <code>stop</code> / <code>down</code></td><td>Starts everything in a Compose file / stops it / stops and removes the containers (volumes stay unless <code>-v</code>)</td></tr>
+<tr><td><code>docker volume ls</code></td><td>The volumes, where data outside PostgreSQL lives</td></tr>
+<tr><td><code>kubectl -n sutraflow-prod get pods</code></td><td>Kubernetes: the engine pods and whether they are ready</td></tr>
+<tr><td><code>kubectl -n sutraflow-prod logs deploy/sutraflow-engine</code></td><td>Kubernetes: an engine's log</td></tr>
+<tr><td><code>kubectl -n sutraflow-prod exec deploy/sutraflow-engine -- sutra status</code></td><td>Kubernetes: the <code>sutra</code> command inside an engine pod</td></tr>
+</tbody></table>
+<p class="h">Upgrading SutraFlow in containers</p>
+<p>Engines of different versions must not run on one database: the new version changes the database for its own program. So a version upgrade is <em>stop all, then start all</em>, not a rolling update:</p>
+<ol>
+<li>Back up the database (<code>pg_dump -Fc</code>, or your managed service's snapshot) and keep the master key safe.</li>
+<li>Make or pull the new image, for example <code>sutraflow:2.1.7</code>.</li>
+<li>Stop every engine and the studio: <code>docker compose stop</code>, or in Kubernetes <code>kubectl -n sutraflow-prod scale deploy/sutraflow-engine --replicas=0</code> (and the studio, if any).</li>
+<li>Change the tag: <code>SUTRA_VERSION</code> in <code>.env</code>, or <code>newTag</code> in the overlay's <code>kustomization.yaml</code>.</li>
+<li>Start: <code>docker compose up -d</code>, or <code>kubectl apply -k deploy/kubernetes/overlays/prod</code> (which also sets the replicas back). The first engine to start makes the database changes; the others wait for it.</li>
+<li>Check: <code>sutra status</code> shows the new version on every engine.</li>
+</ol>
+<p>Restarts with the <em>same</em> version (a changed setting, a moved node, <code>kubectl rollout restart</code>) are rolling and lose nothing: each engine drains before it stops and the others keep serving.</p>
+[[tip:Remember|One image for everything; projects travel as releases, settings as config files.<br>The database and the master key are the environment: back them up, and never share them between test and production.]]`,
+  },
+  {
+    id: 'lifecycle', title: 'From development to production, step by step',
+    html: `
+<p>How an application (a SutraFlow project and its Sutras) moves from a designer's machine to test (UAT) and to production, with or without Docker, by hand or by a pipeline. The steps are the same whichever way the servers run; only where the commands are typed changes.</p>
+<p class="h">Three things travel separately</p>
+<table class="t"><thead><tr><th>What</th><th>Who makes it</th><th>How it travels</th><th>How often</th></tr></thead><tbody>
+<tr><td><b>The SutraFlow program</b></td><td>The SutraFlow release</td><td>A release package (installer zip or tar.gz) for servers without Docker; the image for containers</td><td>When you upgrade SutraFlow</td></tr>
+<tr><td><b>The application</b>: a project's Sutras</td><td>Designers, in the studio</td><td>A <strong>release</strong>: <code>orders-1.4.0.zip</code>, versioned, built in the studio or from Git</td><td>Every version of the application</td></tr>
+<tr><td><b>The environment's settings</b>: connections, properties, secrets, gateway, roles</td><td>DevOps and administrators</td><td>A <strong>config file</strong> for what every environment has, and an <strong>environment file</strong> per environment for what differs (hosts, users, secrets), kept in Git</td><td>Written once per project; changed when the environment changes</td></tr>
+</tbody></table>
+<p>The database and the master key do not travel: each environment has its own.</p>
+<p class="h">The environments</p>
+<table class="t"><thead><tr><th>Stage</th><th>Without Docker</th><th>With Docker</th></tr></thead><tbody>
+<tr><td><b>Development</b>: designers build and try Sutras</td><td>A laptop or a small VPS: <code>sutraflow install</code> (the web installer) or Laragon; one studio, SQLite is enough (<a href="#ch-install">The web installer</a>, <a href="#ch-install-dev">Development machines</a>)</td><td><code>sutraflow docker up</code>: a studio and an engine in containers on the laptop (<a href="#ch-docker-basics">Docker in plain words</a>)</td></tr>
+<tr><td><b>Test / UAT</b>: testers and business users try a release</td><td>A VPS installed silently (<code>sutraflow install --config install.json</code>) with PostgreSQL; a studio for looking around, or engines only</td><td><code>compose.cluster.yml</code> on one VPS, or Kubernetes <code>overlays/test</code>: one engine and the optional studio</td></tr>
+<tr><td><b>Production</b></td><td>Two or more VMs with engines only (<code>sutraflow start engine</code>), one PostgreSQL (managed or replicated), a load balancer (<a href="#ch-cluster">Setting up a cluster</a>)</td><td>Kubernetes <code>overlays/prod</code>: three engines, the autoscaler, an Ingress; PostgreSQL managed or run by an operator</td></tr>
+</tbody></table>
+<p>Mixing is fine: development without Docker and production in Kubernetes is common. A release built on a laptop deploys to a container exactly as to a VM, because both run the same SutraFlow version.</p>
+<p class="h">The path of one application, step by step</p>
+<ol>
+<li><strong>Design and try</strong> in the development studio: Sutras, their test data, the project's connections pointing at development systems.</li>
+<li><strong>Build a release</strong>: Designer, <em>Releases</em>, <em>Build</em> (choose the version), or from Git in a pipeline: <code>sutra package --from-git . --version 1.4.0 --out orders-1.4.0.zip</code>. The release holds the Sutras, not the passwords.</li>
+<li><strong>First time only: write the config files.</strong> Export what the project uses from development:<br><code>sutra config export --project "Orders" --out config/orders.yaml</code><br>Commit it to Git. Then write a small environment file per environment, <code>config/env/uat.yaml</code> and <code>config/env/prod.yaml</code>, with that environment's hosts and users, and secrets as <code>\${env:NAME}</code> (read from the pipeline's secret store) or <code>file:/run/secrets/name</code>. Add <code>--server-settings</code> to the export the first time you set up a whole server (gateway options, roles, system accounts, alerts). See <a href="#ch-config-files">Configuration as files</a>.</li>
+<li><strong>Test / UAT</strong>:
+  <ol>
+  <li><code>sutra config check config/orders.yaml --env config/env/uat.yaml</code>: what would be created, and the checklist of what is already there. Changes nothing.</li>
+  <li><code>sutra config apply config/orders.yaml --env config/env/uat.yaml</code>: creates the missing connections, properties and secrets.</li>
+  <li><code>sutra check orders-1.4.0.zip</code>: the plan (new, unchanged, <em>replaces</em>, undeployed) and its plan id.</li>
+  <li><code>sutra deploy orders-1.4.0.zip</code>: asks for <code>yes</code> if something is replaced; in a pipeline <code>--approve &lt;plan id&gt;</code> after the approval gate.</li>
+  <li>Testers use the APIs, approvals and dashboards on UAT.</li>
+  </ol></li>
+<li><strong>Production</strong>: the same four commands with <code>--env config/env/prod.yaml</code> and the <em>same</em> <code>orders-1.4.0.zip</code>. Never rebuild a release for production: what was tested is what goes live.</li>
+<li><strong>Later versions</strong>: only steps 2, 4 and 5. The config apply creates only what is new (a connection added in 1.5.0, say) and lists everything else for checking; nothing set by hand on a server is overwritten.</li>
+</ol>
+<p>Each command talks to a server's admin port: give <code>--server https://uat-engine:4800 --token &lt;token&gt;</code>, or set <code>SUTRA_SERVER</code> and <code>SUTRA_ADMIN_TOKEN</code> once. The token is a system account's (<code>sutra token create ci-deployer</code>), with Deploy on the project. A brand-new project needs Deploy on all projects (or the admin token) the first time.</p>
+<p class="h">Three ways to deploy, the same result</p>
+<table class="t"><thead><tr><th>Way</th><th>How</th><th>Good for</th></tr></thead><tbody>
+<tr><td><b>Admin Console</b></td><td><em>Releases</em>: upload the release zip, read the plan and the checklist, type the project's name if something is replaced, <em>Deploy</em>. Each project's package history, with <em>Roll back</em>, on the same page.</td><td>Small teams, the first deployments, anyone who prefers pages</td></tr>
+<tr><td><b>The sutra command</b> (silent)</td><td><code>sutra config apply</code>, <code>sutra check</code>, <code>sutra deploy</code> from a terminal or script; with Docker, <code>docker exec &lt;engine&gt; sutra ...</code></td><td>Repeatable steps, scripts, servers without a browser</td></tr>
+<tr><td><b>A pipeline</b></td><td>The same commands in GitHub Actions, GitLab CI, Azure DevOps or Jenkins, with a manual approval between <em>check</em> and <em>deploy</em> (<a href="#ch-ci-pipelines">CI/CD pipelines</a>)</td><td>Teams with Git: every deployment recorded, approved and repeatable</td></tr>
+</tbody></table>
+<p>A fourth way suits fixed set-ups: put <code>.sutra</code> packages in the deploy folder (<code>SUTRA_DEPLOY_DIR</code>, <code>/deploy</code> in the image). Engines deploy them when they start. It is how an engine-only appliance carries its applications, but it has no approval step, so use it only where the folder is controlled.</p>
+<p class="h">"Silent" for the program, and for applications</p>
+<ul>
+<li><strong>Installing SutraFlow</strong> without a browser: on a VM, <code>sutraflow install --config install.json</code> (<a href="#ch-install-silent">Silent installation</a>); in Docker, the environment variables are the installation: there is nothing else to run.</li>
+<li><strong>Deploying applications</strong> without a browser: the <code>sutra</code> commands above.</li>
+<li><strong>The first administrator</strong> of an engine-only server: <code>sutra user add admin --role administrator --password-from-env ADMIN_PW</code> on the server (with Docker, <code>docker exec -e ADMIN_PW=... &lt;engine&gt; sutra user add ...</code>). A studio asks for it on its first visit instead.</li>
+</ul>
+<p class="h">CI/CD with or without Docker</p>
+<p>The pipeline only needs the <code>sutra</code> command and the target's admin address. It does not matter how the target runs:</p>
+<table class="t"><thead><tr><th>Pipeline runs</th><th>Target runs</th><th>Notes</th></tr></thead><tbody>
+<tr><td>In the SutraFlow image (the files in <code>deploy/ci</code>)</td><td>VMs, Docker or Kubernetes</td><td>The easiest: <code>sutra</code> is the same version as the server</td></tr>
+<tr><td>On a runner with Node.js 24 and the release package</td><td>VMs, Docker or Kubernetes</td><td>Use <code>bin/sutraflow cli</code> from the unpacked package of the server's version</td></tr>
+<tr><td>Inside Kubernetes</td><td>Kubernetes</td><td>The Job in <code>deploy/kubernetes/jobs/config-and-deploy.yaml</code> runs the config apply and the approved deploy from inside the cluster, so the admin port never leaves it</td></tr>
+</tbody></table>
+[[tip:Good practice|Keep the config file, the environment files and the pipeline in the project's Git repository; secrets only in the CI secret store.<br>Number releases (1.4.0, 1.4.1) and keep the zips: an earlier zip is the way back.<br>Read the checklist after the first deployment to each environment: a connection kept from before may still point at the wrong host.]]`,
+  },
+  {
+    id: 'add-application', title: 'Adding an application to a running cluster',
+    html: `
+<p>A cluster is running, in Docker, in Kubernetes or on VMs, and a new application (a new project) must go live, or a new version of an existing one. <strong>No new image, no new container and no restart are needed.</strong> The application goes into the shared database through any one engine, and every engine serves it within one heartbeat (5 seconds).</p>
+<p class="h">What you need</p>
+<ul>
+<li>The release zip from the designers, for example <code>billing-1.0.0.zip</code>.</li>
+<li>The project's config file and the environment file for this environment (<a href="#ch-lifecycle">From development to production</a>, step 3), with its secrets in environment variables or files.</li>
+<li>The admin address of any engine, and a token: a system account's with Deploy on all projects for a new project (on the project for a new version), or the cluster's <code>SUTRA_ADMIN_TOKEN</code>.</li>
+</ul>
+<p class="h">The steps</p>
+<ol>
+<li><strong>Tell <code>sutra</code> where the cluster is</strong> (once per terminal):<br><code>SUTRA_SERVER=http://&lt;admin address&gt;</code>, <code>SUTRA_ADMIN_TOKEN=&lt;token&gt;</code> (PowerShell: <code>$env:SUTRA_SERVER = "..."</code>).</li>
+<li><strong>Check the settings</strong>: <code>sutra config check billing.yaml --env env/prod.yaml</code>. It lists what will be created and stops on any problem (a missing environment variable, a connection naming one that does not exist).</li>
+<li><strong>Create them</strong>: <code>sutra config apply billing.yaml --env env/prod.yaml --checklist checklist.md</code>. All or nothing; existing items are kept and listed in <code>checklist.md</code>.</li>
+<li><strong>Check the release</strong>: <code>sutra check billing-1.0.0.zip</code>. For a new project every Sutra is <em>new</em>, so no approval is needed. For a new version, the Sutras it <em>replaces</em> are listed, with the plan id.</li>
+<li><strong>Deploy</strong>: <code>sutra deploy billing-1.0.0.zip</code> (type <code>yes</code> when asked), or <code>--approve &lt;plan id&gt;</code> in a pipeline.</li>
+<li><strong>Verify</strong>: Admin Console, <em>Applications</em> shows the project and its Sutras deployed; <em>Engines</em> shows every engine alive; call one of its APIs through the load balancer or Ingress.</li>
+</ol>
+<p>The Admin Console way is the same in pages: <em>Releases</em>, upload, read the plan and checklist, <em>Deploy</em>. Settings that the release needs and the server lacks show in the checklist; create them with <code>sutra config apply</code> or in the Admin Console before the Sutras run.</p>
+<p class="h">Where the admin address is</p>
+<table class="t"><thead><tr><th>Cluster</th><th>Admin address for the steps</th></tr></thead><tbody>
+<tr><td>Docker Compose on one machine</td><td><code>http://localhost:4800</code> (the studio in <code>compose.cluster.yml</code>), or run the commands inside an engine container: <code>docker compose cp billing-1.0.0.zip engine-1:/tmp/</code> then <code>docker compose exec engine-1 sutra deploy /tmp/billing-1.0.0.zip</code> (inside a container, <code>sutra</code> needs no address or token: it uses that container's own engine and <code>SUTRA_ADMIN_TOKEN</code>)</td></tr>
+<tr><td>Kubernetes, from your laptop</td><td><code>kubectl -n sutraflow-prod port-forward svc/sutraflow-engine 4800:4800</code> in one terminal; then <code>http://localhost:4800</code> in another</td></tr>
+<tr><td>Kubernetes, from a pipeline</td><td>The Job in <code>deploy/kubernetes/jobs/config-and-deploy.yaml</code>: it runs inside the namespace, with the release address and the approved plan id</td></tr>
+<tr><td>VMs</td><td>Any engine's admin port on the private network, for example <code>https://engine-1.internal:4801</code></td></tr>
+</tbody></table>
+<p>Kubernetes keeps the admin port inside the namespace: its network policy lets in only pods labelled <code>sutraflow-admin: "true"</code> (the studio and the Job) and other SutraFlow pods. <code>kubectl port-forward</code> goes through your Kubernetes sign-in, so it works without opening the port.</p>
+<p class="h">After it is live</p>
+<table class="t"><thead><tr><th>Task</th><th>How</th></tr></thead><tbody>
+<tr><td>A new version</td><td>The same steps with the new zip; the plan lists what it replaces and needs a person's yes</td></tr>
+<tr><td>Go back to the previous version</td><td>Admin Console, <em>Releases</em>: the project's package history, <em>Roll back</em>; or <code>sutra history --project Billing</code> then <code>sutra rollback --project Billing</code></td></tr>
+<tr><td>Pause it</td><td>Admin Console, <em>Applications</em>, <em>Stop</em> on the Sutra; or <code>sutra sutras stop &lt;sutra&gt; --project Billing</code> (its triggers stop; deployed versions stay)</td></tr>
+<tr><td>Files it reads or writes</td><td>If every engine must see them, a shared volume at <code>/data/files</code> (ReadWriteMany in Kubernetes, a shared drive on VMs)</td></tr>
+<tr><td>Timers and folder or mailbox listeners</td><td>Nothing to do: the leader runs them, once for the cluster</td></tr>
+</tbody></table>
+[[note:Many applications, one cluster|A cluster runs any number of projects. They share the engines and the database; roles keep each team to its own projects. Give a project its own cluster only when it must be isolated (separate data, a separate network) or sized on its own.]]`,
+  },
+  {
+    id: 'cluster-console', title: 'One Admin Console for the whole cluster',
+    html: `
+<p>Every engine of a cluster, and the studio, serves the Admin Console on its admin port. They all read the same database, so <strong>each one shows the whole cluster</strong>: every engine, every project and deployed Sutra, every run, the queue, the gateway, people and the audit log. It does not matter which one you open. The Admin Console is not the leader's: the leader only runs timers and listeners (<a href="#ch-cluster">Setting up a cluster</a>).</p>
+<p class="h">Give people one address</p>
+<p>Put the admin ports of all engines behind one address on your private network (an internal load balancer, an internal Ingress, or a VPN host name) with <code>/ready</code> as the health check. A sign-in is a cookie signed with a key kept in the shared database, so it is valid on every engine: when an engine stops, the load balancer sends the next page to another engine and the person stays signed in.</p>
+<table class="t"><thead><tr><th>Cluster</th><th>The Admin Console</th></tr></thead><tbody>
+<tr><td>One machine (studio and engine)</td><td><code>http://localhost:4800</code>, or the engine's <code>4801</code></td></tr>
+<tr><td>VMs</td><td>An internal load balancer over every engine's admin port (<code>4801</code>), for example <code>https://sutra-admin.internal</code></td></tr>
+<tr><td>Docker Compose</td><td><code>http://localhost:4800</code> (the studio); to open an engine's too, publish its port 4800 in the Compose file</td></tr>
+<tr><td>Kubernetes</td><td><code>kubectl -n sutraflow-prod port-forward svc/sutraflow-engine 4800:4800</code>, then <code>http://localhost:4800/admin</code>. For a permanent address, an internal Ingress to the <code>sutraflow-engine</code> Service's admin port, and a rule in <code>base/network.yaml</code> that lets the ingress controller's namespace reach port 4800</td></tr>
+</tbody></table>
+<p>Without a load balancer, keep the addresses of two engines. If one does not answer, open the other: it shows the same.</p>
+<p class="h">When an engine, the leader or the studio stops</p>
+<table class="t"><thead><tr><th>What stops</th><th>What happens</th><th>What you do</th></tr></thead><tbody>
+<tr><td>Any engine</td><td>Its running steps are finished by the others; callers reach the others through the load balancer; the Admin Console shows it as not alive</td><td>Nothing; start it again when you can. Kubernetes restarts it by itself.</td></tr>
+<tr><td>The leader</td><td>Its lease runs out within 15 seconds and another engine becomes leader; timers and listeners start there. APIs never pause.</td><td>Nothing. <em>Engines</em> shows the new leader; <code>sutra status</code> and <code>/metrics</code> (<code>sutra_engine_leader</code>) say the same.</td></tr>
+<tr><td>The studio</td><td>Designers cannot design. Deployed Sutras keep running on the engines; their Admin Consoles keep working.</td><td>Start it again; on Kubernetes it restarts by itself.</td></tr>
+<tr><td>The database</td><td>Engines keep running what they can, retry, and report not ready</td><td>Restore the database; engines recover by themselves</td></tr>
+</tbody></table>
+<p>Nobody needs to know which engine leads. There is no leader to choose or configure: engines elect one among themselves (<em>Never lead</em> keeps one out of it).</p>
+<p class="h">Keep PostgreSQL near the engines</p>
+<p>Every step is several database round trips, and the cluster's leader, queue and heartbeats run through the database. Put PostgreSQL in the same data centre or cloud region as the engines, with a round trip of about 2 ms or less (<code>SELECT 1</code> from an engine machine). A managed PostgreSQL in the engines' region is ideal.</p>
+<table class="t"><thead><tr><th>Measured 4 November 2026, image 2.1.6, two engines</th><th>Round trip</th><th>Result</th></tr></thead><tbody>
+<tr><td>PostgreSQL 18.2 on the same machine</td><td>0.4 ms</td><td>Ready in 4 s; 120 simultaneous calls answered in 3.9 s, steps shared by both engines, each step once; leader killed: 8 of 8 slow calls answered, new leader in 5.6 s; <code>docker stop</code> drained and exited 0</td></tr>
+<tr><td>Hosted PostgreSQL 17.2 over the internet (through the provider's connection pooler)</td><td>75 ms</td><td>Started, deployed once, elected one leader, no errors, but each call took 3 to 8 s instead of 0.15 s, and 120 calls at once were not answered within 60 s</td></tr>
+</tbody></table>
+<p>A database far away works for a Sutra's own <em>database connections</em> (Resources, Database connection), where a few queries per run are fine. It is not suitable as the engines' own <code>SUTRA_DB</code>.</p>`,
+  },
+  {
+    id: 'docker-faq', title: 'Questions from DevOps teams',
+    html: `
+<table class="t"><thead><tr><th>Question</th><th>Answer</th></tr></thead><tbody>
+<tr><td>Do we need a separate image for each project or application?</td><td>No. One image per SutraFlow version, for every project and environment. Projects are releases deployed into the database (<a href="#ch-docker-basics">Docker in plain words</a>).</td></tr>
+<tr><td>Do we rebuild the image when designers change a Sutra?</td><td>No. They build a release; you deploy it (<a href="#ch-add-application">Adding an application</a>).</td></tr>
+<tr><td>Which database for a cluster? Can it be remote or managed?</td><td>PostgreSQL 14 or later (17 and 18 tested), with pgvector for knowledge bases kept in PostgreSQL. A managed service is recommended, in the engines' region (round trip about 2 ms or less). MySQL, SQL Server and Oracle can be <em>connections</em> for Sutras but not SutraFlow's own database. SQLite means one engine only.</td></tr>
+<tr><td>Can the cluster use a database through a connection pooler (PgBouncer and the like)?</td><td>Prefer a direct connection, or a pooler in <em>session</em> mode: the engines use session features (locks for the leader, notifications that wake the queue).</td></tr>
+<tr><td>Where do passwords and keys go?</td><td><code>SUTRA_MASTER_KEY</code>, <code>SUTRA_ADMIN_TOKEN</code> and <code>SUTRA_DB</code> (or <code>SUTRA_DB_PASSWORD</code>) in a Kubernetes Secret or the Compose <code>.env</code>, never in the image. Application secrets go into the vault through config files (<code>\${env:NAME}</code>, <code>file:</code>) or the Admin Console.</td></tr>
+<tr><td>What must we back up?</td><td>The PostgreSQL database and the master key. Without the key, the vault's secrets cannot be read. Volumes hold only logs and work files, unless the server runs on SQLite.</td></tr>
+<tr><td>How many engines?</td><td>Two at least, for failover. Then by load: the prod overlay's autoscaler adds engines between 2 and 10 at 70% CPU (it needs the Kubernetes metrics server). See <a href="#ch-sizing">Sizing</a>.</td></tr>
+<tr><td>Does adding engines always add throughput?</td><td>For API calls and steps, yes, until PostgreSQL is the limit. Timers and folder or mailbox listeners run on the leader only; the steps they start are shared.</td></tr>
+<tr><td>Do we need the studio in UAT or production?</td><td>No. Engines serve the Admin Console, the APIs and the automation API. A studio in UAT is handy for looking at Sutras; production usually has engines only.</td></tr>
+<tr><td>Which Admin Console do we use, and what if the leader goes down?</td><td>Any engine's: they all show the whole cluster. The leader is not special for the Admin Console; if it stops, another engine leads within 15 seconds (<a href="#ch-cluster-console">One Admin Console</a>).</td></tr>
+<tr><td>How do we deploy without a browser?</td><td><code>sutra config apply</code>, <code>sutra check</code>, <code>sutra deploy --approve</code>, from a terminal, a pipeline or <code>docker exec</code> (<a href="#ch-lifecycle">From development to production</a>).</td></tr>
+<tr><td>What config do we export, and from where?</td><td>Per project, from the development studio: <code>sutra config export --project "Orders"</code>. Once per server set-up, add <code>--server-settings</code>. People are never exported; secrets come out as <code>\${env:...}</code> placeholders.</td></tr>
+<tr><td>Will a deployment overwrite what an administrator set by hand?</td><td>No. Config apply and deploy create only what is missing and list the rest in a checklist. Replacing Sutras needs a person's approval.</td></tr>
+<tr><td>How do we upgrade SutraFlow?</td><td>New image tag; stop all engines, start them on the new tag. Never run two versions on one database (<a href="#ch-docker-basics">Upgrading SutraFlow in containers</a>).</td></tr>
+<tr><td>How do we see logs and health?</td><td><code>docker logs</code> or <code>kubectl logs</code> (JSON lines), <code>/health</code> and <code>/ready</code>, <code>/metrics</code> for Prometheus, OpenTelemetry traces (<a href="#ch-monitoring">Monitoring</a>).</td></tr>
+<tr><td>How do callers reach our APIs?</td><td>Through the gateway ports (8080, 8443) behind a load balancer or Ingress. Add its address range to <code>trustedProxies</code> so callers' addresses are read correctly.</td></tr>
+<tr><td>Can we run without Docker in production?</td><td>Yes: VMs with the release package, engines only, one PostgreSQL, a load balancer (<a href="#ch-cluster">Setting up a cluster</a>). The release and config steps are identical.</td></tr>
+<tr><td>Can we run without internet?</td><td>Yes: the offline release package, or <code>sutraflow image save</code> and <code>docker load</code>.</td></tr>
+</tbody></table>`,
+  },
+  {
+    id: 'containers', title: 'Containers and Kubernetes (2.1.6)',
+    html: `
+<p>SutraFlow runs from one image: studio, engine or both, chosen with <code>SUTRA_MODE</code>. The image is the same for every environment; settings come from environment variables and config files, and releases from <code>sutra deploy</code>.</p>
+<table class="t"><thead><tr><th>Image from</th><th>How</th></tr></thead><tbody>
+<tr><td>The official registry</td><td><code>ghcr.io/spinny007/sutraflow:2.1.6</code> (also <code>2.1</code> and <code>latest</code>), for amd64 and arm64. It is signed with cosign (keyless) and carries an SBOM and provenance. <code>deploy/docker/README.md</code> gives the verify command.</td></tr>
+<tr><td>Your registry</td><td>Copy the official image, or build on it: <code>FROM ghcr.io/spinny007/sutraflow:2.1.6</code></td></tr>
+<tr><td>A site without internet</td><td><code>sutraflow image build</code> in the release package (no npm needed), <code>sutraflow image save sutraflow-2.1.6.tar</code>, then <code>docker load -i</code> on the server</td></tr>
+</tbody></table>
+<p>The container runs as an ordinary user (uid 1000) and keeps its data in <code>/data</code>. It answers <code>/health</code> (alive) and <code>/ready</code> (ready for work, not while draining) on port 4800. When stopped it drains, so running steps finish first: give it 45 to 60 seconds.</p>
+<p class="h">Docker</p>
+<p><code>deploy/docker/compose.yml</code> runs a studio and an engine, and <code>compose.cluster.yml</code> runs PostgreSQL with pgvector, a studio and two engines. Copy <code>env.example</code> to <code>.env</code> and fill it in. In a release package, <code>sutraflow docker up</code> and <code>sutraflow docker cluster up</code> use these files.</p>
+<p class="h">Kubernetes</p>
+<p><code>deploy/kubernetes</code> holds Kustomize files:</p>
+<ul>
+<li><strong>base</strong>: engines with readiness and liveness checks, a disruption budget, and a network policy that opens the gateway but keeps the admin API inside;</li>
+<li><strong>overlays/test</strong>: one engine and the optional studio;</li>
+<li><strong>overlays/prod</strong>: three engines, an autoscaler and an Ingress;</li>
+<li><strong>jobs/config-and-deploy.yaml</strong>: a Job that applies the config file and deploys an approved release.</li>
+</ul>
+<pre>kubectl -n sutraflow-test create secret generic sutraflow --from-literal=SUTRA_ADMIN_TOKEN=... --from-literal=SUTRA_MASTER_KEY=... --from-literal=SUTRA_DB=postgres://...
+kubectl apply -k deploy/kubernetes/overlays/test</pre>
+<p>Engines in a cluster share one PostgreSQL database and one master key; back the key up. Behind an Ingress, put the controller's address range in <code>server.gateway.trustedProxies</code> in the config file, so callers' addresses are read correctly. Project files that every engine must see need a shared (ReadWriteMany) volume at <code>/data/files</code>.</p>`,
+  },
+  {
+    id: 'ci-pipelines', title: 'CI/CD pipelines (2.1.6)',
+    html: `
+<p><code>deploy/ci</code> has the same release pipeline for GitHub Actions, GitLab CI, Azure DevOps and Jenkins. Each one runs in the SutraFlow image, so <code>sutra</code> has the server's version.</p>
+<ol>
+<li><strong>Build</strong> the release from the project's Git repository: <code>sutra package --from-git . --version 1.4.0 --out release.zip</code>.</li>
+<li><strong>Test</strong> it in a throw-away server: <code>sutra test release.zip --secrets-from-env</code>.</li>
+<li><strong>Check</strong> against the target: <code>sutra config check</code> (what would be created, and the checklist) and <code>sutra check</code> (the plan and its id). Nothing changes.</li>
+<li><strong>Approve</strong>: a person reads the plan and the checklist. GitHub uses environment reviewers, GitLab a manual job, Azure DevOps environment approvals, and Jenkins an <code>input</code> step that asks for the plan id.</li>
+<li><strong>Deploy</strong>: <code>sutra config apply --yes</code> (creates what is missing), then <code>sutra deploy release.zip --approve &lt;plan id&gt;</code>.</li>
+</ol>
+<p>The pipeline signs in with a system account's token (<code>sutra token create</code>), kept in the CI system's secret store with the environment's secrets. The account needs Deploy on the projects, plus Users or Server settings only if the config file sets those. Set <code>SUTRA_CI_USER</code> to the person who started the pipeline so the audit log names them.</p>
+[[tip:Good practice|One config file for every environment, one small environment file each; all in Git, secrets in the CI secret store.<br>Promote the same release zip from test to production; never rebuild it for production.]]`,
+  },
+  {
     id: 'admin-role', title: 'What administrators do',
     html: `
 <p>SutraFlow has two kinds of people. <strong>Designers</strong> build Sutras in the studio and release them; the <em>SutraFlow User Guide</em> is theirs. <strong>Administrators</strong> install and upgrade SutraFlow, run its engines, look after its database, people and security, and receive releases on test and production servers. This guide is theirs.</p>
@@ -34,7 +373,11 @@ export const ADMIN_ONLY_CHAPTERS: Chapter[] = [
 <tr><td>Start, stop and configure it</td><td><a href="#ch-launcher">The sutraflow command and server settings</a></td></tr>
 <tr><td>Engines, clusters and sizing</td><td><a href="#ch-production">Running in production</a>, <a href="#ch-cluster">Setting up a cluster</a>, <a href="#ch-sizing">Sizing</a></td></tr>
 <tr><td>Deployed Sutras, runs, alerts, the gateway, people and the audit log</td><td><a href="#ch-console">The Admin Console</a></td></tr>
+<tr><td>Docker and Kubernetes from the start: the words, making the image, upgrading</td><td><a href="#ch-docker-basics">Docker in plain words</a>, <a href="#ch-containers">Containers and Kubernetes</a></td></tr>
+<tr><td>Take an application from development to test and production, with or without Docker</td><td><a href="#ch-lifecycle">From development to production</a>, <a href="#ch-add-application">Adding an application to a running cluster</a></td></tr>
+<tr><td>One Admin Console for a cluster; what happens when the leader stops</td><td><a href="#ch-cluster-console">One Admin Console for the whole cluster</a>, <a href="#ch-docker-faq">Questions from DevOps teams</a></td></tr>
 <tr><td>Releases on test and production servers</td><td><a href="#ch-deploy-releases">Receiving releases</a></td></tr>
+<tr><td>Script or automate anything: every endpoint of the admin API, with its permission and sutra command</td><td><a href="#ch-api-overview">The admin API</a></td></tr>
 <tr><td>Health, metrics, traces and logs</td><td><a href="#ch-monitoring">Monitoring</a></td></tr>
 </tbody></table>
 <p>Designers who also run their own development machine need only <a href="#ch-install">The web installer</a> and <a href="#ch-install-dev">Development machines</a>.</p>
@@ -89,7 +432,7 @@ export const ADMIN_ONLY_CHAPTERS: Chapter[] = [
 </ol>
 <p>The installer starts on this machine only, at <code>127.0.0.1</code> on a free port from 4790, with a one-time address that it opens in the browser (<code>--no-open</code> prints it instead; <code>--port</code> chooses the port). Nobody else, and no other web page in the browser, can drive it. Nothing changes until you choose <strong>Install</strong> on the Review page.</p>
 <p class="h">Welcome</p>
-<p>The system check: Node.js version, a folder it can write, the runtime packages and free disk space. A missing requirement stops it here with what to do. Choose <strong>Install</strong> for a new SutraFlow in this folder, or <strong>Upgrade</strong> to bring another installation up to this version (<a href="#ch-upgrade">Upgrading</a>).</p>
+<p>The system check: Node.js version, a folder it can write, the runtime packages and free disk space. A missing requirement stops it here with what to do. Choose <strong>Install</strong> for a new SutraFlow in this folder, or <strong>Upgrade</strong> to bring another installation up to this version (or to put this version back over a damaged one) (<a href="#ch-upgrade">Upgrading</a>).</p>
 [[img:install-welcome|Welcome: the system check, and Install or Upgrade.]]
 <p class="h">Administrator</p>
 <p>The first account, which manages users, roles, projects and the server: user name, optional email, and a password of at least 12 characters with upper and lower case letters and digits, typed twice. It is not made when the database already holds accounts.</p>
@@ -155,7 +498,7 @@ export const ADMIN_ONLY_CHAPTERS: Chapter[] = [
 <p class="h">Silent upgrade</p>
 <pre>bin/sutraflow upgrade --config upgrade.json [--dry-run]
 { "from": "/opt/sutraflow", "backupDir": "/backups/sutraflow", "start": true }</pre>
-<p>Run it from the new release's folder; the steps are those of <a href="#ch-upgrade">Upgrading</a>, with the same exit codes.</p>
+<p>Run it from the new release's folder; the steps are those of <a href="#ch-upgrade">Upgrading</a>, with the same exit codes. To put the same version's program files back over a damaged installation (2.1.6), add <code>"reinstall": true</code>: see <em>Reinstalling the same version</em> in <a href="#ch-upgrade">Upgrading</a>.</p>
 <p class="h">Samples in scripts</p>
 <p>The install file's <code>"samples": true</code> adds the sample Sutras (default <code>false</code>: leave it off for production). The upgrade file takes <code>"samples"</code> (2.1.5): <code>keep</code> (default), <code>add</code> (when there are none), <code>remove</code> (the samples and their <code>sample_</code> data) or <code>refresh</code> (remove, then add the new version's). They run after the data has been compared, so a sample connection that cannot be reached does not undo the upgrade: it is reported, its sample data stays, and <code>sutraflow samples remove</code> can be run again.</p>
 <pre># Upgrade a production server and make sure no samples are left (Linux)
@@ -168,7 +511,7 @@ bin/sutraflow upgrade --config upgrade.json
 
 # Windows (PowerShell), a training server with the new samples
 Set-Content upgrade.json '{ "from": "C:/laragon/www/sutra", "samples": "refresh", "start": true }'
-binsutraflow.cmd upgrade --config upgrade.json
+bin\\sutraflow.cmd upgrade --config upgrade.json
 
 # Afterwards, at any time, from the installed folder
 bin/sutraflow samples list
@@ -246,7 +589,7 @@ bin/sutraflow samples remove [--folder /opt/sutraflow] [--no-start]</pre>
 <p>Ports need not be given. The upgrade reads them, with the data folder and the database, from the installation's own <code>sutraflow.env</code>, uses them to stop and start it and to check that it answers, and keeps them. This holds for SutraFlow started through its launcher (<code>sutraflow start</code>, the Laragon Procfile, the Windows task or systemd unit of <code>sutraflow service</code>). A process started by hand with other settings in its environment cannot be reached by the upgrade: stop it yourself first.</p>
 [[img:upgrade-installation|Installation: the folder checked, with its version, database, data folder and address.]]
 <p class="h">Review</p>
-<p>The version from and to, the backup folder (empty means <code>backups</code> inside the installation) and what happens to the samples. Nothing changes until you choose <strong>Upgrade</strong>.</p>
+<p>The version from and to, the backup folder (empty means <code>backups</code> inside the installation) and what happens to the samples. Nothing changes until you choose <strong>Upgrade</strong> (<strong>Reinstall</strong> for the same version).</p>
 [[img:upgrade-review|Review: from and to, the backup folder, and starting it again.]]
 <p class="h">What the upgrade does</p>
 <ol>
@@ -264,6 +607,21 @@ bin/sutraflow samples remove [--folder /opt/sutraflow] [--no-start]</pre>
 [[img:upgrade-done|Done: from and to, and where the backup is.]]
 <p class="h">When a step fails</p>
 <p>The previous version is put back: the old runtime, the data folder and <code>sutraflow.env</code> from the backup, the database from its dump, and the previous version started again. The page and <code>data/logs/installer.log</code> say which step failed and why. A database restore waits at most a minute for tables another process still holds (an engine on another machine of the cluster) and then reports that the database was not restored, with the backup to restore by hand, instead of waiting for ever (2.1.2).</p>
+<p class="h">Reinstalling the same version (a repair)</p>
+<p>When an installation already runs the version of the package, <strong>Check</strong> says so, and the upgrade does not run by itself. If its program files are damaged or were changed by hand (a deleted folder, an edited file, a failed copy), tick <em>Reinstall</em> on the Installation page and choose <strong>Reinstall</strong> on Review: the same steps as an upgrade put this package's program files in place again (2.1.6).</p>
+<ul>
+<li>The data folder, <code>sutraflow.env</code>, the database, deployed Sutras and a site's own <code>.htaccess</code> or <code>web.config</code> stay; they are backed up and compared all the same.</li>
+<li>The old program files go into the backup (<code>backups/&lt;version&gt;-&lt;time&gt;/runtime</code>), so a file changed on purpose can be taken back from there.</li>
+<li>An installation whose launcher (<code>bin/sutraflow.mjs</code>) is missing can be reinstalled too, as long as its <code>package.json</code> and <code>sutraflow.env</code> are there. If its launcher cannot stop it, the reinstall goes on only when SutraFlow is not answering on its address.</li>
+<li>Settings the package has and the installation lacks are added with their defaults; there are no database changes within one version.</li>
+<li>A failed step puts the previous files back, as for an upgrade.</li>
+<li>An installation newer than the package is never taken back to an older version.</li>
+</ul>
+<pre># Silent (Windows PowerShell), from the unpacked package of the same version
+Set-Content upgrade.json '{ "from": "C:/laragon/www/sutra", "reinstall": true, "start": true }'
+bin\\sutraflow.cmd upgrade --config upgrade.json --dry-run
+bin\\sutraflow.cmd upgrade --config upgrade.json</pre>
+<p>The installer's lock file in the data folder records <code>"by": "reinstall"</code>. Do not unzip a package over an installation to repair it: that has no backup and leaves files the package no longer has.</p>
 <p class="h">Clusters</p>
 <p>Stop the engines on the other machines first, upgrade every engine's folder, then start them. Engines of different versions must not run on one database: the newer version's database changes are made for its own program.</p>
 <p class="h">By hand, and from before 2.1.0</p>
@@ -382,8 +740,8 @@ bin/sutraflow samples remove [--folder /opt/sutraflow] [--no-start]</pre>
 </ol>
 <p class="h">Deploy</p>
 <ul>
-<li><strong>Admin Console, Releases</strong>: choose the zip; read its check (Sutras and addresses, secrets present or missing, where it was built from, its config and files); change the project name or give another config; <strong>Deploy</strong>. Below, every project's package history with <em>Roll back</em> and <em>Deploy again</em>.</li>
-<li><strong>Command line</strong>: <code>sutra check release.zip</code>, then <code>sutra deploy release.zip [--config prod.json]</code>, with <code>--server https://engine:4800 --token $TOKEN</code> for a remote server. <code>sutra history</code>, <code>sutra rollback --project "Orders" [--to &lt;id&gt;]</code>.</li>
+<li><strong>Admin Console, Releases</strong>: choose the zip; read its check (Sutras and addresses, secrets present or missing, where it was built from, its config and files) and its plan (2.1.6: what it creates, replaces and keeps); change the project name or give another config; <strong>Deploy</strong>. Replacing Sutras already deployed needs the project's name typed (<em>Redeploying needs a person</em>). Below, every project's package history with <em>Roll back</em> and <em>Deploy again</em>.</li>
+<li><strong>Command line</strong>: <code>sutra check release.zip</code> (the plan and its id), then <code>sutra deploy release.zip [--config prod.json] [--approve &lt;plan id&gt;]</code>, with <code>--server https://engine:4800 --token $TOKEN</code> for a remote server. <code>sutra history</code>, <code>sutra rollback --project "Orders" [--to &lt;id&gt;]</code>.</li>
 <li><strong>Headless engines</strong> deploy the packages in <code>SUTRA_DEPLOY_DIR</code> at start, in file-name order; a package already deployed is skipped, and one that cannot be deployed stops the start, so a bad release never serves half-deployed.</li>
 </ul>
 [[img:console-releases|Admin Console, Releases: deploy a release zip, and each project's packages with Roll back.]]
@@ -431,6 +789,8 @@ sutra token create ci-orders --name github --expires-days 90</pre>
     id: 'admin-trouble', title: 'Troubleshooting servers',
     html: `
 <table class="t"><thead><tr><th>What you see</th><th>What to do</th></tr></thead><tbody>
+<tr><td>Upgrade: "It already runs 2.1.6, the version of this package"</td><td>Nothing to upgrade. If the installation is damaged, tick <em>Reinstall</em> (or <code>"reinstall": true</code> in <code>upgrade.json</code>) to put the package's program files back (<a href="#ch-upgrade">Upgrading</a>).</td></tr>
+<tr><td>Install from an unpacked package does not ask for a folder</td><td>Install puts SutraFlow in the folder the package was unpacked to. To bring an existing installation to the package's files, use <em>Upgrade</em> (or <em>Reinstall</em> for the same version) and give that installation's folder.</td></tr>
 <tr><td>PowerShell: "The term 'sutraflow' is not recognized"</td><td>PowerShell runs nothing from the current folder by its name alone: in <code>bin</code> type <code>.\\sutraflow.cmd</code>, or from the SutraFlow folder <code>bin\\sutraflow.cmd</code> (<a href="#ch-launcher">The sutraflow command</a>).</td></tr>
 <tr><td>The installer says SutraFlow is already installed in this folder</td><td>It locked itself after the install (<code>data/install.lock</code>). To bring another installation up to this version, choose Upgrade; to install again here, <code>sutraflow install --reset</code> first.</td></tr>
 <tr><td>Test connection in the installer: pgvector is not installed</td><td>Install pgvector on the PostgreSQL server (<a href="#ch-install-dev">Development machines</a> for Laragon and Linux), or choose <em>Continue without pgvector</em> when no knowledge base will be kept in PostgreSQL.</td></tr>
@@ -467,7 +827,7 @@ sutra token create ci-orders --name github --expires-days 90</pre>
 <table class="t"><thead><tr><th>Command</th><th>What it does</th><th>When to use it</th></tr></thead><tbody>
 <tr><td><code>sutraflow install</code></td><td>Opens the web installer on this machine: administrator, database with a connection test, ports, cluster, samples</td><td>A new server, by a person at the machine</td></tr>
 <tr><td><code>sutraflow install --config install.json [--dry-run]</code></td><td>The same without a browser, from a JSON file; <code>--dry-run</code> prints the plan and changes nothing</td><td>Servers built by scripts (Ansible, a golden image, a VM template)</td></tr>
-<tr><td><code>sutraflow upgrade --config upgrade.json [--dry-run]</code></td><td>Upgrades an installation from 2.1.0 on: backup, new files, data compared before and after, an automatic way back; keeps, adds, removes or refreshes the samples</td><td>Every new version; run with <code>--dry-run</code> first in a change window</td></tr>
+<tr><td><code>sutraflow upgrade --config upgrade.json [--dry-run]</code></td><td>Upgrades an installation from 2.1.0 on: backup, new files, data compared before and after, an automatic way back; keeps, adds, removes or refreshes the samples. With <code>"reinstall": true</code>, the same version again over a damaged installation (2.1.6)</td><td>Every new version; run with <code>--dry-run</code> first in a change window. Reinstall: program files damaged or changed</td></tr>
 <tr><td><code>sutraflow samples list | add | remove</code></td><td>The samples of an installation and their <code>sample_</code> data: lists them, adds them, or removes them with their data</td><td>Add on designer and training machines; remove before a server goes live</td></tr>
 <tr><td><code>sutraflow setup [--ports]</code></td><td>Installs the packages and builds SutraFlow from a source folder; makes <code>sutraflow.env</code></td><td>Development machines working from the source</td></tr>
 <tr><td><code>sutraflow version</code></td><td>The installed version</td><td>Before and after an upgrade; in support requests</td></tr>
@@ -496,6 +856,7 @@ sutraflow stop all && sutraflow start</pre>
 <tr><td><code>sutraflow engine-file &lt;name&gt; [--port] [--http] [--https] [--workers]</code></td><td>A settings file for one more engine on another machine joining this cluster (PostgreSQL only)</td><td>Adding an engine machine: copy the file and <code>data/master.key</code> there, then <code>sutraflow start engine</code></td></tr>
 <tr><td><code>sutraflow docker up | down | status | logs | build</code></td><td>The studio and an engine in Docker</td><td>Trying SutraFlow in containers on one machine</td></tr>
 <tr><td><code>sutraflow docker cluster up | down | status | logs</code></td><td>PostgreSQL, a studio and two engines in Docker</td><td>Testing a cluster, failover and draining</td></tr>
+<tr><td><code>sutraflow image build [--tag] | image save [file.tar]</code></td><td>Builds the SutraFlow image from this folder or release package (no npm needed for a package), and saves it to a file (2.1.6)</td><td>Sites without internet, or your own registry</td></tr>
 </tbody></table>
 <pre>sutraflow engine-file engine-b --host 0.0.0.0 --port 4801 --http 9080 --https 9443
 sutraflow docker cluster up</pre>
@@ -514,17 +875,19 @@ sutra db migrate --url postgres://sutra@db1:5432/sutraflow --write-env sutraflow
 <table class="t"><thead><tr><th>Command</th><th>What it does</th><th>When to use it</th></tr></thead><tbody>
 <tr><td><code>sutra package --project &lt;name&gt; --version 1.4.0 --zip</code></td><td>A release zip of a project: every deployed Sutra at its version, a deployment config to fill in, a README and documentation</td><td>Handing a tested project to the team that runs test or production</td></tr>
 <tr><td><code>sutra package --from-git &lt;repository&gt; --ref v1.4.0 --out release.zip</code></td><td>The same from the project's Git repository, with no server or database</td><td>CI/CD pipelines: build on every tag</td></tr>
-<tr><td><code>sutra check &lt;release.zip&gt;</code></td><td>Checks a package against a server: activities it knows, secrets present, addresses already in use. Changes nothing.</td><td>Before every deploy, and in a pipeline as a gate</td></tr>
+<tr><td><code>sutra check &lt;release.zip&gt; [--json] [--checklist plan.md]</code></td><td>Checks a package against a server: activities it knows, secrets present, addresses already in use; and the plan (2.1.6): Sutras new, unchanged or replacing what is here, what is created, the checklist, the plan id. Changes nothing.</td><td>Before every deploy, and in a pipeline as a gate</td></tr>
 <tr><td><code>sutra test &lt;release.zip&gt; [--secrets-from-env]</code></td><td>Installs the package in a throw-away server and runs every Sutra with its test data</td><td>In the pipeline before the package goes to any server</td></tr>
-<tr><td><code>sutra deploy &lt;release.zip&gt; [--config prod.json] [--keep-others]</code></td><td>Deploys a package with this server's deployment config; Sutras of the project not in it are undeployed unless <code>--keep-others</code></td><td>Putting a release on test, UAT or production</td></tr>
+<tr><td><code>sutra deploy &lt;release.zip&gt; [--config prod.yaml] [--env env/prod.yaml] [--keep-others] [--approve &lt;plan id&gt;]</code></td><td>Deploys a package with this server's deployment config; Sutras of the project not in it are undeployed unless <code>--keep-others</code>. Replacing or undeploying needs <code>yes</code> typed, or <code>--approve</code> with the plan id (exit code 3 without it)</td><td>Putting a release on test, UAT or production</td></tr>
+<tr><td><code>sutra config export | check | apply</code></td><td>Server settings and project connections as a config file (2.1.6): export what is set, check what applying would create, apply (create what is missing, all or nothing; the rest in a checklist)</td><td>Setting up environments the same way from Git and pipelines</td></tr>
 <tr><td><code>sutra history --project &lt;name&gt;</code></td><td>The packages deployed to a project, newest first</td><td>Before a rollback; audits of what went live</td></tr>
 <tr><td><code>sutra rollback --project &lt;name&gt; [--to &lt;id&gt;]</code></td><td>Deploys the package before the current one (or the one named)</td><td>A release misbehaves in production</td></tr>
 <tr><td><code>sutra doc --project &lt;name&gt; | &lt;release.zip&gt; [--format html|md]</code></td><td>Documentation from the Sutras and their step descriptions</td><td>Reviews, hand-over, change records</td></tr>
 </tbody></table>
 <pre>sutra package --project "Orders" --version 1.4.0 --note "Faster lookup" --zip --out orders-1.4.0.zip
 sutra test orders-1.4.0.zip --secrets-from-env
-sutra check orders-1.4.0.zip --server https://prod:4800 --token $SUTRA_TOKEN
-sutra deploy orders-1.4.0.zip --config prod-config.json --server https://prod:4800 --token $SUTRA_TOKEN
+sutra config apply config/sutraflow.yaml --env config/env/prod.yaml --yes --server https://prod:4800 --token $SUTRA_TOKEN
+sutra check orders-1.4.0.zip --server https://prod:4800 --token $SUTRA_TOKEN          # prints the plan id
+sutra deploy orders-1.4.0.zip --approve 3f9c2a1b7d4e --server https://prod:4800 --token $SUTRA_TOKEN
 sutra rollback --project "Orders" --server https://prod:4800 --token $SUTRA_TOKEN</pre>
 
 <p class="h">6. People, system accounts, secrets and connections (sutra)</p>
@@ -585,7 +948,7 @@ sutra alerts test ops-teams</pre>
 <p class="h">Who may use it</p>
 <table class="t"><thead><tr><th>Setting</th><th>Search</th><th>Add and remove</th></tr></thead><tbody>
 <tr><td>Not a server knowledge base</td><td>Home project only</td><td>Home project only</td></tr>
-<tr><td>Server, <em>Every project</em></td><td>Every project, the whole base</td><td>Home project only</td></tr>
+<tr><td>Server, <em>Every project</em></td><td>Every project, the whole base</td><td>Home project, and projects granted <em>May add and remove</em> in their areas</td></tr>
 <tr><td>Server, <em>Granted projects only</em></td><td>Each granted project, in its granted areas</td><td>Only in areas granted with <em>May add and remove</em></td></tr>
 </tbody></table>
 <p>Removing everything, rebuilding vectors and building the search index stay with the home project and administrators. The checks are made by the engine on every step, agent tool and API call, not by the designer: a Sutra that tries to change an area it was not granted fails with the reason. A granted knowledge base appears in the project's knowledge base lists marked with its home project and areas; its own connections (the pgvector database, the AI provider for vectors) are used through it and never offered to the project.</p>

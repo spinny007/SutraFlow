@@ -18,7 +18,7 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Logo } from '../src/Auth';
 
 interface Check { name: string; ok: boolean; detail: string; required: boolean }
-interface Found { folder: string; version: string; exists: boolean; settings: boolean; hasData: boolean; dataDir: string; database: string; port: number; host: string; upgradable: boolean; note: string }
+interface Found { folder: string; version: string; exists: boolean; settings: boolean; hasData: boolean; dataDir: string; database: string; port: number; host: string; upgradable: boolean; reinstallable?: boolean; note: string }
 interface MemoryInfo { machineMb: number; freeMb: number; nodeDefaultMb: number; suggestedMb: number }
 interface State { version: string; home: string; locked: boolean; system: Check[]; here: Found; memory: MemoryInfo; hostname: string; defaults: Record<string, number> }
 interface Step { step: string; state: string; detail?: string }
@@ -94,6 +94,9 @@ export function Installer() {
   const [found, setFound] = useState<Found | null>(null);
   const [backupDir, setBackupDir] = useState('');
   const [upSamples, setUpSamples] = useState<'keep' | 'add' | 'remove' | 'refresh'>('keep');
+  // Reinstall (2.1.6): the same version again over a damaged installation, ticked on purpose.
+  const [reinstall, setReinstall] = useState(false);
+  const again = !!found && !found.upgradable && !!found.reinstallable && reinstall;
   const [job, setJob] = useState<Job | null>(null);
   const [busy, setBusy] = useState(false);
   const [moving, setMoving] = useState(false);
@@ -199,7 +202,8 @@ export function Installer() {
         return go(at + 1);
       }
       if (page === 'Installation') {
-        if (!found?.upgradable) return setErr(found ? found.note : 'Find the installation first (Check).');
+        if (found?.reinstallable && !found.upgradable && !reinstall) return setErr(`It already runs ${found.version}: tick Reinstall to replace its program files (a repair), or close the installer.`);
+        if (!found?.upgradable && !again) return setErr(found ? found.note : 'Find the installation first (Check).');
       }
       if (page === 'Review' && mode === 'samples') {
         if (!sampleList || sampleList.action !== sampleAction) return setErr('List what would change first (List).');
@@ -213,7 +217,7 @@ export function Installer() {
         return;
       }
       if (page === 'Review' && mode === 'upgrade') {
-        await call('POST', '/api/upgrade', { config: { from: found!.folder, backupDir: backupDir.trim() || undefined, start, samples: upSamples } });
+        await call('POST', '/api/upgrade', { config: { from: found!.folder, backupDir: backupDir.trim() || undefined, start, samples: upSamples, ...(again ? { reinstall: true } : {}) } });
         setJob({ steps: [], done: false });
         go(at + 1);
         follow(j => { if (!j.error) go(UPGRADE.indexOf('Done')); });
@@ -260,7 +264,7 @@ export function Installer() {
           {st.locked && <div className="i-msg info">SutraFlow is already installed in this folder (version {st.here.version}). To install again, remove <span className="i-mono">data/install.lock</span> first; to bring another installation up to {st.version}, choose Upgrade.</div>}
           <div className="i-choice" role="group" aria-label="What to do">
             <button type="button" aria-pressed={mode === 'install'} disabled={st.locked} onClick={() => setMode('install')}><b>Install</b><span>A new SutraFlow in this folder: administrator, database, ports, and optionally a cluster.</span></button>
-            <button type="button" aria-pressed={mode === 'upgrade'} onClick={() => setMode('upgrade')}><b>Upgrade</b><span>An installation of 2.1.0 or later, to {st.version}: backed up first, put back if anything fails.</span></button>
+            <button type="button" aria-pressed={mode === 'upgrade'} onClick={() => setMode('upgrade')}><b>Upgrade</b><span>An installation of 2.1.0 or later, to {st.version}, or {st.version} again to repair it: backed up first, put back if anything fails.</span></button>
             <button type="button" aria-pressed={mode === 'samples'} onClick={() => { setMode('samples'); if (!folder) setFolder(st.home); }}><b>Samples</b><span>Add the sample Sutras to an installation of {st.version}, or remove them and their data (everything named sample_).</span></button>
           </div>
           {mode === 'install' && <><h3>System check</h3><ul className="i-checks">{st.system.map(c => <li key={c.name}>{c.ok ? <span className="i-ok">✓</span> : c.required ? <span className="i-bad">✗</span> : <span className="i-warn">!</span>}<span><b>{c.name}</b><br /><small>{c.detail}</small></span></li>)}</ul></>}
@@ -399,23 +403,24 @@ export function Installer() {
         {page === 'Installation' && <>
           <h2>{mode === 'samples' ? 'Installation' : 'Installation to upgrade'}</h2>
           <p className="lead">{mode === 'samples' ? `The folder of a SutraFlow ${st?.version} installation (this one, or another on this machine).` : `The folder of a SutraFlow 2.1.0 or later installation. This package (${st?.version}) is installed into it; its data and settings stay.`}</p>
-          <div className="i-row"><div className="i-fld" style={{ flex: 1 }}><label>Folder<input value={folder} onChange={e => { setFolder(e.target.value); setFound(null); }} placeholder="C:\laragon\www\sutra" /></label></div><button className="i-btn" onClick={detect} disabled={busy || !folder.trim()}>{busy ? 'Looking…' : 'Check'}</button></div>
-          {found && mode !== 'samples' && <div className={`i-msg ${found.upgradable ? 'ok' : 'err'}`}>{found.note}</div>}
+          <div className="i-row"><div className="i-fld" style={{ flex: 1 }}><label>Folder<input value={folder} onChange={e => { setFolder(e.target.value); setFound(null); setReinstall(false); }} placeholder="C:\laragon\www\sutra" /></label></div><button className="i-btn" onClick={detect} disabled={busy || !folder.trim()}>{busy ? 'Looking…' : 'Check'}</button></div>
+          {found && mode !== 'samples' && <div className={`i-msg ${found.upgradable ? 'ok' : found.reinstallable ? 'info' : 'err'}`}>{found.note}</div>}
+          {found && mode !== 'samples' && !found.upgradable && found.reinstallable && <p><label><input type="checkbox" checked={reinstall} onChange={e => setReinstall(e.target.checked)} /> Reinstall {found.version}: replace its program files with this package's (backed up first, put back if anything fails)</label></p>}
           {found && mode === 'samples' && <div className={`i-msg ${found.exists && found.version === st?.version ? 'ok' : 'err'}`}>{!found.exists ? found.note : found.version === st?.version ? `SutraFlow ${found.version}: its samples can be added or removed.` : `It runs ${found.version}: upgrade it to ${st?.version} first.`}</div>}
           {found?.exists && <dl className="i-review"><dt>Version</dt><dd>{found.version}</dd><dt>Database</dt><dd className="i-mono">{found.database}</dd><dt>Data folder</dt><dd className="i-mono">{found.dataDir}</dd><dt>Address</dt><dd>http://{found.host === '0.0.0.0' ? '127.0.0.1' : found.host}:{found.port}</dd></dl>}
         </>}
 
         {page === 'Review' && mode === 'upgrade' && found && <>
           <h2>Review</h2>
-          <p className="lead">SutraFlow {found.version} is stopped gracefully (running steps finish), backed up, upgraded to {st?.version}, checked and started again. If any step fails, the previous version is put back and started.</p>
-          <dl className="i-review"><dt>Installation</dt><dd className="i-mono">{found.folder}</dd><dt>From</dt><dd>{found.version}</dd><dt>To</dt><dd>{st?.version}</dd></dl>
+          <p className="lead">SutraFlow {found.version} is stopped gracefully (running steps finish), backed up, {again ? `given this package's ${st?.version} program files again (its data and settings stay)` : `upgraded to ${st?.version}`}, checked and started again. If any step fails, the previous {again ? 'files are' : 'version is'} put back and started.</p>
+          <dl className="i-review"><dt>Installation</dt><dd className="i-mono">{found.folder}</dd>{again ? <><dt>Reinstall</dt><dd>{found.version}</dd></> : <><dt>From</dt><dd>{found.version}</dd><dt>To</dt><dd>{st?.version}</dd></>}</dl>
           <Field label="Backup folder" help="Empty: a backups folder inside the installation. It gets the data folder, the settings and the whole database."><input value={backupDir} onChange={e => setBackupDir(e.target.value)} placeholder={`${found.folder}${found.folder.includes('\\') ? '\\' : '/'}backups`} /></Field>
           <Field label="Samples" help="Keep leaves the samples as they are. Remove deletes the sample Sutras and their sample_ data (the Samples mode lists them first). Refresh removes them and adds this version's. Production servers usually have none.">
             <select value={upSamples} onChange={e => setUpSamples(e.target.value as any)}>
               <option value="keep">Keep</option><option value="add">Add when none</option><option value="remove">Remove</option><option value="refresh">Refresh</option>
             </select>
           </Field>
-          <p><label><input type="checkbox" checked={start} onChange={e => setStart(e.target.checked)} /> Start it again when upgraded</label></p>
+          <p><label><input type="checkbox" checked={start} onChange={e => setStart(e.target.checked)} /> Start it again when {again ? 'reinstalled' : 'upgraded'}</label></p>
         </>}
 
         {page === 'Review' && mode === 'samples' && found && <>
@@ -441,14 +446,14 @@ export function Installer() {
         </>}
 
         {working && <>
-          <h2>{page === 'Install' ? 'Installing' : page === 'Samples' ? (sampleAction === 'add' ? 'Adding the samples' : 'Removing the samples') : 'Upgrading'}</h2>
+          <h2>{page === 'Install' ? 'Installing' : page === 'Samples' ? (sampleAction === 'add' ? 'Adding the samples' : 'Removing the samples') : again ? 'Reinstalling' : 'Upgrading'}</h2>
           <ul className="i-checks">{(job?.steps || []).map(s => <li key={s.step}>{mark(s.state)}<span><b>{s.step}</b>{s.detail && <><br /><small>{s.detail}</small></>}</span></li>)}</ul>
           {!job?.done && <p className="lead">Working…</p>}
           {job?.error && <div className="i-msg err">{job.error} {logLink}</div>}
         </>}
 
         {page === 'Done' && <>
-          <h2>{mode === 'install' ? 'SutraFlow is installed' : mode === 'samples' ? (sampleAction === 'add' ? 'Samples added' : 'Samples removed') : 'SutraFlow is upgraded'}</h2>
+          <h2>{mode === 'install' ? 'SutraFlow is installed' : mode === 'samples' ? (sampleAction === 'add' ? 'Samples added' : 'Samples removed') : again ? 'SutraFlow is reinstalled' : 'SutraFlow is upgraded'}</h2>
           {mode === 'install' && job?.result && <>
             <p className="lead">Sign in as <b>{admin.username}</b> at <a href={job.result.address} target="_blank" rel="noreferrer">{job.result.address}</a>{start ? '' : ' after starting it (sutraflow start)'}.</p>
             {(job.result.cluster || []).length > 0 && <><h3>Engines of the cluster</h3><ul>{job.result.cluster.map((e: any) => <li key={e.name}>{e.name}: <a href={`/api/cluster-file?t=${token}&name=${encodeURIComponent(e.name)}`}>download its settings file</a></li>)}</ul></>}
@@ -456,7 +461,7 @@ export function Installer() {
             <div className="i-msg info">The installer is locked now. Keep <span className="i-mono">data/master.key</span> safe and backed up: it unlocks the vault. To start SutraFlow with the machine: <span className="i-mono">sutraflow service</span>.</div>
           </>}
           {mode === 'samples' && job?.result && <p className="lead">{sampleAction === 'add' ? `${job.result.added} sample Sutras in the project ${job.result.project}.` : `${job.result.items?.length || 0} removed.`}{job.result.problems?.length ? ` Not removed: ${job.result.problems.join('; ')}` : ''}</p>}
-          {mode === 'upgrade' && job?.result && <p className="lead">{job.result.upgraded} in <span className="i-mono">{job.result.folder}</span>. The backup is in <span className="i-mono">{job.result.backup}</span>.</p>}
+          {mode === 'upgrade' && job?.result && <p className="lead">{job.result.reinstalled ? `${found?.version} reinstalled` : job.result.upgraded} in <span className="i-mono">{job.result.folder}</span>. The backup is in <span className="i-mono">{job.result.backup}</span>.</p>}
           <p>{logLink} (also kept in <span className="i-mono">{job?.logFile || 'data/logs/installer.log'}</span>)</p>
           <p><button className="i-btn" onClick={() => call('POST', '/api/quit').then(() => window.close(), () => {})}>Close the installer</button></p>
         </>}
@@ -466,7 +471,7 @@ export function Installer() {
         {st && !working && page !== 'Done' && (
           <div className="i-foot">
             <button className="i-btn" onClick={() => go(at - 1)} disabled={at === 0}>Back</button>
-            <button className="i-btn primary" onClick={next} disabled={busy || moving || (page === 'Welcome' && mode === 'install' && !!st.locked)}>{moving ? 'Checking…' : page === 'Review' ? (mode === 'install' ? 'Install' : mode === 'samples' ? (sampleAction === 'add' ? 'Add samples' : 'Remove samples') : 'Upgrade') : 'Next'}</button>
+            <button className="i-btn primary" onClick={next} disabled={busy || moving || (page === 'Welcome' && mode === 'install' && !!st.locked)}>{moving ? 'Checking…' : page === 'Review' ? (mode === 'install' ? 'Install' : mode === 'samples' ? (sampleAction === 'add' ? 'Add samples' : 'Remove samples') : again ? 'Reinstall' : 'Upgrade') : 'Next'}</button>
           </div>
         )}
         {working && job?.done && job.error && <div className="i-foot"><button className="i-btn" onClick={() => go(at - 1)}>Back</button></div>}

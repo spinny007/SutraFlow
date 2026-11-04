@@ -146,11 +146,25 @@ test('new version, pruning, keep-others and rollback', () => {
   flows.saveFlow(helper.id, d);
   flows.deploy(helper.id);
   const p2 = pk.buildPackage(shop, { version: '1.1.0', sutras: ['Double'] });
-  const kept = pk.deployPackage(p2, { project: 'Shop Prod', keepOthers: true });
+  // 2.1.6: replacing a deployed Sutra needs a person's approval of the plan.
+  const plan = pk.planDeploy(p2, { project: 'Shop Prod', keepOthers: true });
+  assert.deepEqual(plan.sutras.map(x => [x.name, x.action]), [['Double', 'replaces']]);
+  assert.equal(plan.needsApproval, true);
+  assert.throws(() => pk.deployPackage(p2, { project: 'Shop Prod', keepOthers: true }), (e: any) => e.approval && e.plan.planId === plan.planId && /replaces Sutra Double/.test(e.message));
+  assert.throws(() => pk.deployPackage(p2, { project: 'Shop Prod', keepOthers: true, approve: 'not-the-plan' }), /does not match the plan/);
+  const kept = pk.deployPackage(p2, { project: 'Shop Prod', keepOthers: true, approve: plan.planId, by: 'reviewer' });
   assert.deepEqual(kept.undeployed, []);
   assert.equal(kept.sutras[0].action, 'updated');
+  assert.equal(kept.approvedBy, 'reviewer');
   assert.ok(shopFlow('Order API', prod).deployed, 'kept with keepOthers');
-  const pruned = pk.deployPackage(p2, { project: 'Shop Prod' });
+  // The same package again changes nothing and needs no approval.
+  assert.equal(pk.planDeploy(p2, { project: 'Shop Prod', keepOthers: true }).needsApproval, false);
+  // Undeploying a Sutra not in the package needs approval too; an approval of an older plan does not count.
+  const prunePlan = pk.planDeploy(p2, { project: 'Shop Prod' });
+  assert.deepEqual(prunePlan.undeploys, ['Order API']);
+  assert.notEqual(prunePlan.planId, plan.planId);
+  assert.throws(() => pk.deployPackage(p2, { project: 'Shop Prod', approve: plan.planId }), /does not match the plan/);
+  const pruned = pk.deployPackage(p2, { project: 'Shop Prod', approve: prunePlan.planId });
   assert.deepEqual(pruned.undeployed, ['Order API']);
   assert.equal(shopFlow('Order API', prod).deployed, null);
   assert.ok(flows.getFlow(shopFlow('Order API', prod).id), 'undeployed, not deleted');

@@ -16,12 +16,28 @@
 # Release: pushing a tag such as v2.0.0 tests SutraFlow, builds the release archives on Windows and
 # Linux (each with an offline archive holding the runtime packages for that system), and attaches
 # them with their SHA-256 files and RELEASE-NOTES.md to a GitHub Release.
+#
+# 2.1.6: also the SutraFlow image, built and checked on every run, and on a tag pushed for
+# linux/amd64 and linux/arm64 with an SBOM and build provenance, then signed with cosign (keyless,
+# this workflow's GitHub identity). GHCR by default; another registry through the inputs of a manual
+# run and the REGISTRY_USERNAME and REGISTRY_PASSWORD secrets.
 name: Release
 
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      registry:
+        description: 'Registry for the image (ghcr.io, docker.io, myregistry.azurecr.io, ...)'
+        default: ghcr.io
+      image:
+        description: 'Image name in the registry (empty: <owner>/sutraflow)'
+        default: ''
+      push:
+        description: 'Push the image (a manual run builds and checks it only, unless this is true)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -67,6 +83,93 @@ jobs:
         with:
           name: release-${{ matrix.os }}
           path: release/
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    env:
+      REGISTRY: ${{ inputs.registry || 'ghcr.io' }}
+      IMAGE: ${{ inputs.image || format('{0}/sutraflow', github.repository_owner) }}
+      PUSH: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.push == true }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Version
+        id: v
+        run: |
+          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "image=$(echo "$REGISTRY/$IMAGE" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Build for this runner and check it
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: sutraflow:check
+          build-args: |
+            VERSION=${{ steps.v.outputs.version }}
+            REVISION=${{ github.sha }}
+            SOURCE=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: The image starts, answers and reports its version
+        run: |
+          docker run -d --name check -e SUTRA_ADMIN_TOKEN=check-$RANDOM$RANDOM -p 4800:4800 sutraflow:check
+          for i in $(seq 1 60); do curl -fs http://127.0.0.1:4800/health > health.json && break; sleep 1; done
+          cat health.json
+          test "$(node -p "require('./health.json').version")" = "${{ steps.v.outputs.version }}"
+          for u in /guide /admin-guide /design-guide /architecture /admin; do curl -fs -o /dev/null "http://127.0.0.1:4800$u"; done
+          test "$(docker exec check id -u)" != "0"
+          docker stop check
+          test "$(docker inspect check --format '{{.State.ExitCode}}')" = "0"
+      - name: Sign in to the registry
+        if: env.PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ env.REGISTRY == 'ghcr.io' && github.actor || secrets.REGISTRY_USERNAME }}
+          password: ${{ env.REGISTRY == 'ghcr.io' && secrets.GITHUB_TOKEN || secrets.REGISTRY_PASSWORD }}
+      - name: Tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.v.outputs.image }}
+          tags: |
+            type=raw,value=${{ steps.v.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.v.outputs.version }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+      - name: Build for amd64 and arm64 and push, with SBOM and provenance
+        id: push
+        if: env.PUSH == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.v.outputs.version }}
+            REVISION=${{ github.sha }}
+            SOURCE=${{ github.server_url }}/${{ github.repository }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha
+      - uses: sigstore/cosign-installer@v3
+        if: env.PUSH == 'true'
+      - name: Sign the image (keyless)
+        if: env.PUSH == 'true'
+        run: cosign sign --yes "${{ steps.v.outputs.image }}@${{ steps.push.outputs.digest }}"
+      - name: Where it is
+        if: env.PUSH == 'true'
+        run: |
+          echo "### Image" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}\` (digest \`${{ steps.push.outputs.digest }}\`)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Check the signature: \`cosign verify ${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }} --certificate-identity-regexp '^${{ github.server_url }}/${{ github.repository }}/' --certificate-oidc-issuer https://token.actions.githubusercontent.com\`" >> "$GITHUB_STEP_SUMMARY"
 
   publish:
     needs: build

@@ -1,18 +1,25 @@
-# SutraFlow 2.1.5 release notes
+# SutraFlow 2.1.6 release notes
 
-Prepared 2026-11-03. Copyright (c) 2026-27 Surya Partap Singh, MixAgile.com. AGPL-3.0-only; a commercial licence is available.
+Prepared 2026-11-04. Copyright (c) 2026-27 Surya Partap Singh, MixAgile.com. AGPL-3.0-only; a commercial licence is available.
 
 | Download | For |
 |---|---|
-| `sutraflow-2.1.5-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
-| `sutraflow-2.1.5-windows-x64-offline.zip` | The same with the runtime packages inside, for servers without the npm registry |
-| `sutraflow-2.1.5-linux.tar.gz` | Linux (x64 or arm64); also macOS |
-| `sutraflow-2.1.5-docs.zip` | The user guide, the Administration Guide, the Sutra Design Guide and the architecture page, to put on a website |
+| `sutraflow-2.1.6-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
+| `sutraflow-2.1.6-windows-x64-offline.zip` | The same with the runtime packages inside, for servers without the npm registry |
+| `sutraflow-2.1.6-linux.tar.gz` | Linux (x64 or arm64); also macOS |
+| `sutraflow-2.1.6-docs.zip` | The user guide, the Administration Guide, the Sutra Design Guide and the architecture page, to put on a website |
 
 Each comes with a `.sha256` file to check the download: `sha256sum -c <archive>.sha256`, or on Windows `Get-FileHash <archive> -Algorithm SHA256`.
 
+2.1.5 was built but not published: a review of its new features found four serious problems (fixed below). **2.1.6 holds everything 2.1.5 brought** (the sections *What is new in 2.1.5* below) **with those fixes**, plus 2.1.6's own changes. Upgrade from 2.1.4 straight to 2.1.6.
+
 ## In short
 
+- **Redeploying needs a person** (2.1.6): a release may replace Sutras already deployed, but only after someone has seen the plan (each Sutra new, unchanged or replacing the version here, those undeployed) and approved it: `yes` typed at `sutra deploy`, `--approve <plan id>` in pipelines (exit code 3 without it), or the project name typed in the Admin Console. A plan id no longer matches once the server changes.
+- **Never overwritten without a list** (2.1.6): deployments and config files create connections, project properties and settings that are missing and keep the ones already there, listing them in a checklist (name, type, where it points, the fields that differ, never values) for the operations team to verify.
+- **Configuration as files** (2.1.6): `sutra config export | check | apply` keeps a server's settings (engine properties, roles, system accounts, shared connections, gateway, firewall, plans and apps, alerts, server knowledge bases) and projects' connections and properties in YAML or JSON in Git, with one small environment file per environment; secrets from `${env:}` or `file:` into the vault. Apply is all or nothing.
+- **Containers, Kubernetes and pipelines** (2.1.6): an official image `ghcr.io/spinny007/sutraflow`, signed and with an SBOM, for amd64 and arm64; `sutraflow image build | save` for sites without internet; Compose files and Kustomize manifests (engines, optional studio, test and prod overlays, a config-and-deploy Job) in `deploy/`; release pipelines for GitHub Actions, GitLab CI, Azure DevOps and Jenkins with a manual approval of the plan.
+- **Fixes to 2.1.5's new features** (2.1.6): a knowledge base offered as an MCP tool is never served without a policy; dashboards cached per caller keep callers with the same subject but another issuer or other claims apart; a project granted an area cannot remove another area that differs only in case; removing the samples keeps a Samples project that holds connections, schemas or properties of the site; write grants keep working when every project may search.
 - **Dashboards**: a new Dashboards palette publishes a Sutra as a page of Apache ECharts charts on the gateway (`/dash/<name>`), on a database, an API or any JSON, behind a security policy, with filters (slicers) and click-to-filter, KPI cards, grouping of raw rows, refreshed on a schedule with results shared by every viewer, and PNG and SVG export; an AI may plan or suggest charts, used only after an allow-list check.
 - **Knowledge admin**: an administrator shares a project's knowledge base with other projects (every project to search, or granted projects by area, to search or also to change), keeps areas in step with folders, SFTP, SharePoint, Google Drive, web pages, a database or an API on the leader (only changed items get new vectors), offers it as an MCP search tool, and exports a source as a Sutra; one writer per area, enforced by the engine.
 - **Conversation tokens**: every answer of a published agent carries a token signed by SutraFlow. It continues the conversation only for the caller who started it, and only for a set time; administrators clear expired conversations and their memory.
@@ -24,12 +31,56 @@ Each comes with a `.sha256` file to check the download: `sha256sum -c <archive>.
 
 ## Install and upgrade
 
-Install as for 2.1.4. Upgrade from 2.1.0 to 2.1.4: unpack 2.1.5 in a folder of its own and run `bin/sutraflow upgrade` from there. 2.1.5 adds one table (`agent_conversations`) and no required settings.
+Install as for 2.1.4. Upgrade from 2.1.0 to 2.1.4 (or a 2.1.5 build): unpack 2.1.6 in a folder of its own and run `bin/sutraflow upgrade` from there. It adds six tables (`agent_conversations`, and for Knowledge admin `kb_admin`, `kb_grants`, `kb_sources`, `kb_source_items`, `kb_sync_runs`), made on upgrade, and no required settings.
 
 **What changes for you:**
+- **Deployments that replace Sutras** already deployed (or undeploy them) need approval (2.1.6). Pipelines that ran `sutra deploy` unattended stop with exit code 3 and the plan: add a manual approval and `--approve <plan id>` from `sutra check` (templates in `deploy/ci`). Packages in `SUTRA_DEPLOY_DIR` and rollbacks are not affected.
+- **A release's deployment config no longer changes connections and project properties already on the server** (2.1.6); it creates missing ones and lists the rest in the checklist. Change an existing connection in the Admin Console or the designer, on purpose.
 - **Clients that made up their own session ids** for a published agent (the chat API, the OpenAI-compatible API, A2A `contextId`, the MCP tool's `session`) now get a new conversation each time, until they send back the token SutraFlow returns (`sessionId`, `X-Session-Id`, `contextId`, `session`). The chat page and widget already do. OpenAI-compatible clients that send the whole history are not affected.
 - **Conversations end** after the agent channel's *Conversation lasts* time (24 hours unless set); the next message starts a new one.
 - **Chat visitors** (no policy) get a new kind of signed identity; 2.1.4 identities are renewed on their next message, so nobody loses a conversation.
+
+## Fixes in 2.1.6
+
+| Seen | Cause | Now |
+|---|---|---|
+| Clearing the policy of an MCP server that offers a knowledge base as a tool opened the knowledge base to anyone: an anonymous request got private passages | Knowledge admin asked for a policy only when the tool was set up; the MCP handler served anonymously when the server had none | A knowledge tool answers only behind its MCP server's policy; without one it answers 503 and shows nothing |
+| A dashboard cached *for each caller* could show one caller's result to another: two tokens with the same subject from different issuers shared the cache | The cache key held only the method, the subject and the app, while the Sutra also sees the issuer, roles, scopes and other claims | The key covers everything the Sutra receives about the caller (except the token's own times and id, so a renewed token keeps its cache) |
+| A project granted the area `products` could remove `Products/private` from a knowledge base kept in SQLite | The access check compares areas with their case; the removal used SQLite's LIKE, which ignores case | Areas are matched exactly, with their case, on SQLite and PostgreSQL |
+| Removing the samples could delete connections, schemas and properties someone had added to the Samples project, without listing them | The project went once no other Sutras were left in it, and deleting a project takes all its connections, schemas and folders | The project goes only when nothing but the listed sample items is in it; otherwise it is kept and the list says what it holds |
+| Choosing *Every project may search* took away a project's grant to add and remove in its area | The access check returned search-only before reading the project's grants | Every project searches the whole base and write grants still apply; Knowledge admin shows the grants in both modes |
+| The upgrader refused an installation already on the package's version ("It already runs 2.1.6"), leaving no safe way to repair damaged program files | Only a lower version counted as upgradable | *Reinstall* runs the same safe steps over the same version, only when asked for |
+
+## What is new in 2.1.6
+
+### Redeploying needs approval
+
+- **The plan**: `sutra check`, the Admin Console's Releases page and the designer's Releases page show what a release does before it changes anything: each Sutra *new*, *unchanged*, *deployed again* or *replaces* (with the version here), Sutras *undeployed*, changed schemas, what is created, the checklist, and a **plan id** (a hash of the release and of what is on the server now).
+- **Approval**: replacing or undeploying needs a person: `yes` typed in a terminal, `sutra deploy --approve <plan id>` in a pipeline, the project name typed in the Admin Console, or the *Approved plan* field of the Release palette's *Deploy package*. Without it, `sutra deploy` stops with exit code 3 and the API answers 409 with the plan; an id that no longer matches is refused. Who approved, and the plan id, go into the deployment record and the audit log.
+- **Checklist**: connections, project properties and logging already on the server are kept and listed (name, type, where it points without credentials, which fields differ); `--checklist file.md` writes it as Markdown. `sutra check --json` gives the plan to scripts.
+
+### Configuration as files
+
+- `sutra config export --server-settings --project "A,B" --out sutraflow.yaml`: what is set now, YAML or JSON. Never people; system accounts without tokens, gateway apps without keys; secrets as `${env:SUTRA_<PROJECT>_<NAME>}` placeholders; a run-time `${env:}` reference stays one (`$${env:}`).
+- `sutra config check <file> [--env env/prod.yaml]`: what applying would create and the checklist; runs the apply and undoes it, so it finds every error an apply would. Warns about secrets written directly, unless `--allow-plain-secrets`.
+- `sutra config apply <file> [--env] [--yes] [--checklist]`: creates what is missing, all or nothing; asks first in a terminal; each item created is audited. Permissions follow what the file holds.
+- Values: direct, `${env:NAME}` from where the command runs, `file:/path` for secret, private key and certificate properties (Kubernetes and Docker secrets). The environment file is merged over the config file, lists matched by name.
+- `sutra deploy` and `sutra check` take `--env` too, and `--config` may be YAML.
+
+### Containers, Kubernetes and pipelines
+
+- **Official image** `ghcr.io/spinny007/sutraflow:2.1.6` (and `2.1`, `latest`) for amd64 and arm64, built by the release workflow after the tests, smoke-tested (health, version, guides, non-root, clean stop), signed with cosign keyless, with an SBOM and provenance. OCI labels name the version, commit and source.
+- **Offline**: `sutraflow image build` builds the image from a release package (`deploy/docker/Dockerfile.package`, no npm needed) or a source folder; `sutraflow image save` writes it to a file for `docker load`.
+- **Docker**: `deploy/docker/compose.yml` (studio and engine) and `compose.cluster.yml` (PostgreSQL with pgvector, studio, two engines) from the image, with `env.example`; `sutraflow docker up` in a release package uses them.
+- **Kubernetes**: `deploy/kubernetes`: engines with readiness on `/ready`, liveness on `/health` and time to drain, a disruption budget and network policy; an optional studio; `overlays/test` and `overlays/prod` (autoscaler, Ingress); a Job that applies the config file and deploys an approved release.
+- **CI/CD**: `deploy/ci`: GitHub Actions, GitLab CI, Azure DevOps and Jenkins, each building from Git, testing, checking (plan and checklist), waiting for a person's approval and deploying with `--approve`.
+- The Administration Guide has four new chapters: *Redeploying needs a person*, *Configuration as files*, *Containers and Kubernetes* and *CI/CD pipelines*.
+- **`sutra` inside the image**: `docker exec <container> sutra status` (or `docker compose exec engine-1 sutra ...`) works with no address or token: it uses the container's own server and `SUTRA_ADMIN_TOKEN`. An empty `SUTRA_SERVER` works on the database directly.
+- A new Administration Guide part, *Docker, Kubernetes and the application lifecycle*, for teams new to containers: *Docker in plain words, and making the image*, *From development to production, step by step* (with and without Docker, by hand or by pipeline), *Adding an application to a running cluster*, *One Admin Console for the whole cluster* (any engine shows all of it; what happens when the leader stops) and *Questions from DevOps teams*.
+- **The admin API, documented**: a new Administration Guide part, *The admin API*, covers all 258 endpoints of the admin port. It covers addresses, signing in (admin token, system account tokens, sessions and the `X-Sutra` header), permissions, status codes, curl and PowerShell examples, and the `sutra` command beside each endpoint. Then come eight chapters by area, each endpoint with what it does, who may call it, and whether headless engines serve it. The tables are made from the server's own route and permission tables (`server/src/api-docs.ts`, `guard.ts`), and a test fails when an endpoint has no description or a route the `sutra` command calls has no command named.
+- **Upgrading in containers**: engines of different versions must not share a database, so a SutraFlow upgrade stops every engine and starts them on the new tag; rolling restarts are for the same version only (guide and `deploy/kubernetes/README.md`).
+- **Reinstall the same version** (a repair): the upgrader no longer only refuses an installation that already runs the package's version. *Check* says so, and ticking *Reinstall* (or `"reinstall": true` in `upgrade.json`) puts the package's program files in place again through the upgrade's own steps: graceful stop, backup (pg_dump checked), old files moved into the backup, data compared, started and checked, and the previous files put back if a step fails. Data, settings and deployed Sutras stay. It also works when the launcher is missing, and it never takes a newer installation back. *Upgrading* and *Troubleshooting servers* in the Administration Guide explain it.
+- **Keep PostgreSQL near the engines** (about 2 ms round trip or less). Measured with the image and two engines: PostgreSQL 18.2 on the same machine answered 120 simultaneous calls in 3.9 s and survived a hard kill of the leader; a hosted PostgreSQL 17.2 over the internet (75 ms) worked correctly but took 3 to 8 s per call.
 
 ## What is new in 2.1.5
 

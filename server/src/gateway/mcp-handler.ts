@@ -65,6 +65,17 @@ export async function handleMcp(req: FastifyRequest, reply: FastifyReply, secure
     // The realm (policy and token issuer) keeps callers of different identity providers apart (agents.ts).
     return { ...who, realm: `${ref}|${who.claims && typeof who.claims.iss === 'string' ? who.claims.iss : ''}` };
   };
+  // A knowledge tool answers only behind its own MCP server's policy: Knowledge admin asks for one,
+  // and a policy cleared later must not leave private passages open to anyone (2.1.6).
+  const kbAllowed = async (t: { serverId: string }) => {
+    const ref = effectiveResource(t.serverId)?.config.policy || '';
+    const policy = ref ? effectiveResource(ref) : undefined;
+    if (!policy) throw new PolicyError(503, "The knowledge tool's MCP server has no security policy; refusing to serve it unprotected");
+    const who = await authorize(policy, ctx);
+    const g = (req as any).gw;
+    if (g) { g.caller = who.subject; g.appId = who.appId; }
+    return who;
+  };
   const out: any[] = [];
   for (const m of batch) {
     if (!m || m.jsonrpc !== '2.0' || typeof m.method !== 'string') { out.push({ jsonrpc: '2.0', id: m?.id ?? null, error: { code: -32600, message: 'Invalid request' } }); continue; }
@@ -81,7 +92,7 @@ export async function handleMcp(req: FastifyRequest, reply: FastifyReply, secure
       let denied: PolicyError | undefined;
       for (const t of endpointTools) { try { await allowed(t); list.push(toolDefinition(t.node, t.projectId)); } catch (e: any) { denied ||= e; } }
       for (const t of agentTools) { try { await serverAllowed(); list.push(t.def); } catch (e: any) { denied ||= e; } }
-      for (const t of kbTools) { try { await serverAllowed(); list.push(t.def); } catch (e: any) { denied ||= e; } }
+      for (const t of kbTools) { try { await kbAllowed(t); list.push(t.def); } catch (e: any) { denied ||= e; } }
       if (!list.length && denied) { if (denied.headers) reply.headers(denied.headers); return reply.code(denied.status || 401).send({ jsonrpc: '2.0', id: m.id, error: { code: -32001, message: denied.message } }); }
       ok({ tools: list });
     } else if (m.method === 'tools/call') {
@@ -96,7 +107,7 @@ export async function handleMcp(req: FastifyRequest, reply: FastifyReply, secure
       }
       const kt = kbTools.find(x => x.def.name === name);
       if (kt) {
-        try { await serverAllowed(); } catch (e: any) { const pe = e as PolicyError; if (pe.headers) reply.headers(pe.headers); return reply.code(pe.status || 401).send({ jsonrpc: '2.0', id: m.id, error: { code: -32001, message: pe.message } }); }
+        try { await kbAllowed(kt); } catch (e: any) { const pe = e as PolicyError; if (pe.headers) reply.headers(pe.headers); return reply.code(pe.status || 401).send({ jsonrpc: '2.0', id: m.id, error: { code: -32001, message: pe.message } }); }
         ok(await callKnowledgeTool(kt, m.params?.arguments || {}));
         continue;
       }
