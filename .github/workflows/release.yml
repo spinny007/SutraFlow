@@ -180,6 +180,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: out
+          # Only the archives: the image job's build records (*.dockerbuild) are artifacts too and are not release files.
+          pattern: release-*
           merge-multiple: true
       - name: Release
         env:
