@@ -18,6 +18,7 @@
 #   cp deploy/docker/env.example .env      (fill it in; keep it private)
 #   docker compose -f deploy/docker/compose.yml --env-file .env up -d
 #   studio: http://localhost:4800     engine admin API: http://localhost:4801     engine gateway: http://localhost:9080
+#   (the published ports are set in .env: SUTRA_STUDIO_PORT, SUTRA_ENGINE_PORT and the gateway ports)
 #
 # Official image: SUTRA_IMAGE=ghcr.io/spinny007/sutraflow. Offline: `sutraflow image build` makes sutraflow:<version>.
 services:
@@ -28,7 +29,7 @@ services:
       SUTRA_ADMIN_TOKEN: ${SUTRA_ADMIN_TOKEN:?set SUTRA_ADMIN_TOKEN}
       SUTRA_MASTER_KEY: ${SUTRA_STUDIO_MASTER_KEY:-}
       SUTRA_ENVIRONMENT: ${SUTRA_STUDIO_ENVIRONMENT:-development}
-    ports: ["4800:4800", "8080:8080"]
+    ports: ["${SUTRA_STUDIO_PORT:-4800}:4800", "${SUTRA_STUDIO_GATEWAY_PORT:-8080}:8080"]
     volumes: ["studio-data:/data"]
     restart: unless-stopped
 
@@ -39,7 +40,7 @@ services:
       SUTRA_ADMIN_TOKEN: ${SUTRA_ADMIN_TOKEN}
       SUTRA_MASTER_KEY: ${SUTRA_MASTER_KEY:?set SUTRA_MASTER_KEY (openssl rand -base64 32), and back it up}
       SUTRA_ENVIRONMENT: ${SUTRA_ENVIRONMENT:-production}
-    ports: ["4801:4800", "9080:8080", "9443:8443"]
+    ports: ["${SUTRA_ENGINE_PORT:-4801}:4800", "${SUTRA_ENGINE_GATEWAY_PORT:-9080}:8080", "${SUTRA_ENGINE_GATEWAY_TLS_PORT:-9443}:8443"]
     # .sutra packages put in this folder are deployed on start (the pipeline that put them there had them approved).
     volumes: ["engine-data:/data", "${SUTRA_DEPLOY_FOLDER:-./deploy-drop}:/deploy:ro"]
     # Running steps finish before the engine stops.

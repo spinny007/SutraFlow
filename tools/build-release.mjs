@@ -56,7 +56,8 @@ if (!fs.readFileSync(path.join(HOME, 'RELEASE-NOTES.md'), 'utf8').includes(VERSI
 
 /** What the release holds: compiled/runtime folders and explicitly selected guides. */
 const shippedVendors = Object.entries(vendorPolicy.packages).filter(([, rule]) => rule.ship).map(([name]) => `vendor/${name}`);
-const FOLDERS = ['dist', 'bin', 'samples', 'deploy', 'docs/guide-images', 'docs/releases', ...shippedVendors];
+// docs/guide-images is not shipped: the guides embed their screenshots, and the image files are not in Git.
+const FOLDERS = ['dist', 'bin', 'samples', 'deploy', 'docs/releases', ...shippedVendors];
 const FILES = [
   'package.json', 'package-lock.json', 'LICENSE', 'COMMERCIAL-LICENSE.md', 'SECURITY.md', 'README.md', 'RELEASE-NOTES.md',
   'sutraflow.env.example',

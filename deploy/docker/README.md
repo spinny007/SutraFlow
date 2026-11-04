@@ -19,6 +19,8 @@ cp deploy/docker/env.example .env
 docker compose -f deploy/docker/compose.yml --env-file .env up -d
 ```
 
+The ports published on the machine come from `.env` (`SUTRA_STUDIO_PORT` 4800, `SUTRA_STUDIO_GATEWAY_PORT` 8080, `SUTRA_ENGINE_PORT` 4801, `SUTRA_ENGINE_GATEWAY_PORT` 9080, `SUTRA_ENGINE_GATEWAY_TLS_PORT` 9443 by default); `COMPOSE_PROJECT_NAME` names the containers and volumes. The Admin Guide chapter "Docker in plain words" has the whole install step by step with screenshots.
+
 A cluster: PostgreSQL, a studio and two engines that share the work:
 
 ```bash

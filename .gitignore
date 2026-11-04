@@ -15,3 +15,18 @@ docs/releases/2.0.10-aggregate-input-deployment.md
 docs/releases/2.0.10-aggregate-input-usability.md
 docs/code-navigation.md
 docs/releases/2.0.11-deployment.md
+
+# Images: the guides embed their screenshots (base64), so the image files stay on the machine that
+# builds the guides (docs/guide-images) and are not stored in Git. Only the ones README.md shows on
+# GitHub are kept.
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.bmp
+!docs/guide-images/ai-app-dashboard.jpg
+!docs/guide-images/ai-app-shop.jpg
+!docs/guide-images/console-apps.jpg
+!docs/guide-images/designer-ai-chat.jpg
+!docs/guide-images/install-samples.jpg

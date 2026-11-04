@@ -151,6 +151,134 @@ projects:
 <li>Stop it with <code>docker stop sutra-studio</code> (it drains: running steps finish first) and start it again with <code>docker start sutra-studio</code>. The data is in the <code>sutra-studio</code> volume, so <code>docker rm</code> and a new <code>docker run</code> with the same volume keep everything.</li>
 </ol>
 <p>For a studio and an engine together, or a cluster with PostgreSQL, use the Compose files instead: copy <code>deploy/docker/env.example</code> to <code>.env</code>, fill it in, and run <code>docker compose -f deploy/docker/compose.cluster.yml --env-file .env up -d</code>. From a release package, <code>sutraflow docker cluster up</code> does the same and makes the <code>.env</code> for you.</p>
+<p class="h">A production install with Compose, step by step</p>
+<p>A fresh studio and engine from the official image, in its own folder, on ports chosen in <code>.env</code> (here 4900 and 4901, so it does not clash with another SutraFlow on 4800). The screenshots are from a real install on Windows with Docker Desktop; the commands are the same in a Linux shell.</p>
+<ol>
+<li><strong>Remove an old image (only if there is one).</strong> Stopped containers made from it go first (<code>docker rm &lt;name&gt;</code>); their volumes stay.<br><code>docker images</code> then <code>docker rmi sutraflow:2.1.6</code></li>
+</ol>
+[[img:docker-remove-old|An image built earlier on this machine, removed before pulling the official one.]]
+<ol start="2">
+<li><strong>Pull the image.</strong> It is public: no sign-in.<br><code>docker pull ghcr.io/spinny007/sutraflow:2.1.6</code></li>
+</ol>
+[[img:docker-pull|The official image pulled from GitHub (GHCR).]]
+<ol start="3">
+<li><strong>Make a folder</strong> with <code>compose.yml</code> (from <code>deploy/docker</code> in the release package) and an empty <code>deploy-drop</code> folder:<br><code>New-Item -ItemType Directory -Force C:\\sutra-production\\deploy-drop</code><br><code>Copy-Item &lt;package&gt;\\deploy\\docker\\compose.yml C:\\sutra-production\\</code></li>
+<li><strong>Write <code>.env</code></strong> beside it. Two values you make up yourself, nobody hands them to you:
+<ul>
+<li><code>SUTRA_ADMIN_TOKEN</code>: the password of the admin API, any long random text. The containers read it on start and accept exactly that value from then on.</li>
+<li><code>SUTRA_MASTER_KEY</code>: the vault key, 32 random bytes in Base64. <strong>Back it up</strong>: without it the secrets cannot be read.</li>
+</ul>
+In PowerShell, both at once:<br><code>$r = [System.Security.Cryptography.RandomNumberGenerator]::Create(); $t = New-Object byte[] 24; $r.GetBytes($t); $k = New-Object byte[] 32; $r.GetBytes($k)</code><br><code>"SUTRA_ADMIN_TOKEN=" + (($t | ForEach-Object { $_.ToString('x2') }) -join '')</code><br><code>"SUTRA_MASTER_KEY=" + [Convert]::ToBase64String($k)</code><br>On Linux: <code>openssl rand -hex 24</code> and <code>openssl rand -base64 32</code>. Add the rest from <code>env.example</code>: the image, the version, the environment name and the ports.</li>
+</ol>
+[[img:docker-master-key|Making the master key and the admin token (blurred here). A master key must be 32 bytes: the last command checks it.]]
+<p><strong>The master key, before the first start:</strong></p>
+<ul>
+<li>Make it once per environment (development, test and production each have their own) and put it in <code>.env</code> before <code>docker compose up</code>: the engine encrypts every secret with it from the first one on.</li>
+<li>Check it: <code>[Convert]::FromBase64String("&lt;key&gt;").Length</code> must answer <code>32</code>.</li>
+<li><strong>Back it up</strong> at once, apart from the server: a password manager or your secret store. A backup of the database is useless without it, and a new key cannot read the secrets saved with the old one.</li>
+<li>Never change it on a running environment, and never copy production's key to test.</li>
+</ul>
+[[img:docker-env|The .env of this install (the token and the key blurred here). COMPOSE_PROJECT_NAME names the containers and volumes; the ports are the ones published on this machine.]]
+<table class="t"><thead><tr><th>Setting in .env</th><th>Default</th><th>What it is</th></tr></thead><tbody>
+<tr><td><code>SUTRA_STUDIO_PORT</code></td><td>4800</td><td>The studio: designer, Admin Console, Approval Center</td></tr>
+<tr><td><code>SUTRA_STUDIO_GATEWAY_PORT</code></td><td>8080</td><td>The studio's gateway (REST and SOAP services while designing)</td></tr>
+<tr><td><code>SUTRA_ENGINE_PORT</code></td><td>4801</td><td>The engine's Admin Console and admin API</td></tr>
+<tr><td><code>SUTRA_ENGINE_GATEWAY_PORT</code> / <code>SUTRA_ENGINE_GATEWAY_TLS_PORT</code></td><td>9080 / 9443</td><td>The engine's gateway, HTTP and HTTPS: what callers of your APIs use</td></tr>
+<tr><td><code>SUTRA_ENVIRONMENT</code></td><td>production</td><td>The engine's environment name, shown in the console and the logs</td></tr>
+<tr><td><code>COMPOSE_PROJECT_NAME</code></td><td>the folder name</td><td>Prefix of the containers and volumes (<code>sutraflow-production-engine-1</code>)</td></tr>
+</tbody></table>
+<ol start="5">
+<li><strong>Start it</strong> in that folder: <code>docker compose up -d</code></li>
+</ol>
+[[img:docker-up|The volumes, the network and both containers are made and started.]]
+<ol start="6">
+<li><strong>Check it</strong>: <code>docker compose ps</code> shows both <em>healthy</em>, and <code>/ready</code> answers on each port.</li>
+</ol>
+[[img:docker-ready|Both healthy, published on the ports from .env, and ready.]]
+<ol start="7">
+<li><strong>The studio: create the administrator.</strong> Open <code>http://localhost:4900/</code>. The first visit asks for the administrator: a name and a password (twice).</li>
+</ol>
+[[img:docker-studio-setup|First visit to the studio: Create the administrator.]]
+<p>The designer (the editor) opens at once, signed in. It is only in the studio.</p>
+[[img:docker-studio-designer|The designer of the new studio, empty.]]
+<p>The Admin Console is at <code>http://localhost:4900/admin</code>, with the same sign-in.</p>
+[[img:docker-studio-console|The studio's Admin Console.]]
+<ol start="8">
+<li><strong>The engine: make its first administrator</strong> on the command line. The engine is headless: no designer (<code>/</code> answers 404), and it does not offer to create the administrator in the browser.<br><code>docker compose exec -e ADMIN_PW="&lt;first password&gt;" engine sutra user add admin --role administrator --password-from-env ADMIN_PW</code></li>
+</ol>
+[[img:docker-engine-admin|The engine's first administrator, made inside the container (no token to type).]]
+<ol start="9">
+<li><strong>Sign in to the engine's Admin Console</strong> at <code>http://localhost:4901/admin</code> with that name and password.</li>
+</ol>
+[[img:docker-engine-signin|The engine's Admin Console: Sign in.]]
+<p>The first sign-in asks for a password only the administrator knows (skipped when the account was made with <code>--keep-password</code>).</p>
+[[img:docker-engine-new-password|Choose your password: replaces the one given on the command line.]]
+[[img:docker-engine-console|The engine's Admin Console: one engine, the leader, ready; the gateway listening.]]
+<ol start="10">
+<li><strong>A system account for pipelines</strong>, with only the role it needs, and its token (shown once: put it in the pipeline's secret store). Tokens expire and can be revoked one by one; the admin token in <code>.env</code> cannot.<br><code>docker compose exec engine sutra user add ci-deployer --system --role deployer</code><br><code>docker compose exec engine sutra token create ci-deployer --name pipeline --expires-days 90</code></li>
+</ol>
+[[img:docker-system-account|A system account and its token (hidden here), listed and revoked.]]
+<p>People and system accounts can also be managed in the Admin Console, on the <em>Users</em> and <em>System accounts</em> pages.</p>
+<p class="h">After installation: where to sign in</p>
+<p>The <strong>studio</strong> has the designer (the editor). The <strong>engine</strong> is headless: no designer, only the Admin Console and the Approval Center. Sutras are designed in the studio and deployed to the engine. With the ports of the install above:</p>
+<table class="t"><thead><tr><th>Page</th><th>Studio (4900)</th><th>Engine (4901)</th></tr></thead><tbody>
+<tr><td>Designer (editor)</td><td><code>http://localhost:4900/</code></td><td>Not there: <code>/</code> answers 404</td></tr>
+<tr><td>Admin Console</td><td><code>http://localhost:4900/admin</code></td><td><code>http://localhost:4901/admin</code></td></tr>
+<tr><td>Approval Center (business people)</td><td><code>/approvals</code></td><td><code>/approvals</code></td></tr>
+<tr><td>Guides</td><td><code>/guide</code>, <code>/admin-guide</code>, <code>/design-guide</code>, <code>/architecture</code></td><td>The same</td></tr>
+<tr><td>Gateway (callers of your APIs)</td><td>HTTP 4980</td><td>HTTP 4990, HTTPS 4943</td></tr>
+</tbody></table>
+<table class="t"><thead><tr><th></th><th>First administrator</th><th>Sign in</th></tr></thead><tbody>
+<tr><td><b>Studio</b></td><td>Asked for on the first visit (<em>Create the administrator</em>); signed in at once</td><td>The same name and password for the designer and its Admin Console</td></tr>
+<tr><td><b>Engine</b></td><td>Made on the command line (<code>sutra user add ... --role administrator</code>); the browser does not offer it</td><td><code>/admin</code>; the first sign-in asks for a new password (not with <code>--keep-password</code>)</td></tr>
+</tbody></table>
+<p><strong>Separate accounts.</strong> The studio and the engine each have their own database, so their people and system accounts are separate: an administrator of the studio cannot sign in to the engine, and the other way round. Make the people each one needs on each. In a cluster (<code>compose.cluster.yml</code>, Kubernetes) all engines share one PostgreSQL database and therefore one set of accounts.</p>
+<p><strong>A forgotten password or a locked account</strong>, from the server (use <code>studio</code> instead of <code>engine</code> for a studio account):<br><code>docker compose exec -e NEW_PW="&lt;new password&gt;" engine sutra user password admin --password-from-env NEW_PW</code><br><code>docker compose exec engine sutra user unlock admin</code></p>
+<p class="h">People, system accounts and roles in containers</p>
+<table class="t"><thead><tr><th>Kind</th><th>Who</th><th>Signs in with</th></tr></thead><tbody>
+<tr><td><b>Person</b></td><td>Someone who opens the studio or a console</td><td>Name and password</td></tr>
+<tr><td><b>System account</b></td><td>A pipeline, a script, another system</td><td>An API token (no password)</td></tr>
+</tbody></table>
+<table class="t"><thead><tr><th>Role</th><th>What it may do</th></tr></thead><tbody>
+<tr><td><code>administrator</code></td><td>Everything, including users, roles and server settings</td></tr>
+<tr><td><code>developer</code></td><td>Design and test Sutras and connections</td></tr>
+<tr><td><code>deployer</code></td><td>Deploy packages and Sutras, roll back</td></tr>
+<tr><td><code>operator</code></td><td>Run production: runs, approvals, engines, gateway, alerts, audit</td></tr>
+<tr><td><code>approver</code></td><td>Decide approvals</td></tr>
+<tr><td><code>viewer</code></td><td>Read what it is granted, change nothing (a person's default)</td></tr>
+<tr><td><code>apiCaller</code></td><td>Call gateway services (a system account's default)</td></tr>
+</tbody></table>
+<p>Without <code>--project</code> a role applies to all projects; with <code>--project "Orders"</code> to that project only. Run the commands in the container that should hold the account.</p>
+<table class="t"><thead><tr><th>Task</th><th>Command</th></tr></thead><tbody>
+<tr><td>Add a person (the password through a variable, not in the command history; they choose their own at the first sign-in)</td><td><code>docker compose exec -e NEW_PW="&lt;first password&gt;" engine sutra user add priya --role operator --display "Priya Shah" --email priya@example.com --password-from-env NEW_PW</code></td></tr>
+<tr><td>List people and system accounts</td><td><code>docker compose exec engine sutra user list</code></td></tr>
+<tr><td>A new password</td><td><code>docker compose exec -e NEW_PW="&lt;new password&gt;" engine sutra user password priya --password-from-env NEW_PW</code></td></tr>
+<tr><td>Locked after wrong passwords</td><td><code>docker compose exec engine sutra user unlock priya</code></td></tr>
+<tr><td>A lost laptop: end every session</td><td><code>docker compose exec engine sutra user sign-out priya</code></td></tr>
+<tr><td>A leaver (<code>enable</code> brings them back), or delete</td><td><code>docker compose exec engine sutra user disable priya</code>, <code>... sutra user delete priya</code></td></tr>
+<tr><td>A system account for one project's pipeline</td><td><code>docker compose exec engine sutra user add ci-orders --system --role deployer --project "Orders"</code></td></tr>
+<tr><td>Its token (shown once: straight into the CI secret store)</td><td><code>docker compose exec engine sutra token create ci-orders --name github --expires-days 90</code></td></tr>
+<tr><td>Rotate tokens</td><td><code>docker compose exec engine sutra token list ci-orders</code>, then <code>... sutra token revoke ci-orders &lt;token id&gt;</code></td></tr>
+</tbody></table>
+<p>A brand-new project is not on the engine yet: for its first deploy, give the pipeline's account <code>deployer</code> without <code>--project</code>, or deploy once with the admin token.</p>
+<p><strong>Using a token.</strong> Inside a container <code>sutra</code> needs none: it uses that container's own <code>SUTRA_ADMIN_TOKEN</code>. From another machine or a pipeline: <code>sutra status --server http://localhost:4901 --token &lt;token&gt;</code>, or set <code>SUTRA_SERVER</code> and <code>SUTRA_ADMIN_TOKEN</code> once. A system account's token can do only what its role allows. Do not hand out the admin token from <code>.env</code>: it acts as an administrator and can only be replaced by changing <code>.env</code> and restarting.</p>
+<p class="h">Deploying a Sutra package to the engine</p>
+<ul>
+<li><b>By the drop folder:</b> put the <code>.sutra</code> file in the folder named by <code>SUTRA_DEPLOY_FOLDER</code> (<code>C:\\sutra-production\\deploy-drop</code> above), then <code>docker compose restart engine</code>. Packages there are deployed when the engine starts; the pipeline that put them there had them approved.</li>
+<li><b>With a plan and an approval:</b><br><code>docker compose cp orders-1.4.0.sutra engine:/tmp/</code><br><code>docker compose exec engine sutra check /tmp/orders-1.4.0.sutra</code><br><code>docker compose exec engine sutra deploy /tmp/orders-1.4.0.sutra --approve &lt;plan id&gt;</code><br><code>check</code> lists what is new, unchanged, replaced and undeployed and gives the plan id; nothing is replaced without it (<a href="#ch-redeploy-approval">Redeploying needs a person</a>).</li>
+</ul>
+<p class="h">Running it day to day (Compose)</p>
+<table class="t"><thead><tr><th>Task</th><th>Command, in the install folder</th></tr></thead><tbody>
+<tr><td>Status</td><td><code>docker compose ps</code>, <code>docker compose exec engine sutra status</code></td></tr>
+<tr><td>Logs</td><td><code>docker compose logs -f engine</code></td></tr>
+<tr><td>Stop (running steps finish first, up to 45 s)</td><td><code>docker compose stop</code></td></tr>
+<tr><td>Start again</td><td><code>docker compose up -d</code></td></tr>
+<tr><td>Move to other ports</td><td>Change the ports in <code>.env</code>, then <code>docker compose up -d</code></td></tr>
+<tr><td>Upgrade SutraFlow</td><td>Back up, change <code>SUTRA_VERSION</code> in <code>.env</code>, <code>docker compose pull</code>, <code>docker compose up -d</code> (below)</td></tr>
+<tr><td>Remove the containers, keep the data</td><td><code>docker compose down</code></td></tr>
+<tr><td>Remove everything <strong>including the data</strong></td><td><code>docker compose down -v</code>: cannot be undone</td></tr>
+</tbody></table>
+<p>The data is in the Docker volumes (<code>sutraflow-production_studio-data</code> and <code>sutraflow-production_engine-data</code> above); stopping, upgrading and <code>down</code> keep it. From an unpacked release package, <code>sutraflow docker up</code> (Windows: <code>bin\\sutraflow.cmd docker up</code>) uses the same Compose file and makes <code>.env</code> with the admin token and the master key on first use; the ports and the other settings can be added to it afterwards.</p>
 <p class="h">Commands you need every day</p>
 <table class="t"><thead><tr><th>Command</th><th>What it does</th></tr></thead><tbody>
 <tr><td><code>docker ps</code></td><td>Running containers, their ports, and <em>healthy</em> once <code>/health</code> answers</td></tr>
