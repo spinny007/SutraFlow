@@ -139,9 +139,10 @@ const write = (file, buf, count = files.length) => {
   console.log(`Wrote release/${file}: ${count} files, ${(buf.length / 1048576).toFixed(1)} MB, SHA-256 ${sha}`);
 };
 // --only windows|linux: one system's archives (the release workflow builds each on its own system).
+// --only docs: the documents archive alone (after a guide changed; the program archives stay as they are).
 const only = (process.argv.find(a => a.startsWith('--only=')) || '').slice(7);
-if (only !== 'linux') write(`${top}-windows.zip`, zipFiles(entries));
-if (only !== 'windows') write(`${top}-linux.tar.gz`, zlib.gzipSync(tar(entries), { level: 9 }));
+if (!only || only === 'windows') write(`${top}-windows.zip`, zipFiles(entries));
+if (!only || only === 'linux') write(`${top}-linux.tar.gz`, zlib.gzipSync(tar(entries), { level: 9 }));
 
 // The documents for a website (2.1.2): one folder to upload as it is. Each page holds its pictures, and the
 // pages link to each other by file name, so they need nothing else and stay together in one folder.
@@ -166,7 +167,7 @@ ${pages.map(([f, t, d]) => `<a class="doc" href="${f}"><b>${esc(t)}</b>${esc(d)}
 }
 
 // The website of the chat sample (Sutra Sample Shop), to ship on its own with its README (2.1.5).
-if (only !== 'linux') {
+if (!only || only === 'windows') {
   const shop = folderFiles(path.join(HOME, 'samples', 'sutra-sample-shop'), 'sutra-sample-shop');
   write(`sutra-sample-shop-${VERSION}.zip`, zipFiles(shop), shop.length);
 }
