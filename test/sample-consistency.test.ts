@@ -45,7 +45,9 @@ test('entire bundled catalogue has project-local schemas and consistent starter 
         if (!schema || schema.project_id !== p.id) problems.push(`${doc.name}/${n.name}: unresolved ${f.label}`);
       }
       if (n.type === 'start' && n.config.schema && n.config.payload) {
-        const errors = await validateStructured(n.config.schema, JSON.parse(n.config.payload));
+        // An XSD payload schema takes an XML test payload (2.1.7), checked as written.
+        const xml = String(n.config.payload).trim().startsWith('<') ? String(n.config.payload) : undefined;
+        const errors = await validateStructured(n.config.schema, xml ? null : JSON.parse(n.config.payload), xml);
         if (errors.length) problems.push(`${doc.name}/${n.name}: ${errors.join('; ')}`);
       }
       for (const warning of design[n.id]?.warnings || []) if (warning.includes('source field is absent')) problems.push(`${doc.name}/${n.name}: ${warning}`);

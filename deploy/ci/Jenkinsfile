@@ -5,7 +5,7 @@
 // per ${env:NAME} your env/prod.yaml names. The input step shows the plan and asks a person to type
 // its id: the deployment replaces exactly what that person saw.
 pipeline {
-  agent { docker { image 'ghcr.io/spinny007/sutraflow:2.1.6'; args '--user 0:0 --entrypoint=' } }
+  agent { docker { image 'ghcr.io/spinny007/sutraflow:2.1.7'; args '--user 0:0 --entrypoint=' } }
   environment {
     SUTRA = 'node /app/dist/server/cli.js'
     SUTRA_SERVER = credentials('sutraflow-server')

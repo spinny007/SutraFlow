@@ -14,9 +14,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # SutraFlow: one image for the studio and for headless engines (SUTRA_MODE=studio | engine).
 #
-#   docker build --build-arg VERSION=2.1.6 -t sutraflow:2.1.6 .
-#   docker run -p 4800:4800 -p 8080:8080 -v sutra-data:/data sutraflow:2.1.6
-#   docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:2.1.6
+#   docker build --build-arg VERSION=2.1.7 -t sutraflow:2.1.7 .
+#   docker run -p 4800:4800 -p 8080:8080 -v sutra-data:/data sutraflow:2.1.7
+#   docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -v ./deploy:/deploy:ro -p 8080:8080 sutraflow:2.1.7
 #
 # The release workflow publishes it as ghcr.io/<owner>/sutraflow:<version> (2.1.6); any registry works
 # (docker tag and docker push). Without internet: sutraflow image build, from a release package.

@@ -19,7 +19,7 @@ import { get, post } from './api';
 import { fmtTime, Json, since, useToast } from './ui';
 import type { RunDetail } from './types';
 
-interface RunRow { id: string; flowId: string; flowName: string; version: number; status: string; source: string; error: string | null; steps: number; startedAt: string; finishedAt: string | null }
+interface RunRow { id: string; flowId: string; flowName: string; version: number; status: string; source: string; stage?: 'design' | 'runtime'; client?: string | null; error: string | null; steps: number; startedAt: string; finishedAt: string | null }
 interface Approval { id: number; runId: string; flowName: string; step: string; startedAt: string; wait: { message: string; assignee?: string; question?: boolean }; input: any }
 
 export function Runs() {
@@ -27,14 +27,16 @@ export function Runs() {
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [status, setStatus] = useState('');
+  // All by default in the designer; Design = tests, debugging and drafts; Runtime = deployed versions (2.1.7).
+  const [stage, setStage] = useState('');
   const [open, setOpen] = useState<RunDetail | null>(null);
   const [step, setStep] = useState<number | null>(null);
   const [comment, setComment] = useState<Record<number, string>>({});
 
   const load = useCallback(async () => {
-    const [r, a] = await Promise.all([get<RunRow[]>(`/api/runs?limit=200${status ? `&status=${status}` : ''}`), get<Approval[]>('/api/approvals')]);
+    const [r, a] = await Promise.all([get<RunRow[]>(`/api/runs?limit=200${status ? `&status=${status}` : ''}${stage ? `&stage=${stage}` : ''}`), get<Approval[]>('/api/approvals')]);
     setRuns(r); setApprovals(a);
-  }, [status]);
+  }, [status, stage]);
   useEffect(() => {
     load().catch(e => toast(e.message, true));
     const t = window.setInterval(() => load().catch(() => {}), 4000);
@@ -78,18 +80,24 @@ export function Runs() {
         <div className="card">
           <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
             <h2 style={{ margin: 0 }}>History</h2>
-            <select className="inp" style={{ width: 'auto' }} aria-label="Filter by status" value={status} onChange={e => setStatus(e.target.value)}>
-              <option value="">All statuses</option>{['running', 'waiting', 'done', 'failed', 'cancelled'].map(s => <option key={s}>{s}</option>)}
-            </select>
+            <div className="row">
+              <select className="inp" style={{ width: 'auto' }} aria-label="Filter by stage" title="Design: tests, debugging and runs of drafts. Runtime: runs of deployed versions." value={stage} onChange={e => setStage(e.target.value)}>
+                <option value="">All stages</option><option value="design">Design</option><option value="runtime">Runtime</option>
+              </select>
+              <select className="inp" style={{ width: 'auto' }} aria-label="Filter by status" value={status} onChange={e => setStatus(e.target.value)}>
+                <option value="">All statuses</option>{['running', 'waiting', 'done', 'failed', 'cancelled'].map(s => <option key={s}>{s}</option>)}
+              </select>
+            </div>
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table className="t">
-              <thead><tr><th>Started</th><th>Sutra</th><th>Source</th><th>Status</th><th>Steps</th><th>Time</th></tr></thead>
+              <thead><tr><th>Started</th><th>Sutra</th><th>Stage</th><th>Source</th><th>Status</th><th>Steps</th><th>Time</th></tr></thead>
               <tbody>{runs.map(r => (
                 <tr key={r.id} className="click" onClick={() => openRun(r.id)} style={open?.id === r.id ? { background: 'var(--paper)' } : undefined}>
                   <td className="muted" style={{ whiteSpace: 'nowrap' }}>{fmtTime(r.startedAt)}</td>
                   <td>{r.flowName}{r.version ? <span className="muted"> v{r.version}</span> : <span className="muted"> draft</span>}</td>
-                  <td>{r.source}</td>
+                  <td>{r.stage === 'design' ? 'Design' : r.stage === 'runtime' ? 'Runtime' : ''}</td>
+                  <td>{r.source}{r.client ? <span className="muted"> · {r.client}</span> : null}</td>
                   <td><span className={`badge ${r.status}`}>{r.status}</span></td>
                   <td>{r.steps}</td>
                   <td className="muted">{since(r.startedAt, r.finishedAt)}</td>

@@ -59,7 +59,7 @@ function triggersOf(doc: any, names: Map<string, string>) {
 
 export function overview(c: Caller) {
   const f = projectFilter(c, 'project_id');
-  f.sql += ` and source not in ('test', 'debug')`;
+  f.sql += ` and stage = 'runtime'`;
   const since = dayAgo();
   const runs = Object.fromEntries(q.all<any>(`select status, count(*) n from runs where started_at >= ?${f.sql} group by status`, since, ...f.args).map(r => [r.status, Number(r.n)]));
   const deployed = q.all<any>(`select d.enabled, count(*) n from deployments d join flows f on f.id = d.flow_id where 1 = 1${projectFilter(c, 'f.project_id').sql} group by d.enabled`, ...projectFilter(c, 'f.project_id').args);
@@ -90,12 +90,12 @@ export function applications(c: Caller) {
     join flow_versions v on v.flow_id = d.flow_id and v.version = d.version where 1 = 1${f.sql} order by p.name, f.name`, ...f.args);
   const since = dayAgo();
   const counts = new Map<string, Record<string, number>>();
-  for (const r of q.all<any>(`select flow_id, status, count(*) n from runs where started_at >= ? and source not in ('test', 'debug') group by flow_id, status`, since)) {
+  for (const r of q.all<any>(`select flow_id, status, count(*) n from runs where started_at >= ? and stage = 'runtime' group by flow_id, status`, since)) {
     const m = counts.get(r.flow_id) || {};
     m[r.status] = Number(r.n);
     counts.set(r.flow_id, m);
   }
-  const last = new Map(q.all<any>(`select flow_id, max(started_at) at from runs where source not in ('test', 'debug') group by flow_id`).map(r => [r.flow_id, r.at]));
+  const last = new Map(q.all<any>(`select flow_id, max(started_at) at from runs where stage = 'runtime' group by flow_id`).map(r => [r.flow_id, r.at]));
   const byProject = new Map<string, any>();
   for (const r of rows) {
     let p = byProject.get(r.project_id);

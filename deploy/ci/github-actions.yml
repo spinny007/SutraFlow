@@ -34,7 +34,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: { image: 'ghcr.io/spinny007/sutraflow:2.1.6', options: --user root }
+    container: { image: 'ghcr.io/spinny007/sutraflow:2.1.7', options: --user root }
     steps:
       - uses: actions/checkout@v4
       - name: Build the release from the project files
@@ -47,7 +47,7 @@ jobs:
   check:
     needs: build
     runs-on: ubuntu-latest
-    container: { image: 'ghcr.io/spinny007/sutraflow:2.1.6', options: --user root }
+    container: { image: 'ghcr.io/spinny007/sutraflow:2.1.7', options: --user root }
     outputs:
       plan: ${{ steps.plan.outputs.plan }}
     env:
@@ -72,7 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     # The approval: the reviewers read the plan in the check job's summary, then approve.
     environment: production
-    container: { image: 'ghcr.io/spinny007/sutraflow:2.1.6', options: --user root }
+    container: { image: 'ghcr.io/spinny007/sutraflow:2.1.7', options: --user root }
     env:
       SUTRA_SERVER: ${{ secrets.SUTRA_SERVER }}
       SUTRA_ADMIN_TOKEN: ${{ secrets.SUTRA_TOKEN }}

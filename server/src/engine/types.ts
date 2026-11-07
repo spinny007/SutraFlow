@@ -50,6 +50,8 @@ export interface FlowEdge {
   when?: 'always' | 'when' | 'otherwise';
   /** Formula on the previous activity's output ({input.x}), for when = 'when'. */
   condition?: string;
+  /** Line colour chosen by hand in the designer (2.1.7): a palette name; absent = automatic. */
+  color?: string;
 }
 export interface ProcessVariable { name: string; type?: string; value?: any; description?: string }
 export interface FlowDoc {

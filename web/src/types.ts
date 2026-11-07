@@ -79,7 +79,7 @@ export interface FlowNode {
   description?: string;
   settings?: { retries?: number; retryDelayMs?: number; timeoutMs?: number; disabled?: boolean; loop?: '' | 'for each item' | 'repeat while'; loopOver?: string; loopWhile?: string; loopDelayMs?: number; loopMax?: number };
 }
-export interface FlowEdge { id: string; from: string; port: string; to: string; label?: string; when?: 'always' | 'when' | 'otherwise'; condition?: string }
+export interface FlowEdge { id: string; from: string; port: string; to: string; label?: string; when?: 'always' | 'when' | 'otherwise'; condition?: string; /** Line colour chosen by hand (2.1.7): a palette name; absent = automatic. */ color?: string }
 export interface ProcessVariable { name: string; type: string; value: any; description?: string }
 export interface FlowDoc { name: string; description?: string; variables?: ProcessVariable[]; nodes: FlowNode[]; edges: FlowEdge[] }
 
@@ -110,7 +110,9 @@ export interface SNode {
   maxItems?: number;
   namespace?: string;
 }
-export interface NodeDesign { in: SNode | null; out: SNode | null; ports?: Record<string, SNode>; inputTrees: Record<string, SNode>; errors: string[]; warnings: string[] }
+/** The input contract of a called Sutra (server/src/call-contract.ts). */
+export interface CallContract { sutra: string; version: number; trigger: string; ref: string; schemaName: string; kind: 'json' | 'xsd' | ''; strict: boolean; fingerprint: string }
+export interface NodeDesign { in: SNode | null; out: SNode | null; ports?: Record<string, SNode>; inputTrees: Record<string, SNode>; errors: string[]; warnings: string[]; contract?: (CallContract & { follows: boolean; changed: boolean }) | { problem: string } }
 
 export interface MapRule { expr?: string; forEach?: string; where?: string; groupBy?: string; sortBy?: string; sortDesc?: boolean; ifCond?: string; choose?: { when: string; expr: string }[]; otherwise?: string }
 export interface MappingValue { rules: Record<string, MapRule>; fields?: string[]; definitions?: Record<string, { type?: SNode['type']; repeats?: boolean; required?: boolean; minItems?: number; maxItems?: number; description?: string; namespace?: string }> }

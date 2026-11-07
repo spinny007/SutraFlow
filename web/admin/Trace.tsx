@@ -22,7 +22,7 @@ import { PageHead, Err, Empty, useLoad, ago, when, runState } from './shared';
 interface Sutra { id: string; name: string; version: number; deployed: boolean; done: number; failed: number; cancelled: number; open: number; lastRun: string | null; lastFailure: string | null }
 interface Project { id: string; name: string; sutras: Sutra[]; done: number; failed: number; cancelled: number; open: number }
 interface StartedBy { kind: 'person' | 'client' | 'system' | 'run'; id: string; how?: string; app?: string; ip?: string; anonymous?: boolean; recorded?: boolean }
-interface Run { id: string; flowId: string; flowName: string; projectId: string; version: number; status: string; source: string; error: string | null; steps: number; startedAt: string; finishedAt: string | null; ms: number | null; startedBy: StartedBy }
+interface Run { id: string; flowId: string; flowName: string; projectId: string; version: number; status: string; source: string; stage?: 'design' | 'runtime'; client?: string | null; error: string | null; steps: number; startedAt: string; finishedAt: string | null; ms: number | null; startedBy: StartedBy }
 
 /** Who or what started a run, in words: a person, an API client (anonymous where the route has no security policy), the system, or another run. */
 function by(b: StartedBy | undefined) {
@@ -69,6 +69,8 @@ export function Trace() {
   const [projectId, setProjectId] = useState('');
   const [flowId, setFlowId] = useState('');
   const [status, setStatus] = useState('');
+  // Runtime (deployed versions) by default; Design shows tests, debugging and drafts (2.1.7).
+  const [stage, setStage] = useState('runtime');
   const [text, setText] = useState('');
   const [search, setSearch] = useState('');
   const [found, setFound] = useState<Found | null>(null);
@@ -82,6 +84,7 @@ export function Trace() {
     if (projectId) p.set('projectId', projectId);
     if (flowId) p.set('flowId', flowId);
     if (status) p.set('status', status);
+    p.set('stage', stage);
     if (search) p.set('q', search);
     if (before) p.set('before', before);
     return `/api/console/trace/runs?${p}`;
@@ -90,7 +93,7 @@ export function Trace() {
     if (!projectId && !search) { setFound(null); return; }
     setErr('');
     get<Found>(query()).then(setFound, e => setErr(e.message));
-  }, [hours, projectId, flowId, status, search]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [hours, projectId, flowId, status, stage, search]); // eslint-disable-line react-hooks/exhaustive-deps
   const more = async () => { if (!found?.next) return; try { const r = await get<Found>(query(found.next)); setFound({ runs: [...found.runs, ...r.runs], more: r.more, next: r.next }); } catch (e: any) { setErr(e.message); } };
 
   return (
@@ -142,6 +145,10 @@ export function Trace() {
               <select id="tr-status" className="inp" value={status} onChange={e => setStatus(e.target.value)}>
                 <option value="">All</option><option value="failed">Failed</option><option value="done">Done</option><option value="open">Open (running, waiting, queued)</option><option value="cancelled">Cancelled</option>
               </select></div>
+            <div className="fld"><label htmlFor="tr-stage">Stage</label>
+              <select id="tr-stage" className="inp" value={stage} onChange={e => setStage(e.target.value)} title="Runtime: runs of deployed versions. Design: tests, debugging and runs of drafts.">
+                <option value="runtime">Runtime</option><option value="design">Design</option><option value="all">All</option>
+              </select></div>
           </div>
           {found.runs.length ? (
             <div className="c-tablewrap"><table className="t c-table">
@@ -149,7 +156,7 @@ export function Trace() {
               <tbody>{found.runs.map(r => (
                 <tr key={r.id} className="click" aria-selected={runId === r.id} tabIndex={0} onClick={() => setRunId(r.id)} onKeyDown={e => { if (e.key === 'Enter') setRunId(r.id); }}>
                   <td className="nowrap" title={when(r.startedAt)}>{ago(r.startedAt)}<div className="muted xs mono">{r.id.slice(0, 8)}</div></td>
-                  <td>{r.flowName} <span className="muted xs">v{r.version}</span></td><td>{runState(r.status)}</td><td className="xs">{by(r.startedBy)}<div className="muted">{r.source}</div></td>
+                  <td>{r.flowName} <span className="muted xs">{r.version ? `v${r.version}` : 'draft'}{r.stage === 'design' ? ' · design' : ''}</span></td><td>{runState(r.status)}</td><td className="xs">{by(r.startedBy)}<div className="muted">{r.source}{r.client ? ` · ${r.client}` : ''}</div></td>
                   <td className="right nowrap">{duration(r.ms)}</td><td className="right">{r.steps}</td><td className="c-err">{r.error || ''}</td>
                 </tr>
               ))}</tbody>

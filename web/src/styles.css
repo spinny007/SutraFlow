@@ -19,6 +19,8 @@
   --edge: #6E8189; --focus: #2F6FEB; --ok: #1B8A4E; --err: #C2362F; --warn: #B7791F;
   --c-general: #3E6A86; --c-flow: #7B5CB8; --c-data: #B0435F; --c-ai: #C88A00; --c-auto: #0E7A62; --c-soap: #2C7A8C;
   --grid: rgba(23, 36, 43, .13);
+  /* Line colours (2.1.7): names stored in the Sutra, values per theme; see web/src/line-colours.ts. */
+  --lc-blue: #1F6FD1; --lc-orange: #B85F00; --lc-green: #1B7F52; --lc-purple: #7B4FC9; --lc-teal: #0B7F95; --lc-gold: #8A6D00; --lc-pink: #B83A80; --lc-slate: #4E5D7D;
   --shadow: 0 1px 0 rgba(23, 36, 43, .06), 0 8px 18px -10px rgba(23, 36, 43, .45);
   --sans: "Sora", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
@@ -29,6 +31,7 @@
     --surface: #121A1E; --paper: #0D1417; --card: #1A252A; --ink: #E2E9E7; --muted: #8FA0A6; --line: #2B393F;
     --edge: #7D9098; --focus: #6EA0FF; --ok: #3CC17A; --err: #F06A62; --warn: #E5A93B;
     --c-general: #6FA0C2; --c-flow: #A88BE0; --c-data: #E07393; --c-ai: #F0B429; --c-auto: #34B892; --c-soap: #4FB3C8;
+    --lc-blue: #6EA8FF; --lc-orange: #F2A04B; --lc-green: #4CC98A; --lc-purple: #B69CFF; --lc-teal: #4FD0E6; --lc-gold: #E3C44A; --lc-pink: #F07BBE; --lc-slate: #A4B2CC;
     --grid: rgba(226, 233, 231, .09); --shadow: 0 1px 0 rgba(0, 0, 0, .3), 0 10px 22px -12px rgba(0, 0, 0, .8);
     color-scheme: dark;
   }
@@ -37,6 +40,7 @@
   --surface: #121A1E; --paper: #0D1417; --card: #1A252A; --ink: #E2E9E7; --muted: #8FA0A6; --line: #2B393F;
   --edge: #7D9098; --focus: #6EA0FF; --ok: #3CC17A; --err: #F06A62; --warn: #E5A93B;
   --c-general: #6FA0C2; --c-flow: #A88BE0; --c-data: #E07393; --c-ai: #F0B429; --c-auto: #34B892; --c-soap: #4FB3C8;
+  --lc-blue: #6EA8FF; --lc-orange: #F2A04B; --lc-green: #4CC98A; --lc-purple: #B69CFF; --lc-teal: #4FD0E6; --lc-gold: #E3C44A; --lc-pink: #F07BBE; --lc-slate: #A4B2CC;
   --grid: rgba(226, 233, 231, .09); --shadow: 0 1px 0 rgba(0, 0, 0, .3), 0 10px 22px -12px rgba(0, 0, 0, .8);
   color-scheme: dark;
 }
@@ -92,6 +96,7 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .canvas .react-flow__edge-textbg { fill: var(--paper); }
 .flowbar { position: absolute; left: 12px; right: 12px; top: 10px; z-index: 5; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; pointer-events: none; }
 .flowbar > * { pointer-events: auto; }
+.flowbar .bar-group { display: inline-flex; gap: 8px; align-items: center; flex-wrap: nowrap; }
 .flowbar .name { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 6px 10px; font-weight: 600; min-width: 160px; }
 .pill { display: inline-flex; align-items: center; gap: 6px; background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; font-size: 12px; color: var(--muted); }
 .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
@@ -129,6 +134,15 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .fld { margin: 0 0 12px; }
 .fld > label, .fld > .lbl { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; }
 .fld .hint { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+/* Notes under a field from the step editor (2.1.7): the Call Sutra contract and the Dashboard page link. */
+.hint.contract-note, .hint.page-link { font-size: 12px; color: var(--muted); line-height: 1.45; margin: 4px 0 12px; }
+.warnbox.contract-note { margin: 4px 0 12px; white-space: normal; }
+.contract-note .btn, .page-link .btn { margin-top: 6px; }
+/* Where the references in a field come from (2.1.7). */
+.ref-origins { list-style: none; margin: 5px 0 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); display: grid; gap: 3px; font-size: 11.5px; }
+.ref-origins li { display: grid; grid-template-columns: minmax(0, max-content) 1fr; gap: 8px; align-items: baseline; color: var(--muted); }
+.ref-origins code { font-family: var(--mono); color: var(--ink); overflow-wrap: anywhere; }
+.ref-origins li.warn, .ref-origins li.warn code { color: var(--err); }
 .fld input[type=text], .fld input[type=number], .fld input[type=password], .fld select, .fld textarea, .inp {
   width: 100%; border: 1px solid var(--line); background: var(--card); border-radius: 7px; padding: 6px 9px; }
 .fld textarea { min-height: 64px; resize: vertical; }
@@ -339,6 +353,30 @@ table.t tr.click:hover td { background: var(--paper); }
 .okbox { border: 1px solid color-mix(in srgb, #34c759 45%, transparent); background: color-mix(in srgb, #34c759 12%, transparent); border-radius: 8px; padding: 8px 10px; margin: 8px 0; font-size: 13px; }
 .canvas .react-flow__edge.cond-edge .react-flow__edge-path { stroke: var(--focus); stroke-width: 2; }
 .canvas .react-flow__edge.else-edge .react-flow__edge-path { stroke-dasharray: 2 5; }
+/* Canvas reading aids (2.1.7): empty lines dotted, coloured lines, highlighting, the step menu. */
+.canvas .react-flow__edge.empty-edge .react-flow__edge-path { stroke-dasharray: 2 5; }
+.canvas .react-flow__edge.coloured-edge .react-flow__edge-path { stroke-width: 2.6; }
+.canvas .react-flow__edge.hl-on .react-flow__edge-path { stroke-width: 3.4; }
+.canvas .react-flow__edge.hl-dim { opacity: .18; }
+.anode.hl-dim { opacity: .35; }
+.anode.hl-on:not(.selected) { outline: 1px dashed var(--focus); outline-offset: 2px; }
+.btn.on { border-color: var(--focus); color: var(--focus); background: color-mix(in srgb, var(--focus) 12%, var(--card)); }
+.step-menu { position: fixed; z-index: 50; background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 10px; min-width: 220px; }
+.step-menu-title { font-size: 12.5px; font-weight: 600; margin-bottom: 8px; }
+.swatches { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.swatch { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--card); outline: 1px solid var(--line); cursor: pointer; padding: 0; }
+.swatch[aria-pressed="true"] { outline: 2px solid var(--ink); }
+.incoming-key { border: 1px solid var(--line); border-radius: 8px; background: var(--card); padding: 8px 10px; margin: 0 0 10px; font-size: 12.5px; }
+.incoming-key ul { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.swatch-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; background: var(--edge); }
+.lc-blue { background: var(--lc-blue); }
+.lc-orange { background: var(--lc-orange); }
+.lc-green { background: var(--lc-green); }
+.lc-purple { background: var(--lc-purple); }
+.lc-teal { background: var(--lc-teal); }
+.lc-gold { background: var(--lc-gold); }
+.lc-pink { background: var(--lc-pink); }
+.lc-slate { background: var(--lc-slate); }
 .aimodels { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 10px 0; display: grid; gap: 8px; }
 .aimodels .h { margin: 6px 0 0; font-weight: 700; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }

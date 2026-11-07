@@ -220,6 +220,58 @@ async function main() {
       node('Error handler').querySelector('.anode').click(); await wait(400); tab('Output').click(); await wait(600);`);
     await shot('sample-trycatch');
 
+    // 13. What a step can see, line colours, the Call Sutra contract and the page link (2.1.7):
+    // a throwaway project with the database dashboard and XML samples, removed afterwards.
+    const pathDemo = await js(`
+      const api = async (m, u, b) => { const r = await fetch(u, { method: m, headers: { 'content-type': 'application/json', 'x-sutra': '1' }, body: b ? JSON.stringify(b) : undefined }); return r.json(); };
+      const p = await api('POST', '/api/projects', { name: 'Designer tour ' + Date.now() });
+      await api('POST', '/api/projects/' + p.id + '/samples', { ids: ['dashboarddb', 'xml'] });
+      localStorage.setItem('sutra.project', p.id);
+      return p.id;`);
+    await go('#designer'); await cdp('Page.reload', {}); await sleep(2500);
+    await js(`${H} [...document.querySelectorAll('.ltabs button')].find(b => b.textContent === 'Palettes')?.click(); await wait(300);
+      await openFlow('Sample: Sales dashboard on a database'); await wait(1200); document.querySelector('.react-flow__pane')?.click(); await wait(300);`);
+    // Closer: the steps of this wide Sutra are readable at about 1.15 times the fitted size.
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 648, y: 470, deltaX: 0, deltaY: -70 }); await sleep(700);
+    // The line from Regions into All charts, selected: its side panel says why it has its colour.
+    await js(`${H} const fl = await (await fetch('/api/flows?projectId=' + localStorage.getItem('sutra.project'))).json();
+      const f = fl.find(x => x.name === 'Sample: Sales dashboard on a database'); const r = await (await fetch('/api/flows/' + f.id)).json(); const doc = r.doc || r;
+      const id = n => doc.nodes.find(x => x.name === n)?.id; const e = doc.edges.find(x => x.from === id('Regions') && x.to === id('All charts'));
+      document.querySelector('.react-flow__edge[data-id="' + e.id + '"] path')?.dispatchEvent(new MouseEvent('click', { bubbles: true })); await wait(700);`);
+    await shot('paths-colours');
+    await js(`${H} node('Revenue by category')?.querySelector('.anode').click(); await wait(400); btn('Path')?.click(); await wait(600);`);
+    await shot('paths-path');
+    await js(`${H} btn('Path')?.click(); await wait(200); tab('Input')?.click(); await wait(1200);
+      document.querySelectorAll('.srow.root').forEach(r => { const b = r.querySelector('button.tw'); if (b?.getAttribute('aria-label') === 'Collapse' && r.dataset.ref !== 'trigger') b.click(); }); await wait(300);
+      const t = document.querySelector('.srow.root[data-ref="trigger"]'); const b = t?.querySelector('button.tw'); if (b?.getAttribute('aria-label') === 'Expand') b.click(); await wait(300);
+      const pr = document.querySelector('.srow[data-ref="trigger.params"] button.tw'); if (pr?.getAttribute('aria-label') === 'Expand') pr.click(); await wait(300);
+      t?.scrollIntoView({ block: 'start' }); await wait(300);`);
+    await shot('paths-trigger-data');
+    await js(`${H} node('All charts')?.querySelector('.anode').click(); await wait(400); tab('Input')?.click(); await wait(1000);`);
+    await shot('paths-input-key');
+    await js(`${H} node('Filtered orders')?.querySelector('.anode').click(); await wait(400); tab('General')?.click(); await wait(700);
+      const list = document.querySelector('.ref-origins'); const side = document.querySelector('.side .tabbody'); if (list && side) side.scrollTop = Math.max(0, list.offsetTop - 420);`);
+    await shot('paths-ref-origin');
+    await js(`${H} node('Sales on MySQL')?.querySelector('.anode').click(); await wait(400); tab('General')?.click(); await wait(900);`);
+    await shot('dashboard-page-link');
+    await js(`${H} const n = node('Regions'); const r = n.getBoundingClientRect();
+      n.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 })); await wait(600);`);
+    await shot('paths-step-menu');
+    await js(`${H} document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); document.querySelector('.react-flow__pane')?.click(); await wait(300);
+      await openFlow('Sample: Call the XML order check'); await wait(1200);
+      node('Check order')?.querySelector('.anode').click(); await wait(500); tab('General')?.click(); await wait(1200);
+      const note = document.querySelector('.contract-note'); const side = document.querySelector('.side .tabbody'); if (note && side) side.scrollTop = Math.max(0, note.offsetTop - 380);`);
+    await shot('contract-note');
+    await js(`${H} btn('▶ Test')?.click(); await wait(3000);`);
+    await go('#runs');
+    await js(`${H} await wait(800);`);
+    await shot('runs-stage');
+    await go('#designer');
+    await js(`await (async () => { const fl = await (await fetch('/api/flows?projectId=${pathDemo}')).json(); for (const f of fl) await fetch('/api/flows/' + f.id, { method: 'DELETE', headers: { 'x-sutra': '1' } });
+      const rs = await (await fetch('/api/resources?projectId=${pathDemo}')).json().catch(() => []); for (const r of (Array.isArray(rs) ? rs : [])) await fetch('/api/resources/' + r.id, { method: 'DELETE', headers: { 'x-sutra': '1' } });
+      await fetch('/api/projects/${pathDemo}', { method: 'DELETE', headers: { 'x-sutra': '1' } }); localStorage.setItem('sutra.project', 'default'); })()`);
+    await cdp('Page.reload', {}); await sleep(2500);
+
     // Admin Console: the Database page (where the move to PostgreSQL starts).
     await cdp('Page.navigate', { url: `${BASE}/admin#database` }); await sleep(2500);
     await js(`[...document.querySelectorAll('.c-nav a')].find(a => a.textContent.trim() === 'Database')?.click(); await new Promise(r => setTimeout(r, 1500));`);

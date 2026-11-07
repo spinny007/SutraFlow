@@ -25,7 +25,7 @@ components:
   - ../../components/studio
 images:
   - name: ghcr.io/spinny007/sutraflow
-    newTag: "2.1.6"
+    newTag: "2.1.7"
 replicas:
   - name: sutraflow-engine
     count: 1

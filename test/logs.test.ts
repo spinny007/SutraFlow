@@ -83,7 +83,7 @@ test('project log: developers read it by level and words, and clear it and their
     const id = await engine.startRun({ doc, flowId: f.id, projectId: shop, source: 'test' });
     await engine.waitFor(id, 10000);
   }
-  const live = await engine.startRun({ doc, flowId: f.id, projectId: shop, source: 'rest' });
+  const live = await engine.startRun({ doc, flowId: f.id, projectId: shop, source: 'rest', version: 1 });
   await engine.waitFor(live, 10000);
 
   let log = (await call(dev, 'GET', `/api/projects/${shop}/log`)).json();

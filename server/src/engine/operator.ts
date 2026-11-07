@@ -38,7 +38,7 @@ export interface OperatorPorts {
   finish(runId: string, status: string): void;
   runEnded(runId: string, flowId: string | null, source: string, status: string): Promise<void>;
   resumeCaller(runId: string, status: string): Promise<void>;
-  observeRun(runId: string, sutra: string, status: string, startedAt: string, source: string | null, trace?: RunState['trace'], error?: string): void;
+  observeRun(runId: string, sutra: string, status: string, startedAt: string, source: string | null, trace?: RunState['trace'], error?: string, stage?: string | null): void;
   cancelMemory(runId: string, reason?: string): Promise<boolean> | undefined;
 }
 
@@ -86,7 +86,7 @@ export class Operator {
     for (const id of flows) {
       const max = Number(sutraTuning(id).maxRuns) || 0;
       await store.transaction(`flow:${id}`, async tx => {
-        let active = Number((await tx.get<any>(`select count(*) n from runs where flow_id = ? and status in ('running', 'waiting', 'paused') and source not in ('test', 'debug')`, id))?.n || 0);
+        let active = Number((await tx.get<any>(`select count(*) n from runs where flow_id = ? and status in ('running', 'waiting', 'paused') and stage = 'runtime'`, id))?.n || 0);
         while (max === 0 || active < max) {
           const next = await tx.get<{ id: string }>(`select id from runs where flow_id = ? and status = 'queued' order by started_at, id limit 1`, id);
           if (!next) break;
@@ -107,7 +107,7 @@ export class Operator {
       const min = Number(tuning.runTimeoutMin) || 0;
       if (!min) continue;
       const cutoff = new Date(nowMs - min * 60000).toISOString();
-      for (const run of await this.ports.store().all<{ id: string }>(`select id from runs where flow_id = ? and status in ('running', 'waiting', 'paused') and source not in ('test', 'debug') and started_at < ?`, flowId, cutoff)) if (await this.cancel(run.id, `Run time limit of ${min} min reached`)) count++;
+      for (const run of await this.ports.store().all<{ id: string }>(`select id from runs where flow_id = ? and status in ('running', 'waiting', 'paused') and stage = 'runtime' and started_at < ?`, flowId, cutoff)) if (await this.cancel(run.id, `Run time limit of ${min} min reached`)) count++;
     }
     return count;
   }
@@ -148,7 +148,7 @@ export class Operator {
     this.ports.cancelReply(runId); this.ports.remember(runId); this.ports.finish(runId, 'cancelled');
     await this.ports.runEnded(runId, run.row.flow_id, run.row.source, 'cancelled');
     if (run.row.source === 'sutra' || run.row.source === 'process') void this.ports.resumeCaller(runId, 'cancelled').catch(() => {});
-    this.ports.observeRun(runId, run.doc.name, 'cancelled', run.row.started_at, run.row.source, run.state.trace, 'Run cancelled');
+    this.ports.observeRun(runId, run.doc.name, 'cancelled', run.row.started_at, run.row.source, run.state.trace, 'Run cancelled', run.row.stage);
     for (const child of children) await this.cancel(child);
     this.ports.notify(runId);
     return true;

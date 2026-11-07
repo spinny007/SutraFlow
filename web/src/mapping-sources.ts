@@ -47,19 +47,12 @@ export function mappingRunContext(run: { id: string; flowName: string; version?:
 
 export function mappingSources(doc: FlowDoc, nodeId: string, activities: (Pick<ActivityMeta, 'type' | 'name'> & Partial<Pick<ActivityMeta, 'ports'>>)[]) {
   const label = (node: FlowNode) => `${node.name} (${activities.find(a => a.type === node.type)?.name || node.type})`;
-  const walk = (direction: 'before' | 'after') => {
-    const seen = new Set<string>([nodeId]);
-    const pending = [nodeId];
-    while (pending.length) {
-      const id = pending.pop()!;
-      for (const e of doc.edges) {
-        const next = direction === 'before' ? e.to === id ? e.from : null : e.from === id ? e.to : null;
-        if (next && !seen.has(next)) { seen.add(next); pending.push(next); }
-      }
-    }
-    return seen;
-  };
-  const before = walk('before'), after = walk('after');
+  // Steps before this one: every step from which a chain of connections leads here (joins included).
+  const before = new Set<string>([nodeId]);
+  for (const pending = [nodeId]; pending.length;) {
+    const id = pending.pop()!;
+    for (const e of doc.edges) if (e.to === id && !before.has(e.from)) { before.add(e.from); pending.push(e.from); }
+  }
   const incoming = new Set(doc.edges.filter(e => e.to === nodeId).map(e => e.from));
   const direct = doc.nodes.filter(n => n.id !== nodeId && incoming.has(n.id));
   const ports = direct.length === 1 ? activities.find(a => a.type === direct[0].type)?.ports : undefined;
@@ -71,8 +64,8 @@ export function mappingSources(doc: FlowDoc, nodeId: string, activities: (Pick<A
     inputLabel: direct.length === 1 ? `${label(direct[0])} — current input` : direct.length ? `Current input — incoming activities: ${direct.map(label).join(', ')}` : 'Current input (starter / supplied data)',
     // A unique predecessor already appears as current input. Named-output formulas remain valid;
     // omit only its redundant browser entry, never distinct multi-input or parallel sources.
-    sources: doc.nodes.filter(n => n.id !== nodeId && before.has(n.id) && n.id !== alias).map(n => ({ node: n, label: label(n) })).concat(
-      doc.nodes.filter(n => !before.has(n.id) && !after.has(n.id)).map(n => ({ node: n, label: `${label(n)} — other branch; available only after completion` })),
-    ),
+    // The path rule (2.1.7): only steps before this one on a connected path. Steps in other lanes are
+    // never offered; the engine refuses them (server/src/engine/paths.ts holds the same rule).
+    sources: doc.nodes.filter(n => n.id !== nodeId && before.has(n.id) && n.id !== alias).map(n => ({ node: n, label: label(n) })),
   };
 }

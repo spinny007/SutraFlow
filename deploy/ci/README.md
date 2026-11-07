@@ -1,4 +1,4 @@
-# SutraFlow CI/CD templates (2.1.6)
+# SutraFlow CI/CD templates (2.1.7)
 
 One pipeline in four dialects, for the repository that holds your project files (the studio's Git tab):
 

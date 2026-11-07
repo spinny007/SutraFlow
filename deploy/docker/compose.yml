@@ -23,7 +23,7 @@
 # Official image: SUTRA_IMAGE=ghcr.io/spinny007/sutraflow. Offline: `sutraflow image build` makes sutraflow:<version>.
 services:
   studio:
-    image: ${SUTRA_IMAGE:-sutraflow}:${SUTRA_VERSION:?set SUTRA_VERSION, e.g. 2.1.6}
+    image: ${SUTRA_IMAGE:-sutraflow}:${SUTRA_VERSION:?set SUTRA_VERSION, e.g. 2.1.7}
     environment:
       SUTRA_MODE: studio
       SUTRA_ADMIN_TOKEN: ${SUTRA_ADMIN_TOKEN:?set SUTRA_ADMIN_TOKEN}

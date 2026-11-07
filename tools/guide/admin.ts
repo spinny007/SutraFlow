@@ -261,7 +261,7 @@ In PowerShell, both at once:<br><code>$r = [System.Security.Cryptography.RandomN
 <tr><td>Rotate tokens</td><td><code>docker compose exec engine sutra token list ci-orders</code>, then <code>... sutra token revoke ci-orders &lt;token id&gt;</code></td></tr>
 </tbody></table>
 <p>A brand-new project is not on the engine yet: for its first deploy, give the pipeline's account <code>deployer</code> without <code>--project</code>, or deploy once with the admin token.</p>
-<p><strong>Using a token.</strong> Inside a container <code>sutra</code> needs none: it uses that container's own <code>SUTRA_ADMIN_TOKEN</code>. From another machine or a pipeline: <code>sutra status --server http://localhost:4901 --token &lt;token&gt;</code>, or set <code>SUTRA_SERVER</code> and <code>SUTRA_ADMIN_TOKEN</code> once. A system account's token can do only what its role allows. Do not hand out the admin token from <code>.env</code>: it acts as an administrator and can only be replaced by changing <code>.env</code> and restarting.</p>
+<p><strong>Using a token.</strong> Inside a container <code>sutra</code> needs none: it uses that container's own <code>SUTRA_ADMIN_TOKEN</code>, which the compose files and manifests set. A container started by hand without it answers <em>A token is required</em>: add <code>-e SUTRA_ADMIN_TOKEN=...</code> to <code>docker run</code>, or pass <code>--token</code>. From another machine or a pipeline: <code>sutra status --server http://localhost:4901 --token &lt;token&gt;</code>, or set <code>SUTRA_SERVER</code> and <code>SUTRA_ADMIN_TOKEN</code> once. A system account's token can do only what its role allows. Do not hand out the admin token from <code>.env</code>: it acts as an administrator and can only be replaced by changing <code>.env</code> and restarting.</p>
 <p class="h">Deploying a Sutra package to the engine</p>
 <ul>
 <li><b>By the drop folder:</b> put the <code>.sutra</code> file in the folder named by <code>SUTRA_DEPLOY_FOLDER</code> (<code>C:\\sutra-production\\deploy-drop</code> above), then <code>docker compose restart engine</code>. Packages there are deployed when the engine starts; the pipeline that put them there had them approved.</li>
@@ -844,6 +844,7 @@ bin\\sutraflow.cmd upgrade --config upgrade.json</pre>
 <tr><td><code>SUTRA_KEEPALIVE_MS</code></td><td>65000</td><td>Idle connections kept by the admin and gateway servers; above the idle time of a load balancer in front</td></tr>
 <tr><td><code>SUTRA_HEARTBEAT_MS</code>, <code>SUTRA_DRAIN_MS</code></td><td>5000, 30000</td><td>Heartbeat (dead after three missed); time running steps get on shutdown</td></tr>
 <tr><td><code>SUTRA_RUN_RETENTION_DAYS</code>, <code>SUTRA_AUDIT_RETENTION_DAYS</code></td><td>30, 365</td><td>Delete finished runs and audit entries after so many days; 0 = keep</td></tr>
+<tr><td><code>SUTRA_DESIGN_RUN_RETENTION_DAYS</code></td><td>7</td><td>Delete finished design runs (tests, debugging, drafts) after so many days, before the runtime retention; 0 = only the runtime retention applies (2.1.7)</td></tr>
 <tr><td><code>SUTRA_REPLY_TIMEOUT_MS</code>, <code>SUTRA_MAX_STEPS</code></td><td>60000, 10000</td><td>How long API callers wait for a reply; steps per run</td></tr>
 <tr><td><code>SUTRA_LOG_FORMAT</code>, <code>SUTRA_METRICS_TOKEN</code></td><td>text, (none)</td><td><code>json</code>: log lines on standard output; bearer token for <code>/metrics</code></td></tr>
 <tr><td><code>OTEL_EXPORTER_OTLP_ENDPOINT</code>, <code>OTEL_SERVICE_NAME</code></td><td>(none), sutraflow</td><td>OpenTelemetry collector (OTLP/HTTP) and the service name on traces</td></tr>
@@ -893,7 +894,7 @@ sutra token create ci-orders --name github --expires-days 90</pre>
 </tbody></table>
 <p class="h">Metrics</p>
 <ul>
-<li><code>sutra_runs_started_total{sutra,source}</code>, <code>sutra_runs_finished_total{sutra,status}</code>, <code>sutra_run_duration_seconds</code></li>
+<li><code>sutra_runs_started_total{sutra,source,stage}</code>, <code>sutra_runs_finished_total{sutra,status,stage}</code>, <code>sutra_run_duration_seconds{sutra,status,stage}</code>; <code>stage</code> is <code>design</code> or <code>runtime</code> (2.1.7), so dashboards can leave out tests with <code>stage="runtime"</code></li>
 <li><code>sutra_steps_total{activity,outcome}</code> (done, error handled by an error output, failed), <code>sutra_step_duration_seconds</code>, <code>sutra_step_retries_total</code></li>
 <li><code>sutra_gateway_requests_total{kind,status}</code>, <code>sutra_gateway_request_duration_seconds</code></li>
 <li><code>sutra_tasks{status}</code>, <code>sutra_engine_running_steps</code>, <code>sutra_engine_workers</code>, <code>sutra_engine_leader</code>, <code>sutra_engines_alive</code>, <code>sutra_listeners{state}</code>, <code>sutra_info{version,mode,engine}</code></li>
@@ -905,8 +906,16 @@ sutra token create ci-orders --name github --expires-days 90</pre>
 <li><code>SUTRA_LOG_FORMAT=json</code> writes one JSON object per line on standard output: time, level, engine, project, Sutra, run, step, message. Each project's own log file stays as configured.</li>
 <li>The launcher's output log of each process: <code>&lt;data&gt;/logs/studio.out.log</code>, <code>engine.out.log</code>; the installer's: <code>installer.log</code>.</li>
 </ul>
+<p class="h">Design runs and runtime runs (2.1.7)</p>
+<p>Every run records its <strong>stage</strong>:</p>
+<ul>
+<li><strong>design</strong>: a test or debug run from the designer, any run of a draft (version 0), and a Sutra called by a design run;</li>
+<li><strong>runtime</strong>: deployed work, started by its trigger, the Run API or a runtime caller.</li>
+</ul>
+<p>Runs started by hand also record the <strong>client</strong>: <em>studio</em>, <em>api</em> or <em>cli</em> (the <code>sutra</code> command sends <code>x-sutra-client: cli</code>); automatic starts have none. One rule decides the stage, so every figure agrees: the Admin Console Overview and Applications, alerts, Traceability, the Operator view and the runs-at-once limit count runtime runs only. Traceability shows runtime runs by default with a <em>Stage</em> filter (Runtime, Design, All); the designer's Runs shows all, with the same filter. The upgrade to 2.1.7 fills the stage of older runs from their source and version, in batches, on SQLite and PostgreSQL.</p>
 <p class="h">Runs and housekeeping</p>
 <ul>
+<li>Finished <strong>design</strong> runs older than <code>SUTRA_DESIGN_RUN_RETENTION_DAYS</code> (7; engine tuning <em>Keep design runs</em>; <code>sutra engines tune --design-retention-days</code>) are deleted first, so tests do not fill the database; 0 leaves them to the runtime retention below. Runtime runs are not affected.</li>
 <li>Finished runs (done, failed, cancelled) older than <code>SUTRA_RUN_RETENTION_DAYS</code> (30; 0 keeps everything, per Sutra in its tuning) are deleted with their steps by the leader, about once a minute. Waiting runs, such as approvals and timers, are never deleted. Admin Console, Engines, <em>Delete old runs now</em> runs it at once.</li>
 <li><strong>Run again from the failed step</strong> (Admin Console, Traceability or Applications, Runs; <code>sutra runs resubmit &lt;id&gt;</code>): the failed step runs again with the same input; everything the earlier steps produced is kept.</li>
 <li>Audit entries older than <code>SUTRA_AUDIT_RETENTION_DAYS</code> (365) are deleted the same way; Admin Console, Audit log has the retention and clearing.</li>

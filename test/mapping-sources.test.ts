@@ -29,8 +29,8 @@ const activities = [{ type: 'query', name: 'SQL query', ports: ['out'] }, { type
 test('mapping names current input and earlier activities with their activity types', () => {
   const result = mappingSources(doc, 'map', activities);
   assert.equal(result.inputLabel, 'Fetch customer (SQL query) — current input');
-  assert.deepEqual(result.sources.map(s => s.node.id), ['start', 'parallel']);
-  assert.match(result.sources[1].label, /other branch; available only after completion/);
+  assert.deepEqual(result.sources.map(s => s.node.id), ['start'], 'a step in another lane (parallel) is not offered (2.1.7)');
+  assert.equal(result.sources[0].label, 'start (Map data)');
   assert.equal(result.inputAliasName, 'Fetch customer');
   assert.equal(mappingDisplayRef('nodes.Fetch customer.id', result.inputAliasName), 'input.id');
   assert.equal(mappingDisplayRef('nodes.Fetch customerExtra.id', result.inputAliasName), 'nodes.Fetch customerExtra.id');

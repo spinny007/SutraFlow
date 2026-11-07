@@ -162,6 +162,8 @@ export const RULES: Record<string, Rule> = {
   'GET /api/projects/:id/folders/contents': R('view', 'project'),
   'POST /api/flows/validate': R('design', undefined, true),
   'GET /api/flows/:id/versions': R('view', 'flow'),
+  'GET /api/flows/:id/contract': R('view', 'flow'),
+  'GET /api/flows/:id/page-link': R('view', 'flow'),
   'POST /api/flows/:id/deploy': R('deploy', 'flow'),
   'DELETE /api/flows/:id/deploy': R('deploy', 'flow'),
   'POST /api/flows/:id/test': R('design', 'flow'),

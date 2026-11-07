@@ -35,7 +35,7 @@ spec:
       securityContext: { runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: engine
-          image: ghcr.io/spinny007/sutraflow:2.1.6
+          image: ghcr.io/spinny007/sutraflow:2.1.7
           envFrom:
             - configMapRef: { name: sutraflow }
             - secretRef: { name: sutraflow }

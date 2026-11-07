@@ -2,14 +2,14 @@
 
 **A visual integration designer and engine.** Drag activities onto a canvas, map data between steps, test and debug, and deploy *Sutras* (integration processes) that run as REST, SOAP and MCP services, on schedules, or on events: files, queues, mail, cloud drives, chat messages and more.
 
-![Version](https://img.shields.io/badge/version-2.1.6-2f6fd8)
+![Version](https://img.shields.io/badge/version-2.1.7-2f6fd8)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Commercial licence available](https://img.shields.io/badge/commercial%20licence-available-orange)](COMMERCIAL-LICENSE.md)
 ![Node.js](https://img.shields.io/badge/node-%E2%89%A5%2022.13-339933?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-7-3178c6?logo=typescript&logoColor=white)
 ![Database](https://img.shields.io/badge/database-SQLite%20%7C%20PostgreSQL-4169e1?logo=postgresql&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Docker-555)
-![Tests](https://img.shields.io/badge/tests-578-success)
+![Tests](https://img.shields.io/badge/tests-614-success)
 
 ![The SutraFlow designer: the sample chat agent with its eight skills, the palettes and the step inspector](docs/guide-images/designer-ai-chat.jpg)
 
@@ -35,8 +35,8 @@
 
 ## Features
 
-- **Visual designer**: 142 activities in 22 palettes, drag-and-drop data mapping with For-Each, Where, Group by and Sort by, more than 100 formula functions, JSONata, live previews, step-by-step debugging with breakpoints, undo and redo, folders, and a description on every step.
-- **Durable engine**: every step is checkpointed in the database; approvals and long waits cost nothing while they wait; runs survive restarts and resume where they stopped; retries with backoff, error branches, an Error handler, loops, Merge, sub-Sutras, and resubmitting failed runs from the failed step. Short request-reply Sutras can run **in memory** instead, saved once when they end, several times faster.
+- **Visual designer**: 142 activities in 22 palettes, drag-and-drop data mapping with For-Each, Where, Group by and Sort by, more than 100 formula functions, JSONata, live previews, step-by-step debugging with breakpoints, undo and redo, folders, and a description on every step. A step sees only the steps before it on its path, checked in the designer and at run time; lines take colours where they meet, and *Path* and *Tidy* make large Sutras readable.
+- **Durable engine**: every step is checkpointed in the database; approvals and long waits cost nothing while they wait; runs survive restarts and resume where they stopped; retries with backoff, error branches, an Error handler, loops, Merge, sub-Sutras whose input contract (JSON Schema or XSD) is stated once on their Manual start and checked for every caller, and resubmitting failed runs from the failed step. Every run is a *design* run (tests, drafts) or a *runtime* run, so figures, alerts and traces count real work only. Short request-reply Sutras can run **in memory** instead, saved once when they end, several times faster.
 - **Memory tables**: small reference data (rates, codes, routing, reusable values) in each engine's memory for lookups without a database round trip, loaded from a query or filled by Sutras, with a failsafe copy, hot reload from the Admin Console and enforced limits.
 - **Connection limits**: protect a system behind a connection with Maximum concurrent activities, counted across all engines for Sutra steps (including connections used behind the scenes, such as a knowledge base's database), listener polls and scheduled refreshes; waiting steps keep their place without using retries; per-server values from Project properties; watched in the Admin Console with graphs.
 - **Big files on small servers**: CSV and line files of any size are streamed in batches of rows, each batch a step of its own, so memory depends on the batch, not the file.
@@ -261,7 +261,7 @@ test/                   the test suites
 
 ## Testing
 
-The suite has 475 declared tests; executed totals also include nested cases and environment-dependent skips. It uses real child processes and network calls for HTTP, SOAP with WS-Security, TLS, SMTP, Kafka, RabbitMQ, AMQP 1.0/OpenWire JMS, SFTP and FTP servers, SQLite, Python, multi-process clusters, the launcher and the command-line tool. Real PostgreSQL and MySQL integration tests are the database release gate. PGlite also runs the in-process suite through PostgreSQL compatibility as fast secondary regression coverage; it does not replace testing against PostgreSQL. Atlas M0 checks use explicit opt-in and isolated seeded collections; see the [2.0.10 verification record](docs/releases/2.0.10-verification.md) before treating candidate capabilities as shipped activities. For file purposes, connected modules and entry points, see [code navigation](docs/code-navigation.md); maintain it with `node tools/file-overviews.mjs` and verify with `--check`.
+The suite has 614 declared tests; executed totals also include nested cases and environment-dependent skips. It uses real child processes and network calls for HTTP, SOAP with WS-Security, TLS, SMTP, Kafka, RabbitMQ, AMQP 1.0/OpenWire JMS, SFTP and FTP servers, SQLite, Python, multi-process clusters, the launcher and the command-line tool. Real PostgreSQL and MySQL integration tests are the database release gate. PGlite also runs the in-process suite through PostgreSQL compatibility as fast secondary regression coverage; it does not replace testing against PostgreSQL. Atlas M0 checks use explicit opt-in and isolated seeded collections; see the [2.0.10 verification record](docs/releases/2.0.10-verification.md) before treating candidate capabilities as shipped activities. For file purposes, connected modules and entry points, see [code navigation](docs/code-navigation.md); maintain it with `node tools/file-overviews.mjs` and verify with `--check`.
 
 The process-level tests exercise the central durability claims directly: engines share work without duplicating completed steps, elect and replace a leader, recover work from an engine killed mid-step, hand work back during drain, persist approvals and long waits without holding a worker, and deploy and call packages through both local and remote CLI paths.
 

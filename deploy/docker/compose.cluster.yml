@@ -23,7 +23,7 @@
 # Put a load balancer in front of the engines' gateway ports and point its health check at /ready.
 # For production, use a managed PostgreSQL (set SUTRA_DB) and remove the postgres service.
 x-engine: &engine
-  image: ${SUTRA_IMAGE:-sutraflow}:${SUTRA_VERSION:?set SUTRA_VERSION, e.g. 2.1.6}
+  image: ${SUTRA_IMAGE:-sutraflow}:${SUTRA_VERSION:?set SUTRA_VERSION, e.g. 2.1.7}
   depends_on:
     postgres: { condition: service_healthy }
   environment: &engine-env

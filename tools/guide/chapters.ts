@@ -268,9 +268,10 @@ const ALL_CHAPTERS: Chapter[] = [
 <tr><td><strong>When a condition is true</strong></td><td>A formula on the previous activity's output, which it reads as <code>{input.x}</code>. Browse <strong>Condition data</strong> to insert the previous activity, earlier activities, trigger data, Local variables or Project/Engine properties; the <strong>{x}</strong> button is the quick Project/Engine picker. For example, <code>={input.amount} &gt; {gv.LIMIT}</code> can be named <em>Over project limit</em>. Several "when" connections can be taken together.</td></tr>
 <tr><td><strong>Otherwise</strong></td><td>Taken when none of the "when" connections from the same output was taken.</td></tr>
 </tbody></table>
+<p>Lines have colours where several meet at one step, and the toolbar's <strong>Path</strong> and <strong>Tidy</strong> help to read a large Sutra: see <a href="#ch-paths">What a step can see, and the lines between steps</a>.</p>
 <p>A connection that is not taken counts as a skipped branch, so a [[merge]] after it still continues. For many routes, or for routes on the same message used in several places, a [[router]] activity keeps them in one place.</p>
 <p class="h">Sample Sutras</p>
-<p>Samples that need a connection get one in the project, named <em>Sample ...</em> (Sample MySQL, Sample SFTP, Sample SMTP and so on), already chosen in their activities. Fill in its address, user and password, click <strong>Test connection</strong>, and the sample runs. Adding more samples later reuses these connections. The SQL samples use Laragon's MySQL defaults (127.0.0.1:3306, user root, no password).</p>
+<p>Samples that need a connection get one in the project, named <em>Sample ...</em> (Sample MySQL, Sample SFTP, Sample SMTP and so on), already chosen in their activities. Fill in its address, user and password, click <strong>Test connection</strong>, and the sample runs. Adding more samples later reuses these connections. The SQL samples use Laragon's MySQL defaults (127.0.0.1:3306, user root, no password). Samples that read a sample database have an install Sutra that makes it: when a query fails because a <code>sample_</code> database or table is not there, the error says which one to run, for example <em>Run 'Sample: Sales orders install' first: it makes sample_sutraflow.</em></p>
 <p>Click <strong>+ New Sutra</strong>, then <strong>Choose samples</strong> to tick the ones you want, or <strong>Add all</strong>. Test each one and open its activities' Input and Output tabs to see how it is built. Samples that write files use folders named <code>sample_...</code> in the project's files folder (project properties such as <code>SAMPLE_CSV_FOLDER</code>). Everything the samples store is named <code>sample_</code>, so an administrator can remove the samples with their data from the installer (<em>Samples</em>).</p>
 <p>To learn the formula language, start with <em>Sample: Functions</em>: every function on one order, a Map data step per group (text, conversion, encoding, variables, utility, dates, numbers, logic, sequences, lists) and a Log of its results after each. Open a Map data step to read the formulas, its Output tab for the values.</p>
 <p>Samples are built from SutraFlow's code each time they are added, so a new installation always gets the samples of its release, and every sample added becomes new Sutras with new ids in that project. A sample added to a project is the project's own copy: change it freely; upgrading SutraFlow leaves it as it is. To see a newer release's version, add the sample again: it goes beside the old one, named with a number (<em>Sample: Functions 2</em>); delete the old one when you no longer need it. Samples are for learning and as starting points: test and harden what you build from them before production (<a href="#ch-dg-packaging">Sutra Design Guide, Packaging</a>).</p>
@@ -278,7 +279,7 @@ const ALL_CHAPTERS: Chapter[] = [
 [[img:sample-foreach|Sample: For-Each mapping. The repeating target <em>lines</em> is selected: its For-Each takes the order lines, keeps rows where qty &gt; 0 and sorts them by sku.]]
 [[img:sample-trycatch|Sample: Try and catch with logs after a test: Check stock's own error output handled one failure; the Error handler caught Reject and logged it.]]
 <p class="h">Reusable Sutras</p>
-<p>Put logic used in several places in its own Sutra: a Manual start with a payload schema, the steps, and [[return]] with the result. Other Sutras run it with [[callProcess]], wait for the result and continue; a failure inside it arrives on Call Sutra's error output. While you test, the draft of the called Sutra runs; deployed Sutras call its deployed version.</p>
+<p>Put logic used in several places in its own Sutra: a Manual start with a payload schema, the steps, and [[return]] with the result. Other Sutras run it with [[callProcess]], wait for the result and continue; a failure inside it arrives on Call Sutra's error output. While you test, the draft of the called Sutra runs; deployed Sutras call its deployed version. Since 2.1.7 the called Sutra's Manual start schema is the caller's input contract, and its payload may be JSON or XML: see <a href="#ch-contracts">Inputs of called Sutras</a>.</p>
 <p class="h">Loops</p>
 <p>Any activity can run more than once (Settings tab &rarr; <em>Loop</em>):</p>
 <ul>
@@ -321,7 +322,7 @@ const ALL_CHAPTERS: Chapter[] = [
   {
     id: 'mapping', title: 'Mapping data',
     html: `
-<p>Select an activity and open <strong>Input</strong>. <strong>Sutra Data</strong> on the left lists <code>$_projectVariables</code>, <code>$_sengineVariables</code> (read only), <code>$_sutraContext</code> (this run: id, name, version, step), <code>$_sutraVariables</code>, current input, and named activity outputs. Sources show the user-assigned activity name followed by its activity type, for example <strong>Fetch customer (SQL query)</strong>. Current input retains the formula path <code>input</code>; named outputs retain <code>nodes.Activity name</code>. Multiple incoming connections are listed as candidates rather than claiming a unique source. Other branches are labelled separately: their output is available only after completion; selecting a field does not wait for a parallel branch. Synchronize branches before consuming their outputs. Downstream activities are not offered as source outputs. <strong>Activity Input</strong> on the right lists what the activity needs; for structured inputs, the tree of the chosen schema.</p>
+<p>Select an activity and open <strong>Input</strong>. <strong>Sutra Data</strong> on the left lists <code>$_projectVariables</code>, <code>$_sengineVariables</code> (read only), <code>$_sutraContext</code> (this run: id, name, version, step), <code>$_sutraVariables</code>, current input, and named activity outputs. Sources show the user-assigned activity name followed by its activity type, for example <strong>Fetch customer (SQL query)</strong>. Current input retains the formula path <code>input</code>; named outputs retain <code>nodes.Activity name</code>. Multiple incoming connections are listed as candidates rather than claiming a unique source. <strong>Trigger data (trigger)</strong> is listed on every step (2.1.7), so dragging one of its fields writes <code>{{trigger.params.region}}</code>. Only the steps before this one on a connected path are listed: steps on another lane and later steps are not (see <a href="#ch-paths">What a step can see</a>). <strong>Activity Input</strong> on the right lists what the activity needs; for structured inputs, the tree of the chosen schema.</p>
 <p>Before testing, the source tree describes the configured schema. During an explicit Test/Debug session it shows observed fields and values; <strong>Received</strong> and <strong>Output</strong> also show that recorded run. Static warnings still check references against configured schemas. A schema edit does not change a starter's sample payload or rewrite an earlier run. Keep sample payloads and schemas consistent and run Test again after changes. A missing-source warning means the reference is absent from the known schema; dynamic run data can still contain that field. Mapping may rename and restructure fields across formats; optional strict target validation checks the transformed result, not equality with the source schema.</p>
 <p>The designer does not automatically load previous run values when opening a flow. Runtime previews belong only to the explicitly started Test/Debug session, held in browser memory, not browser storage or the flow definition. Flow edits, schema-catalog reloads and switching flows clear that session's preview values. <strong>Clear test data</strong> removes completed test values from the designer without deleting server-side run history. Production run outputs are never selected as design samples. Repeating scalar previews show the item count and array values rather than presenting only the first value. The <strong>Sample: Renamed fields to XML</strong> example maps JSON <code>zone:[2,5]</code> into XML <code>Score</code> elements containing 2 and 5; its payload, source contract and formulas agree.</p>
 <p><strong>Stop test</strong> is visible in the designer toolbar and enabled while its Test/Debug run is active, including paused/debug and durable waits. It requests cancellation through the engine; preview values are cleared after a terminal state is confirmed. If the request fails, the controls remain so you can retry. Editing a flow clears stale previews but retains its active test cancellation handle. Starting a second test is disabled while one is active. Supported in-flight work is aborted cooperatively; stopping does not roll back SQL commits, published messages or other side effects already completed. Run history remains available under Runs. For an already completed test, use <strong>Clear test data</strong>.</p>
@@ -449,6 +450,78 @@ const ALL_CHAPTERS: Chapter[] = [
 [[tip:When to use JSONata instead|For heavy reshaping of repeating JSON (filter, group, total and nest in one go) a single <strong>JSONata</strong> activity is often clearer than many mapper rules.]]`,
   },
   {
+    id: 'paths', title: 'What a step can see, and the lines between steps (2.1.7)',
+    html: `
+<p>A step can use only data it can really receive. Since 2.1.7 one rule decides this everywhere: in the Input tab, the condition picker, template and SQL fields, the design check and the engine.</p>
+<p class="h">The rule</p>
+<p>A step may use:</p>
+<ul>
+<li>the trigger's data, as <code>{{trigger…}}</code>;</li>
+<li>Project and Engine properties (<code>{{gv…}}</code>, <code>{{ev…}}</code>) and Local variables (<code>{{vars…}}</code>);</li>
+<li>the outputs of the steps that come <strong>before it on a connected path</strong>, as <code>{{nodes.Step name…}}</code>.</li>
+</ul>
+<p>A <em>lane</em> is a path that leaves a step beside another one. Take a trigger with two lanes: <em>Trigger &rarr; Orders &rarr; Chart</em> and <em>Trigger &rarr; Regions</em>. Chart sees the trigger and Orders, but not Regions: Regions runs on its own lane and may not have finished, or even run, when Chart starts. Where the lanes meet (two lines into one step, such as a [[merge]]), both lanes are before that step and every step after it.</p>
+<ul>
+<li>A line back to an earlier step (a loop back) does not make the later steps count as before.</li>
+<li>Inside a For each loop, read the item from <code>{input}</code> or <code>{iteration.value}</code>.</li>
+<li>The [[catch]] Error handler sees every step, because it runs after the failure.</li>
+<li>A condition on a line can use the step it leaves and the steps before that step.</li>
+</ul>
+<p class="h">What the designer shows</p>
+<ul>
+<li><strong>Sutra Data</strong> on the Input tab lists only the steps the rule allows, and <strong>Trigger data (trigger)</strong> on every step, so <code>input.params…</code> on the first step and <code>trigger.params…</code> later are clearly the same data.</li>
+<li>Pointing at a <code>{{…}}</code> under a text field (SQL, templates) shows where it comes from, for example <em>trigger data &rarr; Sales on MySQL (Dashboard page) &rarr; params &rarr; region, sent as a bound parameter</em>, and says when a step is not on this step's path.</li>
+<li>The <strong>design check</strong> reports a reference to a step that is not before this one as a problem, naming the step, the field and the step used: <em>Latest orders: Rows uses the step "Regions", which is not on its path.</em> These references count: <code>{{nodes.…}}</code> in mappings, templates and conditions, JSONata <code>$nodes</code>, and <code>nodes</code> in Code steps.</li>
+<li>At run time such a reference <strong>fails the step</strong> with the same message, instead of reading an output that may or may not be there yet.</li>
+</ul>
+[[img:paths-trigger-data|Sutra Data on a later step: Trigger data (trigger) and only the steps before it on its path.]]
+[[img:paths-ref-origin|Under the SQL field: where each reference comes from, and that run data is sent as a bound parameter.]]
+[[note:Sutras made before 2.1.7|The rule applies to every Sutra from 2.1.7, with no setting to turn it off. Open older Sutras and run the design check: when a step uses a step on another lane, connect that step before it, or move the step after the place where the lanes meet (for example a Merge). The samples follow the rule.]]
+<p class="h">Reading the lines</p>
+<ul>
+<li><strong>Pointing at a line</strong> shows <em>from step (port) &rarr; to step</em> and highlights the line and both ends.</li>
+<li><strong>Selecting a step</strong> highlights its lines and the steps at their other ends, and dims the rest.</li>
+<li><strong>Path</strong> (toolbar): with a step selected, lights every step before and after it, by the rule above, so you see exactly the steps whose data it can use and those that use its data.</li>
+<li><strong>Tidy</strong> (toolbar) lays the Sutra out left to right by its order, so fewer lines cross. It changes positions only, and Ctrl+Z undoes it in one step.</li>
+</ul>
+<p class="h">Line colours</p>
+<ul>
+<li><strong>Automatic.</strong> Where two or more lines go into one step, each gets its own colour from a palette of 8, checked for contrast in the light and dark themes. The colour belongs to the line's source step, so all lines leaving a step share it, and it stays when steps move. Other lines keep the normal colour.</li>
+<li><strong>By hand.</strong> Select a line and pick a colour in its side panel, or <em>Automatic</em>. The colour is saved in the Sutra and travels with exports, packages and Git.</li>
+<li><strong>A step's lines at once.</strong> Right-click a step, then <em>Colour its lines</em>.</li>
+<li><strong>Meaning never by colour alone.</strong> Error lines stay red and dashed; empty and <em>otherwise</em> lines stay dotted with a short port label. A colour is added on top.</li>
+<li><strong>The key.</strong> A step that receives several lines lists them with their colours on its Input tab: <em>All charts receives 3 lines: Orders (blue), Revenue by month (green), …</em></li>
+</ul>
+<p>Opening a run in the designer (Runs, Open in designer) shows the same colours and highlighting.</p>
+[[img:paths-colours|Nine lines into All charts, each in its source step's colour. The line from Regions is selected: its side panel says why it is orange, and offers the palette or Automatic.]]
+[[img:paths-path|Path on: every step before and after the selected step is lit.]]
+[[img:paths-step-menu|Right-click a step: Colour its lines.]]
+[[img:paths-input-key|The key on the Input tab of a step that receives several lines.]]`,
+  },
+  {
+    id: 'contracts', title: 'Inputs of called Sutras: JSON or XML (2.1.7)',
+    html: `
+<p>A Sutra called by others states its input once, on its Manual start. Every caller is checked against it: Call Sutra, a test in the studio and the Run API.</p>
+<p class="h">Manual start with JSON or XML</p>
+<ul>
+<li><strong>Payload schema</strong> takes a JSON Schema (or a JSON sample) or an <strong>XSD</strong>.</li>
+<li>With an XSD, write the <strong>Test payload</strong> as XML. The design check warns when it is not.</li>
+<li>An XML input may arrive as XML text, as <code>{ "xml": "&lt;Order&gt;…" }</code>, or as data already in the Parse XML shape (<code>{ "Order": { … } }</code>). Text is checked against the XSD and turned into data the way [[parseXml]] does; DTDs and entities are refused.</li>
+<li>The step gives the data in the Parse XML shape and the original text under <code>xml</code>, so later steps map <code>{input.Order.amount}</code> as they would from JSON, or pass <code>{input.xml}</code> on unchanged.</li>
+<li><strong>Strict schema validation</strong> works as before: On refuses invalid input from every caller before any step runs.</li>
+</ul>
+<p class="h">Call Sutra follows the called Sutra's contract</p>
+<ol>
+<li>Pick the Sutra in [[callProcess]]. When the step has no input schema of its own, <strong>Input contract from the called Sutra</strong> turns on: the called Sutra's Manual start schema, for the chosen <em>Version</em> (draft or deployed), is the input.</li>
+<li>Set <em>Input from</em> to <em>mapping</em>: the Input tab shows the called Sutra's fields as targets, required ones marked. <em>Input schema</em> is hidden while the contract is followed.</li>
+<li>When the called Sutra changes its schema, the step shows a note and the design check a warning: <em>… changed its input since this step was saved.</em> Check the mapping, then choose <strong>Accept the new input</strong>.</li>
+<li>Older Call Sutra steps with their own <em>Input schema</em> keep it. The note offers <strong>Use its input contract</strong> to switch with one click.</li>
+</ol>
+<p>The called Sutra checks its input at its Manual start, the same check every caller gets. An invalid input fails the Call Sutra step with the problem fields (<em>Input for Order check refused: …</em>) before any step of the called Sutra runs, with or without <em>Wait for the result</em>; the error output can handle it.</p>
+[[img:contract-note|Sample: Call the XML order check. Check order follows the input contract of the called Sutra: its XSD, root Order, and the fields it requires.]]
+<p><em>Sample: XML order check</em> has a Manual start with an XSD, an XML test payload and strict validation; <em>Sample: Call the XML order check</em> calls it through its contract, mapping JSON fields to the XML order.</p>`,
+  },
+  {
     id: 'schemas', title: 'Schemas and WSDLs',
     html: `
 <p>Activities that receive or produce structured data let you pick a <strong>shared schema</strong>: Manual start (payload), REST service (request body), Send HTTP request (body and response), Map data (target), Parse/Render JSON and XML, the file activities (CSV row schema), Invoke SOAP service (arguments and response).</p>
@@ -511,8 +584,9 @@ const ALL_CHAPTERS: Chapter[] = [
 </ol>
 [[img:debugger|Debugging: paused before Build order. The toolbar shows Step, Continue, Pause and Stop; the Output tab shows the input it will receive.]]
 <p class="h">Runs</p>
-<p>The Runs screen lists every run: Sutra, version, trigger, status, time. Open one to see each step with its input, output, time and error, and the run log. <em>Approvals</em> lists runs waiting for a person; designers can decide their own test runs there, and approvers decide deployed ones in the <a href="#ch-approvals">Approval Center</a>.</p>
-[[img:runs|A run: its steps, each with input and output, and the log.]]`,
+<p>The Runs screen lists every run: Sutra, version, trigger, stage, status, time. The <strong>Stage</strong> filter (2.1.7) shows all runs, <em>design</em> runs only (tests, debugging, drafts) or <em>runtime</em> runs only (deployed work); the Stage column also names the client that started a run by hand: <em>studio</em>, <em>api</em> or <em>cli</em>. Open one to see each step with its input, output, time and error, and the run log. <em>Approvals</em> lists runs waiting for a person; designers can decide their own test runs there, and approvers decide deployed ones in the <a href="#ch-approvals">Approval Center</a>.</p>
+[[img:runs|A run: its steps, each with input and output, and the log.]]
+[[img:runs-stage|Runs with the Stage filter: a studio test is a design run.]]`,
   },
   {
     id: 'deploy', title: 'Deploying and versions',
@@ -567,7 +641,7 @@ const ALL_CHAPTERS: Chapter[] = [
 <ol>
 <li><strong>Start.</strong> Something starts the Sutra: a call to its REST or SOAP service, a timer, a new file, a queue message, an email, a chat message or AI tool call, another Sutra (Call Sutra), or you pressing Test. A <strong>run</strong> begins, with a copy of the Sutra as it is now: deploying a new version never changes a run already going.</li>
 <li><strong>Each step waits its turn.</strong> The first step after the starter is queued and taken by the next free worker of any engine, the Sutra's priority first, then the oldest. A step whose connection has a limit may wait for a place first (see <a href="#ch-connection-limits">Connection limits</a>); waiting never uses a retry.</li>
-<li><strong>The step runs.</strong> It sees <code>{input}</code> (what the step before it sent), <code>{nodes.Step name}</code> (any earlier step's output), <code>{trigger}</code>, <code>{vars}</code>, <code>{gv}</code> and <code>{ev}</code>, and runs within its time limit: 2 minutes for most activities, 10 for AI steps, longer for data platform steps, or what its Settings tab says.</li>
+<li><strong>The step runs.</strong> It sees <code>{input}</code> (what the step before it sent), <code>{nodes.Step name}</code> (the output of any step before it on its path; a step on another lane is refused, see <a href="#ch-paths">What a step can see</a>), <code>{trigger}</code>, <code>{vars}</code>, <code>{gv}</code> and <code>{ev}</code>, and runs within its time limit: 2 minutes for most activities, 10 for AI steps, longer for data platform steps, or what its Settings tab says.</li>
 <li><strong>Its result is saved.</strong> The step's output is stored with the run, and the next steps are queued, together. From here on nothing is lost if the server stops.</li>
 <li><strong>The path is chosen.</strong> The step's result goes out on one port (<em>out</em>, <em>true</em>, <em>error</em>, <em>approved</em> ...). Each connection from it is followed when its condition holds; a merge waits for every branch that can still arrive.</li>
 <li><strong>Waits cost nothing.</strong> A step that waits (an approval, Ask a person, Call Sutra with wait, a timer, an AI agent waiting for a tool) holds no worker and no memory, for a minute or a month, and goes on when its answer comes.</li>
@@ -929,7 +1003,7 @@ curl http://127.0.0.1:8080/orders/A-1001 -H "Authorization: Bearer ACCESS_TOKEN"
 <p>Use the native broker connections above for a Queue / topic trigger. They provide the broker's consumer groups, delivery credit or prefetch, acknowledgement, redelivery and partition-order guarantees. REST endpoints are useful when an HTTP-only system needs an occasional publish, query or administrative call:</p>
 <ul>
 <li><strong>Aiven Kafka REST</strong> can <a href="https://aiven.io/docs/products/kafka/howto/connect-with-kafka-rest">produce and consume through its Karapace REST proxy</a>. <em>Sample: Kafka REST publish</em> shows production; <em>Sample: Kafka REST subscribe</em> shows the complete create consumer &rarr; subscribe &rarr; poll &rarr; commit offsets &rarr; close lifecycle. A new REST consumer configured with <code>latest</code> may skip a record published before its first poll establishes an offset; the sample uses <code>earliest</code> for deterministic demonstration. It is not selected as the connection of a Queue / topic trigger.</li>
-<li><strong>RabbitMQ HTTP API</strong> can publish and fetch. <em>Sample: RabbitMQ HTTP publish and fetch</em> declares a durable sample queue, publishes, fetches with <code>ack_requeue_false</code>, and removes the queue. <a href="https://www.rabbitmq.com/docs/management#http-api-publishing">RabbitMQ recommends AMQP for messaging</a> because HTTP is less efficient and omits protocol features such as publisher confirms. RabbitMQ 4.x rejects deprecated transient non-exclusive queues by default, which is why the sample declares a durable queue and cleans it up explicitly.</li>
+<li><strong>RabbitMQ HTTP API</strong> can publish and fetch. <em>Sample: RabbitMQ HTTP publish and fetch</em> declares a durable sample queue, publishes, fetches with <code>ack_requeue_false</code>, and removes the queue. <a href="https://www.rabbitmq.com/docs/management#http-api-publishing">RabbitMQ recommends AMQP for messaging</a> because HTTP is less efficient and omits protocol features such as publisher confirms. RabbitMQ 4.x rejects deprecated transient non-exclusive queues by default, which is why the sample declares a durable queue and cleans it up explicitly. The HTTP API is RabbitMQ's management plugin, which is off in a fresh installation (the broker then listens only on 5672 and the HTTP calls are refused): enable it once with <code>rabbitmq-plugins enable rabbitmq_management</code> (Windows: <code>sbin\\rabbitmq-plugins.bat</code>) and restart the broker; it answers on port 15672.</li>
 <li><strong>ActiveMQ Classic REST</strong>: Classic 6.3 disables the deprecated, unmaintained MessageServlet by default because it has security issues. Do not enable it for this sample. <em>Sample: ActiveMQ REST publish and fetch</em> uses the supported Jolokia management endpoint to create a queue, send, browse, remove the exact message, and clean up. That is management automation, not JMS consumption. Use AMQP 1.0 for SutraFlow triggers and OpenWire/JMS for Java clients so acknowledgement, selectors, durable subscriptions and redelivery stay broker-native. See the current <a href="https://activemq.apache.org/components/classic/documentation/rest">ActiveMQ REST warning</a> and <a href="https://activemq.apache.org/components/classic/documentation/jolokia">Jolokia documentation</a>.</li>
 </ul>
 <p>Never put a username or password in a URL. Create an HTTP Connection, keep the password in the vault, enable TLS certificate verification, and map the endpoint path and body in Send HTTP request. See the provider's current REST documentation because paths and media types differ between products.</p>`,
@@ -1070,8 +1144,9 @@ ws.onopen = () =&gt; ws.send(JSON.stringify({ type: 'watch', orderId: 'A-1001' }
 <li>Query the data: [[dbQuery]], [[mongoFind]], [[httpRequest]], a memory table, anything that gives rows. Branches run in parallel.</li>
 <li>A [[chart]] step per chart: rows, chart type (bar, horizontal bar, line, area, pie, donut, scatter, a number, a KPI card, a gauge, a table), the category field and the value fields, grouping, sorting, a limit, a unit and colours.</li>
 <li>A [[merge]] when there are branches, then [[dashboardReply]] with the charts in the order the page shows them.</li>
-<li>Deploy, and open <code>http://&lt;gateway&gt;/dash/&lt;name&gt;</code>.</li>
+<li>Deploy, and open <code>http://&lt;gateway&gt;/dash/&lt;name&gt;</code>. Since 2.1.7 the Dashboard page step links to its page once deployed, says <em>not deployed</em> before that, and asks to deploy again when the draft's name differs from the deployed page.</li>
 </ol>
+[[img:dashboard-page-link|The Dashboard page step of a Sutra not yet deployed: it says so under the page name, and links to the page once deployed.]]
 <p class="h">Filters (slicers)</p>
 <p>The Dashboard page's <em>Filters</em> put controls at the top of the page, one per row: the field, then <code>list</code>, <code>multi list</code>, <code>date range</code>, <code>number range</code> or <code>search</code>; fixed choices after a colon (<code>list: North, South</code>). Without fixed choices, a list offers the <em>Filter choices</em> of [[dashboardReply]] (such as the rows of <code>SELECT DISTINCT region FROM orders</code>), else the values the charts show. The chosen values are in the page address (a link opens the same view), the page asks for new data at once, and a click on a bar, a slice or a table row sets the filter of that chart's category field; a second click clears it.</p>
 <ul>
@@ -1138,7 +1213,7 @@ ws.onopen = () =&gt; ws.send(JSON.stringify({ type: 'watch', orderId: 'A-1001' }
 <ul>
 <li><strong>DB Ops</strong> works with PostgreSQL, MySQL/MariaDB, SQL Server, Oracle and SQLite. Parameters are written <code>:name</code> and are always bound, never pasted into the SQL. [[dbScript]] runs install scripts (tables, procedures, seed rows); a REST service with [[dbProcedure]] then turns a stored procedure into a microservice, as <em>Sample: Procedure as a microservice</em> shows.</li>
 <li><strong>Email</strong>: SMTP to send, IMAP to start a run per incoming message.</li>
-<li><strong>Firebase</strong>: Firestore, Realtime Database and push notifications, with a service-account key held in the vault.</li>
+<li><strong>Firebase</strong>: Firestore, Realtime Database and push notifications, with a service-account key held in the vault. To get the key: Firebase console, the gear beside <em>Project Overview</em>, <em>Project settings</em>, <em>Service accounts</em>, <em>Generate new private key</em>; a JSON file downloads, once. Paste the whole file into a Secret property and pick it as the connection's <em>Service account key (JSON)</em>; <em>Test connection</em> says which project and account it signed in as. When Firebase answers <em>Key creation is not allowed on this service account</em>, the project belongs to a Google Workspace organization whose policy <em>Disable service account key creation</em> is enforced (the default for newer organizations): an Organization Policy Administrator turns it off for this project only (Google Cloud console, IAM and Admin, Organization Policies, the policy, <em>Override parent's policy</em>, enforcement off); extra roles on the service account do not help. The key gives full access to the project, past its security rules: keep it only in the vault and use one per environment. The Realtime Database URL is needed only for Realtime Database steps.</li>
 <li><strong>Apps</strong> (Google Sheets, Drive and Docs, Dropbox, YouTube, Facebook Pages) use an <strong>OAuth connection</strong>: create it in Resources, then click <em>Connect account</em> and sign in once. Tokens are stored in the vault and refreshed automatically. [[oauthRequest]] reaches any other API of the same account.</li>
 </ul>
 <p class="h">Database connections</p>
@@ -2038,7 +2113,7 @@ sutra deploy shop-1.4.0.sutra --server https://prod:4800 --token $SUTRA_TOKEN</p
 [[img:console-overview|The Overview: engines, deployed Sutras, runs of the last day, approvals, the work queue and the gateway, with recent failures.]]
 <p class="h">Operate</p>
 <ul>
-<li><strong>Overview</strong>: tiles for engines, deployed Sutras, runs of the last 24 hours, waiting approvals, the work queue and the gateway certificate, and the latest failed runs with <em>Resubmit</em>. Test runs from the designer are not counted.</li>
+<li><strong>Overview</strong>: tiles for engines, deployed Sutras, runs of the last 24 hours, waiting approvals, the work queue and the gateway certificate, and the latest failed runs with <em>Resubmit</em>. Design runs (tests, debugging and drafts) are not counted.</li>
 <li><strong>Applications</strong>: every deployed project with its package version and its Sutras: version, started or stopped, what starts it (REST path, SOAP path, timer, skill), runs of the last day and the last run. <em>Stop</em> makes the Sutra's triggers start nothing (its address answers 404, timers and listeners pause) while it stays deployed; <em>Start</em> brings it back on every engine; <em>Restart</em> does both at once, so its address, timers and listeners start fresh with the current connections. <em>Runs</em> opens its runs with every step's result, <em>Resubmit</em> and <em>Cancel run</em>; <em>Versions</em> deploys an earlier version; <em>Tuning</em> sets how the Sutra runs (below); <em>Package history</em> rolls the project back to an earlier package.</li>
 <li><strong>Agent conversations</strong> (2.1.5; View permission to see, Server permission to clear): the conversations of every published agent, active and expired, with their messages and the time of the last one. A conversation token continues a conversation only until it expires (the agent channel's <em>Conversation lasts</em>); expired conversations keep their AI memory in the database until <em>Clear expired</em> removes them, with their messages and summaries, for one agent or all (<code>sutra agents clear-expired [--agent name]</code>). Active conversations are never touched. It is recorded in the audit log.</li>
 <li><strong>Knowledge admin</strong> (2.1.5; Server permission): every knowledge base with its home project; share one as a server knowledge base with every project or granted projects and areas, managed sources that keep areas in step (Sync now, Re-index, History, Export as Sutra), the MCP search tool and Rebuild vectors. See <a href="#ch-knowledge-admin">Knowledge admin</a>.</li>
@@ -2065,6 +2140,7 @@ sutra engines drain engine-2</pre>
 <tr><td>Steps per run limit</td><td>Stops runs that take more steps, such as loops that never end.</td></tr>
 <tr><td>Reply wait</td><td>How long REST, SOAP and MCP callers wait for a reply step.</td></tr>
 <tr><td>Keep finished runs, Keep audit entries</td><td>Days before housekeeping deletes them.</td></tr>
+<tr><td>Keep design runs</td><td>Days before housekeeping deletes finished design runs (tests, debugging, drafts); 7 by default, 0 = as finished runs (2.1.7).</td></tr>
 <tr><td>Trace sampling</td><td>Share of runs sent to the OpenTelemetry collector.</td></tr>
 </tbody></table>
 <table class="t s"><thead><tr><th>Sutra tuning</th><th>What it does</th></tr></thead><tbody>
@@ -2496,7 +2572,7 @@ docker run -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=... -e SUTRA_MASTER_KEY=...
  */
 export const PARTS: [string, string[]][] = [
   ['Getting started', ['overview', 'start', 'tour', 'projects']],
-  ['Building Sutras', ['build', 'tabs', 'mapping', 'schemas', 'variables', 'debug', 'deploy', 'documentation', 'git', 'engine-inside', 'design', 'reliability211']],
+  ['Building Sutras', ['build', 'tabs', 'mapping', 'paths', 'contracts', 'schemas', 'variables', 'debug', 'deploy', 'documentation', 'git', 'engine-inside', 'design', 'reliability211']],
   ['Palettes and connections', ['call', 'apps', 'mongodb-m0', 'memory', 'files', 'messaging', 'broker-connections', 'message-processing', 'websocket', 'dashboards', 'data-platforms', 'social', 'oauth-setup', 'code', 'python', 'connection-limits']],
   ['AI', ['ai-concepts', 'mcp', 'agents', 'rag-build', 'ai-samples']],
   ['APIs, security and approvals', ['gateway', 'expose', 'approvals']],

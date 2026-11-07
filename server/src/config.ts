@@ -97,6 +97,8 @@ export const config = {
   canLead: process.env.SUTRA_CAN_LEAD !== '0',
   /** Finished runs older than this are deleted (0 = keep forever). */
   runRetentionDays: Number(process.env.SUTRA_RUN_RETENTION_DAYS ?? 30),
+  /** Design runs (tests, debugging, drafts) are kept for their own time (2.1.7); 0 = as other runs. */
+  designRetentionDays: Number(process.env.SUTRA_DESIGN_RUN_RETENTION_DAYS ?? 7),
   /** text (default) or json: engine events on standard output as JSON lines. */
   logFormat: (process.env.SUTRA_LOG_FORMAT === 'json' ? 'json' : 'text') as 'text' | 'json',
   /** OpenTelemetry: traces of runs and steps are sent to this OTLP/HTTP endpoint when set. */

@@ -41,9 +41,9 @@ export function traceProjects(visible: Visible, hours = 24) {
   const flows = q.all<{ id: string; name: string; project_id: string | null; version: number }>('select id, name, project_id, version from flows');
   const deployed = new Set(q.all<{ flow_id: string }>('select flow_id from deployments where enabled = 1').map(d => d.flow_id));
   const counts = q.all<{ flow_id: string; status: string; n: number; last: string }>(
-    `select flow_id, status, count(*) as n, max(started_at) as last from runs where started_at >= ? and flow_id is not null and source not in ('test', 'debug') group by flow_id, status`, from);
+    `select flow_id, status, count(*) as n, max(started_at) as last from runs where started_at >= ? and flow_id is not null and stage = 'runtime' group by flow_id, status`, from);
   const lastFail = q.all<{ flow_id: string; at: string }>(
-    `select flow_id, max(started_at) as at from runs where status = 'failed' and started_at >= ? and flow_id is not null group by flow_id`, from);
+    `select flow_id, max(started_at) as at from runs where status = 'failed' and started_at >= ? and flow_id is not null and stage = 'runtime' group by flow_id`, from);
   const byFlow = new Map<string, Record<string, number>>();
   const lastRun = new Map<string, string>();
   for (const c of counts) {
@@ -68,7 +68,9 @@ export function traceProjects(visible: Visible, hours = 24) {
   });
 }
 
-export interface RunSearch { projectId?: string; flowId?: string; status?: string; hours?: number; text?: string; before?: string; limit?: number; tests?: boolean }
+export interface RunSearch { projectId?: string; flowId?: string; status?: string; hours?: number; text?: string; before?: string; limit?: number;
+  /** design, runtime (the default) or all (2.1.7). tests: true is the older way of saying all. */
+  stage?: string; tests?: boolean }
 
 /**
  * Runs, newest first. Text finds a run by its id (or the start of it), or by a value anywhere in the
@@ -80,7 +82,8 @@ export function traceRuns(visible: Visible, o: RunSearch) {
   if (o.flowId) { where.push('flow_id = ?'); args.push(o.flowId); }
   if (o.status === 'open') where.push(`status in ('running', 'waiting', 'queued', 'paused')`);
   else if (o.status) { where.push('status = ?'); args.push(o.status); }
-  if (!o.tests) where.push(`source not in ('test', 'debug')`);
+  const stage = o.stage === 'design' || o.stage === 'runtime' || o.stage === 'all' ? o.stage : o.tests ? 'all' : 'runtime';
+  if (stage !== 'all') { where.push('stage = ?'); args.push(stage); }
   if (o.before) { where.push('started_at < ?'); args.push(o.before); }
   const text = String(o.text || '').trim();
   if (text) {
@@ -90,10 +93,10 @@ export function traceRuns(visible: Visible, o: RunSearch) {
     args.push(`${lit}%`, `%${lit}%`, `%${lit}%`);
   }
   const limit = Math.max(1, Math.min(200, Number(o.limit) || 50));
-  const rows = q.all<any>(`select id, flow_id, flow_name, project_id, version, status, source, error, steps, started_at, finished_at, started_by from runs
+  const rows = q.all<any>(`select id, flow_id, flow_name, project_id, version, status, source, stage, client, error, steps, started_at, finished_at, started_by from runs
     where ${where.join(' and ')} order by started_at desc limit ?`, ...args, limit + 1);
   const runs = rows.filter(r => visible(r.project_id)).slice(0, limit).map(r => ({
-    id: r.id, flowId: r.flow_id, flowName: r.flow_name, projectId: r.project_id, version: Number(r.version), status: r.status, source: r.source,
+    id: r.id, flowId: r.flow_id, flowName: r.flow_name, projectId: r.project_id, version: Number(r.version), status: r.status, source: r.source, stage: r.stage, client: r.client ?? null,
     error: r.error, steps: Number(r.steps), startedAt: r.started_at, finishedAt: r.finished_at, startedBy: startedByOf(r.started_by, r.source),
     ms: r.finished_at ? Date.parse(r.finished_at) - Date.parse(r.started_at) : null,
   }));

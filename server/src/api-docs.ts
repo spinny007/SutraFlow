@@ -86,6 +86,8 @@ export const API_DOCS: Record<string, ApiDoc> = {
   'GET /api/sample-projects': { does: 'Sample projects shipped with SutraFlow.' },
   'GET /api/sample-projects/:file': { does: 'One sample project file to download.' },
   'GET /api/projects/:id/documentation': { does: 'Documentation of a project made from its Sutras and step descriptions. Query: `format=html|md`.', cli: 'sutra doc --project <name>' },
+  'GET /api/flows/:id/contract': { does: 'The input contract of a Sutra for Call Sutra (2.1.7): its Manual start payload schema (JSON Schema or XSD) for `use` (draft or deployed), whether it is strict, and a fingerprint that changes with the schema; or the problem (not deployed, another project, no Manual start).' },
+  'GET /api/flows/:id/page-link': { does: 'Where a Dashboard page step publishes its page (2.1.7): `node` is the step; deployed or not, the deployed version and name, the name in the draft, and the page address on the gateway.' },
   'GET /api/flows/:id/documentation': { does: 'The same for one Sutra.', cli: 'sutra doc --project <name> --sutra <name>' },
 
   // ---------- releases and packages ----------
@@ -168,7 +170,7 @@ export const API_DOCS: Record<string, ApiDoc> = {
   'DELETE /api/secrets/:name': { does: 'Deletes a secret.' },
 
   // ---------- runs and approvals ----------
-  'GET /api/runs': { does: 'Runs, newest first, of the projects the caller may see. Query: `flowId`, `status`, `limit` (at most 500).', cli: 'sutra runs list [--sutra <name> --project <name>] [--status failed]' },
+  'GET /api/runs': { does: 'Runs, newest first, of the projects the caller may see, each with its stage (design or runtime) and client. Query: `flowId`, `status`, `stage` (`design` or `runtime`; all when absent), `limit` (at most 500).', cli: 'sutra runs list [--sutra <name> --project <name>] [--status failed]' },
   'GET /api/runs/:id': { does: 'One run with every step, its input, output and error.', cli: 'sutra runs show <run id>' },
   'POST /api/runs/:id/resubmit': { does: 'Runs a failed run again from the step that failed, with the same input; earlier steps\' results are kept.', cli: 'sutra runs resubmit <run id>' },
   'POST /api/runs/:id/cancel': { does: 'Cancels a running or waiting run.', cli: 'sutra runs cancel <run id>' },

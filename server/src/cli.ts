@@ -133,7 +133,7 @@ const HELP = `sutra <command> [options]
   engines   lead <engine> --yes|--no | cluster-name <name>
             Whether an engine may lead (the leader is elected among those that may), and the cluster's name.
   engines   tune [--engine <id>] [--workers n] [--max-steps n] [--reply-timeout-ms n]
-                [--retention-days n] [--audit-retention-days n] [--trace-sampling 0..1]
+                [--retention-days n] [--design-retention-days n] [--audit-retention-days n] [--trace-sampling 0..1]
                 [--memory-workers n] [--poll-ms n] [--settings-refresh-ms n] [--memory-mb n]
             Engine tuning, for every engine or one: workers, limits, retention, trace sampling, queue check;
             Node memory (MB, applies at restart: sutra engines restart <engine>).
@@ -216,7 +216,7 @@ function remote(a: Args) {
   const token = str(a, 'token') || process.env.SUTRA_ADMIN_TOKEN || '';
   if (!token) throw new Usage('A token is required with --server (--token or SUTRA_ADMIN_TOKEN)');
   return async (method: string, p: string, body?: unknown) => {
-    const r = await fetch(server + p, { method, headers: { authorization: `Bearer ${token}`, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });
+    const r = await fetch(server + p, { method, headers: { authorization: `Bearer ${token}`, 'x-sutra-client': 'cli', ...(body !== undefined ? { 'content-type': 'application/json' } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined });
     const text = await r.text();
     let j: any; try { j = JSON.parse(text); } catch { j = text; }
     if (!r.ok) throw Object.assign(new Error(j?.error || `${r.status} ${r.statusText}`), { check: j?.check, plan: j?.plan, approval: r.status === 409 && !!j?.plan });
@@ -968,7 +968,7 @@ async function operate(cmd: string, a: Args, call: Call): Promise<number> {
       const cur = await call('GET', '/api/console/tuning');
       const engineId = str(a, 'engine');
       const values: Record<string, unknown> = { ...(engineId ? cur.perEngine[engineId] || {} : cur.cluster) };
-      const map: Record<string, string> = { workers: 'workers', 'max-steps': 'maxStepsPerRun', 'reply-timeout-ms': 'replyTimeoutMs', 'retention-days': 'runRetentionDays', 'audit-retention-days': 'auditRetentionDays', 'trace-sampling': 'traceSampling', 'memory-workers': 'memoryWorkers', 'poll-ms': 'pollMs', 'settings-refresh-ms': 'settingsRefreshMs', 'memory-mb': 'memoryMb' };
+      const map: Record<string, string> = { workers: 'workers', 'max-steps': 'maxStepsPerRun', 'reply-timeout-ms': 'replyTimeoutMs', 'retention-days': 'runRetentionDays', 'design-retention-days': 'designRetentionDays', 'audit-retention-days': 'auditRetentionDays', 'trace-sampling': 'traceSampling', 'memory-workers': 'memoryWorkers', 'poll-ms': 'pollMs', 'settings-refresh-ms': 'settingsRefreshMs', 'memory-mb': 'memoryMb' };
       for (const [flag, k] of Object.entries(map)) if (str(a, flag) === '') delete values[k]; else if (str(a, flag) !== undefined) values[k] = num(a, flag);
       const r = await call('PUT', engineId ? `/api/console/tuning/engines/${encodeURIComponent(engineId)}` : '/api/console/tuning/engine', { values });
       out(`${engineId || 'All engines'}: ${JSON.stringify(engineId ? r.perEngine[engineId] || {} : r.cluster)}`);
@@ -1138,7 +1138,7 @@ async function gateway(a: Args, call: Call): Promise<number> {
 async function fetchText(a: Args, p: string) {
   const server = (str(a, 'server') || process.env.SUTRA_SERVER || '').replace(/\/+$/, '');
   const token = str(a, 'token') || process.env.SUTRA_ADMIN_TOKEN || '';
-  const r = await fetch(server + p, { headers: { authorization: `Bearer ${token}` } });
+  const r = await fetch(server + p, { headers: { authorization: `Bearer ${token}`, 'x-sutra-client': 'cli' } });
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
   return r.text();
 }

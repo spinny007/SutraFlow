@@ -123,6 +123,14 @@ const BASE: Chapter[] = [
 <li><strong>Should</strong>: end branches that are finished with [[end]] where it makes the intent clear (<em>stop this branch</em>, or end the run with a status).</li>
 <li><strong>May</strong>: mark a step still to be designed with [[noop]]; it must be gone before release.</li>
 </ul>
+<p class="h">Lanes: what a step can see (2.1.7)</p>
+<p>A step can use the trigger, properties, Local variables and the outputs of the steps <em>before it on a connected path</em>; nothing from another lane (<a href="#ch-paths">What a step can see</a>). The designer, the design check and the engine apply the same rule.</p>
+<ul>
+<li><strong>Must</strong>: a step that needs the results of two lanes comes after the step where they meet, usually a [[merge]]. A reference to a step on another lane is a design problem and fails the step at run time.</li>
+<li><strong>Should</strong>: read request data as <code>{{trigger…}}</code> in later steps rather than carrying it from step to step; it is the same on every path.</li>
+<li><strong>Should</strong>: run <em>Tidy</em> after large changes and check the line colours where lanes meet: every line into a Merge should come from a lane you meant to join.</li>
+<li><strong>Should</strong>: give a line a colour by hand only where it helps a reader (a lane you name in the description); meaning must never depend on colour alone.</li>
+</ul>
 <p class="h">Durable or in memory</p>
 <table class="t"><thead><tr><th></th><th>Durable (default)</th><th>In memory</th></tr></thead><tbody>
 <tr><td>Saved</td><td>Every step; a run survives a restart and continues on another engine</td><td>Only the finished run</td></tr>
@@ -183,6 +191,8 @@ const BASE: Chapter[] = [
 <p class="h">Designing a called Sutra like a function</p>
 <ul>
 <li><strong>Must</strong>: an input schema and a result schema, with <em>Validate input</em> and <em>Validate result</em> on for shared Sutras: the contract is checked on every call, and the data trees of callers show its fields.</li>
+<li><strong>Must</strong> (2.1.7): the input schema lives on the called Sutra's Manual start, with strict validation on, and callers follow it with <em>Input contract from the called Sutra</em> instead of copying it. A change shows in every caller until someone accepts it (<a href="#ch-contracts">Inputs of called Sutras</a>).</li>
+<li><strong>Should</strong>: an XSD on the Manual start when the callers hold XML: the called Sutra receives the Parse XML shape plus the original text, so it maps the same way as JSON and can still pass the XML on.</li>
 <li><strong>Must</strong>: every path ends in [[return]] (or fails). A path that just ends leaves a waiting caller without a result.</li>
 <li><strong>Should</strong>: a pure function where possible: the same input gives the same result, no changes outside. Sutras that do change things say so in their name (<em>Reserve stock</em>) and are safe to repeat.</li>
 <li><strong>Should</strong>: callers use the <em>deployed</em> version (the default while not testing is <em>deployed (draft while testing)</em>), so a half-finished draft never runs in production.</li>
@@ -553,6 +563,7 @@ const BASE: Chapter[] = [
 <li><strong>Should</strong>: test the unhappy paths too: invalid input, a missing record, a partner that answers 500 or is slow. A Sutra whose error paths never ran is not tested.</li>
 <li><strong>Should</strong>: mock partners that are not ready or not available in test: a REST or SOAP service of your own with canned replies, pointed to by a property.</li>
 <li><strong>Should</strong>: called Sutras tested on their own with their input schema, like unit tests of a function.</li>
+<li><strong>Should</strong>: tell design runs from runtime runs when reading figures: tests, debugging and drafts are <em>design</em> runs (2.1.7), left out of the Admin Console figures, alerts and Traceability, and kept for 7 days by default.</li>
 <li><strong>Should</strong>: breakpoints and step-by-step debugging for logic, the Output tab (with each step's log lines) for what a step really received and produced.</li>
 <li><strong>Must</strong>: <code>sutra test</code> in the release pipeline, so a broken Sutra stops the release (<a href="#ch-cicd">CI/CD pipelines</a>).</li>
 </ul>`,
@@ -578,9 +589,10 @@ const BASE: Chapter[] = [
 <tr><td>Purpose</td><td>One business purpose; ten to thirty steps; split otherwise</td><td><a href="#ch-dg-principles">Principles</a></td></tr>
 <tr><td>Names</td><td>Sutra, steps, connections, properties and paths follow the conventions; every Sutra and step described</td><td><a href="#ch-dg-structure">Naming</a></td></tr>
 <tr><td>Shape</td><td>Receive, validate, enrich, transform, act, reply, record; a reply on every path when a caller waits</td><td><a href="#ch-dg-anatomy">Anatomy</a></td></tr>
+<tr><td>Lanes</td><td>No step uses a step on another lane; lanes meet at a Merge before their results are used; the design check shows no problems</td><td><a href="#ch-dg-anatomy">Anatomy</a></td></tr>
 <tr><td>Execution</td><td>Durable unless short, read-only and repeatable</td><td><a href="#ch-dg-anatomy">Anatomy</a></td></tr>
 <tr><td>Transformations</td><td>Mappings before code; missing values handled; money rounded once; times in UTC</td><td><a href="#ch-dg-functions">Functions</a></td></tr>
-<tr><td>Reuse</td><td>Shared logic in called Sutras with input and result schemas and a Return on every path</td><td><a href="#ch-dg-subsutras">Reusable logic</a></td></tr>
+<tr><td>Reuse</td><td>Shared logic in called Sutras with input and result schemas and a Return on every path; callers follow the called Sutra's input contract</td><td><a href="#ch-dg-subsutras">Reusable logic</a></td></tr>
 <tr><td>Contracts</td><td>A schema on every entry point; input validated at the door; schema change impact checked</td><td><a href="#ch-dg-contracts">Contracts</a></td></tr>
 <tr><td>Configuration</td><td>Nothing environment-specific in steps; secrets only in the vault</td><td><a href="#ch-dg-config">Configuration</a></td></tr>
 <tr><td>REST</td><td>Resource paths, right methods and status codes, the standard error body, paging, 202 for long work</td><td><a href="#ch-dg-rest">REST</a></td></tr>

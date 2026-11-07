@@ -36,7 +36,7 @@ test('traceability: Sutras by run outcome per project, runs found by a value in 
   const p = projects.saveProject({ name: 'Trace' });
   const s = node('start', 'Start', { payload: '{}' }), m = node('jsonata', 'Check', { source: '{{input}}', expression: '$.fail ? $error("no stock") : { "order": orderId }' });
   const f = flows.saveFlow(undefined, { name: 'Orders', nodes: [s, m], edges: [edge(s, m)] }, p.id) as any;
-  const go = async (input: any, startedBy: any) => { const id = await engine.startRun({ doc: f.doc ?? f, flowId: f.id, projectId: p.id, input, source: 'rest', startedBy }); await engine.waitFor(id, 20000); return id; };
+  const go = async (input: any, startedBy: any) => { const id = await engine.startRun({ doc: f.doc ?? f, flowId: f.id, projectId: p.id, version: 1, input, source: 'rest', startedBy }); await engine.waitFor(id, 20000); return id; };
   const ok = await go({ orderId: 'ORD-7781' }, startedByCaller({ method: 'jwt', subject: 'erp-system' }, '10.0.0.5'));
   const bad = await go({ orderId: 'ORD-9000', fail: true }, startedByCaller({ method: 'none', subject: 'anonymous' }, '10.0.0.9'));
   const mine = await go({ orderId: 'ORD-1' }, { kind: 'person', id: 'ana' });

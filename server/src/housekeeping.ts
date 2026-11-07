@@ -28,7 +28,7 @@ import { pruneReplayGuard } from './security/hmac.js';
  * (approvals, timers) are never deleted. 0 days keeps everything. Audit entries older than
  * SUTRA_AUDIT_RETENTION_DAYS are deleted too.
  */
-export function housekeeping(o: { retentionDays?: number; now?: number } = {}) {
+export function housekeeping(o: { retentionDays?: number; designRetentionDays?: number; now?: number } = {}) {
   const deletedAudit = pruneAudit();
   pruneGateway(o.now ?? Date.now());
   pruneAlerts(o.now ?? Date.now());
@@ -38,6 +38,9 @@ export function housekeeping(o: { retentionDays?: number; now?: number } = {}) {
   for (const [flowId, t] of tunedSutras()) {
     if (Number(t.retentionDays) > 0) deletedRuns += prune(new Date((o.now ?? Date.now()) - Number(t.retentionDays) * 86400000).toISOString(), flowId);
   }
+  // Design runs (2.1.7): tests, debugging and drafts have their own, shorter time (7 days unless set).
+  const designDays = o.designRetentionDays ?? config.designRetentionDays;
+  if (designDays > 0) deletedRuns += prune(new Date((o.now ?? Date.now()) - designDays * 86400000).toISOString(), undefined, 'design');
   const days = o.retentionDays ?? config.runRetentionDays;
   if (!(days > 0)) return { deletedRuns, deletedAudit };
   const cutoffMs = (o.now ?? Date.now()) - days * 86400000;
@@ -48,11 +51,11 @@ export function housekeeping(o: { retentionDays?: number; now?: number } = {}) {
 }
 
 /** Deletes finished runs before cutoff (of one Sutra, or all), with their steps. */
-/** Deletes the finished test and debug runs of a project (the designer's own runs), not deployed runs. */
+/** Deletes the finished design runs of a project (tests, debugging and drafts: the designer's own runs), not deployed runs. */
 export function clearTestRuns(projectId: string) {
   let n = 0;
   for (;;) {
-    const ids = q.all<{ id: string }>(`select id from runs where project_id = ? and source in ('test', 'debug') and status in ('done', 'failed', 'cancelled') limit 500`, projectId).map(r => r.id);
+    const ids = q.all<{ id: string }>(`select id from runs where project_id = ? and stage = 'design' and status in ('done', 'failed', 'cancelled') limit 500`, projectId).map(r => r.id);
     if (!ids.length) break;
     tx(() => { for (const id of ids) { q.run('delete from tasks where run_id = ?', id); q.run('delete from run_outputs where run_id = ?', id); q.run('delete from payloads where run_id = ?', id); q.run('delete from runs where id = ?', id); } });
     n += ids.length;
@@ -60,11 +63,11 @@ export function clearTestRuns(projectId: string) {
   return n;
 }
 
-function prune(cutoff: string, flowId?: string) {
+function prune(cutoff: string, flowId?: string, stage?: 'design') {
   let deletedRuns = 0;
   // In batches, so a large backlog never holds the database for long.
   for (;;) {
-    const ids = q.all<{ id: string }>(`select id from runs where status in ('done', 'failed', 'cancelled') and finished_at is not null and finished_at < ?${flowId ? ' and flow_id = ?' : ''} limit 500`, cutoff, ...(flowId ? [flowId] : [])).map(r => r.id);
+    const ids = q.all<{ id: string }>(`select id from runs where status in ('done', 'failed', 'cancelled') and finished_at is not null and finished_at < ?${flowId ? ' and flow_id = ?' : ''}${stage ? ' and stage = ?' : ''} limit 500`, cutoff, ...(flowId ? [flowId] : []), ...(stage ? [stage] : [])).map(r => r.id);
     if (!ids.length) break;
     tx(() => {
       for (const id of ids) {

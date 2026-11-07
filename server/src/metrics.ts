@@ -55,9 +55,9 @@ const all: (Counter | Histogram)[] = [];
 const SECONDS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 300];
 
 export const metrics = {
-  runsStarted: new Counter('sutra_runs_started_total', 'Runs started, by Sutra and source (test, rest, soap, mcp, timer...).'),
-  runsFinished: new Counter('sutra_runs_finished_total', 'Runs ended, by Sutra and status (done, failed, cancelled).'),
-  runSeconds: new Histogram('sutra_run_duration_seconds', 'Time from start to end of runs, by Sutra and status.', SECONDS),
+  runsStarted: new Counter('sutra_runs_started_total', 'Runs started, by Sutra, source (test, rest, soap, mcp, timer...) and stage (design or runtime, 2.1.7).'),
+  runsFinished: new Counter('sutra_runs_finished_total', 'Runs ended, by Sutra, status (done, failed, cancelled) and stage (design or runtime).'),
+  runSeconds: new Histogram('sutra_run_duration_seconds', 'Time from start to end of runs, by Sutra, status and stage.', SECONDS),
   steps: new Counter('sutra_steps_total', 'Steps finished, by activity type and outcome (done, error = handled by an error output, failed).'),
   stepSeconds: new Histogram('sutra_step_duration_seconds', 'Time steps took, by activity type.', SECONDS),
   retries: new Counter('sutra_step_retries_total', 'Steps run again after a failure, by activity type.'),

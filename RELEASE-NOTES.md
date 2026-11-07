@@ -1,19 +1,97 @@
-# SutraFlow 2.1.6 release notes
+# SutraFlow 2.1.7 release notes
 
-Prepared 2026-11-04. Copyright (c) 2026-27 Surya Partap Singh, MixAgile.com. AGPL-3.0-only; a commercial licence is available.
+Prepared 2026-11-07. Copyright (c) 2026-27 Surya Partap Singh, MixAgile.com. AGPL-3.0-only; a commercial licence is available.
 
 | Download | For |
 |---|---|
-| `sutraflow-2.1.6-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
-| `sutraflow-2.1.6-windows-x64-offline.zip` | The same with the runtime packages inside, for servers without the npm registry |
-| `sutraflow-2.1.6-linux.tar.gz` | Linux (x64 or arm64); also macOS |
-| `sutraflow-2.1.6-docs.zip` | The user guide, the Administration Guide, the Sutra Design Guide and the architecture page, to put on a website |
+| `sutraflow-2.1.7-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
+| `sutraflow-2.1.7-windows-x64-offline.zip` | The same with the runtime packages inside, for servers without the npm registry |
+| `sutraflow-2.1.7-linux.tar.gz` | Linux (x64 or arm64); also macOS |
+| `sutraflow-2.1.7-docs.zip` | The user guide, the Administration Guide, the Sutra Design Guide and the architecture page, to put on a website |
 
 Each comes with a `.sha256` file to check the download: `sha256sum -c <archive>.sha256`, or on Windows `Get-FileHash <archive> -Algorithm SHA256`.
 
-2.1.5 was built but not published: a review of its new features found four serious problems (fixed below). **2.1.6 holds everything 2.1.5 brought** (the sections *What is new in 2.1.5* below) **with those fixes**, plus 2.1.6's own changes. Upgrade from 2.1.4 straight to 2.1.6.
+2.1.7 is about trusting what the designer shows: a step sees only the data it can really receive, every line shows where it comes from, a called Sutra states its input once, and every run says whether it was a test or real work.
 
 ## In short
+
+- **A step sees only the steps before it** (lanes): the Input tab, the condition picker, template and SQL fields, the design check and the engine apply one rule. A step may use the trigger, properties, Local variables and the outputs of steps before it on a connected path. A step on another lane is not offered, is a design problem, and fails the step at run time with the same message. After a Merge both lanes count. *Trigger data (trigger)* is listed on every step, and pointing at a `{{…}}` under a field says where it comes from.
+- **Lines you can follow**: pointing at a line names it (*from step (port) → to step*) and highlights it; selecting a step lights its lines and dims the rest; *Path* lights every step before and after it. Where two or more lines meet, each takes its source step's colour from a palette of 8 (or one chosen by hand, saved in the Sutra; right-click a step to colour all its lines), with a key on the step's Input tab. *Tidy* lays a Sutra out left to right in one undo step. Error lines stay red and dashed, so meaning never depends on colour.
+- **Called Sutras state their input once**: Manual start takes an XSD as well as a JSON Schema, with an XML test payload, and gives later steps the Parse XML shape plus the original `xml`. Call Sutra follows the called Sutra's Manual start schema as its input contract (*Input contract from the called Sutra*) and says when that Sutra changes it. An invalid input fails the Call Sutra step before any step of the called Sutra runs: the same check for the studio and the Run API.
+- **Design runs and runtime runs**: every run records its stage (*design*: tests, debugging, drafts; *runtime*: deployed work) and the client that started it by hand (*studio*, *api*, *cli*). The Admin Console figures, alerts, Traceability, the runs-at-once limit and the Prometheus run metrics (new `stage` label) count runtime runs; Runs and Traceability have a Design / Runtime / All filter. Design runs are deleted after 7 days (`SUTRA_DESIGN_RUN_RETENTION_DAYS`, *Keep design runs*).
+- **Smaller fixes**: a Dashboard page step links to its page once deployed and says *not deployed* before; a query on missing sample data names the install Sutra to run first; the bundled samples were laid out again so lines do not run under steps; two new samples show a called Sutra with an XML contract.
+
+## Install and upgrade
+
+Install as for 2.1.6. Upgrade from 2.1.0 to 2.1.6: unpack 2.1.7 in a folder of its own and run `bin/sutraflow upgrade` from there. It adds two columns to `runs` (`stage`, `client`) and an index, fills the stage of existing runs in batches from their source and version (a test, a debug run or a draft is design), and needs no new settings.
+
+**What changes for you:**
+- **A step that uses a step on another lane now fails** (decided for 2.1.7; no setting turns it off, and older Sutras are not handled specially). Before upgrading production, open each project and run the design check. Where a step uses a step on another lane, connect that step before it, or move the step after the place where the lanes meet (for example a Merge).
+- **Design runs are deleted after 7 days.** Set *Keep design runs* (Engines, Tuning) or `SUTRA_DESIGN_RUN_RETENTION_DAYS` to keep them longer; 0 leaves them to *Keep finished runs*. Runtime runs are not affected.
+- **Figures leave out every design run**, including runs of a draft started through its REST, SOAP or other trigger, which some figures used to count.
+- **Prometheus**: `sutra_runs_started_total`, `sutra_runs_finished_total` and `sutra_run_duration_seconds` have a new `stage` label (`design` or `runtime`). Queries that match the old label sets exactly need `stage` added, or `sum without (stage)`.
+
+## Fixes in 2.1.7
+
+| Seen | Cause | Now |
+|---|---|---|
+| A step could use the output of a step on another lane; depending on timing it got that output, or nothing | The mapper listed other lanes ("available only after completion") and the engine let any step read any step's output | One rule for the designer, the design check and the engine: only the steps before it on its path. A reference to another lane is a problem in the design check and fails the step at run time with the same message |
+| Where many lines met at one step (the dashboard samples) it was hard to tell which line came from where | Every line looked the same apart from its port; the connection was named only in the side panel | Lines are named when pointed at and highlighted with their ends; where two or more meet each has its source step's colour, with a key on the Input tab; *Path* and *Tidy* |
+| In the bundled samples lines ran under steps and labels overlapped | The samples were laid out for columns 240 px apart while a step is 250 px wide | Samples are placed with columns 340 px apart and the crowded ones laid out again; a test fails when any sample's steps overlap or its lines have too little room |
+| A Call Sutra step mapped to an input schema copied by hand, which still looked right after the called Sutra changed its input; the error came only from the called Sutra, after it had started | Call Sutra kept its own *Input schema*, unrelated to the called Sutra's Manual start | Call Sutra follows the called Sutra's schema for the chosen version, warns when it changes until the change is accepted, and refuses an invalid input before the called Sutra starts |
+| Figures, alerts and traces could count test runs, and did not agree with each other | Each left out `test` and `debug` runs its own way, by source; runs of a draft through a trigger counted as real work | Every run has a stage, decided in one place when it starts (a called Sutra takes its caller's); every figure counts runtime runs only |
+| A Dashboard page step did not show where its page was, or whether it was published | The page address was only in the guide | The step shows the page's link once deployed, *not deployed* before, and asks to deploy again when the draft's name differs |
+| A sample query on missing sample data failed with only the database's message (*Table … doesn't exist*) | Nothing linked the sample to the install Sutra that makes its data | The error adds the install Sutra of the project that makes it: *Run 'Sample: Sales orders install' first: it makes sample_sutraflow.* |
+
+## What is new in 2.1.7
+
+### What a step can see
+
+- **The rule**: the trigger (`{{trigger…}}`), Project and Engine properties, Local variables, and the outputs of the steps before it on a connected path. After a join both lanes count; a loop back does not make later steps count as before; the Error handler sees every step; a condition on a line uses the step it leaves and the steps before it.
+- **Designer**: Sutra Data, the condition picker and template fields offer only what the rule allows. *Trigger data (trigger)* is on every step, so dragging writes `{{trigger.params.region}}`. Under text fields (SQL, templates) each `{{…}}` says where it comes from, and SQL fields add that run data is sent as a bound parameter.
+- **Design check**: a reference to a step that is not before this one is a problem naming the step, the field and the step used. `{{nodes.…}}` in mappings, templates and conditions, JSONata `$nodes` and Code steps' `nodes` count.
+- **Engine**: such a reference fails the step with the same message. Each step gets only the outputs it may see.
+- **Samples**: every sample passes the check (a test fails otherwise). The filter SQL of *Sales dashboard on a database* has a comment: an empty filter matches every row, and each value is a bound parameter.
+
+### Lines on the canvas
+
+- **Pointing at a line**: a label *from step (port) → to step*, the line and both ends highlighted.
+- **Selecting a step**: its lines and the steps at their other ends lit, the rest dimmed. **Path** (toolbar) lights every step before and after it.
+- **Colours**: automatic only where two or more lines go into one step, by source step, stable when steps move; with more than 8 sources the least used colour is repeated. By hand in the line's side panel (palette or *Automatic*), saved as `edge.color` and kept in exports, packages and Git; right-click a step, *Colour its lines*, for all of them. The palette is checked for contrast in the light and dark themes.
+- **Key**: a step receiving several lines lists them with their colours on its Input tab.
+- **Tidy** (toolbar): columns by the longest path from the trigger, each column ordered to cross fewer lines, stacked by real step heights; one undo step.
+- **Run view**: Runs, *Open in designer* shows the same colours and highlighting.
+
+### Manual start and Call Sutra contracts
+
+- **Manual start with an XSD**: an XML test payload (the design check warns when it is not XML). Input may be XML text, `{ "xml": "…" }` or data in the Parse XML shape; text is checked against the XSD (DTDs and entities refused). Output: the Parse XML shape plus `xml`.
+- **Call Sutra**: *Input contract from the called Sutra* (turned on when a Sutra is picked and the step has no schema of its own) uses the called Sutra's Manual start schema for the chosen version. The Input tab maps to it with required fields marked; *Input schema* is hidden while it is followed. A note shows the contract, *Accept the new input* after the called Sutra changes it, or *Use its input contract* for older steps that keep their own schema.
+- **One check**: the called Sutra's Manual start check runs before the child starts, with or without *Wait for the result* (*Input for Order check refused: …*, on Call Sutra's error output). The studio and the Run API use the same check.
+- **Samples**: *Sample: XML order check* (XSD, XML test payload, strict) and *Sample: Call the XML order check* (JSON mapped to the XML contract), added with the *XML* sample.
+- **API**: `GET /api/flows/:id/contract?use=draft|deployed` returns the input contract of a Sutra (View permission on the Sutra).
+
+### Design runs and runtime runs
+
+- **Stage and client**: `runs.stage` (*design* or *runtime*) and `runs.client` (*studio*, *api*, *cli*, or none for automatic starts). One function decides; a called Sutra takes its caller's stage. The `sutra` command sends `x-sutra-client: cli`.
+- **Where it counts**: the Admin Console Overview and Applications, alerts, Traceability (runtime by default, with a Stage filter), the Operator view, the runs-at-once limit and the Prometheus run metrics (`stage` label). The designer's Runs shows all runs, with a Stage filter and column. `GET /api/runs?stage=design|runtime` filters.
+- **Retention**: *Keep design runs* (engine tuning, `SUTRA_DESIGN_RUN_RETENTION_DAYS`, `sutra engines tune --design-retention-days`), 7 days by default; a project's *Clear test runs* now clears its design runs.
+- **Upgrade**: existing runs get their stage from source and version, in batches of 5,000, on SQLite and PostgreSQL.
+
+### Smaller changes
+
+- **Page link**: the Dashboard page step shows `/dash/<name>` as a link once deployed (`GET /api/flows/:id/page-link?node=`).
+- **Missing sample data**: SQL query errors on a `sample_` database or table that is not there name the install Sutra of the project that makes it.
+- **Documentation**: new user guide chapters *What a step can see, and the lines between steps* and *Inputs of called Sutras: JSON or XML*; the Sutra Design Guide's rules on lanes and contracts and its checklist; the Administration Guide on run stages, retention and metrics; screenshots retaken on 2.1.7.
+
+## 2.1.7 release gate
+
+The 24-hour remote-PostgreSQL soak, the backlog's only Must have, is deferred again (decided 7 November 2026) and stays the Must have; the package receipt records it and why.
+
+## Previous release: 2.1.6
+
+2.1.5 was built but not published: a review of its new features found four serious problems (fixed below). **2.1.6 holds everything 2.1.5 brought** (the sections *What is new in 2.1.5* below) **with those fixes**, plus 2.1.6's own changes. Upgrade from 2.1.4 straight to 2.1.6.
+
+### In short
 
 - **Redeploying needs a person** (2.1.6): a release may replace Sutras already deployed, but only after someone has seen the plan (each Sutra new, unchanged or replacing the version here, those undeployed) and approved it: `yes` typed at `sutra deploy`, `--approve <plan id>` in pipelines (exit code 3 without it), or the project name typed in the Admin Console. A plan id no longer matches once the server changes.
 - **Never overwritten without a list** (2.1.6): deployments and config files create connections, project properties and settings that are missing and keep the ones already there, listing them in a checklist (name, type, where it points, the fields that differ, never values) for the operations team to verify.
@@ -29,7 +107,7 @@ Each comes with a `.sha256` file to check the download: `sha256sum -c <archive>.
 - **Sample data named sample_**: everything the samples store is named `sample_<objective>` (tables, databases, collections, counters, queues, folders), and the installer's new *Samples* mode adds the samples to an installation or lists and removes them with their data, also through the *Sample ...* connections; earlier versions' sample names are recognised. No samples and no AI knowledge are set up unless chosen.
 - **Installer**: server name, the gateway certificate (self-signed, your files or Let's Encrypt), sample Sutras, steps at once per engine, heartbeat and drain, a check that the engines see each other, `sutraflow engine-file` for an engine joining later, and YAML install files.
 
-## Install and upgrade
+### Install and upgrade
 
 Install as for 2.1.4. Upgrade from 2.1.0 to 2.1.4 (or a 2.1.5 build): unpack 2.1.6 in a folder of its own and run `bin/sutraflow upgrade` from there. It adds six tables (`agent_conversations`, and for Knowledge admin `kb_admin`, `kb_grants`, `kb_sources`, `kb_source_items`, `kb_sync_runs`), made on upgrade, and no required settings.
 
@@ -40,7 +118,7 @@ Install as for 2.1.4. Upgrade from 2.1.0 to 2.1.4 (or a 2.1.5 build): unpack 2.1
 - **Conversations end** after the agent channel's *Conversation lasts* time (24 hours unless set); the next message starts a new one.
 - **Chat visitors** (no policy) get a new kind of signed identity; 2.1.4 identities are renewed on their next message, so nobody loses a conversation.
 
-## Fixes in 2.1.6
+### Fixes in 2.1.6
 
 | Seen | Cause | Now |
 |---|---|---|
@@ -51,15 +129,15 @@ Install as for 2.1.4. Upgrade from 2.1.0 to 2.1.4 (or a 2.1.5 build): unpack 2.1
 | Choosing *Every project may search* took away a project's grant to add and remove in its area | The access check returned search-only before reading the project's grants | Every project searches the whole base and write grants still apply; Knowledge admin shows the grants in both modes |
 | The upgrader refused an installation already on the package's version ("It already runs 2.1.6"), leaving no safe way to repair damaged program files | Only a lower version counted as upgradable | *Reinstall* runs the same safe steps over the same version, only when asked for |
 
-## What is new in 2.1.6
+### What is new in 2.1.6
 
-### Redeploying needs approval
+#### Redeploying needs approval
 
 - **The plan**: `sutra check`, the Admin Console's Releases page and the designer's Releases page show what a release does before it changes anything: each Sutra *new*, *unchanged*, *deployed again* or *replaces* (with the version here), Sutras *undeployed*, changed schemas, what is created, the checklist, and a **plan id** (a hash of the release and of what is on the server now).
 - **Approval**: replacing or undeploying needs a person: `yes` typed in a terminal, `sutra deploy --approve <plan id>` in a pipeline, the project name typed in the Admin Console, or the *Approved plan* field of the Release palette's *Deploy package*. Without it, `sutra deploy` stops with exit code 3 and the API answers 409 with the plan; an id that no longer matches is refused. Who approved, and the plan id, go into the deployment record and the audit log.
 - **Checklist**: connections, project properties and logging already on the server are kept and listed (name, type, where it points without credentials, which fields differ); `--checklist file.md` writes it as Markdown. `sutra check --json` gives the plan to scripts.
 
-### Configuration as files
+#### Configuration as files
 
 - `sutra config export --server-settings --project "A,B" --out sutraflow.yaml`: what is set now, YAML or JSON. Never people; system accounts without tokens, gateway apps without keys; secrets as `${env:SUTRA_<PROJECT>_<NAME>}` placeholders; a run-time `${env:}` reference stays one (`$${env:}`).
 - `sutra config check <file> [--env env/prod.yaml]`: what applying would create and the checklist; runs the apply and undoes it, so it finds every error an apply would. Warns about secrets written directly, unless `--allow-plain-secrets`.
@@ -67,7 +145,7 @@ Install as for 2.1.4. Upgrade from 2.1.0 to 2.1.4 (or a 2.1.5 build): unpack 2.1
 - Values: direct, `${env:NAME}` from where the command runs, `file:/path` for secret, private key and certificate properties (Kubernetes and Docker secrets). The environment file is merged over the config file, lists matched by name.
 - `sutra deploy` and `sutra check` take `--env` too, and `--config` may be YAML.
 
-### Containers, Kubernetes and pipelines
+#### Containers, Kubernetes and pipelines
 
 - **Official image** `ghcr.io/spinny007/sutraflow:2.1.6` (and `2.1`, `latest`) for amd64 and arm64, built by the release workflow after the tests, smoke-tested (health, version, guides, non-root, clean stop), signed with cosign keyless, with an SBOM and provenance. OCI labels name the version, commit and source.
 - **Offline**: `sutraflow image build` builds the image from a release package (`deploy/docker/Dockerfile.package`, no npm needed) or a source folder; `sutraflow image save` writes it to a file for `docker load`.
@@ -82,9 +160,9 @@ Install as for 2.1.4. Upgrade from 2.1.0 to 2.1.4 (or a 2.1.5 build): unpack 2.1
 - **Reinstall the same version** (a repair): the upgrader no longer only refuses an installation that already runs the package's version. *Check* says so, and ticking *Reinstall* (or `"reinstall": true` in `upgrade.json`) puts the package's program files in place again through the upgrade's own steps: graceful stop, backup (pg_dump checked), old files moved into the backup, data compared, started and checked, and the previous files put back if a step fails. Data, settings and deployed Sutras stay. It also works when the launcher is missing, and it never takes a newer installation back. *Upgrading* and *Troubleshooting servers* in the Administration Guide explain it.
 - **Keep PostgreSQL near the engines** (about 2 ms round trip or less). Measured with the image and two engines: PostgreSQL 18.2 on the same machine answered 120 simultaneous calls in 3.9 s and survived a hard kill of the leader; a hosted PostgreSQL 17.2 over the internet (75 ms) worked correctly but took 3 to 8 s per call.
 
-## What is new in 2.1.5
+### What is new in 2.1.5
 
-### Dashboards
+#### Dashboards
 
 - **Dashboard page** (trigger): the page `/dash/<name>` while deployed, with a title, a description, filters (list, multi list, date range, number range, search: their values in the page address, `{{trigger.params.<field>}}` for SQL as bound parameters and `{{trigger.filters}}` for Chart steps; a click on a chart sets the filter of its category field), who may see it (a security policy: the page holds no data, its data request goes through the policy), a refresh time, whether results are the same for everyone or kept per caller, and the number of columns. `/dash/<name>/embed.js` puts it on another web page; a page with its own login passes it with `window.SutraDashboard = { token: () => accessToken }`.
 - **Chart**: rows to a chart: bar, horizontal bar, line, area, pie, donut, scatter, a number, a KPI card (the total or the latest period, the change against the one before, a trend line, a target), a gauge or a table, with category and value fields, stacking, sorting, a row limit, a unit and a colour palette. Rows from SQL, an API answer (*List inside*), any JSON; raw rows grouped and added up (sum, average, count, distinct count, min, max), dates by day, week, month, quarter or year, series split by a field, nested fields such as `customer.city`; the page filters applied to the rows. Plain JSON options only: no code, no links.
@@ -98,7 +176,7 @@ Install as for 2.1.4. Upgrade from 2.1.0 to 2.1.4 (or a 2.1.5 build): unpack 2.1
 - **Sample: Dashboard from JSON** (new, Samples/Dashboards): `/dash/orders-json` from an API-style answer, grouped by month, split by channel, a nested field, four filters including a search, and three charts planned by Charts from AI.
 - **Sample: Sales dashboard** (new, Samples/Dashboards): five charts from SQL queries on the built-in SQLite file (total revenue, revenue by month, orders by category, top products, latest orders), and a suggestion step standing in for an AI whose unknown field is refused.
 
-### Knowledge admin
+#### Knowledge admin
 
 - **Admin Console, Knowledge admin** (new page, Server permission): every knowledge base with its home project. *Server knowledge base* on: *Every project* may search the whole base, or *Granted projects only*, each grant naming the project, the area (a folder of sources such as `products`; empty = whole base) and whether it may add and remove there. The home project keeps full use; removing everything, rebuilding vectors and building the search index stay with it and administrators.
 - The engine checks every step, agent tool and API call: a project searches only its granted areas (a search without a filter searches all of them), and changing outside its areas fails with the reason. A granted knowledge base appears in the project's knowledge base lists marked with its home project and areas; its own connections are used through it, never offered to the project.
@@ -108,7 +186,7 @@ Install as for 2.1.4. Upgrade from 2.1.0 to 2.1.4 (or a 2.1.5 build): unpack 2.1
 - **MCP search tool**: a server knowledge base as a tool on an MCP server connection of its home project, for an area; the MCP server must have a security policy.
 - `sutra knowledge list | sync <base> <source> [--reindex] | runs <base> <source>`. New tables `kb_admin`, `kb_grants`, `kb_sources`, `kb_source_items`, `kb_sync_runs` (made on upgrade; nothing changes for existing knowledge bases until an administrator shares one).
 
-### Agent conversations
+#### Agent conversations
 
 - A conversation token `c1.<id>.<expiry>.<signature>` is signed with a key derived from the master key over the conversation id, its expiry, the agent and the caller (policy and token issuer, subject, gateway app, or the visitor). A missing, altered, foreign or expired token, or a made-up session id, starts a new conversation. The Sutra sees the conversation id as `{trigger.sessionId}`; answers name the conversation by its token, with `conversationExpires`.
 - The same in every entry point: chat page and API, OpenAI-compatible API (without a token, the same conversation for the same first message until it expires), A2A, and the MCP tool `ask_<agent>`, where each assistant user's conversation is bound to the gateway app and caller the assistant signed in with. Jobs name their conversation again.
@@ -116,19 +194,19 @@ Install as for 2.1.4. Upgrade from 2.1.0 to 2.1.4 (or a 2.1.5 build): unpack 2.1
 - **Admin Console, Agent conversations** (new page): every agent's conversations, active and expired, with their messages; *Clear expired* removes expired conversations with their AI memory (messages, summaries, queue places) for one agent or all, for administrators (Server permission), recorded in the audit log. `sutra agents conversations` and `sutra agents clear-expired [--agent name]` do the same. The new table `agent_conversations` keeps no message text.
 - Visitor identities (`v2`) expire after `SUTRA_VISITOR_DAYS` (30) and are renewed once half of that has passed while the visitor keeps coming back.
 
-### Who is chatting
+#### Who is chatting
 
 - The caller's verified claims and scopes reach the agent Sutra as `trigger.caller.claims` and `trigger.caller.scopes` (JWT, OAuth introspection and gateway apps), beside the subject.
 - The chat page and widget carry a website's login: the page sets `window.SutraChat = { token: () => accessToken }` before the widget script; the chat asks for it before each message, sends it as a bearer token, and asks again when it is refused as expired. The widget answers only its own frame and sends the token only to the SutraFlow address it came from. Without a login, the chat says to sign in on the website. `SutraChat.reload()` reopens the chat after a sign-in change.
 
-### Samples
+#### Samples
 
 - **Sample data named sample_**: the samples' tables, databases, collections, counters, channels, queues and folders are named `sample_<objective>`: MySQL `sample_sutraflow` (tables `sample_sales_orders`, `sample_products`, `sample_customers`, `sample_orders`, procedure `sample_customer_orders`, was `sutraflow_samples`), SQLite `sample_sutraflow.sqlite` (was `samples.sqlite`), MongoDB `sample_orders`, queues `sample_orders.in`/`.out`, and folders in the project's files folder (`sample_csv`, `sample_inbox`, `sample_outbox`, `sample_documents`, `sample_scripts`, `sample_downloads`, `sample_validation`) through project properties instead of `C:/sutra/...`. Samples added before keep their old names until they are removed and added again.
 - **Knowledge feed from a database** (new, Samples/AI agents): *Sample: Product catalogue install* makes a product table in MySQL; *Sample: Product knowledge feed* reads the published rows of the table in the project property `PRODUCTS_TABLE` every 30 minutes, adds each product as a passage under `products/<id>` with its category, price and link as details (*Same text as before: skip*), and removes the products no longer published; *Sample: Product search API* (`POST /samples/products/search`) answers the closest products with their details. No AI model needed.
 - **Chat for customers and support** (new, Samples/AI agents): *Sample: Customer and support chat*, published as `shop-help`, with the policy *Sample chat website sign-in* (JWT with a shared secret in the Secret property `CHAT_SITE_SECRET`, issuer `sutra-sample-shop`). Eight skills chosen by keywords: order status, tracking a parcel, returns and refunds (within 30 days of delivery), invoices, the delivery address, products and stock, a person from the support desk, and help. Customers see only their own orders, the support desk every order and every order of a customer; no AI model needed.
 - **Sutra Sample Shop** (new): the PHP website for that sample, ready to ship as a repository of its own. Its own sign-in with two demo accounts, a 15-minute token per person, the chat button, a setup check page (`check.php`), settings in `config.local.php` or environment variables (never in the shipped files), and `SUTRAFLOW_URL` to use this SutraFlow or one on another server. Download it from *New Sutra*, *Samples* (*Download the website (zip)*), or as `sutra-sample-shop-<version>.zip` beside the release packages; its README is the install guide.
 
-### Installer
+#### Installer
 
 - **Server page**: *Server name* (`SUTRA_PUBLIC_URL`) and *Gateway certificate*: off, self-signed, your certificate files (checked against the key; the key kept in the vault) or Let's Encrypt (domains, email, staging or production, agreement).
 - **Cluster page**: *Steps at once* per engine (`STUDIO_WORKERS`, `ENGINE_WORKERS`, and in further engines' files), *Heartbeat* (`SUTRA_HEARTBEAT_MS`) and *Finish steps on stop* (`SUTRA_DRAIN_MS`).
@@ -139,13 +217,13 @@ Install as for 2.1.4. Upgrade from 2.1.0 to 2.1.4 (or a 2.1.5 build): unpack 2.1
 - **`sutraflow engine-file <name>`**: a settings file for an engine joining the cluster later, from the installed server's settings, without the database password.
 - **YAML install files**: `sutraflow install --config install.yaml` (the same fields as JSON). The silent install takes the new fields too (`docs/install-example.json`).
 
-### Documentation
+#### Documentation
 
 - User guide: *Dashboards*. Sutra Design Guide: *Blueprint: dashboards*, *Blueprint: knowledge bases from databases, APIs and files* (the feed Sutra, rules, a Joomla example, answering from it), and *Blueprint: chat agents for customers and support staff*, with the two agent patterns (a public agent that owns the conversation, and skills for an outside assistant), who is chatting from a third-party login, customers and staff, conversation tokens and their expiry, and the PHP example.
 - User guide: conversations and who is chatting; the Agent conversations page. Administration Guide: the new installer choices, `engine-file`, YAML, `SUTRA_VISITOR_DAYS`.
 - Administration Guide: *Knowledge admin: server knowledge bases* (settings, sources, grants, and using it: from a granted project's steps, from an assistant over MCP with curl and Claude Desktop examples, from the command line), and *The command line by task*: every `sutraflow` and `sutra` command grouped by task (installing and upgrading, starting and watching, engines and Docker, the database, releases, people and secrets, operating, alerts and the gateway), with what each does, when to use it and examples. User guide: *Exporting a Sutra application from the command line* in *Deploying and versions*, with deployment on servers pointing to the Administration Guide; server knowledge bases in *AI agents and knowledge bases*. Sutra Design Guide: one knowledge base for many projects, designed by area.
 
-### Fixes in 2.1.5
+#### Fixes in 2.1.5
 
 | Seen | Cause | Now |
 |---|---|---|
@@ -158,7 +236,7 @@ Install as for 2.1.4. Upgrade from 2.1.0 to 2.1.4 (or a 2.1.5 build): unpack 2.1
 | `sutra knowledge sync` with a misspelt knowledge base said the names were missing | Not found and not given shared one message | It names the knowledge base not found and lists the ones there are |
 | GitHub CI proved upgrades from 2.1.0 only | The previous release was written into the workflow | CI upgrades from the newest published release other than the one being built (2.1.4 for 2.1.5) |
 
-## 2.1.5 release gate
+### 2.1.5 release gate
 
 See `docs/releases/2.1.5-packages.md`.
 

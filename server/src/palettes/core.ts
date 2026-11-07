@@ -24,7 +24,7 @@ import { F, when, isObj, listOf, parseJsonText, needList, OPS, compare } from '.
 import { truthy } from '../expr.js';
 import { checkMappedValue } from '../mapping-check.js';
 import { validateStructured } from '../schema-validation.js';
-import { manualStartPayload, messageStartPayload, soapStartPayload, enforceContract } from '../contracts.js';
+import { manualStartPayload, messageStartPayload, soapStartPayload, enforceContract, schemaKindOf } from '../contracts.js';
 import { publicEngineVariableValues, publicProjectVariableValues } from '../projects.js';
 
 const safeJson = (t: unknown): any => { if (typeof t !== 'string') return t; try { return JSON.parse(t); } catch { return undefined; } };
@@ -36,16 +36,23 @@ const routeNames = (v: unknown) => (Array.isArray(v) ? v.map((r: any) => String(
 const triggers: Activity[] = [
   {
     type: 'start', palette: 'triggers', name: 'Manual start', glyph: '▶', trigger: true, ports: ['out'],
-    desc: 'Starts the Sutra from the studio or the Run API, with a test payload.',
+    desc: 'Starts the Sutra from the studio, the Run API, sutra or Call Sutra, with a test payload. Its payload schema (JSON Schema or XSD) is the input contract callers see.',
     fields: [
-      F('schema', 'Payload schema', 'schema', '', { schemaKinds: ['json'], help: 'Describes the payload. Turn strict validation On to enforce it before a run starts.' }),
-      F('validateSchema', 'Strict schema validation', 'bool', false, { help: 'On requires a JSON Schema/sample and rejects invalid configured or supplied input before processing. Off is descriptive only.' }),
-      F('payload', 'Test payload (JSON)', 'code', '{\n  "orderId": "A-1001"\n}'),
+      F('schema', 'Payload schema', 'schema', '', { schemaKinds: ['json', 'xsd'], help: 'Describes the payload: a JSON Schema/sample, or an XSD for XML. A Call Sutra step that calls this Sutra maps to it. Turn strict validation On to enforce it before a run starts.' }),
+      F('validateSchema', 'Strict schema validation', 'bool', false, { help: 'On requires a payload schema and rejects invalid input from every caller before processing. Off is descriptive only.' }),
+      F('payload', 'Test payload', 'code', '{\n  "orderId": "A-1001"\n}', { help: 'JSON; XML text when the payload schema is an XSD. With an XSD the step gives the data in the Parse XML shape and the text under xml.' }),
     ],
-    outputSchema: (cfg, h) => h.schema(cfg.schema) || h.infer(safeJson(cfg.payload) ?? {}),
+    outputSchema: (cfg, h) => {
+      const tree = h.schema(cfg.schema);
+      if (tree && schemaKindOf(cfg.schema) === 'xsd') return { ...tree, children: [...(tree.children || []), { name: 'xml', type: 'string' }] };
+      return tree || h.infer(safeJson(cfg.payload) ?? {});
+    },
     execute: async c => ({ out: await manualStartPayload(c.node.config, c.input, c.scope, c.projectId, c.node.name) }),
     validateStart: async c => { await manualStartPayload(c.node.config, c.input, c.scope, c.projectId, c.node.name); },
-    designCheck: cfg => cfg.schema && !cfg.validateSchema ? ['Payload schema is descriptive only; enable Strict schema validation to enforce it.'] : [],
+    designCheck: cfg => [
+      ...(cfg.schema && !cfg.validateSchema ? ['Payload schema is descriptive only; enable Strict schema validation to enforce it.'] : []),
+      ...(schemaKindOf(cfg.schema) === 'xsd' && typeof cfg.payload === 'string' && cfg.payload.trim() && !cfg.payload.trim().startsWith('<') ? ['The payload schema is an XSD: write the test payload as XML.'] : []),
+    ],
   },
   {
     type: 'timer', palette: 'triggers', name: 'Timer', glyph: '⏱', trigger: true, ports: ['out'],

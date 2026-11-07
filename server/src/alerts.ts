@@ -149,12 +149,12 @@ export function check(r: Rule, nowMs = Date.now()): Finding {
   const where = (min: number) => new Date(nowMs - min * 60e3).toISOString();
   switch (r.kind) {
     case 'runFailures': {
-      const rows = q.all<any>(`select id, flow_name, error from runs where status = 'failed' and source not in ('test', 'debug') and started_at >= ?${flow} order by started_at desc`, where(p.minutes), ...fa);
+      const rows = q.all<any>(`select id, flow_name, error from runs where status = 'failed' and stage = 'runtime' and started_at >= ?${flow} order by started_at desc`, where(p.minutes), ...fa);
       return { firing: rows.length >= Math.max(1, p.count), message: `${rows.length} failed run${rows.length === 1 ? '' : 's'} of ${p.flowId ? sutraName(p.flowId) : 'deployed Sutras'} in ${p.minutes} min`, details: { runs: rows.slice(0, 5).map(x => ({ id: x.id, sutra: x.flow_name, error: x.error })) } };
     }
     case 'slowRuns': {
       const limitIso = (row: any) => Date.parse(row.finished_at || new Date(nowMs).toISOString()) - Date.parse(row.started_at);
-      const rows = q.all<any>(`select id, flow_name, started_at, finished_at, status from runs where source not in ('test', 'debug') and started_at >= ?${flow}`, where(p.minutes + p.seconds / 60), ...fa)
+      const rows = q.all<any>(`select id, flow_name, started_at, finished_at, status from runs where stage = 'runtime' and started_at >= ?${flow}`, where(p.minutes + p.seconds / 60), ...fa)
         .filter(x => limitIso(x) > p.seconds * 1000 && (x.finished_at ? Date.parse(x.finished_at) >= nowMs - p.minutes * 60e3 : true));
       return { firing: rows.length > 0, message: `${rows.length} run${rows.length === 1 ? '' : 's'} of ${p.flowId ? sutraName(p.flowId) : 'deployed Sutras'} took longer than ${p.seconds} s`, details: { runs: rows.slice(0, 5).map(x => ({ id: x.id, sutra: x.flow_name, status: x.status, seconds: Math.round(limitIso(x) / 1000) })) } };
     }
@@ -341,7 +341,7 @@ export function pruneAlerts(nowMs = Date.now()) {
 export function runsTimeline(visible: 'all' | Set<string>, nowMs = Date.now()) {
   const hour = 3600e3, start = Math.floor((nowMs - 24 * hour) / hour) * hour;
   const v = visible === 'all' ? { sql: '', args: [] as string[] } : visible.size ? { sql: ` and project_id in (${[...visible].map(() => '?').join(', ')})`, args: [...visible] } : { sql: ' and 1 = 0', args: [] };
-  const rows = q.all<any>(`select started_at, status from runs where started_at >= ? and source not in ('test', 'debug')${v.sql}`, new Date(start).toISOString(), ...v.args);
+  const rows = q.all<any>(`select started_at, status from runs where started_at >= ? and stage = 'runtime'${v.sql}`, new Date(start).toISOString(), ...v.args);
   const n = Math.ceil((nowMs - start) / hour);
   const t = Array.from({ length: n }, (_x, i) => ({ at: new Date(start + i * hour).toISOString(), done: 0, failed: 0, other: 0 }));
   for (const r of rows) {

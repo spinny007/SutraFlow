@@ -252,6 +252,19 @@ test('more samples across the palettes run as tests (REST, files, database, XML,
   assert.match(r.state.outputs['Render invoice'].text, /<Number>INV-A-7<\/Number>/);
   assert.match(r.state.outputs['Render invoice'].text, /<Amount>240<\/Amount>/);
 
+  // XML at a Manual start and the Call Sutra contract (2.1.7).
+  r = await ok(doc('Sample: XML order check'));
+  assert.equal(r.state.outputs.Decide.approved, true);
+  assert.match(r.state.outputs.Decide.received, /<customer>Asha Traders<\/customer>/);
+  r = await ok(doc('Sample: Call the XML order check'));
+  assert.deepEqual({ ...r.state.outputs['Check order'], received: undefined }, { orderId: 'A-1002', customer: 'Ravi Stores', approved: false, received: undefined });
+  assert.match(r.state.outputs['Check order'].received, /^<Order><orderId>A-1002<\/orderId><customer>Ravi Stores<\/customer><amount>7200<\/amount><\/Order>$/);
+  const noAmount = doc('Sample: Call the XML order check');
+  delete noAmount.nodes.find((n: any) => n.type === 'callProcess')!.config.inputMapping.rules['Order/amount'];
+  const refused = await engine.startRun({ doc: noAmount, projectId: pid, source: 'test' });
+  await engine.waitFor(refused, 10000);
+  assert.match(q.get<any>(`select error from tasks where run_id = ? and status = 'failed'`, refused).error, /Input for Sample: XML order check refused/);
+
   r = await ok(doc('Sample: JSONata, JavaScript and HTML'));
   assert.deepEqual(r.state.outputs['Rank countries'].ranked.map((c: any) => [c.rank, c.country]), [[1, 'IN'], [2, 'LK']]);
   assert.match(r.state.outputs.Report.html, /<td>IN<\/td>/);

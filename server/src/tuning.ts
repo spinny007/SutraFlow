@@ -35,6 +35,7 @@ export const ENGINE_FIELDS: Field[] = [
   { k: 'maxStepsPerRun', name: 'Steps per run limit', help: 'A run that takes more steps is stopped: protects against loops that never end.', type: 'number', min: 10, max: 1000000, unit: 'steps' },
   { k: 'replyTimeoutMs', name: 'Reply wait', help: 'How long REST, SOAP and MCP callers wait for a reply step before they get 504.', type: 'number', min: 1000, max: 600000, step: 1000, unit: 'ms' },
   { k: 'runRetentionDays', name: 'Keep finished runs', help: 'Finished runs older than this are deleted with their steps. 0 = keep.', type: 'number', min: 0, max: 3650, unit: 'days' },
+  { k: 'designRetentionDays', name: 'Keep design runs', help: 'Finished design runs (tests, debugging and runs of drafts) older than this are deleted with their steps, sooner than other runs. 0 = the same as Keep finished runs.', type: 'number', min: 0, max: 3650, unit: 'days' },
   { k: 'auditRetentionDays', name: 'Keep audit entries', help: 'Audit entries older than this are deleted. 0 = keep.', type: 'number', min: 0, max: 3650, unit: 'days' },
   { k: 'memoryWorkers', name: 'Steps at once in memory', help: 'The same, for Sutras that run in memory. 0 = the same as Steps at once.', type: 'number', min: 0, max: 512, unit: 'steps', perEngine: true },
   { k: 'pollMs', name: 'Queue check', help: 'How often an idle engine looks for due steps. Lower answers sooner and costs more database reads; steps started on the same engine begin at once either way.', type: 'number', min: 20, max: 10000, step: 10, unit: 'ms', perEngine: true },
@@ -57,7 +58,7 @@ export const SUTRA_FIELDS: Field[] = [
 /** The environment (or built-in) values, read once at start. */
 const DEFAULTS: Record<string, number> = {
   workers: config.workerConcurrency, maxStepsPerRun: config.maxStepsPerRun, replyTimeoutMs: config.replyTimeoutMs,
-  runRetentionDays: config.runRetentionDays, auditRetentionDays: config.auditRetentionDays, traceSampling: config.traceSampling,
+  runRetentionDays: config.runRetentionDays, designRetentionDays: config.designRetentionDays, auditRetentionDays: config.auditRetentionDays, traceSampling: config.traceSampling,
   memoryWorkers: config.memoryWorkers, pollMs: config.pollMs, settingsRefreshMs: settingsCache.ms, memoryMb: config.memoryMb,
 };
 
@@ -147,6 +148,7 @@ export function applyTuning(setWorkers?: (n: number) => void) {
   config.maxStepsPerRun = e.maxStepsPerRun;
   config.replyTimeoutMs = e.replyTimeoutMs;
   config.runRetentionDays = e.runRetentionDays;
+  config.designRetentionDays = e.designRetentionDays;
   config.auditRetentionDays = e.auditRetentionDays;
   config.traceSampling = e.traceSampling;
   config.memoryWorkers = e.memoryWorkers;

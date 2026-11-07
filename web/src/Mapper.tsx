@@ -143,6 +143,13 @@ export function Mapper({ node, act, doc, design, run, outputs, updateNode }: Pro
     if (engineVars.length) r.push({ label: '$_sengineVariables (read only)', path: 'ev', shape: { name: 'ev', type: 'object', children: engineVars.map(v => ({ name: v.name, type: 'string' as const, doc: v.description })) }, value: Object.fromEntries(engineVars.map(v => [v.name, v.value])), state: 'none' });
     if (varShape.children!.length || (runVars && Object.keys(runVars).length)) r.push({ label: '$_sutraVariables', path: 'vars', shape: runVars ? observedShape(runVars, 'vars') : varShape, value: runVars, state: run ? 'ran' : 'none' });
     if (d?.in || inputValue !== undefined) r.push({ label: sourceInfo.inputLabel, path: 'input', shape: ranHere ? observedShape(inputValue, 'input') : d?.in ?? null, value: inputValue, state: ranHere ? 'ran' : run ? 'skipped' : 'none' });
+    // Trigger data (2.1.7): the trigger's output under its own name, so dragging writes {{trigger.…}},
+    // which reads the same anywhere in the Sutra (input changes after each step).
+    const triggerNode = doc.nodes.find(n => meta.activities.find(a => a.type === n.type)?.trigger);
+    if (triggerNode && triggerNode.id !== node.id) {
+      const ran = triggerNode.name in outputs;
+      r.push({ label: `Trigger data (trigger) — ${triggerNode.name} (${meta.activities.find(a => a.type === triggerNode.type)?.name || triggerNode.type})`, path: 'trigger', shape: ran ? observedShape(outputs[triggerNode.name], 'trigger') : design[triggerNode.id]?.out ? { ...design[triggerNode.id].out!, name: 'trigger' } : null, value: outputs[triggerNode.name], state: ran ? 'ran' : run ? 'skipped' : 'none' });
+    }
     for (const { node: n, label } of sourceInfo.sources) {
       const ran = n.name in outputs;
       r.push({ label, path: `nodes${seg(n.name)}`, shape: ran ? observedShape(outputs[n.name], n.name) : design[n.id]?.out ?? null, value: outputs[n.name], state: ran ? 'ran' : run ? 'skipped' : 'none' });
@@ -162,7 +169,7 @@ export function Mapper({ node, act, doc, design, run, outputs, updateNode }: Pro
       r.unshift({ label: '$index', path: 'index', shape: { name: 'index', type: 'integer' }, value: 1, state: 'none' });
     }
     return r;
-  }, [sourceInfo, outputs, design, d, inputValue, run, ranHere, forEachCtx, gvShape, gvValue, procShape, varShape, runVars, engineVars, node.settings]);
+  }, [sourceInfo, outputs, design, d, inputValue, run, ranHere, forEachCtx, gvShape, gvValue, procShape, varShape, runVars, engineVars, node.settings, node.id, doc.nodes, meta.activities]);
 
   // ----- values on the right -----
   const getVal = (t: Target): string | MapRule | undefined => {

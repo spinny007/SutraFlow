@@ -66,14 +66,14 @@ test('metrics: runs, steps by outcome, retries and durations; gauges read when s
   assert.equal(r.statusCode, 200);
   assert.match(String(r.headers['content-type']), /text\/plain; version=0\.0\.4/);
   const text = r.body;
-  assert.equal(value(text, /^sutra_runs_finished_total\{status="done",sutra="Metric ok"\}/), 1);
-  assert.equal(value(text, /^sutra_runs_finished_total\{status="failed",sutra="Metric fail"\}/), 1);
+  assert.equal(value(text, /^sutra_runs_finished_total\{stage="design",status="done",sutra="Metric ok"\}/), 1);
+  assert.equal(value(text, /^sutra_runs_finished_total\{stage="design",status="failed",sutra="Metric fail"\}/), 1);
   assert.equal(value(text, /^sutra_steps_total\{activity="throw",outcome="failed"\}/), 1);
   assert.equal(value(text, /^sutra_steps_total\{activity="throw",outcome="error"\}/), 1);
   assert.equal(value(text, /^sutra_step_retries_total\{activity="throw"\}/), 1);
-  assert.ok(value(text, /^sutra_runs_started_total\{source="test",sutra="Metric ok"\}/) >= 1);
+  assert.ok(value(text, /^sutra_runs_started_total\{source="test",stage="design",sutra="Metric ok"\}/) >= 1);
   assert.ok(value(text, /^sutra_step_duration_seconds_count\{activity="log"\}/) >= 2);
-  assert.match(text, /sutra_run_duration_seconds_bucket\{le="\+Inf",status="done",sutra="Metric ok"\} 1/);
+  assert.match(text, /sutra_run_duration_seconds_bucket\{le="\+Inf",stage="design",status="done",sutra="Metric ok"\} 1/);
   assert.equal(value(text, /^sutra_engine_leader /), 1);
   const { version } = await import('../server/src/config.js');
   assert.ok(new RegExp('sutra_info\{engine="[^"]+",mode="studio",version="([^"]+)"\} 1').exec(text)?.[1] === version, 'sutra_info carries the product version');
@@ -160,7 +160,8 @@ test('retention: finished runs older than the limit are deleted with their steps
   const long = new Date(Date.now() - 40 * 86400000).toISOString();
   q.run('update runs set started_at = ?, finished_at = ? where id = ?', long, long, old1.id);
   q.run('update runs set started_at = ? where id = ?', long, waiting);
-  assert.equal(housekeeping({ retentionDays: 0 }).deletedRuns, 0, '0 keeps everything');
+  // Design runs have their own time (2.1.7): 0 for both keeps everything.
+  assert.equal(housekeeping({ retentionDays: 0, designRetentionDays: 0 }).deletedRuns, 0, '0 keeps everything');
   const r = await srv.admin.inject({ method: 'POST', url: '/api/engine/housekeeping', headers: ADMIN, payload: { retentionDays: 30 } });
   assert.equal(r.statusCode, 200, r.body);
   assert.ok(r.json().deletedRuns >= 1);

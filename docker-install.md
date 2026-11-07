@@ -1,4 +1,4 @@
-# SutraFlow 2.1.6 in Docker — install steps
+# SutraFlow 2.1.7 in Docker — install steps
 
 A fresh installation on Windows with Docker Desktop: one **studio** (design Sutras) and one **engine** (run them), each with its own data volume. Commands are for PowerShell.
 
@@ -7,7 +7,7 @@ A fresh installation on Windows with Docker Desktop: one **studio** (design Sutr
 ## 1. Download the image
 
 ```powershell
-docker pull ghcr.io/spinny007/sutraflow:2.1.6
+docker pull ghcr.io/spinny007/sutraflow:2.1.7
 ```
 
 The image is public; no sign-in is needed. `latest` points at the newest release, but pin the version on real sites.
@@ -15,7 +15,7 @@ The image is public; no sign-in is needed. `latest` points at the newest release
 Optional: check the signature (needs cosign):
 
 ```powershell
-cosign verify ghcr.io/spinny007/sutraflow:2.1.6 --certificate-identity-regexp '^https://github.com/spinny007/SutraFlow/' --certificate-oidc-issuer https://token.actions.githubusercontent.com
+cosign verify ghcr.io/spinny007/sutraflow:2.1.7 --certificate-identity-regexp '^https://github.com/spinny007/SutraFlow/' --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
 ## 2. Make a folder with the compose file
@@ -46,7 +46,7 @@ $k = New-Object byte[] 32; $r.GetBytes($k)
 @"
 COMPOSE_PROJECT_NAME=sutraflow-production
 SUTRA_IMAGE=ghcr.io/spinny007/sutraflow
-SUTRA_VERSION=2.1.6
+SUTRA_VERSION=2.1.7
 SUTRA_ADMIN_TOKEN=$(($t | ForEach-Object { $_.ToString('x2') }) -join '')
 SUTRA_MASTER_KEY=$([Convert]::ToBase64String($k))
 SUTRA_ENVIRONMENT=production
@@ -266,10 +266,10 @@ Data lives in the Docker volumes `studio-data` and `engine-data`; stopping, upgr
 
 ## Shortcut from the release package
 
-From the unpacked 2.1.6 package, `bin\sutraflow.cmd docker up` uses the same compose file and makes `.env` (admin token and master key) on first use: steps 2 and 3 done for you. `bin\sutraflow.cmd docker cluster up` starts PostgreSQL with two engines (`compose.cluster.yml`).
+From the unpacked 2.1.7 package, `bin\sutraflow.cmd docker up` uses the same compose file and makes `.env` (admin token and master key) on first use: steps 2 and 3 done for you. `bin\sutraflow.cmd docker cluster up` starts PostgreSQL with two engines (`compose.cluster.yml`).
 
 ## Offline sites
 
-On a machine with internet: `bin\sutraflow.cmd image build` then `bin\sutraflow.cmd image save sutraflow-2.1.6.tar`. Copy the file, then on the offline machine `docker load -i sutraflow-2.1.6.tar` and set `SUTRA_IMAGE=sutraflow` in `.env`.
+On a machine with internet: `bin\sutraflow.cmd image build` then `bin\sutraflow.cmd image save sutraflow-2.1.7.tar`. Copy the file, then on the offline machine `docker load -i sutraflow-2.1.7.tar` and set `SUTRA_IMAGE=sutraflow` in `.env`.
 
 More: Admin Guide, "Docker, Kubernetes and the application lifecycle".

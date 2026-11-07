@@ -40,6 +40,10 @@ export function attachSampleSchemas(projectId: string, doc: FlowDoc) {
   try { payload = JSON.parse(String(start?.config.payload || '')); } catch { /* Not every starter carries JSON text. */ }
   for (const node of doc.nodes) {
     const cfg = node.config;
+    // A Manual start that takes XML (2.1.7): its payload schema is an XSD, the contract its callers map to.
+    if (node.type === 'start' && doc.name === 'Sample: XML order check' && !cfg.schema) {
+      cfg.schema = schema('Order XML in', 'xsd', `<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="Order"><xs:complexType><xs:sequence><xs:element name="orderId" type="xs:string"/><xs:element name="customer" type="xs:string"/><xs:element name="amount" type="xs:decimal"/></xs:sequence></xs:complexType></xs:element></xs:schema>`, 'Order');
+    }
     if (node.type === 'start' && payload !== undefined && !cfg.schema) {
       cfg.schema = schema(`${node.name} payload`, 'json', JSON.stringify(payload, null, 2));
     }
