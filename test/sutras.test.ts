@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { testEnv, captureServer, node, edge, port } from './helpers.js';
+import { testEnv, captureServer, node, edge, port, engineSecrets, allowPrograms } from './helpers.js';
 
 testEnv(18910);
 const { boot } = await import('../server/src/index.js');
@@ -29,7 +29,8 @@ const { q } = await import('../server/src/db.js');
 const projects = await import('../server/src/projects.js');
 const flows = await import('../server/src/flows.js');
 const { saveResource } = await import('../server/src/resources.js');
-const { setSecret } = await import('../server/src/secrets.js');
+// 2.1.8: a stored secret is used through a Secret property; these are engine Secret properties (helpers.ts).
+const setSecret = await engineSecrets();
 const { addSamples } = await import('../server/src/samples.js');
 const { listSchemas, schemaTree } = await import('../server/src/schemas.js');
 const { testResource } = await import('../server/src/resourceTest.js');
@@ -111,6 +112,7 @@ test('AI engines: OpenAI, Gemini, Ollama and a command-line tool return text plu
     const openai = mk('OpenAI', { engine: 'OpenAI API', apiKeySecret: 'AI_KEY', baseUrl: cap.url, model: 'gpt-5' });
     const gemini = mk('Gemini', { engine: 'Gemini API', apiKeySecret: 'AI_KEY', baseUrl: cap.url, model: 'gemini-3-pro-preview' });
     const ollama = mk('Local', { engine: 'Ollama', baseUrl: cap.url, model: 'llama3.3' });
+    await allowPrograms(`"${process.execPath}"`); // 2.1.8: AI command-line tools need the administrator's allowance
     const cli = mk('Claude CLI', { engine: 'Claude CLI', command: process.execPath, args: `"${fake}"`, model: 'claude-sonnet-5-5' });
     const s = node('start', 'Start');
     const cls = node('aiClassify', 'Classify', { provider: openai, text: 'I want my money back', labels: 'refund, question' });

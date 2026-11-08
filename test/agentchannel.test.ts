@@ -19,7 +19,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { testEnv, node, edge } from './helpers.js';
+import { testEnv, node, edge, allowPrograms, engineSecrets } from './helpers.js';
 
 /** Published agents: chat page and API, OpenAI-compatible API, MCP tool, A2A, jobs, policies; MCP client; hand-off. */
 const env = testEnv(19910);
@@ -29,7 +29,7 @@ const { q } = await import('../server/src/db.js');
 const flows = await import('../server/src/flows.js');
 const projects = await import('../server/src/projects.js');
 const { saveResource, getResource } = await import('../server/src/resources.js');
-const { setSecret } = await import('../server/src/secrets.js');
+const setSecret = await engineSecrets(); // 2.1.8: policy keys only behind a Secret property
 const { listMcpTools, callMcpTool } = await import('../server/src/ai/mcpClient.js');
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -214,6 +214,7 @@ test('a conversation token continues only for the caller who started it; a made-
 });
 
 test('MCP client over a command; Call MCP tool; an agent uses outside tools; hand-off to an agent', async () => {
+  await allowPrograms(`"${process.execPath}"`); // 2.1.8: an MCP server started by a command needs the administrator's allowance
   const cmd = getResource(saveResource({ kind: 'mcpClient', name: 'Calculator', project_id: pid, config: { transport: 'command', command: `"${process.execPath}" "${path.join(here, 'mcpstdio.mjs')}"` } }).id)!;
   assert.deepEqual((await listMcpTools(cmd, () => '')).map(t => t.name), ['add']);
   const s = node('start', 'Go', { payload: '{}' });

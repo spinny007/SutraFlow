@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { testEnv, node, edge } from './helpers.js';
+import { testEnv, node, edge, engineSecrets } from './helpers.js';
 
 /**
  * Python steps (with the Python of this machine), and YouTube and Twitch through OAuth connections
@@ -33,7 +33,8 @@ const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const projects = await import('../server/src/projects.js');
 const { saveResource } = await import('../server/src/resources.js');
-const { setSecret } = await import('../server/src/secrets.js');
+// 2.1.8: a stored secret is used through a Secret property; these are engine Secret properties (helpers.ts).
+const setSecret = await engineSecrets();
 const { testResource } = await import('../server/src/resourceTest.js');
 const { validateDoc } = await import('../server/src/flows.js');
 const { findPython } = await import('../server/src/python.js');

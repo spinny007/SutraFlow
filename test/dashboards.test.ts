@@ -16,7 +16,7 @@
  * @end-sutra-file-overview */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { testEnv } from './helpers.js';
+import { testEnv, engineSecrets } from './helpers.js';
 
 /** Dashboards (2.1.5): Chart steps, the allow-list for suggested settings, the page and its data on the gateway. */
 const env = testEnv(19840);
@@ -25,7 +25,7 @@ const projects = await import('../server/src/projects.js');
 const flows = await import('../server/src/flows.js');
 const { addSamples } = await import('../server/src/samples.js');
 const { saveResource } = await import('../server/src/resources.js');
-const { setSecret } = await import('../server/src/secrets.js');
+const setSecret = await engineSecrets(); // 2.1.8: policy keys only behind a Secret property
 const { chartFrom, checkChartSettings } = await import('../server/src/palettes/dashboard.js');
 
 let srv: Awaited<ReturnType<typeof boot>>;

@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import dns from 'node:dns';
 import { parseEnv } from 'node:util';
 import { BSON } from 'mongodb';
-import { testEnv, node, edge } from './helpers.js';
+import { testEnv, node, edge, engineSecrets } from './helpers.js';
 testEnv(23130);
 const { mongoCandidates, mongoConnection, closeMongoPools, mongoDocument, mongoPublic } = await import('../server/src/connectors/mongodb.js');
 test('MongoDB BSON types round-trip, invalid documents fail and every exposed activity has a sample', async () => {
@@ -81,7 +81,8 @@ test('Atlas M0 activities use isolated seeded data, strict boundaries and real e
   const server = await boot({ listenAdmin: false, gateway: false }); engine.register(mongoCandidates);
   const variables = [{ name: 'MONGO_DB', type: 'string' as const, value: 'sutraflow_test' }, { name: 'STRICT', type: 'boolean' as const, value: 'On' }];
   const projectId = saveProject({ name: 'M0 certification', config: { variables } }).id;
-  setSecret('M0_TEST_URI', u.href);
+  // From 2.1.8 a stored secret is used only behind a Secret property (here an engine one).
+  (await engineSecrets())('M0_TEST_URI', u.href);
   const resource = saveResource({ kind: 'mongodb', name: 'Atlas M0 test', project_id: projectId, config: { uriSecret: 'M0_TEST_URI', database: '{{gv.MONGO_DB}}', maxPoolSize: 3, timeoutMs: 15000 } });
   saveProject({ id: projectId, name: 'M0 certification', config: { variables: [...variables, { name: 'MONGO_CONNECTION', type: 'string', value: resource.id }] } });
   const collection = `sutra_210_${Date.now()}_${process.pid}`;

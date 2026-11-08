@@ -122,7 +122,7 @@ export interface ProjectVariable { name: string; type: 'string' | 'number' | 'bo
 /** Secret and Private key properties are kept in the vault; their values are never shown (2.1.1). */
 export const isVaultType = (t?: string) => t === 'secret' || t === 'private key';
 export const PRIVATE_KEY_PEM = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/;
-export interface LoggingConfig { enabled: boolean; file: string; level: string; format: string; maxSizeMb: number; maxFiles: number; stepData: boolean }
+export interface LoggingConfig { enabled: boolean; file: string; level: string; format: string; maxSizeMb: number; maxFiles: number; stepData: boolean; hidePersonalData?: boolean }
 export interface Project { id: string; name: string; description: string; config: { variables: ProjectVariable[]; logging: LoggingConfig }; flows?: number }
 
 export interface RunTask {

@@ -213,8 +213,11 @@ export function listAlerts(f: { state?: string; limit?: number } = {}) {
 }
 export const getAlert = (id: string) => { const r = q.get<any>('select * from alerts where id = ?', id); return r ? alertRow(r) : null; };
 
-export function summary() {
-  const rows = q.all<any>(`select severity, state, count(*) n from alerts where state != 'resolved' group by severity, state`);
+/** Open alerts by severity and state; rules: only alerts of these rules (a person who sees part of them). */
+export function summary(rules?: Set<string>) {
+  const rows = rules
+    ? q.all<any>(`select severity, state, rule_id, count(*) n from alerts where state != 'resolved' group by severity, state, rule_id`).filter(r => rules.has(r.rule_id))
+    : q.all<any>(`select severity, state, count(*) n from alerts where state != 'resolved' group by severity, state`);
   const n = (s?: string, st?: string) => rows.filter(r => (!s || r.severity === s) && (!st || r.state === st)).reduce((a, r) => a + Number(r.n), 0);
   return { open: n(), firing: n(undefined, 'firing'), critical: n('critical'), warning: n('warning'), acknowledged: n(undefined, 'acknowledged') };
 }

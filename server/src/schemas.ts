@@ -55,6 +55,9 @@ export function saveSchema(s: { id?: string; project_id: string; name: string; k
   const name = String(s.name || '').trim();
   if (!name) throw new Error('Schema name is required');
   const id = s.id || crypto.randomUUID();
+  // An existing schema stays in its project: saving it under another project is refused (audit 2.1.7 F4).
+  const stored = s.id ? q.get<{ project_id: string; name: string }>('select project_id, name from schemas where id = ?', s.id) : undefined;
+  if (stored && stored.project_id !== s.project_id) throw new Error(`The schema ${stored.name} belongs to another project; it cannot be saved under this one.`);
   if (q.get('select 1 from schemas where project_id = ? and lower(name) = lower(?) and id != ?', s.project_id, name, id)) throw new Error(`This project already has a schema named "${name}"`);
   // Validate by converting it once.
   if (s.kind === 'json') jsonTree(parseJsonText(s.text), name);

@@ -46,7 +46,8 @@ export async function googleServiceToken(sa: Sa, scopes: string, cacheKey: strin
 
 function account(c: ExecCtx, r: Resource): Sa {
   let sa: Sa;
-  try { sa = JSON.parse(c.secret(r.config.serviceAccountSecret, 'Firebase service account')); } catch { throw new Error('The Firebase service account secret is not valid JSON'); }
+  const saText = c.secret(r.config.serviceAccountSecret, 'Firebase service account');
+  try { sa = JSON.parse(saText); } catch { throw new Error('The Firebase service account secret is not valid JSON'); }
   if (!sa.client_email || !sa.private_key || !sa.project_id) throw new Error('The service account JSON needs project_id, client_email and private_key');
   return sa;
 }

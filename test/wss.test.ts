@@ -18,7 +18,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { generate } from 'selfsigned';
 import { SignedXml } from 'xml-crypto';
-import { testEnv, node, edge } from './helpers.js';
+import { testEnv, node, edge, engineSecrets } from './helpers.js';
 
 /**
  * WS-Security on SOAP services (security/wssin.ts): requests signed with X.509, SAML assertions,
@@ -26,7 +26,8 @@ import { testEnv, node, edge } from './helpers.js';
  */
 const env = testEnv(20750);
 const { boot } = await import('../server/src/index.js');
-const { setSecret } = await import('../server/src/secrets.js');
+// 2.1.8: a stored secret is used through a Secret property; these are engine Secret properties (helpers.ts).
+const setSecret = await engineSecrets();
 const { saveResource } = await import('../server/src/resources.js');
 const flows = await import('../server/src/flows.js');
 const { engine, runState } = await import('../server/src/engine/engine.js');

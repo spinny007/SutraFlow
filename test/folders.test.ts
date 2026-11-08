@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { testEnv } from './helpers.js';
+import { testEnv, engineSecrets } from './helpers.js';
 import { sftpServer } from './sftpserver.js';
 
 /** Sutra folders, and the samples for SOAP, JSON microservices, SQL install scripts and SFTP / FTP. */
@@ -31,7 +31,8 @@ const { q } = await import('../server/src/db.js');
 const flows = await import('../server/src/flows.js');
 const projects = await import('../server/src/projects.js');
 const { listResources, saveResource, getResource } = await import('../server/src/resources.js');
-const { setSecret } = await import('../server/src/secrets.js');
+// 2.1.8: a stored secret is used through a Secret property; these are engine Secret properties (helpers.ts).
+const setSecret = await engineSecrets();
 const { addSamples, SAMPLES, SAMPLE_SUTRAS, fileSamples } = await import('../server/src/samples.js');
 const { buildPackage, importPackage } = await import('../server/src/packages.js');
 const folders = await import('../server/src/folders.js');

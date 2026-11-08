@@ -351,6 +351,7 @@ function InputTab(p: Props & { node: FlowNode }) {
 }
 
 function WsdlLoader({ node, setCfg }: { node: FlowNode; setCfg(k: string, v: any): void }) {
+  const { projectId } = useCatalog();
   const toast = useToast();
   const [desc, setDesc] = useState<any>(null);
   const [busy, setBusy] = useState(false);
@@ -358,7 +359,7 @@ function WsdlLoader({ node, setCfg }: { node: FlowNode; setCfg(k: string, v: any
   const load = async () => {
     setBusy(true);
     try {
-      setDesc(await post('/api/soap/describe', fromProject ? { wsdlRef: node.config.wsdlRef } : { wsdlUrl: node.config.wsdlUrl, connection: node.config.connection || undefined, auth: node.config.auth || undefined }));
+      setDesc(await post('/api/soap/describe', fromProject ? { projectId, wsdlRef: node.config.wsdlRef } : { projectId, wsdlUrl: node.config.wsdlUrl, connection: node.config.connection || undefined, auth: node.config.auth || undefined }));
     } catch (e: any) { toast(e.message, true); } finally { setBusy(false); }
   };
   const choose = (svc: string, port: string, op: string) => {

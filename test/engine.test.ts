@@ -16,13 +16,14 @@
  * @end-sutra-file-overview */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { testEnv, captureServer, node, edge } from './helpers.js';
+import { testEnv, captureServer, node, edge, engineSecrets } from './helpers.js';
 
 testEnv(18110);
 const { boot } = await import('../server/src/index.js');
 const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
-const { setSecret } = await import('../server/src/secrets.js');
+// 2.1.8: a stored secret is used through a Secret property; these are engine Secret properties (helpers.ts).
+const setSecret = await engineSecrets();
 const { saveResource } = await import('../server/src/resources.js');
 
 let srv: Awaited<ReturnType<typeof boot>>;

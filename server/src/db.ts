@@ -289,6 +289,7 @@ create table if not exists gw_requests(
 create index if not exists gw_requests_at on gw_requests(at);
 create index if not exists gw_requests_route on gw_requests(route, at);
 create index if not exists audit_actor on audit(actor, at);
+create table if not exists guard_cache(flow_id text not null, question text not null, person text not null, answer text not null, expires_at bigint not null, primary key(flow_id, question, person));
 `;
 
 export function openDb(file?: string) {
@@ -367,6 +368,8 @@ function migrate(d = getDb()) {
   // Personal copies of a project (Git workspaces): the owner, and restricted mode until the repository is trusted.
   add('projects', 'owner', "owner text not null default ''");
   add('projects', 'restricted', 'restricted integer not null default 0');
+  // 2.1.8: the project a stored secret belongs to (empty: a server-level secret from the Secrets page or the command line).
+  add('secrets', 'project_id', 'project_id text');
   // Audit entries keep the names of what they were about, so a renamed or deleted item stays readable.
   add('audit', 'project_name', 'project_name text');
   add('audit', 'sutra_id', 'sutra_id text');

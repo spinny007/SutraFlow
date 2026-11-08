@@ -24,7 +24,7 @@ import { listFlows, getFlow, saveFlow, publish, deploy, undeploy, versionDoc, va
 import { listResources, saveResource, RESOURCE_KINDS } from './resources.js';
 import { listSchemas, getSchema, saveSchema } from './schemas.js';
 import { setItemFolder } from './folders.js';
-import { listProjects, getProject, saveProject, getOps, projectFilesDir } from './projects.js';
+import { listProjects, getProject, saveProject, getOps, projectFilesDir, isVaultType, substituteEnv, secretVariableReferences } from './projects.js';
 import { audit } from './audit.js';
 import { writeProjectFiles } from './bundles.js';
 import { getSecret } from './secrets.js';
@@ -87,7 +87,7 @@ export function usedBy<R extends { id: string; config: unknown }, S extends { id
 }
 
 /** Secret names a project needs: from connection settings, secret project variables, and {{secret.X}} references. */
-function secretsOf(resources: Package['resources'], variables: any[], docs: FlowDoc[]) {
+export function secretsOf(resources: Package['resources'], variables: any[], docs: FlowDoc[]) {
   const out = new Set<string>();
   for (const r of resources) {
     const k = RESOURCE_KINDS.find(x => x.kind === r.kind);
@@ -200,6 +200,14 @@ export function checkPackage(p: Package, o: { project?: string } = {}): CheckRes
   const secrets = p.manifest.secrets.map(name => ({ name, present: getSecret(name) !== undefined }));
   const missing = secrets.filter(s => !s.present).map(s => s.name);
   if (missing.length) errors.push(`Missing secrets on this server: ${missing.join(', ')}. Add them under Resources > Secrets (or with the command-line tool) before deploying.`);
+  // 2.1.8 (audit F1): a project reads only the stored secrets behind its Secret properties and the engine's.
+  // A connection or Sutra that names another stored secret directly would fail at run time, so it stops the deploy.
+  const behind = new Set([
+    ...(p.project.variables || []).filter((v: any) => isVaultType(v?.type) && v.value).map((v: any) => substituteEnv(String(v.value))),
+    ...Object.values(secretVariableReferences(null).ev).map(String),
+  ]);
+  const direct = secretsOf(p.resources, [], p.sutras.map(s => s.doc)).filter(n => !behind.has(n));
+  if (direct.length) errors.push(`Not behind a Secret property: ${direct.join(', ')}. From 2.1.8 a connection or Sutra uses a stored secret only through a Secret property of its project ({{gv.NAME}}) or of the engine ({{ev.NAME}}). Add a Secret project property whose value is the stored secret's name, use it in the connection or Sutra, and package again.`);
   const supported = new Set(['oracle', 'mssql', 'mysql', 'postgres', 'sqlite']);
   const described = new Map(p.manifest.memoryTables.map(m => [m.name.toLowerCase(), m]));
   for (const r of p.resources.filter(x => x.kind === 'memoryTable')) {

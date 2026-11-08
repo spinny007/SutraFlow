@@ -74,7 +74,7 @@ export const CONNECTOR_KINDS: ResourceKind[] = [
       F('caPem', 'CA certificate', 'code', '', { vars: true, ...when('ssl', true), help: CERT_HELP.ca }),
       F('clientCertPem', 'Client certificate', 'code', '', { vars: true, ...when('ssl', true), group: 'Mutual TLS', help: CERT_HELP.cert }),
       F('clientKeySecret', 'Client private key', 'secret', '', { ...when('ssl', true), group: 'Mutual TLS', keyFile: true, help: CERT_HELP.key }),
-      F('clientKeyPassphraseSecret', 'Private key passphrase', 'secret', '', { ...when('ssl', true), group: 'Mutual TLS', help: 'Optional vault secret for an encrypted client private key.' }),
+      F('clientKeyPassphraseSecret', 'Private key passphrase', 'secret', '', { ...when('ssl', true), group: 'Mutual TLS', help: 'Optional Secret property for an encrypted client private key.' }),
       F('sasl', 'SASL', 'select', 'none', { options: ['none', 'plain', 'scram-sha-256', 'scram-sha-512'] }),
       F('user', 'Username', 'text', '', { showIf: { k: 'sasl', in: ['plain', 'scram-sha-256', 'scram-sha-512'] } }),
       F('passwordSecret', 'Password', 'secret', '', { showIf: { k: 'sasl', in: ['plain', 'scram-sha-256', 'scram-sha-512'] } }),
@@ -109,7 +109,7 @@ export const CONNECTOR_KINDS: ResourceKind[] = [
   {
     kind: 'firebase', name: 'Firebase', desc: 'Firestore, Realtime Database and Cloud Messaging (push notifications) with a service account.',
     fields: [
-      F('serviceAccountSecret', 'Service account key (JSON)', 'secret', '', { help: 'Vault secret holding the JSON key downloaded from Firebase > Project settings > Service accounts.' }),
+      F('serviceAccountSecret', 'Service account key (JSON)', 'secret', '', { help: 'Secret property holding the JSON key downloaded from Firebase > Project settings > Service accounts.' }),
       F('databaseUrl', 'Realtime Database URL', 'text', 'https://PROJECT-default-rtdb.firebaseio.com'),
       F('apiBase', 'API base (testing only)', 'text', '', { help: 'Leave empty. Lets tests point at an emulator.' }),
     ],

@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { testEnv, captureServer, node, edge } from './helpers.js';
+import { testEnv, captureServer, node, edge, engineSecrets } from './helpers.js';
 
 testEnv(18710);
 const require = createRequire(import.meta.url);
@@ -240,7 +240,8 @@ test('End can stop the whole Sutra as success or error; file steps always return
 });
 
 test('AI router, summarize, translate and sentiment (mock Claude endpoint)', async () => {
-  const { setSecret } = await import('../server/src/secrets.js');
+  // 2.1.8: a stored secret is used through a Secret property; these are engine Secret properties (helpers.ts).
+  const setSecret = await engineSecrets();
   setSecret('AI_KEY', 'sk-test');
   const replyFor = (prompt: string) =>
     prompt.includes('Routes:') ? { routes: ['billing'], reason: 'mentions an invoice' }

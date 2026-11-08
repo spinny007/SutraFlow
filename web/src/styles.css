@@ -448,3 +448,20 @@ a.choicenote { color: var(--focus); margin-top: 2px; }
 .project-variable-toggle > .muted { font-size: 12px; }
 .project-variable-body { grid-column: 1 / -1; min-width: 0; }
 .project-variable-body > label { display: grid; gap: 4px; margin-bottom: 8px; }
+
+/* My profile (2.1.8): account, password, own API tokens; designer modal and Admin Console page. */
+.profile { display: grid; gap: 18px; max-width: 760px; }
+.profile-sec h3 { margin: 0 0 8px; font-size: 15px; }
+.profile-who { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
+.profile-perms { margin: 0; padding-left: 18px; font-size: 13px; }
+.profile-form { max-width: 360px; }
+.profile-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.profile-row input, .profile-row select { flex: 1 1 180px; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--surface); color: inherit; font: inherit; }
+.profile-row input.mono { font-family: var(--mono); font-size: 12px; }
+.profile-shown { border: 1px solid var(--focus); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+.profile-table { width: 100%; font-size: 13px; }
+.profile-table td, .profile-table th { padding: 6px 8px; text-align: left; vertical-align: middle; }
+.profile-expired { color: var(--err); font-weight: 600; }
+.profile-table .nowrap { white-space: nowrap; }
+.modal.wide { width: min(820px, 100%); }
+@media (max-width: 640px) { .profile-table thead { display: none; } .profile-table tr { display: grid; gap: 2px; padding: 6px 0; border-bottom: 1px solid var(--line); } }

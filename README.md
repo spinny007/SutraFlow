@@ -2,14 +2,14 @@
 
 **A visual integration designer and engine.** Drag activities onto a canvas, map data between steps, test and debug, and deploy *Sutras* (integration processes) that run as REST, SOAP and MCP services, on schedules, or on events: files, queues, mail, cloud drives, chat messages and more.
 
-![Version](https://img.shields.io/badge/version-2.1.7-2f6fd8)
+![Version](https://img.shields.io/badge/version-2.1.8-2f6fd8)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Commercial licence available](https://img.shields.io/badge/commercial%20licence-available-orange)](COMMERCIAL-LICENSE.md)
 ![Node.js](https://img.shields.io/badge/node-%E2%89%A5%2022.13-339933?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-7-3178c6?logo=typescript&logoColor=white)
 ![Database](https://img.shields.io/badge/database-SQLite%20%7C%20PostgreSQL-4169e1?logo=postgresql&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Docker-555)
-![Tests](https://img.shields.io/badge/tests-614-success)
+![Tests](https://img.shields.io/badge/tests-666-success)
 
 ![The SutraFlow designer: the sample chat agent with its eight skills, the palettes and the step inspector](docs/guide-images/designer-ai-chat.jpg)
 
@@ -41,7 +41,9 @@
 - **Connection limits**: protect a system behind a connection with Maximum concurrent activities, counted across all engines for Sutra steps (including connections used behind the scenes, such as a knowledge base's database), listener polls and scheduled refreshes; waiting steps keep their place without using retries; per-server values from Project properties; watched in the Admin Console with graphs.
 - **Big files on small servers**: CSV and line files of any size are streamed in batches of rows, each batch a step of its own, so memory depends on the batch, not the file.
 - **APIs and gateway**: REST, SOAP and WebSocket services with generated WSDL and OpenAPI; security policies (API keys, Basic, JWT, OAuth token introspection, HMAC-signed requests, mutual TLS, WS-Security UsernameToken, X.509 signatures and SAML assertions, encrypted SOAP, IP allow lists, rate limits, CORS); scopes per service and operation; bodies validated against JSON Schema or XSD; threat protection (depth, fields, sizes, no DOCTYPE); gateway apps with keys, OAuth client-credentials tokens, plans and a firewall; trusted reverse proxies whose forwarded caller address and HTTPS are believed; TLS with your own certificate or Let's Encrypt.
-- **AI**: AI steps (prompt, classify, route, extract, summarize, translate, sentiment) on Claude, OpenAI, Gemini, Ollama and other providers; AI agents with tools, memory, guardrails, people in the loop and hand-offs; knowledge bases for RAG (built-in, pgvector, Qdrant, Chroma, Pinecone); Sutras published as MCP tools for Claude and other assistants; agents as chat pages, an OpenAI-compatible API and A2A.
+- **AI**: AI steps (prompt, classify, route, extract, summarize, translate, sentiment) on Claude, OpenAI, Gemini, Ollama and other providers; AI agents with tools, memory, guardrails (personal data, hidden instructions, moderation, language and translation, an answer cache per person), people in the loop and hand-offs; knowledge bases for RAG (built-in, pgvector, Qdrant, Chroma, Pinecone); Sutras published as MCP tools for Claude and other assistants; agents as chat pages, an OpenAI-compatible API and A2A.
+- **Build Sutras with an AI assistant**: the studio has its own MCP server (`/mcp/studio`). GitHub Copilot, Claude Code, Antigravity, Cursor and other MCP clients read your projects, create and change Sutra drafts (each change shown as a difference before it is saved), check and test them, and hand releases over, with the rights of the person or account whose token they use. They never deploy without a plan a person approved, never see a secret value, and every call is in the audit log.
+- **My profile and personal API tokens**: each person changes their own password and makes their own API tokens for assistants and scripts, expiring after 30, 60 or 90 days and renewed with one click; administrators see and revoke them, or switch them off for the server.
 - **Chat for signed-in people**: published agents hand out signed conversation tokens that expire (administrators clear expired conversations), read who is chatting from a website's own login (claims and scopes), and the chat button carries that login; sample *Chat for customers and support* comes with *Sutra Sample Shop*, a PHP website with its own login and eight chat skills (orders, tracking, returns, invoices, address, products, a person, help), downloadable as a zip and pointed at a local or remote SutraFlow (`samples/sutra-sample-shop`).
 - **Dashboards**: gateway-hosted dashboard pages (`/dash/<name>`) drawn with Apache ECharts served by SutraFlow itself: charts from database queries or any JSON, KPI cards, slicers and filters (bound SQL parameters or JSON filtering), grouping of raw rows, chart settings suggested by AI and checked against an allow-list, a refresh interval with a cache shared by viewers, a security policy per dashboard, PNG/SVG export and an embed script.
 - **Knowledge admin**: one knowledge base shared by many projects, by area (`products`, `hr`), to search or also to change; managed sources keep areas in step with folders, SFTP, SharePoint, Google Drive, web pages, a database or an API (only changed items get new vectors); an MCP search tool per knowledge base; one writer per area, enforced by the engine.
@@ -101,7 +103,7 @@ The `sutraflow` launcher is the one place for every command on Windows and Linux
 
 | Document | What it covers |
 |---|---|
-| [User guide](docs/sutraflow-user-guide.html) (also at `/guide`) | For designers: every screen, every activity with its settings, connection types with tested examples, functions; designing Sutras, how the engine runs them, AI, RAG step by step, the API gateway, releases and CI/CD. |
+| [User guide](docs/sutraflow-user-guide.html) (also at `/guide`) | For designers: every screen, every activity with its settings, connection types with tested examples, functions; designing Sutras, how the engine runs them, what is new in this release, your profile and API tokens, AI, RAG step by step, connecting AI assistants over MCP, the API gateway, releases and CI/CD. |
 | [Administration Guide](docs/sutraflow-admin-guide.html) (also at `/admin-guide`) | For administrators: planning a server, the web installer page by page, silent installation, samples and their data (when to add them and when not), how upgrades work, the launcher and settings, PostgreSQL, engines and clusters, sizing, the Admin Console (with Knowledge admin), security, receiving releases, monitoring, every command by task with when to use it and examples, troubleshooting. |
 | [Sutra Design Guide](docs/sutraflow-design-guide.html) (also at `/design-guide`) | For designers and reviewers: design standards for Sutras: principles and naming, functions and transformations, called Sutras, contracts, REST and SOAP design, API security, integration patterns, messaging, files, databases, error handling, logging, microservices, resilience, testing, releases, solution blueprints (chat agents, knowledge bases, dashboards), designing an AI application from the samples, every sample explained, and a review checklist. |
 | [Architecture](docs/sutraflow-architecture.html) (also at `/architecture`) | How SutraFlow works inside: every source file, every table, every API route, the settings, with diagrams. |
@@ -144,7 +146,7 @@ The Queue / topic trigger is owned only by the elected leader. In client mode it
 
 HTTP-only integrations can start from four tested samples: **Kafka REST publish**, **Kafka REST subscribe** (create, subscribe, poll, commit and close), **RabbitMQ HTTP publish and fetch**, and **ActiveMQ REST publish and fetch**. ActiveMQ Classic 6.3 disables its deprecated MessageServlet for security, so the sample uses Jolokia management operations; production message consumers should use AMQP 1.0 or OpenWire/JMS instead. All REST connection URLs, users, CA/origin settings and vault-secret names can come from Project properties.
 
-FTP and SFTP remain connection-driven: every remote-file activity and trigger selects an **FTP server** or **SFTP server** resource. Connection fields—including host, port, user, base folder and the vault-secret name—may use Project variables such as `{{gv.FTP_HOST}}`; deployment configuration can override them before deployment, while the actual password or private key remains in that server's vault. See [Files, streaming, SFTP and FTP](docs/sutraflow-user-guide.html#ch-files).
+FTP and SFTP remain connection-driven: every remote-file activity and trigger selects an **FTP server** or **SFTP server** resource. Host, port, user and base folder may use Project variables such as `{{gv.FTP_HOST}}`, and the password or private key comes from a Secret property, so each server keeps its own values in its vault; deployment configuration can override them before deployment. See [Files, streaming, SFTP and FTP](docs/sutraflow-user-guide.html#ch-files).
 
 ### Running Python
 
@@ -261,7 +263,7 @@ test/                   the test suites
 
 ## Testing
 
-The suite has 614 declared tests; executed totals also include nested cases and environment-dependent skips. It uses real child processes and network calls for HTTP, SOAP with WS-Security, TLS, SMTP, Kafka, RabbitMQ, AMQP 1.0/OpenWire JMS, SFTP and FTP servers, SQLite, Python, multi-process clusters, the launcher and the command-line tool. Real PostgreSQL and MySQL integration tests are the database release gate. PGlite also runs the in-process suite through PostgreSQL compatibility as fast secondary regression coverage; it does not replace testing against PostgreSQL. Atlas M0 checks use explicit opt-in and isolated seeded collections; see the [2.0.10 verification record](docs/releases/2.0.10-verification.md) before treating candidate capabilities as shipped activities. For file purposes, connected modules and entry points, see [code navigation](docs/code-navigation.md); maintain it with `node tools/file-overviews.mjs` and verify with `--check`.
+The suite has 666 declared tests; executed totals also include nested cases and environment-dependent skips. It uses real child processes and network calls for HTTP, SOAP with WS-Security, TLS, SMTP, Kafka, RabbitMQ, AMQP 1.0/OpenWire JMS, SFTP and FTP servers, SQLite, Python, multi-process clusters, the launcher and the command-line tool. Real PostgreSQL and MySQL integration tests are the database release gate. PGlite also runs the in-process suite through PostgreSQL compatibility as fast secondary regression coverage; it does not replace testing against PostgreSQL. Atlas M0 checks use explicit opt-in and isolated seeded collections; see the [2.0.10 verification record](docs/releases/2.0.10-verification.md) before treating candidate capabilities as shipped activities. For file purposes, connected modules and entry points, see [code navigation](docs/code-navigation.md); maintain it with `node tools/file-overviews.mjs` and verify with `--check`.
 
 The process-level tests exercise the central durability claims directly: engines share work without duplicating completed steps, elect and replace a leader, recover work from an engine killed mid-step, hand work back during drain, persist approvals and long waits without holding a worker, and deploy and call packages through both local and remote CLI paths.
 
@@ -289,7 +291,7 @@ Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Code and docu
 
 ## Security
 
-Secrets are encrypted in a vault, the studio stays on 127.0.0.1 with roles and an audit log, and gateway services are protected by policies and TLS. Report security problems privately: see [SECURITY.md](SECURITY.md).
+Secrets are encrypted in a vault and a project reads only the ones behind its own Secret properties; every request is checked against one project, so a person granted one project cannot reach another's secrets, connections, schemas or runs; programs on the server (scripts, AI command-line tools) run only when an administrator allows them, and projects read only the server environment variables an administrator allowed, never the server's own `SUTRA_` ones. The studio stays on 127.0.0.1 with roles and an audit log, and gateway services are protected by policies and TLS. 2.1.8 fixed every finding of the 2.1.7 security audit and of a review of the 2.1.8 build (see the [release notes](RELEASE-NOTES.md#security)). Report security problems privately: see [SECURITY.md](SECURITY.md).
 
 ## License
 

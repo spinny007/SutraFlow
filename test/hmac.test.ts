@@ -17,7 +17,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { testEnv, node, edge, port } from './helpers.js';
+import { testEnv, node, edge, port, engineSecrets } from './helpers.js';
 
 /**
  * HMAC request signing (incoming and outgoing, with replay protection), OAuth token introspection
@@ -25,7 +25,8 @@ import { testEnv, node, edge, port } from './helpers.js';
  */
 const env = testEnv(20800);
 const { boot } = await import('../server/src/index.js');
-const { setSecret } = await import('../server/src/secrets.js');
+// 2.1.8: a stored secret is used through a Secret property; these are engine Secret properties (helpers.ts).
+const setSecret = await engineSecrets();
 const { saveResource } = await import('../server/src/resources.js');
 const flows = await import('../server/src/flows.js');
 const { engine, runState } = await import('../server/src/engine/engine.js');

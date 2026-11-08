@@ -20,7 +20,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { testEnv, node, edge } from './helpers.js';
+import { testEnv, node, edge, engineSecrets } from './helpers.js';
 import { readTestPem } from './pem-fixtures.js';
 
 const password = process.env.SUTRA_ACTIVEMQ_PASSWORD || '';
@@ -51,7 +51,7 @@ if (!enabled) {
   const { q } = await import('../server/src/db.js');
   const flows = await import('../server/src/flows.js');
   const projects = await import('../server/src/projects.js');
-  const { setSecret } = await import('../server/src/secrets.js');
+  const setSecret = await engineSecrets(); // a stored secret is read only behind a Secret property (2.1.8)
   const { saveResource } = await import('../server/src/resources.js');
   const { rebuildListeners, listenerStatus } = await import('../server/src/listeners.js');
   const { closeBusPublishers, testBroker } = await import('../server/src/connectors/bus.js');

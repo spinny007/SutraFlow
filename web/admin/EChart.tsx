@@ -58,10 +58,13 @@ export function baseOption(t: ChartTokens): EChartsCoreOption {
   return {
     animation: false,
     textStyle: { fontFamily: t.font, color: t.ink },
-    grid: { left: 44, right: 16, top: 16, bottom: 28, containLabel: false },
+    // The legend has its own row above the plot (2.1.8): at the bottom it sat on the time labels and hid them.
+    // containLabel keeps the axis labels inside the chart, whatever their width.
+    grid: { left: 4, right: 16, top: 34, bottom: 4, containLabel: true },
     tooltip: { trigger: 'axis', backgroundColor: t.card, borderColor: t.line, textStyle: { color: t.ink, fontSize: 12 } },
-    legend: { bottom: 0, textStyle: { color: t.muted, fontSize: 11 }, icon: 'roundRect', itemWidth: 10, itemHeight: 10 },
-    xAxis: { type: 'time', ...axis, splitLine: { show: false } },
+    legend: { top: 0, left: 0, textStyle: { color: t.muted, fontSize: 11 }, icon: 'roundRect', itemWidth: 10, itemHeight: 10 },
+    // Midnight reads "8 Nov", not a bare day number that looked like a stray figure; hours read "16:00".
+    xAxis: { type: 'time', ...axis, axisLabel: { ...axis.axisLabel, hideOverlap: true, formatter: { year: '{yyyy}', month: '{MMM} {yyyy}', day: '{d} {MMM}', hour: '{HH}:{mm}', minute: '{HH}:{mm}', second: '{HH}:{mm}:{ss}' } }, splitLine: { show: false } },
     yAxis: { type: 'value', minInterval: 1, ...axis },
   };
 }

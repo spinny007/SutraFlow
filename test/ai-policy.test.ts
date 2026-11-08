@@ -24,7 +24,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { testEnv, node, edge, captureServer } from './helpers.js';
+import { testEnv, node, edge, captureServer, allowPrograms } from './helpers.js';
 testEnv(20320);
 const { aiCall, listModels, resolveAiModel, ollamaCall, rootOf } = await import('../server/src/ai/providers.js');
 const { withAiExecution, aiTimeoutMs } = await import('../server/src/ai/policy.js');
@@ -152,6 +152,7 @@ test('CLI deadline terminates its process instead of returning a stale success',
   fs.writeFileSync(file, "process.stdin.resume(); setInterval(() => {}, 1000);");
   const started = Date.now();
   try {
+    await allowPrograms(`"${process.execPath}"`); // 2.1.8: AI command-line tools need the administrator's allowance
     await assert.rejects(aiCall(resource({ engine: 'Claude CLI', model: 'explicit-model', command: process.execPath, args: `"${file}"`, timeoutMs: 300 }), secret, request), /timed out after 300 ms/);
     assert(Date.now() - started < 10000, 'CLI cancellation must close the subprocess promptly');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }

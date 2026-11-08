@@ -24,8 +24,11 @@ const colour = (t: ChartTokens, cls: Series['cls']) => (cls === 'ok' ? t.auto : 
 
 export function StackChart({ data, series, bucketMs, label }: { data: Record<string, any>[]; series: Series[]; bucketMs: number; label: string }) {
   const key = JSON.stringify([data, series, bucketMs]);
+  const total = data.reduce((a, d) => a + series.reduce((b, s) => b + (Number(d[s.k]) || 0), 0), 0);
   const option = useCallback((t: ChartTokens) => ({
     ...baseOption(t),
+    // Nothing in the period: say so, rather than a bare scale of 0 to 1.
+    ...(total ? {} : { graphic: { type: 'text', left: 'center', top: 'middle', style: { text: 'No activity in this period', fill: t.muted, fontSize: 12, fontFamily: t.font } } }),
     tooltip: { ...(baseOption(t).tooltip as object), axisPointer: { type: 'shadow' } },
     xAxis: { ...(baseOption(t).xAxis as object), type: 'time', minInterval: bucketMs },
     series: series.map(s => ({
@@ -34,6 +37,5 @@ export function StackChart({ data, series, bucketMs, label }: { data: Record<str
     })),
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [key]);
-  const sum = data.reduce((a, d) => a + series.reduce((b, s) => b + (Number(d[s.k]) || 0), 0), 0);
-  return <EChart option={option} height={200} label={`${label}: ${sum} in total`} />;
+  return <EChart option={option} height={200} label={`${label}: ${total} in total`} />;
 }

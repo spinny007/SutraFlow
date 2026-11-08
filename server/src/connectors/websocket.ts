@@ -35,7 +35,7 @@ export const WS_KINDS: ResourceKind[] = [
     kind: 'websocket', name: 'WebSocket connection', desc: 'A WebSocket server this server connects to: its address, headers (a token, a key) and how it reconnects.',
     fields: [
       F('url', 'Address', 'text', 'wss://stream.example.com/ws', { tpl: true, help: 'ws:// or wss://. May use project variables.' }),
-      F('headers', 'Headers', 'kv', [], { tpl: true, help: 'Sent when connecting. Values may use {{secret.NAME}}, such as Authorization = Bearer {{secret.STREAM_TOKEN}}.' }),
+      F('headers', 'Headers', 'kv', [], { tpl: true, help: 'Sent when connecting. Values may use a Secret property, such as Authorization = Bearer {{gv.STREAM_TOKEN}}.' }),
       F('protocols', 'Subprotocols', 'text', '', { help: 'Comma separated, when the server asks for one.' }),
       F('pingSeconds', 'Ping every (seconds)', 'number', 30, { help: 'Keeps the connection open through proxies; a server that stops answering is reconnected. 0 = off.' }),
       F('reconnectMinMs', 'Reconnect after (ms)', 'number', 1000, { help: 'The first wait after a lost connection; it doubles up to the maximum.' }),

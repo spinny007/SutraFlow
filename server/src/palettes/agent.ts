@@ -24,7 +24,7 @@ import { appendTurns, cleanSession, clearOld, clearSession, compact, fitTurns, l
 import { addKnowledge, buildKnowledgeSearchIndex, embed, embedWith, keepOnlySources, rebuildKnowledge, removeKnowledge, searchKnowledge } from '../ai/knowledge.js';
 import { callMcpTool, listMcpTools } from '../ai/mcpClient.js';
 import { aiCall } from '../ai/providers.js';
-import { guardText, GUARD_CHECKS } from '../ai/guard.js';
+import { guardText, guardDesignErrors, GUARD_CHECKS, MODERATION } from '../ai/guard.js';
 import { documentText, DOC_TYPES } from '../ai/documents.js';
 import { httpCall } from '../security/outbound.js';
 
@@ -356,20 +356,29 @@ export const agentActivities: Activity[] = [
 
   // ---------- safety ----------
   {
-    type: 'aiGuard', palette: 'ai', name: 'AI guard', glyph: '⛉', ports: ['pass', 'blocked'],
-    desc: 'Checks text before it goes to a model or out to a person: hides personal data, catches instructions hidden in text an agent reads (prompt injection), blocks topics and checks length or JSON shape. Optionally asks a model as well.',
+    type: 'aiGuard', palette: 'ai', name: 'AI guard', glyph: '⛉', ports: ['pass', 'blocked', 'cached'],
+    desc: 'Checks text before it goes to a model or out to a person: hides personal data, catches instructions hidden in text an agent reads (prompt injection), blocks topics, scores moderation categories, tells the language (and can translate), and checks length or JSON shape. Optionally asks a model as well. Can also keep answers to repeated questions, per Sutra and per person: a question asked before leaves by the cached port with its answer.',
     fields: [
       F('text', 'Text', 'text', '{{input.message}}', { tpl: true }),
       F('checks', 'Checks', 'list', ['hide personal data', 'hidden instructions', 'blocked topics'], { options: [...GUARD_CHECKS], help: 'Hidden personal data is replaced by [EMAIL], [PHONE], [CARD] and so on; the text goes on hidden.' }),
       F('topics', 'Blocked topics', 'textarea', 'medical advice\nlegal advice\nweapons', { vars: true, help: 'One per line: words or phrases. Project properties may supply the list for each environment.' }),
       F('maxChars', 'Maximum length (characters)', 'number', 8000),
       F('jsonSchema', 'Must match schema', 'schema', '', { schemaKinds: ['json'], help: 'For model answers that must be JSON of this shape.' }),
-      F('aiCheck', 'Also ask a model', 'resource', '', { resourceKind: 'aiProvider', help: 'A second opinion on hidden instructions and topics. Empty = rules only.' }),
+      F('moderation', 'Moderation thresholds', 'kv', MODERATION.map(k => ({ k, v: '0.5' })), { help: `One row per category (${MODERATION.join(', ')}) with a threshold from 0 to 1; a score at or above it blocks. Remove a row or set 0 to skip that category.`, ...when('checks', 'moderation') }),
+      F('moderationWarn', 'Warn only', 'list', [], { options: [...MODERATION], help: 'Categories that only warn: the text goes on, the warning is in warnings and in the run log.', ...when('checks', 'moderation') }),
+      F('translateTo', 'Translate to', 'text', '', { vars: true, help: 'Language code such as en. Text in another language is translated with the model in Also ask a model. Empty = only tell the language.', ...when('checks', 'language') }),
+      F('aiCheck', 'Also ask a model', 'resource', '', { resourceKind: 'aiProvider', help: 'A second opinion on hidden instructions, topics and moderation, and the model that translates. Empty = rules only.' }),
+      F('cache', 'Answer cache', 'select', 'off', { options: ['off', 'look up the question', 'store the answer'], help: 'Look up: the text is the question; one asked before leaves by the cached port with answer. Store: the text is the answer to Question. Use one guard of each kind in the Sutra.' }),
+      F('cacheQuestion', 'Question', 'text', '{{trigger.message}}', { tpl: true, help: 'The question this answer belongs to.', ...when('cache', 'store the answer') }),
+      F('cacheFor', 'Cache for', 'select', 'each person', { options: ['each person', 'everyone'], help: 'Each person: an answer is only given back to the person who asked; callers who are not identified get no cache. Everyone: only for answers that hold no personal data.', ...when('cache', 'look up the question', 'store the answer') }),
+      F('cachePerson', 'Person', 'text', '{{trigger.caller}}', { tpl: true, help: 'Who is asking, as the entry point identified them.', ...when('cacheFor', 'each person') }),
+      F('cacheMinutes', 'Keep for (minutes)', 'number', 60, { ...when('cache', 'store the answer') }),
     ],
-    outputHint: { text: '', original: '', hidden: [{ kind: '', count: 0 }], findings: [''], reason: '' },
+    designErrors: guardDesignErrors,
+    outputHint: { text: '', original: '', hidden: [{ kind: '', count: 0 }], findings: [''], warnings: [''], reason: '', moderation: {}, language: '', translatedFrom: '', cache: '', answer: '' },
     execute: async c => {
       const r = await guardText(c, text(c.v('text')));
-      return { port: r.blocked ? 'blocked' : 'pass', out: r };
+      return { port: r.blocked ? 'blocked' : r.answer !== undefined ? 'cached' : 'pass', out: r };
     },
   },
 ];

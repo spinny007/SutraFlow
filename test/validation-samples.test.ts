@@ -19,7 +19,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { SignJWT } from 'jose';
-import { testEnv, node, edge } from './helpers.js';
+import { testEnv, node, edge, engineSecrets } from './helpers.js';
 const env = testEnv(22830);
 const { boot } = await import('../server/src/index.js');
 const { engine, runState } = await import('../server/src/engine/engine.js');
@@ -28,7 +28,7 @@ const { saveProject } = await import('../server/src/projects.js');
 const { addSamples, SAMPLES } = await import('../server/src/samples.js');
 const { getFlow, validateDoc, deploy, saveFlow } = await import('../server/src/flows.js');
 const { saveResource } = await import('../server/src/resources.js');
-const { setSecret } = await import('../server/src/secrets.js');
+const setSecret = await engineSecrets(); // 2.1.8: policy keys only behind a Secret property
 const { listSchemas, getSchema, saveSchema } = await import('../server/src/schemas.js');
 let srv: Awaited<ReturnType<typeof boot>>, projectId: string;
 let samples: ReturnType<typeof addSamples>;

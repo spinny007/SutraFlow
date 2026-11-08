@@ -726,7 +726,15 @@ async function main(argv: string[]) {
       return 0;
     }
     case 'secret': {
-      if (a._[1] !== 'set' || !a._[2]) throw new Usage('Use: sutra secret set <NAME> --value <v> | --from-env <VAR>');
+      if (a._[1] === 'check') {
+        // 2.1.8 upgrade check (audit F1): items naming a stored secret their project can no longer read.
+        const rows: any[] = call ? await call('GET', '/api/console/secret-scope') : (await local(), (await import('./secret-scope.js')).secretScopeProblems());
+        if (!rows.length) { out('Every connection and Sutra uses only secrets behind Secret properties of its project or the engine.'); return 0; }
+        out(`${rows.length} use${rows.length === 1 ? '' : 's'} of a stored secret that will be refused. Switch each to a Secret property ({{gv.NAME}} or {{ev.NAME}}):`);
+        table([['PROJECT', 'ITEM', 'NAME', 'SECRET'], ...rows.map(r => [r.project, r.item, r.name, r.secret])]);
+        return 1;
+      }
+      if (a._[1] !== 'set' || !a._[2]) throw new Usage('Use: sutra secret set <NAME> --value <v> | --from-env <VAR> | sutra secret check');
       const name = a._[2];
       const value = str(a, 'value') ?? (str(a, 'from-env') ? process.env[str(a, 'from-env')!] : undefined);
       if (value === undefined) throw new Usage('Give --value or --from-env (the variable must be set)');

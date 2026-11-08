@@ -33,6 +33,8 @@ interface OverviewData {
   alerts: { open: number; firing: number; critical: number; warning: number; acknowledged: number; latest: AlertRow[] };
   runsTimeline: { at: string; done: number; failed: number; other: number }[];
   trafficTimeline: { at: string; requests: number; errors: number; refused: number }[];
+  /** 2.1.8 upgrade check: items naming a stored secret their project can no longer read (names only; for Secrets or Server settings). */
+  secretScope?: { projectId: string | null; project: string; item: string; id: string; name: string; secret: string }[];
 }
 
 export function Overview({ go }: { go(p: any): void }) {
@@ -80,6 +82,18 @@ export function Overview({ go }: { go(p: any): void }) {
               </button>
             ))}
           </div>
+        </section>
+      )}
+      {!!data.secretScope?.length && (
+        <section className="c-section">
+          <h2>Secrets that will be refused</h2>
+          <p className="muted xs">Since 2.1.8 a connection or Sutra uses a stored secret only through a Secret property of its project (<code>{'{{gv.NAME}}'}</code>) or of the engine (<code>{'{{ev.NAME}}'}</code>). These name a stored secret directly, so they fail when they run or are tested. In the project, add a Secret property for it and use the property instead. <code>sutra secret check</code> lists the same.</p>
+          <div className="c-tablewrap"><table className="t c-table">
+            <thead><tr><th>Project</th><th>Item</th><th>Name</th><th>Stored secret</th></tr></thead>
+            <tbody>{data.secretScope.map(r => (
+              <tr key={`${r.item}|${r.id}|${r.secret}`}><td>{r.project}</td><td>{r.item}</td><td><strong>{r.name}</strong></td><td><code>{r.secret}</code></td></tr>
+            ))}</tbody>
+          </table></div>
         </section>
       )}
       <div className="c-halves">

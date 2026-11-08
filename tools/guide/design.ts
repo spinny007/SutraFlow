@@ -123,7 +123,7 @@ const BASE: Chapter[] = [
 <li><strong>Should</strong>: end branches that are finished with [[end]] where it makes the intent clear (<em>stop this branch</em>, or end the run with a status).</li>
 <li><strong>May</strong>: mark a step still to be designed with [[noop]]; it must be gone before release.</li>
 </ul>
-<p class="h">Lanes: what a step can see (2.1.7)</p>
+<p class="h">Lanes: what a step can see</p>
 <p>A step can use the trigger, properties, Local variables and the outputs of the steps <em>before it on a connected path</em>; nothing from another lane (<a href="#ch-paths">What a step can see</a>). The designer, the design check and the engine apply the same rule.</p>
 <ul>
 <li><strong>Must</strong>: a step that needs the results of two lanes comes after the step where they meet, usually a [[merge]]. A reference to a step on another lane is a design problem and fails the step at run time.</li>
@@ -168,7 +168,7 @@ const BASE: Chapter[] = [
 </ul>
 <p class="h">Function groups: patterns and pitfalls</p>
 <table class="t"><thead><tr><th>Group</th><th>Typical use</th><th>Watch for</th></tr></thead><tbody>
-<tr><td>Text</td><td>Clean names, build codes, pad numbers: <code>concat</code>, <code>upper-case</code>, <code>substring</code>, <code>replace</code>, <code>pad</code></td><td><code>trim</code> removes spaces at the ends only; <code>normalize-space</code> also collapses inner runs (<code>asha   KUMAR</code> becomes <code>asha KUMAR</code>). The Output tab shows spaces as they are (2.1.3).</td></tr>
+<tr><td>Text</td><td>Clean names, build codes, pad numbers: <code>concat</code>, <code>upper-case</code>, <code>substring</code>, <code>replace</code>, <code>pad</code></td><td><code>trim</code> removes spaces at the ends only; <code>normalize-space</code> also collapses inner runs (<code>asha   KUMAR</code> becomes <code>asha KUMAR</code>). The Output tab shows spaces as they are.</td></tr>
 <tr><td>Conversion</td><td>Text to number or boolean and back</td><td>Convert at the door; a number held as text sorts as text (<code>"10"</code> before <code>"9"</code>).</td></tr>
 <tr><td>Dates and times</td><td>Format, add days, compare, parse partner formats</td><td>Keep and send times in UTC with an offset (ISO 8601); convert to local time only for people. State the time zone of every partner field.</td></tr>
 <tr><td>Numbers</td><td>Totals, tax, rounding</td><td>Round money once, at the end, to the currency's places; never add rounded parts. Keep amounts and currency together.</td></tr>
@@ -191,7 +191,7 @@ const BASE: Chapter[] = [
 <p class="h">Designing a called Sutra like a function</p>
 <ul>
 <li><strong>Must</strong>: an input schema and a result schema, with <em>Validate input</em> and <em>Validate result</em> on for shared Sutras: the contract is checked on every call, and the data trees of callers show its fields.</li>
-<li><strong>Must</strong> (2.1.7): the input schema lives on the called Sutra's Manual start, with strict validation on, and callers follow it with <em>Input contract from the called Sutra</em> instead of copying it. A change shows in every caller until someone accepts it (<a href="#ch-contracts">Inputs of called Sutras</a>).</li>
+<li><strong>Must</strong>: the input schema lives on the called Sutra's Manual start, with strict validation on, and callers follow it with <em>Input contract from the called Sutra</em> instead of copying it. A change shows in every caller until someone accepts it (<a href="#ch-contracts">Inputs of called Sutras</a>).</li>
 <li><strong>Should</strong>: an XSD on the Manual start when the callers hold XML: the called Sutra receives the Parse XML shape plus the original text, so it maps the same way as JSON and can still pass the XML on.</li>
 <li><strong>Must</strong>: every path ends in [[return]] (or fails). A path that just ends leaves a waiting caller without a result.</li>
 <li><strong>Should</strong>: a pure function where possible: the same input gives the same result, no changes outside. Sutras that do change things say so in their name (<em>Reserve stock</em>) and are safe to repeat.</li>
@@ -203,7 +203,7 @@ const BASE: Chapter[] = [
 <p>For work on many items with several steps each, call a sub-Sutra per item from a [[forEach]]: each item gets its own run, retries and history, and items run in parallel on free workers. A failed item can be found and run again on its own.</p>
 <p class="h">Local variables, counters and properties</p>
 <table class="t"><thead><tr><th>Kept in</th><th>Lives for</th><th>Use for</th><th>Activity</th></tr></thead><tbody>
-<tr><td>Local variables</td><td>One run</td><td>Values several later steps need (a batch number, a running decision). Record IDs (2.1.3) group them: <code>{vars.1.batchNo}</code>, <code>{vars.2.total}</code>.</td><td>[[setVar]], [[getVar]]</td></tr>
+<tr><td>Local variables</td><td>One run</td><td>Values several later steps need (a batch number, a running decision). Record IDs group them: <code>{vars.1.batchNo}</code>, <code>{vars.2.total}</code>.</td><td>[[setVar]], [[getVar]]</td></tr>
 <tr><td>Counter</td><td>The project, across runs and restarts</td><td>Sequence numbers, daily totals; safe when many runs change it at once</td><td>[[counter]]</td></tr>
 <tr><td>Memory table</td><td>The project, cached on every engine</td><td>Reference data read often, changed rarely</td><td>[[memGet]], [[memPut]], [[memQuery]]</td></tr>
 <tr><td>Project and Engine properties</td><td>Configuration per environment</td><td>Addresses, folders, limits</td><td><code>{gv.X}</code>, <code>{ev.X}</code>, [[getProperties]]</td></tr>
@@ -325,7 +325,7 @@ const BASE: Chapter[] = [
 <li><strong>Should</strong>: CORS origins only for services browsers call, listing the real sites, never <code>*</code> with credentials.</li>
 </ul>
 <p class="h">Behind a reverse proxy or load balancer</p>
-<p>When Apache, nginx, IIS or a cloud load balancer is in front of SutraFlow, list it under Admin Console, Gateway, Firewall, <em>Trusted proxies</em> (2.1.4). From a trusted proxy, SutraFlow reads the caller's real address (<code>X-Forwarded-For</code>) and the HTTPS the proxy ended (<code>X-Forwarded-Proto</code>); from anyone else it ignores both. Without it, every caller has the proxy's address, so IP rules and per-address rate limits treat all callers as one, and <em>Require HTTPS</em> refuses calls forwarded over plain HTTP. <strong>Must</strong>: list only proxies that replace those headers, never a range callers reach directly. The <em>Administration Guide</em> has the proxy settings (<a href="#ch-plan">Planning a server</a>).</p>`,
+<p>When Apache, nginx, IIS or a cloud load balancer is in front of SutraFlow, list it under Admin Console, Gateway, Firewall, <em>Trusted proxies</em>. From a trusted proxy, SutraFlow reads the caller's real address (<code>X-Forwarded-For</code>) and the HTTPS the proxy ended (<code>X-Forwarded-Proto</code>); from anyone else it ignores both. Without it, every caller has the proxy's address, so IP rules and per-address rate limits treat all callers as one, and <em>Require HTTPS</em> refuses calls forwarded over plain HTTP. <strong>Must</strong>: list only proxies that replace those headers, never a range callers reach directly. The <em>Administration Guide</em> has the proxy settings (<a href="#ch-plan">Planning a server</a>).</p>`,
   },
   {
     id: 'dg-calling', title: 'Calling other services',
@@ -352,7 +352,7 @@ const BASE: Chapter[] = [
 <ul>
 <li>[[wsService]] starts a run per message (in order per connection unless the service says otherwise); [[wsSend]] answers one connection or broadcasts to every connection of a service, across engines.</li>
 <li><strong>Must</strong>: a policy (browsers send a token or key in the query) and CORS origins for browser clients; size, depth and schema limits on messages.</li>
-<li><strong>Should</strong>: clients reconnect with a pause and treat broadcasts as notices, not a ledger: a client that is reconnecting (after a network drop or an engine stop) misses what was sent meanwhile. Keep the state in a system the client can read again (a REST service) and use the broadcast to say "read again". Since 2.1.4 a just-connected client gets the next broadcast, and an engine that died no longer collects broadcasts to send to the wrong clients later.</li>
+<li><strong>Should</strong>: clients reconnect with a pause and treat broadcasts as notices, not a ledger: a client that is reconnecting (after a network drop or an engine stop) misses what was sent meanwhile. Keep the state in a system the client can read again (a REST service) and use the broadcast to say "read again". A just-connected client gets the next broadcast, and an engine that died no longer collects broadcasts to send to the wrong clients later.</li>
 </ul>
 <p class="h">AI tools (MCP) and agents</p>
 <ul>
@@ -381,7 +381,7 @@ const BASE: Chapter[] = [
 <tr><td>Scatter and gather</td><td>Ask several systems, combine</td><td>Parallel branches with calls, then [[merge]], then a mapping</td></tr>
 <tr><td>Content enricher</td><td>Add data the message lacks</td><td>A lookup ([[dbQuery]], [[httpRequest]], [[memGet]]) and a mapping</td></tr>
 <tr><td>Normaliser and canonical model</td><td>Many partner formats, one inside</td><td>A mapping per partner into the canonical schema at the edge</td></tr>
-<tr><td>Claim check</td><td>Large documents through a flow</td><td>Store the file, pass its path or id; large inputs are stored once automatically (2.1.1)</td></tr>
+<tr><td>Claim check</td><td>Large documents through a flow</td><td>Store the file, pass its path or id; large inputs are stored once automatically</td></tr>
 <tr><td>Process manager (orchestration)</td><td>A business process across systems</td><td>A parent Sutra calling sub-Sutras with [[callProcess]], waiting where needed</td></tr>
 <tr><td>Saga with compensation</td><td>Several systems, no shared transaction</td><td>Each step has an undo step; on failure, run the undo steps of what succeeded, in reverse (<a href="#ch-dg-errors">Error handling</a>)</td></tr>
 <tr><td>Guaranteed delivery</td><td>A message must not be lost</td><td>Durable Sutras, persistent broker messages, acknowledgement after success</td></tr>
@@ -425,7 +425,7 @@ const BASE: Chapter[] = [
 <ul>
 <li><strong>Must</strong>: a file trigger waits until the file is complete (<em>stable for</em> some seconds), and a file is moved to a <code>processed/</code> or <code>error/</code> folder after the run, so it is not read twice and failures can be found (<a href="#ch-files">Files</a>).</li>
 <li><strong>Should</strong>: one run per file: a trigger per file, or a list without reading and a sub-Sutra per file.</li>
-<li><strong>Must</strong>: big CSV and line files are streamed (<em>Stream in batches</em>), never read whole. Batches go out on the <em>batch</em> output while reading goes on; reading pauses while too much waits (back pressure: the number of waiting batches, and since 2.1.4 also 8 MB of input in flight), so memory stays the same for 10 MB and 10 GB.</li>
+<li><strong>Must</strong>: big CSV and line files are streamed (<em>Stream in batches</em>), never read whole. Batches go out on the <em>batch</em> output while reading goes on; reading pauses while too much waits (back pressure: the number of waiting batches, and also 8 MB of input in flight), so memory stays the same for 10 MB and 10 GB.</li>
 <li><strong>Should</strong>: <em>Step data in history</em> set to <em>none</em> for streaming Sutras; every batch is otherwise kept until the run ends.</li>
 <li><strong>Should</strong>: batch sizes of 1,000 to 5,000 rows; each batch is a step and counts towards <em>Steps per run</em>.</li>
 <li><strong>Should</strong>: database batches paged by key (<code>where id &gt; :last order by id limit 1000</code>), one page per run or per sub-Sutra call, with the last key saved, so a stopped batch continues where it was.</li>
@@ -493,7 +493,7 @@ const BASE: Chapter[] = [
 <li><strong>Must not</strong>: log secrets, passwords, tokens, card numbers or whole personal records. Secret values are masked; other personal data is the designer's care.</li>
 <li><strong>Should</strong>: <em>Step data in history</em> (Sutra tuning) <em>all</em> while building, <em>errors only</em> for busy production Sutras, <em>none</em> for Sutras with sensitive data or streaming.</li>
 <li><strong>Should</strong>: a correlation id through every hop: the business key in logs and messages, the run id in error answers and as the message correlation id, and <code>traceparent</code> on HTTP calls (passed on for you) so traces join across systems.</li>
-<li>Where logs go: the run's log and each step's Output tab (2.1.3), the project log file (Project, Logging; JSON for collectors), metrics at <code>/metrics</code> and traces to an OpenTelemetry collector (<em>Trace sampling</em>).</li>
+<li>Where logs go: the run's log and each step's Output tab, the project log file (Project, Logging; JSON for collectors), metrics at <code>/metrics</code> and traces to an OpenTelemetry collector (<em>Trace sampling</em>).</li>
 <li>Audit: who changed, deployed or approved what is kept by SutraFlow in the audit log; your Sutra records business decisions (who approved a refund) in your own system.</li>
 </ul>`,
   },
@@ -539,7 +539,7 @@ const BASE: Chapter[] = [
 <tr><td>Retries with backoff</td><td>Short outages</td><td>Step or Sutra <em>Retries</em>, doubling waits</td></tr>
 <tr><td>Circuit breaker</td><td>Hammering a system that is down</td><td>HTTP connection circuit breaker</td></tr>
 <tr><td>Bulkhead</td><td>One system or Sutra using everything</td><td>Connection limits (<em>Maximum concurrent activities</em>); <em>Runs at once</em> per Sutra</td></tr>
-<tr><td>Back pressure</td><td>A fast producer flooding a slow consumer</td><td>Queues between them; streaming batches pause (2.1.4: also by input size); <em>Runs at once</em> queues runs</td></tr>
+<tr><td>Back pressure</td><td>A fast producer flooding a slow consumer</td><td>Queues between them; streaming batches pause (also by input size); <em>Runs at once</em> queues runs</td></tr>
 <tr><td>Rate limits and plans</td><td>Callers using too much</td><td>Gateway policies and plans</td></tr>
 <tr><td>Durable runs</td><td>Engine and server stops</td><td>Durable execution: steps continue on another engine</td></tr>
 <tr><td>Idempotency</td><td>Duplicates from retries and redeliveries</td><td>Business keys, deduplication, upserts</td></tr>
@@ -563,7 +563,7 @@ const BASE: Chapter[] = [
 <li><strong>Should</strong>: test the unhappy paths too: invalid input, a missing record, a partner that answers 500 or is slow. A Sutra whose error paths never ran is not tested.</li>
 <li><strong>Should</strong>: mock partners that are not ready or not available in test: a REST or SOAP service of your own with canned replies, pointed to by a property.</li>
 <li><strong>Should</strong>: called Sutras tested on their own with their input schema, like unit tests of a function.</li>
-<li><strong>Should</strong>: tell design runs from runtime runs when reading figures: tests, debugging and drafts are <em>design</em> runs (2.1.7), left out of the Admin Console figures, alerts and Traceability, and kept for 7 days by default.</li>
+<li><strong>Should</strong>: tell design runs from runtime runs when reading figures: tests, debugging and drafts are <em>design</em> runs, left out of the Admin Console figures, alerts and Traceability, and kept for 7 days by default.</li>
 <li><strong>Should</strong>: breakpoints and step-by-step debugging for logic, the Output tab (with each step's log lines) for what a step really received and produced.</li>
 <li><strong>Must</strong>: <code>sutra test</code> in the release pipeline, so a broken Sutra stops the release (<a href="#ch-cicd">CI/CD pipelines</a>).</li>
 </ul>`,

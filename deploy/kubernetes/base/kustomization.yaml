@@ -24,4 +24,4 @@ resources:
   - network.yaml
 images:
   - name: ghcr.io/spinny007/sutraflow
-    newTag: "2.1.7"
+    newTag: "2.1.8"

@@ -21,7 +21,7 @@ import { getSetting, setSetting } from '../db.js';
 import { engine } from '../engine/engine.js';
 import type { FlowDoc, FlowNode } from '../engine/types.js';
 import { deployedFlows } from '../flows.js';
-import { effectiveResource, getResource, kvToObject } from '../resources.js';
+import { effectiveResource, getResource, inProject, kvToObject } from '../resources.js';
 import { authorize, corsHeaders, PolicyError, type Caller } from '../security/inbound.js';
 import { startedByCaller } from '../security/inbound.js';
 import { xmlParser } from '../security/outbound.js';
@@ -257,7 +257,7 @@ async function handle(req: FastifyRequest, reply: FastifyReply, secure: boolean)
     if (policy?.config.decryptKeySecret || policy?.config.requireEncryption || /EncryptedData/.test(raw)) {
       try {
         const c = policy?.config || {};
-        const d = decryptMessage(raw, c.decryptKeySecret ? keyFrom(c.decryptKeySecret, n => getSecret(n) || '', 'Private key for encrypted requests') : '', c.decryptKeyPassSecret ? getSecret(c.decryptKeyPassSecret) : undefined);
+        const d = decryptMessage(raw, c.decryptKeySecret ? keyFrom(c.decryptKeySecret, n => inProject(policy?.project_id ?? null, () => getSecret(n)) || '', 'Private key for encrypted requests') : '', c.decryptKeyPassSecret ? inProject(policy?.project_id ?? null, () => getSecret(c.decryptKeyPassSecret)) : undefined);
         if (c.requireEncryption && !d.bodyEncrypted) throw new WssError('The SOAP Body must be encrypted');
         xml = d.xml;
       } catch (e: any) { gw.error = e.message; return fault(e instanceof WssError ? 400 : 500, 'soap:Client', e.message); }

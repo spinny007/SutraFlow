@@ -80,7 +80,7 @@ export function CatalogHost({ children }: { children: ReactNode }) {
     const [r, sc, s] = await Promise.all([
       get<Resource[]>(`/api/resources?projectId=${encodeURIComponent(pid)}`),
       get<SchemaInfo[]>(`/api/schemas?projectId=${encodeURIComponent(pid)}`),
-      get('/api/secrets'),
+      get(`/api/secrets?projectId=${encodeURIComponent(pid)}`),
     ]);
     setResources(r); setSchemas(sc); setSecrets(s);
   }, [projectId, setProjectId]);
@@ -98,7 +98,7 @@ export function CatalogHost({ children }: { children: ReactNode }) {
 export const famOf = (meta: Meta, palette: string) => `fam-${meta.palettes.find(p => p.id === palette)?.color || 'general'}`;
 
 // ---------- small components ----------
-export function Modal({ title, children, onClose, actions }: { title: string; children: ReactNode; onClose(): void; actions?: ReactNode }) {
+export function Modal({ title, children, onClose, actions, wide }: { title: string; children: ReactNode; onClose(): void; actions?: ReactNode; wide?: boolean }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', k);
@@ -106,7 +106,7 @@ export function Modal({ title, children, onClose, actions }: { title: string; ch
   }, [onClose]);
   return (
     <div className="scrim" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
+      <div className={`modal${wide ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
         <h2>{title}</h2>
         {children}
         <div className="acts">{actions ?? <button className="btn" onClick={onClose}>Close</button>}</div>

@@ -1,6 +1,6 @@
 {
   "name": "sutraflow",
-  "version": "2.1.7",
+  "version": "2.1.8",
   "description": "SutraFlow: visual integration designer and engine (palettes, mapping, SOAP/WS-Security, REST, exposed secured APIs, TLS/Let's Encrypt).",
   "private": true,
   "license": "AGPL-3.0-only",
@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
-    "@fastify/static": "^10.1.6",
+    "@fastify/static": "^10.1.9",
     "@xmldom/xmldom": "^0.8.15",
     "acme-client": "file:vendor/acme-client",
     "ajv": "^8.20.0",
@@ -103,6 +103,12 @@
     "@azure/identity": "4.13.0",
     "@azure/msal-node": {
       "uuid": "11.1.1"
+    },
+    "@fastify/static": {
+      "glob": {
+        ".": "14.0.3",
+        "minimatch": "11.0.3"
+      }
     }
   },
   "bin": {

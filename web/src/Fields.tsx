@@ -72,7 +72,9 @@ export const dropProps = (enabled: boolean) => enabled ? {
 function holds(c: { k: string; in: any[] }, values: Record<string, any>, all: Field[]): boolean {
   const dep = all.find(x => x.k === c.k);
   if (dep && !visible(dep, values, all)) return false;
-  return c.in.includes(values[c.k] ?? dep?.def);
+  const v = values[c.k] ?? dep?.def;
+  // A list field (several choices) shows the dependent field when any chosen value matches.
+  return Array.isArray(v) ? v.some(x => c.in.includes(x)) : c.in.includes(v);
 }
 
 export function visible(f: Field, values: Record<string, any>, all: Field[]): boolean {

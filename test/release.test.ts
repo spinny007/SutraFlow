@@ -19,7 +19,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { testEnv, node, edge, port } from './helpers.js';
+import { testEnv, node, edge, port, engineSecrets } from './helpers.js';
 
 testEnv(19610);
 process.env.SUTRA_ADMIN_TOKEN = 'release-token-0123456789abcdef';
@@ -28,7 +28,8 @@ const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const projects = await import('../server/src/projects.js');
 const flows = await import('../server/src/flows.js');
-const { setSecret } = await import('../server/src/secrets.js');
+// 2.1.8: a stored secret is used through a Secret property; these are engine Secret properties (helpers.ts).
+const setSecret = await engineSecrets();
 const pk = await import('../server/src/packages.js');
 
 let srv: Awaited<ReturnType<typeof boot>>;
@@ -64,9 +65,15 @@ test('release activities are off until an administrator allows them', async () =
 
 test('a release Sutra: build, check, deploy with a deployment config, then roll back, on this server', async () => {
   projects.setReleasesAllowed(true);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-rel-'));
+  const { config } = await import('../server/src/config.js');
+  const dir = path.join(config.dataDir, 'releases', 'nightly');
   const s = node('start', 'Start');
-  const b = node('releasePackage', 'Build', { target: 'this server', project: 'Shop', version: '2.0.0', note: 'from a Sutra', saveTo: dir });
+  // 2.1.8: a folder outside the releases and project files folders is refused.
+  const outside = node('releasePackage', 'Build', { target: 'this server', project: 'Shop', version: '2.0.0', saveTo: fs.mkdtempSync(path.join(os.tmpdir(), 'sutra-rel-')) });
+  const refused = await run([s, outside], [edge(s, outside)]);
+  assert.equal(refused.status, 'failed');
+  assert.match(refused.error, /outside the server's releases folder/);
+  const b = node('releasePackage', 'Build', { target: 'this server', project: 'Shop', version: '2.0.0', note: 'from a Sutra', saveTo: 'nightly' });
   const c = node('releaseCheck', 'Check', { packageFrom: 'previous step', package: '{{input.package}}', target: 'this server', project: 'Shop Copy' });
   const d = node('releaseDeploy', 'Deploy', { packageFrom: 'previous step', package: '{{input.package}}', target: 'this server', project: 'Shop Copy', opsFile: ops });
   const bad = node('log', 'Problems', { message: '{{input.errors}}' });

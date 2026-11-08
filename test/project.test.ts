@@ -60,8 +60,15 @@ async function run(nodes: any[], edges: any[], extra: any = {}) {
 }
 
 test('project variables, Sutra variables and ops overrides with ${env:}', async () => {
-  process.env.SUTRA_TEST_REGION = 'north';
-  projects.setOps(pid, { variables: { REGION: '${env:SUTRA_TEST_REGION}' } });
+  process.env.TEST_REGION = 'north';
+  projects.setOps(pid, { variables: { REGION: '${env:TEST_REGION}' } });
+  // 2.1.8: a project reads only the environment variables an administrator allowed, never the server's own.
+  assert.throws(() => projects.effectiveVariables(pid), /only the environment variables an administrator allowed/);
+  assert.throws(() => projects.setEnvBindings(['SUTRA_ADMIN_TOKEN']), /belongs to the SutraFlow server itself/);
+  projects.setOps(pid, { variables: { REGION: '${env:SUTRA_ADMIN_TOKEN}' } });
+  assert.throws(() => projects.effectiveVariables(pid), /only the environment variables an administrator allowed/);
+  projects.setOps(pid, { variables: { REGION: '${env:TEST_REGION}' } });
+  projects.setEnvBindings(['TEST_REGION', 'BILLING_URL']);
   const s = node('start', 'Start', { payload: '{}' });
   const m = node('mapper', 'Map', { mapping: { rules: {
     region: { expr: '{gv.REGION}' }, limit: { expr: '{gv.LIMIT} * 2' }, token: { expr: '{gv.API_TOKEN}' }, counter: { expr: '{vars.counter} + 1' }, step: { expr: '{process.step}' },
@@ -70,7 +77,7 @@ test('project variables, Sutra variables and ops overrides with ${env:}', async 
   assert.equal(r.status, 'done', r.error);
   assert.deepEqual({ ...r.state.outputs.Map, token: undefined }, { region: 'north', limit: 2000, counter: 42, step: 'Map', token: undefined });
   assert.equal(r.state.outputs.Map.token, '••••••', 'secret project variables are masked in history');
-  delete process.env.SUTRA_TEST_REGION;
+  delete process.env.TEST_REGION;
   projects.setOps(pid, {});
 });
 

@@ -18,7 +18,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
-import { testEnv, captureServer, node, edge } from './helpers.js';
+import { testEnv, captureServer, node, edge, engineSecrets } from './helpers.js';
 
 testEnv(18610);
 const require = createRequire(import.meta.url);
@@ -26,7 +26,8 @@ const { boot } = await import('../server/src/index.js');
 const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
 const flows = await import('../server/src/flows.js');
-const { setSecret } = await import('../server/src/secrets.js');
+// 2.1.8: a stored secret is used through a Secret property; these are engine Secret properties (helpers.ts).
+const setSecret = await engineSecrets();
 const { saveResource } = await import('../server/src/resources.js');
 const { assertReadOnlyPreviewSql, bindFor, namedParams, namedParameterIssues, closeDbPools, inlineRunData, previewDatabaseQuery } = await import('../server/src/connectors/db.js');
 const { priorDelivery, busTiming, messageKey, stopHolds, handle: handleDelivery, logicalJmsDestination, kafkaTlsOptions, brokerTlsOptions } = await import('../server/src/connectors/bus.js');

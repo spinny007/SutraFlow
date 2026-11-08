@@ -22,7 +22,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { testEnv, node, edge, port } from './helpers.js';
+import { testEnv, node, edge, port, engineSecrets, allowPrograms } from './helpers.js';
 import { sftpServer } from './sftpserver.js';
 
 /**
@@ -51,7 +51,8 @@ const { config } = await import('../server/src/config.js');
 const flows = await import('../server/src/flows.js');
 const projects = await import('../server/src/projects.js');
 const { saveResource, getResource } = await import('../server/src/resources.js');
-const { setSecret } = await import('../server/src/secrets.js');
+// 2.1.8: a stored secret is used through a Secret property; these are engine Secret properties (helpers.ts).
+const setSecret = await engineSecrets();
 
 let srv: Awaited<ReturnType<typeof boot>>;
 let pid = '';
@@ -136,6 +137,7 @@ test('remote paths stayed inside the base folder even with base "/" and ../ in t
 
 test('an MCP server command in a folder with spaces (Windows) did not start through the shell', async () => {
   const { listMcpTools } = await import('../server/src/ai/mcpClient.js');
+  await allowPrograms(`"${process.execPath}"`); // 2.1.8: an MCP server started by a command needs the administrator's allowance
   const r = saveResource({ kind: 'mcpClient', name: 'Spaces', project_id: pid, config: { transport: 'command', command: `"${process.execPath}" "${path.join(root, 'test', 'mcpstdio.mjs')}"` } });
   assert.deepEqual((await listMcpTools(getResource(r.id)!, () => '')).map(t => t.name), ['add']);
 });

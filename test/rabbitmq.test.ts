@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
-import { testEnv, node, edge } from './helpers.js';
+import { testEnv, node, edge, engineSecrets } from './helpers.js';
 import { readTestPem } from './pem-fixtures.js';
 
 const require = createRequire(import.meta.url);
@@ -41,7 +41,7 @@ if (!enabled) {
   const { q } = await import('../server/src/db.js');
   const flows = await import('../server/src/flows.js');
   const projects = await import('../server/src/projects.js');
-  const { setSecret } = await import('../server/src/secrets.js');
+  const setSecret = await engineSecrets(); // a stored secret is read only behind a Secret property (2.1.8)
   const { saveResource } = await import('../server/src/resources.js');
   const { rebuildListeners, listenerStatus } = await import('../server/src/listeners.js');
   const { closeBusPublishers, testBroker } = await import('../server/src/connectors/bus.js');

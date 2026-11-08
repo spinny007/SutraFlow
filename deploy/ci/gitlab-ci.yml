@@ -20,7 +20,7 @@
 # the plan (check job log and plan.md artifact) and presses play. Protect the production environment
 # (Settings > CI/CD > Protected environments) to choose who may.
 image:
-  name: ghcr.io/spinny007/sutraflow:2.1.7
+  name: ghcr.io/spinny007/sutraflow:2.1.8
   entrypoint: [""]
 
 variables:

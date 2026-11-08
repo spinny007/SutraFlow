@@ -1,19 +1,131 @@
-# SutraFlow 2.1.7 release notes
+# SutraFlow 2.1.8 release notes
 
-Prepared 2026-11-07. Copyright (c) 2026-27 Surya Partap Singh, MixAgile.com. AGPL-3.0-only; a commercial licence is available.
+Prepared 2026-11-08. Copyright (c) 2026-27 Surya Partap Singh, MixAgile.com. AGPL-3.0-only; a commercial licence is available.
 
 | Download | For |
 |---|---|
-| `sutraflow-2.1.7-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
-| `sutraflow-2.1.7-windows-x64-offline.zip` | The same with the runtime packages inside, for servers without the npm registry |
-| `sutraflow-2.1.7-linux.tar.gz` | Linux (x64 or arm64); also macOS |
-| `sutraflow-2.1.7-docs.zip` | The user guide, the Administration Guide, the Sutra Design Guide and the architecture page, to put on a website |
+| `sutraflow-2.1.8-windows.zip` | Windows 10, 11 and Windows Server 2019 or later |
+| `sutraflow-2.1.8-windows-x64-offline.zip` | The same with the runtime packages inside, for servers without the npm registry |
+| `sutraflow-2.1.8-linux.tar.gz` | Linux (x64 or arm64); also macOS |
+| `sutraflow-2.1.8-docs.zip` | The user guide, the Administration Guide, the Sutra Design Guide and the architecture page, to put on a website |
 
 Each comes with a `.sha256` file to check the download: `sha256sum -c <archive>.sha256`, or on Windows `Get-FileHash <archive> -Algorithm SHA256`.
 
-2.1.7 is about trusting what the designer shows: a step sees only the data it can really receive, every line shows where it comes from, a called Sutra states its input once, and every run says whether it was a test or real work.
+2.1.8 makes the project boundary hold: a person granted one project can no longer read, use, change or watch another project's secrets, connections, schemas or runs, and no project role can start a program on the server unless an administrator allowed it. It closes every finding of the 2.1.7 security audit. It also lets AI assistants build Sutras through the studio's own MCP server, gives each person a profile with their own API tokens, and adds moderation, language and an answer cache to the AI guard.
 
 ## In short
+
+- **Security: project boundaries** (the seven audit findings and five review findings below): server environment variables only when an administrator allows them, never the server's own; a Secret property only for its own project's secret; AI command lines found on upgrade wait for approval; links and junctions cannot lead out of a folder; secrets only through the project's own Secret properties; programs on the server (AI command-line tools, MCP servers started by a command) only when an administrator allows them; one project per request, and create never overwrites; design previews and live run events show only the caller's projects; the rest of the API checked for the same mistakes; patched `glob` and `minimatch`.
+- **Build Sutras with an AI assistant**: a new MCP server at `/mcp/studio` on the admin port. GitHub Copilot, Claude Code, Antigravity, Cursor and other MCP clients read projects, activities, connections and properties (never secret values), create and change Sutra drafts (a change is shown as a difference and saved only when confirmed), run the design check and test runs, and hand releases over. It never deploys without the plan id a person approved. Every call is in the audit log, marked *generated*.
+- **My profile and personal API tokens**: select your name in the designer, or *My profile* in the Admin Console, to see your roles, change your password and make your own API tokens. A token acts as you, with your roles, expires after 30, 60 or 90 days (your choice) and is renewed with one click. Administrators see and revoke people's tokens and can switch personal tokens off for the server.
+- **More AI guard checks**: moderation categories with a threshold each (block, or warn only), language detection with translation, and a cache of answers for repeated questions, per Sutra and per person (never shared across people unless set to *everyone*).
+- **Personal data hidden in logs**: a project can mask e-mail addresses, phone and card numbers, IBAN, Aadhaar, PAN, SSN and similar data in its log lines and run history.
+- **Admin Console charts**: the legend of the Overview charts no longer sits on the time labels, midnight reads *8 Nov* instead of a bare *8*, and an empty chart says *No activity in this period*.
+- **Documentation**: MCP has its own part in the user guide, with new chapters *Connecting AI assistants over MCP*, *My profile: password and API tokens* and *What is new in 2.1.8*; the guides were reread and the dense or machine-like passages rewritten in plain words; "(2.1.x)" tags that only said when something arrived were removed.
+
+## Security
+
+The 2.1.7 security audit (8 November 2026, revision `1238f52`) found six ways a signed-in person could cross a project boundary or start a program, and one dependency advisory. All are fixed, each with tests that try the attack and expect a refusal.
+
+| # | Seen in 2.1.7 | Now |
+|---|---|---|
+| F1 (High) | A person with Design in one project could have a stored secret of another project sent to an address of their choice, for example through an AI provider's model list | While a project's work runs (steps, listeners, Test connection, model lists, previews), only the secrets behind that project's own Secret properties and the engine's can be read, however the name arrives. `{{secret.NAME}}` with a bare vault name is refused. The list of secret names shows a project's own names, and the whole list needs the Secrets permission |
+| F2 (High) | An AI provider using a command-line tool could start any program on the server, even with scripts switched off, with the server's whole environment | A separate *AI command-line tools* switch (Admin Console, Server, Runtime) with a list of allowed command lines; it also covers MCP servers started by a command. AI tools run in an empty folder, refuse flags that let them act without asking, and get a small environment |
+| F3 (High) | A request could name one project for the permission check and another for the work (`projectId` and `project_id`) | The project of each request is settled before the permission check; a request naming two different projects is refused (400) and audited |
+| F4 (High) | Creating a connection or schema with the id of another project's item overwrote it | Create refuses an id that exists (409); an update always keeps the stored project; the save functions never move an item to another project |
+| F5 (Moderate) | The design preview showed the fields of another project's schema | The preview needs the project and shows a warning instead of another project's schema |
+| F6 (Moderate) | The live event stream sent every run's id and status to every signed-in account | Each event is checked against the caller's current grants: View on the run's project, Design for test and debug runs |
+| F7 (Moderate) | `glob` and `minimatch` advisories through `@fastify/static` | `@fastify/static` 10.1, `glob` 14.0.3 and `minimatch` 11.0.3; `npm audit --omit=dev` reports none |
+
+A review of the 2.1.8 build found five more gaps before release. All are fixed, each with a test that tries the attack:
+
+| # | Seen in the 2.1.8 build | Now |
+|---|---|---|
+| G1 (High) | A project property written `${env:SUTRA_ADMIN_TOKEN}` read the server's admin token, which then opened the administrator API | `${env:NAME}` in project properties, deployment config, logging and connections reads only names an administrator allowed (*Environment variables for projects*, Server, Runtime). Names starting with `SUTRA_` are the server's own and can never be allowed, and script steps no longer receive them |
+| G2 (High) | A developer could point their own Secret property at another project's stored secret by its reference | Each stored secret records its project. A Secret property may point only to its own project's secret, a name not stored yet, or (with Manage secrets) a server secret. A secret of another project is refused when the property is saved and reads nothing at run time, even through a binding made earlier |
+| G3 (High, on upgrade) | The upgrade switched AI command-line tools on and trusted every command found in existing connections | After the upgrade the switch is off. The commands found are listed under *Waiting for approval*, with the connections they came from, until an administrator approves or dismisses each |
+| G4 (Moderate) | A directory junction or symbolic link inside a File step's folder, or a project's files folder, let reads and writes reach other folders | Paths are checked at their real location, following links and junctions. Folder listings do not follow links. *Also save to folder* of Build package saves only inside `<data>/releases` or a project files folder |
+| G5 (Low) | A renewed JWT started a new answer cache for the same person | The cache knows a person by sign-in method, subject, issuer, tenant, audience and app, not by token times and ids. A different issuer or tenant is still a different person |
+
+The rest of the API was checked for the same mistakes. Fixed as well: `POST /api/soap/describe` (another project's WSDL, connections and profiles, and files on the server by path), `POST /api/flows/validate`, `POST /api/packages/test` and `/open`, the Admin Console's memory tables, agent conversations and alerts, `GET /api/server`, and gateway policies reading secrets outside their project. A route table test fails when a new route without a project is added without a reviewed reason.
+
+## Install and upgrade
+
+Install as for 2.1.7. Upgrade from 2.1.0 to 2.1.7: unpack 2.1.8 in a folder of its own and run `bin/sutraflow upgrade` from there. It adds the table `guard_cache`, the column `secrets.project_id`, and the settings `aiCliPolicy`, `personalTokens` and `envBindings`, made on upgrade. Secrets stored from a project's Secret property are marked as that project's.
+
+**What changes for you:**
+- **Secrets named directly are refused.** A connection, Sutra or gateway policy that names a stored secret directly, or uses `{{secret.NAME}}` with a vault name, fails with a message saying so. Before upgrading production, run `sutra secret check` (exit 1 when anything is listed) or look at *Secrets that will be refused* on the Admin Console Overview after the upgrade. For each item, add a Secret project property (or an engine one) that points to the secret and pick it instead. A release that names a secret directly does not pass its check.
+- **AI command-line tools need the new switch.** After the upgrade it is off on every server. If AI providers use the Claude, Gemini or Codex command-line tool, or MCP servers are started by a command, open Admin Console, Server, Runtime: the commands found are under *Waiting for approval*. Approve the ones you know and switch the tools on. A tool that signs in with an environment variable needs that variable listed on the same card. AI providers lose the *Working folder* field.
+- **Environment variables need allowing.** A project property, deployment config, logging setting or connection that uses `${env:NAME}` stops working until an administrator allows NAME on the *Environment variables for projects* card, which lists the names in use. Names starting with `SUTRA_` cannot be allowed: put such values in a Secret property instead. Engine properties are not affected. Script steps no longer see the server's `SUTRA_` variables.
+- **Secret properties point to their own project.** Saving a Secret property that points to another project's stored secret is refused. Pointing one at a server secret needs the Manage secrets permission.
+- **Build package, Also save to folder**: a folder name such as `nightly` saves under `<data>/releases`. A full path must be inside that folder or a project files folder.
+- **API callers**: `POST /api/resources` and `POST /api/schemas` answer 409 for an id that exists (they used to replace it); `POST /api/schemas` needs `project_id`; a request naming two different projects answers 400; `POST /api/design/schemas`, `POST /api/flows/validate` and `POST /api/soap/describe` need `projectId`; `GET /api/secrets` without `projectId` needs the Secrets permission; new `GET`/`PUT /api/env-bindings`; `PUT /api/ai/cli-policy` takes `approve` and `dismiss`.
+- **Personal API tokens are on.** People can make their own tokens from the first start. Switch them off on the Users page (*Personal tokens: on/off*) if your organisation does not want them.
+
+## Fixes in 2.1.8
+
+| Seen | Cause | Now |
+|---|---|---|
+| A stored secret of one project could be read by a Sutra, connection test or model list of another project | The vault reader took any name it was given | Only names behind the running project's or the engine's Secret properties are read (F1) |
+| An AI provider could start any program on the server | The command line came from the connection and was never checked | Programs start only when the administrator's switch is on and the command is allowed (F2) |
+| A permission check could pass for one project while the work was done in another | Two body fields named the project, and handlers read the one the guard did not check | One project per request, settled before the check (F3) |
+| Creating a connection or schema could overwrite another project's item | Create saved by the id the caller sent | Create refuses an existing id; an update keeps the stored project (F4) |
+| A step's preview could show another project's schema, and live events reached everyone | Neither checked the project | Both check the caller's projects (F5, F6) |
+| MongoDB and Firebase connections said "stored value is unavailable" or "not valid JSON" when a secret was refused | They caught the refusal and reported a guess | They pass the refusal on, so the message names the real cause |
+| The legend of the Overview charts covered the time labels, and a lone "4" or "8" showed on an empty chart | The legend had no room of its own; ECharts labelled midnight with the bare day of the month | The legend has its own row, midnight reads *8 Nov*, an empty chart says *No activity in this period* |
+| A designer could not use the studio's MCP server with their own rights | Only system accounts and the admin token had API tokens | Each person makes their own tokens in My profile |
+| Several guide pages told readers to name a vault secret on a connection or policy | Written before secrets moved behind Secret properties | The guides and the help texts of those fields say to pick a Secret property |
+| A project property could read the server's admin token from the environment | `${env:NAME}` read any environment variable of the server | Only names an administrator allowed, never `SUTRA_` ones (G1) |
+| A Secret property could point to another project's stored secret | The vault did not know which project a secret belonged to | Each secret records its project; another project's secret is refused (G2) |
+| The upgrade trusted the AI command lines found in connections | They were copied to the allowed commands | They wait for an administrator's approval (G3) |
+| A junction or link inside a folder carried File steps and release files outside it | Paths were checked by their text only | Paths are checked at their real location (G4) |
+| A renewed token missed the person's cached answers | The whole caller, token times included, made the cache key | The cache key is the person, not the token (G5) |
+| The RabbitMQ, ActiveMQ and Kafka REST samples, and the secure Kafka, RabbitMQ and ActiveMQ sample connections, failed with "the selected stored secret is not behind a Secret property" | Their password and client key fields named a vault secret through a plain text property | The samples add Secret project properties (such as `RABBITMQ_HTTP_PASSWORD_SECRET`) and pick them; store the password in the vault under the same name |
+| The user guide mixed up the studio MCP server with the AI tool activities of the AI palette | The MCP chapters did not say which part is built with the palette | The MCP part now separates three things: your Sutras as tools on the gateway (AI palette), tools of other MCP servers used by your Sutras, and the built-in studio server, which has no palette activities |
+
+## What is new in 2.1.8
+
+### The studio MCP server
+
+- **Address**: `/mcp/studio` on the admin port, for example `http://127.0.0.1:4800/mcp/studio`. Signed in with a Bearer token only (a person's own token, a system account's token or the admin token); a browser session is refused, so a web page cannot use someone's sign-in.
+- **15 tools**. To learn (View): `list_projects`, `list_sutras`, `get_sutra`, `list_activities`, `list_connections`, `list_properties`, `list_schemas`, `list_samples`, `get_run`, `check_sutra`. To build (Design): `create_sutra` (always a draft), `change_sutra` (first a difference and a change id, then saved only when confirmed with that id), `test_sutra` (a design-time test run with each step's input, output and log). To hand over (Deploy): `check_release` and `deploy_release`, which needs the plan id a person approved.
+- **Same rules as the designer**: each tool calls the studio's own API with the caller's token, so permissions, project checks and the audit log are those of the designer. No tool returns a secret value, and a generated Sutra reads secrets only through Secret properties.
+- **Audit**: each call is recorded as *MCP studio* and the tool's name, with the client *mcp*; changes are marked *generated*. Test runs started this way are design runs with the client *mcp*.
+- **Connect**: `claude mcp add --transport http sutraflow http://127.0.0.1:4800/mcp/studio --header "Authorization: Bearer <token>"`; VS Code (Copilot), Antigravity and Cursor take the same address and header. The user guide's MCP part explains each.
+
+### My profile and personal API tokens
+
+- **My profile**: in the designer (select your name at the top) and in the Admin Console (*You*, *My profile*): name, e-mail, what you may do on each project, *Change password* (not shown for single sign-on), and *My API tokens*.
+- **Tokens**: a name, an expiry of 30, 60 or 90 days, at most 20 per person, shown once and stored only as a hash. *Renew* (when expired or within 7 days) replaces a token with a new value, same name and period. A token cannot make or renew tokens or change the password.
+- **Ended by**: revoking it, *Sign out everywhere*, a password reset by an administrator, or disabling the account. Changing your own password keeps them.
+- **Administrators**: the Users page lists a person's tokens with *Revoke*, and *Personal tokens: on/off* switches them off for the whole server (the tokens that exist stop working until it is switched on again). System accounts are not affected.
+- **API**: `GET` and `POST /api/access/me/tokens`, `POST /api/access/me/tokens/:id/renew`, `DELETE /api/access/me/tokens/:id`, `GET` and `PUT /api/access/personal-tokens`.
+
+### AI guard
+
+- **Moderation**: categories with a threshold each; *Warn only* categories let the text through with a warning on the run. *Also ask a model* adds the model's score.
+- **Language**: the language of the text (`en`, `hi` ...); *Translate to* translates it with the guard's model.
+- **Answer cache**: one guard looks the question up (a hit leaves by the new *cached* port), another stores the answer for a set time. Cached per person by default; callers without an identity get no cache.
+- **Sample** *AI agent: order desk* now checks moderation (harassment only warns) and language.
+
+### Smaller changes
+
+- **Logging**: project option *Hide personal data in logs and run history*; the data steps pass on is unchanged.
+- **Designer**: a field that depends on a list field (such as the guard's Checks) appears when any chosen value matches.
+- **Samples**: Azure Data Factory, Databricks, Twitch, Discord, Telegram, the broker REST samples and the secure broker connections add a Secret project property instead of naming a secret directly.
+- **Documentation**: the user guide's new MCP part and chapters; the guides reread and rewritten where they were dense; the architecture page on the studio MCP server, personal tokens, the AI guard and one project per request.
+
+## 2.1.8 release gate
+
+- The audit's attacks are covered by the new tests (`secrets218`, `aicli218`, `project218`, `events218`, `sweep218`) and refused. So are the review's (`secrets218`, `aicli218`, `confine218`, `guard218`, `project218`).
+- Full suite with the local and remote outside services: 721 passed, 3 skipped (Kafka, left out on purpose, and the image build without Docker); the two failures were the README test count, since corrected. RabbitMQ, ActiveMQ and their REST APIs passed after the broker samples moved to Secret properties.
+- The 24-hour remote PostgreSQL soak stays deferred and remains the backlog's Must have; the package receipt records it.
+
+## Previous release: 2.1.7
+
+2.1.7 is about trusting what the designer shows: a step sees only the data it can really receive, every line shows where it comes from, a called Sutra states its input once, and every run says whether it was a test or real work.
+
+### In short
 
 - **A step sees only the steps before it** (lanes): the Input tab, the condition picker, template and SQL fields, the design check and the engine apply one rule. A step may use the trigger, properties, Local variables and the outputs of steps before it on a connected path. A step on another lane is not offered, is a design problem, and fails the step at run time with the same message. After a Merge both lanes count. *Trigger data (trigger)* is listed on every step, and pointing at a `{{…}}` under a field says where it comes from.
 - **Lines you can follow**: pointing at a line names it (*from step (port) → to step*) and highlights it; selecting a step lights its lines and dims the rest; *Path* lights every step before and after it. Where two or more lines meet, each takes its source step's colour from a palette of 8 (or one chosen by hand, saved in the Sutra; right-click a step to colour all its lines), with a key on the step's Input tab. *Tidy* lays a Sutra out left to right in one undo step. Error lines stay red and dashed, so meaning never depends on colour.
@@ -21,7 +133,7 @@ Each comes with a `.sha256` file to check the download: `sha256sum -c <archive>.
 - **Design runs and runtime runs**: every run records its stage (*design*: tests, debugging, drafts; *runtime*: deployed work) and the client that started it by hand (*studio*, *api*, *cli*). The Admin Console figures, alerts, Traceability, the runs-at-once limit and the Prometheus run metrics (new `stage` label) count runtime runs; Runs and Traceability have a Design / Runtime / All filter. Design runs are deleted after 7 days (`SUTRA_DESIGN_RUN_RETENTION_DAYS`, *Keep design runs*).
 - **Smaller fixes**: a Dashboard page step links to its page once deployed and says *not deployed* before; a query on missing sample data names the install Sutra to run first; the bundled samples were laid out again so lines do not run under steps; two new samples show a called Sutra with an XML contract.
 
-## Install and upgrade
+### Install and upgrade
 
 Install as for 2.1.6. Upgrade from 2.1.0 to 2.1.6: unpack 2.1.7 in a folder of its own and run `bin/sutraflow upgrade` from there. It adds two columns to `runs` (`stage`, `client`) and an index, fills the stage of existing runs in batches from their source and version (a test, a debug run or a draft is design), and needs no new settings.
 
@@ -31,7 +143,7 @@ Install as for 2.1.6. Upgrade from 2.1.0 to 2.1.6: unpack 2.1.7 in a folder of i
 - **Figures leave out every design run**, including runs of a draft started through its REST, SOAP or other trigger, which some figures used to count.
 - **Prometheus**: `sutra_runs_started_total`, `sutra_runs_finished_total` and `sutra_run_duration_seconds` have a new `stage` label (`design` or `runtime`). Queries that match the old label sets exactly need `stage` added, or `sum without (stage)`.
 
-## Fixes in 2.1.7
+### Fixes in 2.1.7
 
 | Seen | Cause | Now |
 |---|---|---|
@@ -43,9 +155,9 @@ Install as for 2.1.6. Upgrade from 2.1.0 to 2.1.6: unpack 2.1.7 in a folder of i
 | A Dashboard page step did not show where its page was, or whether it was published | The page address was only in the guide | The step shows the page's link once deployed, *not deployed* before, and asks to deploy again when the draft's name differs |
 | A sample query on missing sample data failed with only the database's message (*Table … doesn't exist*) | Nothing linked the sample to the install Sutra that makes its data | The error adds the install Sutra of the project that makes it: *Run 'Sample: Sales orders install' first: it makes sample_sutraflow.* |
 
-## What is new in 2.1.7
+### What is new in 2.1.7
 
-### What a step can see
+#### What a step can see
 
 - **The rule**: the trigger (`{{trigger…}}`), Project and Engine properties, Local variables, and the outputs of the steps before it on a connected path. After a join both lanes count; a loop back does not make later steps count as before; the Error handler sees every step; a condition on a line uses the step it leaves and the steps before it.
 - **Designer**: Sutra Data, the condition picker and template fields offer only what the rule allows. *Trigger data (trigger)* is on every step, so dragging writes `{{trigger.params.region}}`. Under text fields (SQL, templates) each `{{…}}` says where it comes from, and SQL fields add that run data is sent as a bound parameter.
@@ -53,7 +165,7 @@ Install as for 2.1.6. Upgrade from 2.1.0 to 2.1.6: unpack 2.1.7 in a folder of i
 - **Engine**: such a reference fails the step with the same message. Each step gets only the outputs it may see.
 - **Samples**: every sample passes the check (a test fails otherwise). The filter SQL of *Sales dashboard on a database* has a comment: an empty filter matches every row, and each value is a bound parameter.
 
-### Lines on the canvas
+#### Lines on the canvas
 
 - **Pointing at a line**: a label *from step (port) → to step*, the line and both ends highlighted.
 - **Selecting a step**: its lines and the steps at their other ends lit, the rest dimmed. **Path** (toolbar) lights every step before and after it.
@@ -62,7 +174,7 @@ Install as for 2.1.6. Upgrade from 2.1.0 to 2.1.6: unpack 2.1.7 in a folder of i
 - **Tidy** (toolbar): columns by the longest path from the trigger, each column ordered to cross fewer lines, stacked by real step heights; one undo step.
 - **Run view**: Runs, *Open in designer* shows the same colours and highlighting.
 
-### Manual start and Call Sutra contracts
+#### Manual start and Call Sutra contracts
 
 - **Manual start with an XSD**: an XML test payload (the design check warns when it is not XML). Input may be XML text, `{ "xml": "…" }` or data in the Parse XML shape; text is checked against the XSD (DTDs and entities refused). Output: the Parse XML shape plus `xml`.
 - **Call Sutra**: *Input contract from the called Sutra* (turned on when a Sutra is picked and the step has no schema of its own) uses the called Sutra's Manual start schema for the chosen version. The Input tab maps to it with required fields marked; *Input schema* is hidden while it is followed. A note shows the contract, *Accept the new input* after the called Sutra changes it, or *Use its input contract* for older steps that keep their own schema.
@@ -70,20 +182,20 @@ Install as for 2.1.6. Upgrade from 2.1.0 to 2.1.6: unpack 2.1.7 in a folder of i
 - **Samples**: *Sample: XML order check* (XSD, XML test payload, strict) and *Sample: Call the XML order check* (JSON mapped to the XML contract), added with the *XML* sample.
 - **API**: `GET /api/flows/:id/contract?use=draft|deployed` returns the input contract of a Sutra (View permission on the Sutra).
 
-### Design runs and runtime runs
+#### Design runs and runtime runs
 
 - **Stage and client**: `runs.stage` (*design* or *runtime*) and `runs.client` (*studio*, *api*, *cli*, or none for automatic starts). One function decides; a called Sutra takes its caller's stage. The `sutra` command sends `x-sutra-client: cli`.
 - **Where it counts**: the Admin Console Overview and Applications, alerts, Traceability (runtime by default, with a Stage filter), the Operator view, the runs-at-once limit and the Prometheus run metrics (`stage` label). The designer's Runs shows all runs, with a Stage filter and column. `GET /api/runs?stage=design|runtime` filters.
 - **Retention**: *Keep design runs* (engine tuning, `SUTRA_DESIGN_RUN_RETENTION_DAYS`, `sutra engines tune --design-retention-days`), 7 days by default; a project's *Clear test runs* now clears its design runs.
 - **Upgrade**: existing runs get their stage from source and version, in batches of 5,000, on SQLite and PostgreSQL.
 
-### Smaller changes
+#### Smaller changes
 
 - **Page link**: the Dashboard page step shows `/dash/<name>` as a link once deployed (`GET /api/flows/:id/page-link?node=`).
 - **Missing sample data**: SQL query errors on a `sample_` database or table that is not there name the install Sutra of the project that makes it.
 - **Documentation**: new user guide chapters *What a step can see, and the lines between steps* and *Inputs of called Sutras: JSON or XML*; the Sutra Design Guide's rules on lanes and contracts and its checklist; the Administration Guide on run stages, retention and metrics; screenshots retaken on 2.1.7.
 
-## 2.1.7 release gate
+### 2.1.7 release gate
 
 The 24-hour remote-PostgreSQL soak, the backlog's only Must have, is deferred again (decided 7 November 2026) and stays the Must have; the package receipt records it and why.
 

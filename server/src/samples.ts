@@ -1178,29 +1178,39 @@ export function addSamples(projectId: string, ids?: string[]) {
     edges:[E('t','p'),E('p','c')],
   });
 
+  /**
+   * Adds a Secret project property once (kept when the project has it already) and returns its reference.
+   * Since 2.1.8 a connection reads a stored secret only through a Secret property of its project or the engine.
+   */
+  const secretProperty = (name: string, description: string) => {
+    const p = getProject(projectId)!;
+    if (!p.config.variables.some(v => v.name === name)) saveProject({ id: p.id, name: p.name, config: { variables: [...p.config.variables, { name, type: 'secret', value: name, description }] } });
+    return `{{gv.${name}}}`;
+  };
+
   // Broker REST APIs are useful to HTTP-only clients, but do not replace native queue/topic triggers.
   const brokerRest = want('brokerrest');
   const kafkaRestHttp = brokerRest && conn('httpConnection', 'Sample Kafka REST', {
     baseUrl: '{{gv.KAFKA_REST_URL}}', timeoutMs: 30000, verifyTls: true, caPem: '{{gv.KAFKA_REST_CA_PEM}}', headers: [],
   });
   const kafkaRestAuth = brokerRest && conn('outboundAuth', 'Sample Kafka REST Basic auth', {
-    type: 'basic', username: '{{gv.KAFKA_REST_USER}}', passwordSecret: '{{gv.KAFKA_REST_PASSWORD_SECRET}}',
+    type: 'basic', username: '{{gv.KAFKA_REST_USER}}', passwordSecret: secretProperty('KAFKA_REST_PASSWORD_SECRET', 'Password of the Kafka REST proxy user (stored secret)'),
   });
   const rabbitRestHttp = brokerRest && conn('httpConnection', 'Sample RabbitMQ HTTP', {
     baseUrl: '{{gv.RABBITMQ_HTTP_URL}}', timeoutMs: 30000, verifyTls: true, headers: [],
   });
   const rabbitRestAuth = brokerRest && conn('outboundAuth', 'Sample RabbitMQ HTTP Basic auth', {
-    type: 'basic', username: '{{gv.RABBITMQ_HTTP_USER}}', passwordSecret: '{{gv.RABBITMQ_HTTP_PASSWORD_SECRET}}',
+    type: 'basic', username: '{{gv.RABBITMQ_HTTP_USER}}', passwordSecret: secretProperty('RABBITMQ_HTTP_PASSWORD_SECRET', 'Password of the RabbitMQ management HTTP user (stored secret)'),
   });
   const activeRestHttp = brokerRest && conn('httpConnection', 'Sample ActiveMQ REST', {
     baseUrl: '{{gv.ACTIVEMQ_REST_URL}}', timeoutMs: 30000, verifyTls: true, headers: [{ k: 'Origin', v: '{{gv.ACTIVEMQ_REST_ORIGIN}}' }],
   });
   const activeRestAuth = brokerRest && conn('outboundAuth', 'Sample ActiveMQ REST Basic auth', {
-    type: 'basic', username: '{{gv.ACTIVEMQ_REST_USER}}', passwordSecret: '{{gv.ACTIVEMQ_REST_PASSWORD_SECRET}}',
+    type: 'basic', username: '{{gv.ACTIVEMQ_REST_USER}}', passwordSecret: secretProperty('ACTIVEMQ_REST_PASSWORD_SECRET', 'Password of the ActiveMQ REST user (stored secret)'),
   });
   const kafkaRest = kafkaRestHttp && kafkaRestAuth && save({
     name: 'Sample: Kafka REST publish',
-    description: 'Publishes one JSON record through a Kafka REST proxy (Aiven Karapace/Confluent-compatible API). Set KAFKA_REST_URL, KAFKA_REST_USER, KAFKA_REST_PASSWORD_SECRET and optionally KAFKA_REST_CA_PEM, then put the password in the vault. This is for an HTTP-only integration; use the native Kafka connection and Queue / topic trigger for consumer groups, offsets, retries and workflow acknowledgement.',
+    description: 'Publishes one JSON record through a Kafka REST proxy (Aiven Karapace/Confluent-compatible API). Set KAFKA_REST_URL, KAFKA_REST_USER, the Secret property KAFKA_REST_PASSWORD_SECRET and optionally KAFKA_REST_CA_PEM, then put the password in the vault. This is for an HTTP-only integration; use the native Kafka connection and Queue / topic trigger for consumer groups, offsets, retries and workflow acknowledgement.',
     nodes: [
       N('s', 'start', 'Record', 60, 220, { payload: JSON.stringify({ topic: 'sample_orders.rest', key: 'A-1001', value: { orderId: 'A-1001', amount: 1450 } }, null, 2) }),
       N('p', 'httpRequest', 'Publish over Kafka REST', 400, 220, { connection: kafkaRestHttp.id, auth: kafkaRestAuth.id, method: 'POST', url: '/topics/{{input.topic | urlencode}}', query: [], headers: [{ k: 'Accept', v: 'application/vnd.kafka.v2+json' }, { k: 'Content-Type', v: 'application/vnd.kafka.json.v2+json' }], bodyType: 'json', body: '{\n  "records": [\n    { "key": {{input.key | json}}, "value": {{input.value | json}} }\n  ]\n}', parse: 'json', failOn: '4xx or 5xx' }),
@@ -1225,7 +1235,7 @@ export function addSamples(projectId: string, ids?: string[]) {
   });
   const rabbitRest = rabbitRestHttp && rabbitRestAuth && save({
     name: 'Sample: RabbitMQ HTTP publish and fetch',
-    description: 'Declares a durable sample queue, publishes JSON through RabbitMQ\'s management HTTP API, fetches and acknowledges one message, then deletes the sample queue. Set RABBITMQ_HTTP_URL, RABBITMQ_HTTP_USER and RABBITMQ_HTTP_PASSWORD_SECRET as project properties and put that named password in the vault. RabbitMQ recommends AMQP for real messaging: use the native RabbitMQ connection and Queue / topic trigger for efficient consumers, publisher confirms, redelivery and explicit workflow acknowledgement.',
+    description: 'Declares a durable sample queue, publishes JSON through RabbitMQ\'s management HTTP API, fetches and acknowledges one message, then deletes the sample queue. Set RABBITMQ_HTTP_URL and RABBITMQ_HTTP_USER as project properties; the sample adds the Secret property RABBITMQ_HTTP_PASSWORD_SECRET, so store the password in the vault under that name. RabbitMQ recommends AMQP for real messaging: use the native RabbitMQ connection and Queue / topic trigger for efficient consumers, publisher confirms, redelivery and explicit workflow acknowledgement.',
     nodes: [
       N('s', 'start', 'Message', 60, 220, { payload: JSON.stringify({ queue: 'sample_rest_queue', body: { orderId: 'R-1001', amount: 725 } }, null, 2) }),
       N('q', 'httpRequest', 'Declare queue', 360, 220, { connection: rabbitRestHttp.id, auth: rabbitRestAuth.id, method: 'PUT', url: '/api/queues/%2F/{{input.queue | urlencode}}', query: [], headers: [], bodyType: 'json', body: '{ "durable": true, "auto_delete": false, "arguments": {} }', parse: 'json', failOn: '4xx or 5xx' }),
@@ -1238,7 +1248,7 @@ export function addSamples(projectId: string, ids?: string[]) {
   });
   const activeRest = activeRestHttp && activeRestAuth && save({
     name: 'Sample: ActiveMQ REST publish and fetch',
-    description: 'Uses ActiveMQ Classic\'s supported Jolokia management REST endpoint to create a sample queue, send JSON, browse it, remove that exact message and delete the queue. Set ACTIVEMQ_REST_URL, ACTIVEMQ_REST_ORIGIN, ACTIVEMQ_REST_USER and ACTIVEMQ_REST_PASSWORD_SECRET as project properties and put that named password in the vault. Classic 6.3 disables the deprecated MessageServlet by default because it is unmaintained and has security issues; this sample does not enable it. Use AMQP 1.0 for SutraFlow Queue / topic triggers and OpenWire/JMS for Java clients when you need durable subscription and workflow acknowledgement semantics.',
+    description: 'Uses ActiveMQ Classic\'s supported Jolokia management REST endpoint to create a sample queue, send JSON, browse it, remove that exact message and delete the queue. Set ACTIVEMQ_REST_URL, ACTIVEMQ_REST_ORIGIN and ACTIVEMQ_REST_USER as project properties; the sample adds the Secret property ACTIVEMQ_REST_PASSWORD_SECRET, so store the password in the vault under that name. Classic 6.3 disables the deprecated MessageServlet by default because it is unmaintained and has security issues; this sample does not enable it. Use AMQP 1.0 for SutraFlow Queue / topic triggers and OpenWire/JMS for Java clients when you need durable subscription and workflow acknowledgement semantics.',
     nodes: [
       N('s', 'start', 'Message', 40, 220, { payload: JSON.stringify({ brokerName: 'localhost', queue: 'sample_rest_queue', body: { orderId: 'A-REST-1001', amount: 990 } }, null, 2) }),
       N('q', 'httpRequest', 'Create queue', 300, 220, { connection: activeRestHttp.id, auth: activeRestAuth.id, method: 'POST', url: '/api/jolokia/', query: [], headers: [], bodyType: 'json', body: '{ "type": "exec", "mbean": "org.apache.activemq:type=Broker,brokerName={{input.brokerName}}", "operation": "addQueue(java.lang.String)", "arguments": [{{input.queue | json}}] }', parse: 'json', failOn: '4xx or 5xx' }),
@@ -1424,10 +1434,10 @@ export function addSamples(projectId: string, ids?: string[]) {
     '(\n  $p := $lowercase(arguments.product);\n  $contains($p, "tea") ? { "sku": "TEA-01", "title": "Assam tea 500 g", "inStock": 120, "price": 240 } : $contains($p, "cup") ? { "sku": "CUP-02", "title": "Clay cups, set of 6", "inStock": 4, "price": 450 } : { "error": "Unknown product" }\n)', { product: 'tea' });
   const desk = toolOrder && save({
     name: 'Sample: Order desk agent',
-    description: `Published as the agent "order-desk": chat at ${gw}/chat/order-desk (add ${gw}/chat/order-desk/widget.js to any web page for a chat button), OpenAI-compatible model order-desk at ${gw}/v1/chat/completions, MCP tool ask_order_desk at ${gw}/mcp, and A2A at ${gw}/a2a/order-desk. The AI guard hides personal data and stops hidden instructions; refund and cancellation requests go straight to the shop owner (Runs > Approvals) and the caller gets the answer as a job; everything else goes to the agent, which uses the order and stock tools, remembers each session, and may ask the owner itself. Deploy the two AI tool Sutras and this one.`,
+    description: `Published as the agent "order-desk": chat at ${gw}/chat/order-desk (add ${gw}/chat/order-desk/widget.js to any web page for a chat button), OpenAI-compatible model order-desk at ${gw}/v1/chat/completions, MCP tool ask_order_desk at ${gw}/mcp, and A2A at ${gw}/a2a/order-desk. The AI guard hides personal data, stops hidden instructions and harmful messages (a rude customer only warns), and tells the language; refund and cancellation requests go straight to the shop owner (Runs > Approvals) and the caller gets the answer as a job; everything else goes to the agent, which uses the order and stock tools, remembers each session, and may ask the owner itself. Deploy the two AI tool Sutras and this one.`,
     nodes: [
       N('t', 'agentChannel', 'Order desk', 60, 260, { agentName: 'order-desk', title: 'Order desk', description: 'Answers questions about orders, delivery and stock for Asha Traders, and passes refund requests to a person.', chat: true, chatPolicy: '', openai: true, openaiPolicy: '', mcp: true, mcpServer: '', a2a: true, a2aPolicy: '', waitSeconds: 50, testMessage: JSON.stringify({ message: 'When will order A-1001 arrive, and is Assam tea in stock?', sessionId: 'test-1' }, null, 2) }),
-      N('g', 'aiGuard', 'Check the message', 340, 260, { text: '{{input.message}}', checks: ['hide personal data', 'hidden instructions', 'blocked topics', 'length'], topics: 'medical advice\nlegal advice\nweapons', maxChars: 4000 }),
+      N('g', 'aiGuard', 'Check the message', 340, 260, { text: '{{input.message}}', checks: ['hide personal data', 'hidden instructions', 'blocked topics', 'moderation', 'language', 'length'], topics: 'medical advice\nlegal advice\nweapons', maxChars: 4000, moderation: ['hate', 'harassment', 'self-harm', 'sexual', 'violence', 'illegal activity'].map(k => ({ k, v: '0.5' })), moderationWarn: ['harassment'] }),
       N('i', 'if', 'Refund or cancel', 640, 260, { left: '{{input.text}}', op: 'matches regex', right: '[Rr]efund|[Cc]ancel|money back' }),
       N('q', 'askPerson', 'Ask about the refund', 980, 420, { question: 'Order desk ({{trigger.sessionId}}) refund or cancellation: {{input.text}}', assignee: 'shop-owner' }),
       N('a', 'aiAgent', 'Order desk agent', 940, 200, { provider: ai.id, instructions: 'You are the order desk of Asha Traders, a tea and crockery shop in Pune. Answer questions about orders, delivery and stock in one to three short sentences. Use the tools for facts; never guess an order status. Never make up phone numbers, emails, addresses or policies. Refunds, cancellations and complaints are decided by the shop owner: for those, always ask (the ask step) with the order number and what the customer wants.', task: '{{input.text}}', memory: memStore!.id, session: '{{trigger.sessionId}}', tools: 'chosen tools', toolNames: 'order_status, stock_check', canAsk: true, answerFormat: 'text', maxSteps: 6, maxTokens: 40000, maxSeconds: 300, saveSteps: true, effort: 'low' }),
@@ -1505,7 +1515,7 @@ export function addSamples(projectId: string, ids?: string[]) {
   const fsConn = ai && want('agentmcp') && conn('mcpClient', 'Sample MCP file system', { transport: 'command', command: `npx -y @modelcontextprotocol/server-filesystem ${folder}`, timeoutSec: 120, allowTools: 'list_directory, read_text_file, search_files, get_file_info' });
   const mcpAgent = fsConn && save({
     name: 'Sample: Agent with outside MCP tools',
-    description: `Starts the MCP file system server (npx) on ${folder}, lists its tools with Call MCP tool, then lets an agent use the read-only ones (the connection allows only list, read, search and info) to answer a question about the files. Run "Sample: CSV import and totals" first so there is a file to find.`,
+    description: `Starts the MCP file system server (npx) on ${folder}, lists its tools with Call MCP tool, then lets an agent use the read-only ones (the connection allows only list, read, search and info) to answer a question about the files. Run "Sample: CSV import and totals" first so there is a file to find. It starts a program on the server, so an administrator first allows AI command-line tools and adds the command npx -y @modelcontextprotocol/server-filesystem (Admin Console > Server > Runtime).`,
     nodes: [
       N('s', 'start', 'Question', 60, 220, { payload: JSON.stringify({ message: 'Which CSV files are in the samples folder, and what columns does sales.csv have?' }, null, 2) }),
       N('l', 'mcpCall', 'List the tools', 360, 220, { mcp: fsConn.id, action: 'list tools' }),
@@ -1598,11 +1608,10 @@ export function addSamples(projectId: string, ids?: string[]) {
 
 
   // ---------- data platforms, Python and social media ----------
-  /** Adds a project variable once (kept when the project has it already). */
-  const adfC = want('adf') ? conn('azureDataFactory', 'Sample Azure Data Factory', { auth: 'service principal (client secret)', tenantId: '', clientId: '', clientSecretSecret: 'ADF_CLIENT_SECRET', subscriptionId: '', resourceGroup: '', factoryName: '', pollSeconds: 15, cloud: 'Azure (global)' }) : null;
+  const adfC = want('adf') ? conn('azureDataFactory', 'Sample Azure Data Factory', { auth: 'service principal (client secret)', tenantId: '', clientId: '', clientSecretSecret: secretProperty('ADF_CLIENT_SECRET', 'Client secret of the Azure app the Sample Azure Data Factory connection signs in with. Set its value here.'), subscriptionId: '', resourceGroup: '', factoryName: '', pollSeconds: 15, cloud: 'Azure (global)' }) : null;
   const adfRunS = adfC && save({
     name: 'Sample: ADF run pipeline and wait',
-    description: 'Runs the Data Factory pipeline CopySalesToLake for a date and waits for it. When it fails, it logs the failing activity and reruns the pipeline once from the failed activity (the steps that succeeded are not repeated). Fill in the Sample Azure Data Factory connection (tenant, app, secret ADF_CLIENT_SECRET, subscription, resource group, factory) and use your pipeline name.',
+    description: 'Runs the Data Factory pipeline CopySalesToLake for a date and waits for it. When it fails, it logs the failing activity and reruns the pipeline once from the failed activity (the steps that succeeded are not repeated). Fill in the Sample Azure Data Factory connection (tenant, app, the Secret property ADF_CLIENT_SECRET, subscription, resource group, factory) and use your pipeline name.',
     nodes: [
       D(N('s', 'start', 'Run date', 60, 240, { payload: JSON.stringify({ runDate: '2026-10-18' }, null, 2) }), 'The date to load; a timer or another Sutra can start this one with its own date.'),
       D(N('r', 'adfRun', 'Copy sales to the lake', 360, 240, { connection: adfC.id, pipeline: 'CopySalesToLake', parameters: [{ k: 'runDate', v: '{{input.runDate}}' }], parametersJson: '', mode: 'new run', wait: true, waitMinutes: 120, cancelOnLimit: true, withActivities: true }), 'Starts the pipeline with the date as its runDate parameter and waits up to two hours; a run still going then is cancelled.'),
@@ -1626,7 +1635,7 @@ export function addSamples(projectId: string, ids?: string[]) {
     ],
     edges: [E('t', 'ok', 'succeeded'), E('t', 'f', 'failed'), E('t', 'f', 'cancelled'), E('f', 'a'), E('a', 'r', 'answered'), E('a', 'l', 'declined')],
   });
-  const dbxC = want('databricks') ? conn('databricks', 'Sample Databricks', { host: 'https://adb-1234567890123456.7.azuredatabricks.net', auth: 'personal access token', tokenSecret: 'DATABRICKS_TOKEN', clusterId: '', warehouseId: '', pollSeconds: 10 }) : null;
+  const dbxC = want('databricks') ? conn('databricks', 'Sample Databricks', { host: 'https://adb-1234567890123456.7.azuredatabricks.net', auth: 'personal access token', tokenSecret: secretProperty('DATABRICKS_TOKEN', 'Databricks personal access token for the Sample Databricks connection. Set its value here.'), clusterId: '', warehouseId: '', pollSeconds: 10 }) : null;
   const dbxNb = dbxC && save({
     name: 'Sample: Databricks notebook with parameters',
     description: 'Runs a notebook with a date parameter on the default cluster, waits for it, and logs the value the notebook returns with dbutils.notebook.exit(json.dumps({...})). In the notebook: run_date = dbutils.widgets.get("run_date"). Fill in the Sample Databricks connection (address, token secret DATABRICKS_TOKEN, cluster id).',
@@ -1706,7 +1715,7 @@ export function addSamples(projectId: string, ids?: string[]) {
     ],
     edges: [E('t', 'a'), E('a', 'g')],
   });
-  const twC = want('twitch') ? conn('oauthApp', 'Sample Twitch', { provider: 'twitch', clientId: '', clientSecretSecret: 'TWITCH_CLIENT_SECRET', scopes: 'user:read:email user:write:chat moderator:read:followers', refreshTokenSecret: '' }) : null;
+  const twC = want('twitch') ? conn('oauthApp', 'Sample Twitch', { provider: 'twitch', clientId: '', clientSecretSecret: secretProperty('TWITCH_CLIENT_SECRET', 'Client secret of the Twitch app for the Sample Twitch connection. Set its value here.'), scopes: 'user:read:email user:write:chat moderator:read:followers', refreshTokenSecret: '' }) : null;
   const twLive = twC && save({
     name: 'Sample: Twitch going live announcement',
     description: 'While deployed, notices when the channel goes live: welcomes viewers in the chat and logs the stream; when the stream ends, logs the latest broadcast and the follower count. Connect the Sample Twitch connection (an application at dev.twitch.tv with the redirect address shown on the connection).',
@@ -1721,10 +1730,10 @@ export function addSamples(projectId: string, ids?: string[]) {
   });
 
 
-  const dcC = want('discord') ? conn('discord', 'Sample Discord', { mode: 'bot', webhookSecret: '', botTokenSecret: 'DISCORD_BOT_TOKEN', channelId: '', apiBase: 'https://discord.com/api/v10' }) : null;
+  const dcC = want('discord') ? conn('discord', 'Sample Discord', { mode: 'bot', webhookSecret: '', botTokenSecret: secretProperty('DISCORD_BOT_TOKEN', 'Bot token for the Sample Discord connection. Set its value here.'), channelId: '', apiBase: 'https://discord.com/api/v10' }) : null;
   const dcBot = dcC && save({
     name: 'Sample: Discord order status bot',
-    description: 'While deployed, answers !status <order number> in a Discord channel with the order\'s status, and posts a notice with an embed. Make a bot at discord.com/developers, keep its token as the secret DISCORD_BOT_TOKEN, invite it to your server, turn on Message Content Intent, and set the channel id on the Sample Discord connection.',
+    description: 'While deployed, answers !status <order number> in a Discord channel with the order\'s status, and posts a notice with an embed. Make a bot at discord.com/developers, put its token in the Secret project property DISCORD_BOT_TOKEN, invite it to your server, turn on Message Content Intent, and set the channel id on the Sample Discord connection.',
     nodes: [
       D(N('t', 'discordTrigger', 'Message in the channel', 60, 240, { connection: dcC.id, channelId: '', prefix: '!', pollSeconds: 10 }), 'Checks the channel every 10 seconds; messages starting with ! are commands, such as !status A-1001.'),
       D(N('i', 'if', 'Is it status', 360, 160, { left: '{{input.command}}', op: 'equals', right: 'status' }), 'Only the status command is answered here; add a Switch for more commands.'),
@@ -1734,10 +1743,10 @@ export function addSamples(projectId: string, ids?: string[]) {
     ],
     edges: [E('t', 'i', 'command'), E('i', 'j', 'true'), E('i', 'h', 'false'), E('j', 'd')],
   });
-  const tgC = want('telegram') ? conn('telegram', 'Sample Telegram bot', { botTokenSecret: 'TELEGRAM_BOT_TOKEN', chatId: '', apiBase: 'https://api.telegram.org' }) : null;
+  const tgC = want('telegram') ? conn('telegram', 'Sample Telegram bot', { botTokenSecret: secretProperty('TELEGRAM_BOT_TOKEN', 'Bot token from BotFather for the Sample Telegram bot connection. Set its value here.'), chatId: '', apiBase: 'https://api.telegram.org' }) : null;
   const tgBot = tgC && save({
     name: 'Sample: Telegram order status bot',
-    description: 'While deployed, answers /status <order number> sent to your Telegram bot, replying to the message in the same chat; other messages get a help line. Create the bot with @BotFather and keep its token as the secret TELEGRAM_BOT_TOKEN. No public address is needed.',
+    description: 'While deployed, answers /status <order number> sent to your Telegram bot, replying to the message in the same chat; other messages get a help line. Create the bot with @BotFather and put its token in the Secret project property TELEGRAM_BOT_TOKEN. No public address is needed.',
     nodes: [
       D(N('t', 'telegramTrigger', 'Message to the bot', 60, 240, { connection: tgC.id, onlyChats: '' }), 'Receives every message sent to the bot (long polling); /commands go to the command output.'),
       D(N('i', 'if', 'Is it status', 360, 160, { left: '{{input.command}}', op: 'equals', right: 'status' }), 'Only /status is answered here; add a Switch for more commands.'),
@@ -1762,20 +1771,20 @@ export function addSamples(projectId: string, ids?: string[]) {
   if (made.some(m => m.sample === 'queue' || m.sample === 'agentqueue')) {
     conn('kafka', 'Sample Kafka (TLS + SASL)', {
       brokers: ['{{gv.KAFKA_BROKER}}'], clientId: 'sutraflow-samples', ssl: true, caPem: '{{gv.KAFKA_CA_PEM}}',
-      clientCertPem: '', clientKeySecret: '', sasl: 'plain', user: '{{gv.KAFKA_USER}}', passwordSecret: '{{gv.KAFKA_PASSWORD_SECRET}}',
+      clientCertPem: '', clientKeySecret: '', sasl: 'plain', user: '{{gv.KAFKA_USER}}', passwordSecret: secretProperty('KAFKA_PASSWORD_SECRET', 'Kafka SASL password (stored secret)'),
     });
     conn('kafka', 'Sample Kafka (mutual TLS)', {
       brokers: ['{{gv.KAFKA_MTLS_BROKER}}'], clientId: 'sutraflow-samples', ssl: true, caPem: '{{gv.KAFKA_CA_PEM}}',
-      clientCertPem: '{{gv.KAFKA_CLIENT_CERT_PEM}}', clientKeySecret: '{{gv.KAFKA_CLIENT_KEY_SECRET}}', sasl: 'none',
+      clientCertPem: '{{gv.KAFKA_CLIENT_CERT_PEM}}', clientKeySecret: secretProperty('KAFKA_CLIENT_KEY_SECRET', 'Private key of the Kafka client certificate (stored secret)'), sasl: 'none',
     });
     conn('rabbitmq', 'Sample RabbitMQ (mutual TLS)', {
-      url: '{{gv.RABBITMQ_AMQPS_URL}}', user: '{{gv.RABBITMQ_USER}}', passwordSecret: '{{gv.RABBITMQ_PASSWORD_SECRET}}', vhost: '{{gv.RABBITMQ_VHOST}}',
-      caPem: '{{gv.RABBITMQ_CA_PEM}}', clientCertPem: '{{gv.RABBITMQ_CLIENT_CERT_PEM}}', clientKeySecret: '{{gv.RABBITMQ_CLIENT_KEY_SECRET}}',
+      url: '{{gv.RABBITMQ_AMQPS_URL}}', user: '{{gv.RABBITMQ_USER}}', passwordSecret: secretProperty('RABBITMQ_PASSWORD_SECRET', 'RabbitMQ password (stored secret)'), vhost: '{{gv.RABBITMQ_VHOST}}',
+      caPem: '{{gv.RABBITMQ_CA_PEM}}', clientCertPem: '{{gv.RABBITMQ_CLIENT_CERT_PEM}}', clientKeySecret: secretProperty('RABBITMQ_CLIENT_KEY_SECRET', 'Private key of the RabbitMQ client certificate (stored secret)'),
     });
     conn('amqp1', 'Sample ActiveMQ (mutual TLS)', {
-      host: '{{gv.ACTIVEMQ_HOST}}', port: '{{gv.ACTIVEMQ_AMQPS_PORT}}', tls: true, user: '{{gv.ACTIVEMQ_USER}}', passwordSecret: '{{gv.ACTIVEMQ_PASSWORD_SECRET}}',
+      host: '{{gv.ACTIVEMQ_HOST}}', port: '{{gv.ACTIVEMQ_AMQPS_PORT}}', tls: true, user: '{{gv.ACTIVEMQ_USER}}', passwordSecret: secretProperty('ACTIVEMQ_PASSWORD_SECRET', 'ActiveMQ password (stored secret)'),
       containerId: 'sutraflow-samples', queuePrefix: '', topicPrefix: 'topic://', caPem: '{{gv.ACTIVEMQ_CA_PEM}}',
-      clientCertPem: '{{gv.ACTIVEMQ_CLIENT_CERT_PEM}}', clientKeySecret: '{{gv.ACTIVEMQ_CLIENT_KEY_SECRET}}',
+      clientCertPem: '{{gv.ACTIVEMQ_CLIENT_CERT_PEM}}', clientKeySecret: secretProperty('ACTIVEMQ_CLIENT_KEY_SECRET', 'Private key of the ActiveMQ client certificate (stored secret)'),
     });
   }
   for (const m of made) setFlowFolder(m.id, folderOf(m.sample));

@@ -603,6 +603,8 @@ function LoggingEditor() {
         <div className="fld"><label htmlFor="lk">Files kept</label><input id="lk" type="number" value={l.maxFiles} onChange={e => setL({ ...l, maxFiles: Number(e.target.value) })} /></div>
       </div>
       <div className="fld"><label className="check"><input type="checkbox" checked={l.stepData} onChange={e => setL({ ...l, stepData: e.target.checked })} /> Log each activity's input and output (debug level)</label></div>
+      <div className="fld"><label className="check"><input type="checkbox" checked={!!l.hidePersonalData} onChange={e => setL({ ...l, hidePersonalData: e.target.checked })} /> Hide personal data in logs and run history</label>
+        <p className="muted xs">E-mail addresses, phone and card numbers, IBAN, Aadhaar, PAN, SSN and IP addresses show as [EMAIL], [PHONE] and so on. The data the steps pass on is not changed.</p></div>
       <div className="row"><button className="btn primary" onClick={save}>Save</button></div>
       <p className="muted xs">Read, search and clear the log under Configuration &gt; Project log.</p>
     </>

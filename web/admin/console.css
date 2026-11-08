@@ -220,3 +220,4 @@ button.c-tile:not(:disabled):hover { border-color: var(--edge); }
 .c-origin { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .c-origin.is-deployed { color: #2e9e6a; }
 .c-echart { width: 100%; }
+.c-who { color: inherit; text-decoration: none; } .c-who:hover strong { text-decoration: underline; }

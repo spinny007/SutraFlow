@@ -37,7 +37,7 @@ export const httpActivities: Activity[] = [
       F('method', 'Method', 'select', 'GET', { options: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] }),
       F('url', 'URL or path', 'text', 'https://httpbin.org/anything/{{input.orderId}}', { tpl: true }),
       F('query', 'Query parameters', 'kv', [], { tpl: true }),
-      F('headers', 'Headers', 'kv', [{ k: 'Accept', v: 'application/json' }], { tpl: true, help: 'Values may use {{secret.NAME}}; secret values are masked in run history.' }),
+      F('headers', 'Headers', 'kv', [{ k: 'Accept', v: 'application/json' }], { tpl: true, help: 'Values may use a Secret property, such as Authorization = Bearer {{gv.API_TOKEN}}; secret values are masked in run history.' }),
       F('bodyType', 'Body', 'select', 'json', { options: ['none', 'json', 'xml', 'text', 'form', 'mapped JSON', 'mapped XML'], ...when('method', 'POST', 'PUT', 'PATCH', 'DELETE'), help: 'Mapped: build the body field by field against a shared schema in the Input tab.' }),
       F('bodySchema', 'Body schema', 'schema', '', { ...when('bodyType', 'json', 'xml', 'mapped JSON', 'mapped XML'), help: 'Optional. Validate the completed request before sending.' }),
       F('bodyMapping', 'Request body', 'mapping', { rules: {} }, { schemaField: 'bodySchema', ...when('bodyType', 'mapped JSON', 'mapped XML') }),

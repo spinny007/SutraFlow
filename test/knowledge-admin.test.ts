@@ -18,7 +18,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { testEnv, node, edge } from './helpers.js';
+import { testEnv, node, edge, engineSecrets } from './helpers.js';
 
 /** Knowledge admin (2.1.5): server knowledge bases, grants by project and area, managed sources, MCP tool, export as a Sutra. */
 const env = testEnv(23940);
@@ -28,7 +28,7 @@ const { q } = await import('../server/src/db.js');
 const projects = await import('../server/src/projects.js');
 const flows = await import('../server/src/flows.js');
 const { saveResource, getResource, inProject } = await import('../server/src/resources.js');
-const { setSecret } = await import('../server/src/secrets.js');
+const setSecret = await engineSecrets(); // 2.1.8: policy keys only behind a Secret property
 const kn = await import('../server/src/ai/knowledge.js');
 const ka = await import('../server/src/ai/knowledge-admin.js');
 

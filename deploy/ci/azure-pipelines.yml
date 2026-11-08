@@ -30,7 +30,7 @@ variables:
 resources:
   containers:
     - container: sutraflow
-      image: ghcr.io/spinny007/sutraflow:2.1.7
+      image: ghcr.io/spinny007/sutraflow:2.1.8
       options: --user 0:0
 
 stages:

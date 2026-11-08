@@ -250,10 +250,10 @@ function DesignerInner() {
   useEffect(() => {
     if (!doc) return;
     const t = window.setTimeout(() => {
-      post('/api/design/schemas', { doc }).then(setDesign).catch(() => {});
+      if (projectId) post('/api/design/schemas', { doc, projectId }).then(setDesign).catch(() => {});
     }, 350);
     return () => window.clearTimeout(t);
-  }, [doc, schemas]);
+  }, [doc, schemas, projectId]);
 
   // Schema/catalog changes invalidate the designer's explicit test session too.
   useEffect(() => { testSession.current++; setRun(null); }, [schemas]);

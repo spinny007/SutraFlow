@@ -16,7 +16,7 @@
  * @end-sutra-file-overview */
 
 export type RunStage = 'design' | 'runtime';
-export type RunClient = 'studio' | 'api' | 'cli';
+export type RunClient = 'studio' | 'api' | 'cli' | 'mcp';
 export const RUN_STAGES: RunStage[] = ['design', 'runtime'];
 
 /**
@@ -32,7 +32,7 @@ export function runStage(o: { source?: string; version?: number | null; parentSt
 
 /** The client that started a run by hand or by API; automatic starts (timers, listeners, gateway calls) have none. */
 export function runClient(o: { source?: string; client?: string | null }): RunClient | null {
-  if (o.client === 'studio' || o.client === 'api' || o.client === 'cli') return o.client;
+  if (o.client === 'studio' || o.client === 'api' || o.client === 'cli' || o.client === 'mcp') return o.client;
   if (o.source === 'test' || o.source === 'debug') return 'studio';
   if (o.source === 'api') return 'api';
   return null;

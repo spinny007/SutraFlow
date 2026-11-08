@@ -121,16 +121,16 @@ test('generated RabbitMQ, ActiveMQ and Kafka REST sample Sutras execute', { skip
   const variables: any[] = [
     { name: 'RABBITMQ_HTTP_URL', type: 'string', value: process.env.SUTRA_RABBIT_REST_URL || 'http://127.0.0.1:15672' },
     { name: 'RABBITMQ_HTTP_USER', type: 'string', value: process.env.SUTRA_RABBIT_REST_USER || 'guest' },
-    { name: 'RABBITMQ_HTTP_PASSWORD_SECRET', type: 'string', value: 'REST_SAMPLE_RABBIT_PASSWORD' },
+    { name: 'RABBITMQ_HTTP_PASSWORD_SECRET', type: 'secret', value: 'REST_SAMPLE_RABBIT_PASSWORD' },
     { name: 'ACTIVEMQ_REST_URL', type: 'string', value: process.env.SUTRA_ACTIVEMQ_REST_URL || 'http://localhost:8161' },
     { name: 'ACTIVEMQ_REST_ORIGIN', type: 'string', value: process.env.SUTRA_ACTIVEMQ_REST_ORIGIN || 'http://localhost:8161' },
     { name: 'ACTIVEMQ_REST_USER', type: 'string', value: process.env.SUTRA_ACTIVEMQ_REST_USER || 'admin' },
-    { name: 'ACTIVEMQ_REST_PASSWORD_SECRET', type: 'string', value: 'REST_SAMPLE_ACTIVEMQ_PASSWORD' },
+    { name: 'ACTIVEMQ_REST_PASSWORD_SECRET', type: 'secret', value: 'REST_SAMPLE_ACTIVEMQ_PASSWORD' },
   ];
   if (kafkaEnabled) variables.push(
     { name: 'KAFKA_REST_URL', type: 'string', value: process.env.SUTRA_KAFKA_REST_URL },
     { name: 'KAFKA_REST_USER', type: 'string', value: process.env.SUTRA_KAFKA_REST_USER || '' },
-    { name: 'KAFKA_REST_PASSWORD_SECRET', type: 'string', value: 'REST_SAMPLE_KAFKA_PASSWORD' },
+    { name: 'KAFKA_REST_PASSWORD_SECRET', type: 'secret', value: 'REST_SAMPLE_KAFKA_PASSWORD' },
     { name: 'KAFKA_REST_CA_PEM', type: 'string', value: '' },
   );
   const srv = await boot({ listenAdmin: false });

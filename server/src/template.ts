@@ -20,7 +20,7 @@
  *   {{nodes.Get order.body.id}}     any earlier step, by name
  *   {{trigger.body.customer}}       what started the run
  *   {{vars.total}}                  run variables (Set variable step)
- *   {{secret.API_KEY}}              a vault secret (server side only, masked in history)
+ *   {{secret.API_KEY}}              a vault secret behind a Secret property of the project or engine (2.1.8; server side only, masked in history)
  *   {{input.name | upper | default:"n/a"}}   pipes
  * When the whole field is one expression, the typed value is kept (object, number, list).
  * No eval: expressions are parsed and only the pipes below can run.

@@ -106,7 +106,7 @@ function Secrets() {
   return (
     <div className="card">
       <h2>Secrets</h2>
-      <p className="muted" style={{ fontSize: 13 }}>Encrypted with AES-256-GCM using the server's master key. Values can be replaced but never read back. Use them in resources, or in any field as <code>{'{{secret.NAME}}'}</code>; run history shows them masked.</p>
+      <p className="muted" style={{ fontSize: 13 }}>Encrypted with AES-256-GCM using the server's master key. Values can be replaced but never read back. A project uses one through a Secret property whose value is its name (<code>{'{{gv.NAME}}'}</code>), or every project through an engine Secret property (<code>{'{{ev.NAME}}'}</code>); <code>{'{{secret.NAME}}'}</code> works only for a secret behind one of those. Run history shows them masked.</p>
       <table className="t"><tbody>
         {secrets.map(s => (
           <tr key={s.name}><td><code>{s.name}</code></td><td className="muted">updated {fmtTime(s.updated_at)}</td>

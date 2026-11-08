@@ -37,7 +37,7 @@ test('external PostgreSQL and MySQL TLS connectors execute bound engine queries 
   for(const config of configs)await t.test(config.driver,async()=>{
    const secret=`REMOTE_${config.driver.toUpperCase()}_PASSWORD`;setSecret(secret,config.password);
    const project=saveProject({name:`Remote ${config.driver}`,config:{variables:[{name:'DB_HOST',type:'string',value:config.host},{name:'DB_PORT',type:'string',value:String(config.port)},{name:'DB_TLS',type:'boolean',value:'On'}]}});
-   saveEngineVariables([{name:'DB_PORT',value:String(config.port)}]);
+   saveEngineVariables([{name:'DB_PORT',value:String(config.port)},{name:secret,type:'secret',value:secret}]); // 2.1.8: the stored password is used behind an engine Secret property
    const resource=saveResource({kind:'database',name:'Remote TLS database',project_id:project.id,config:{driver:config.driver,host:'{{gv.DB_HOST}}',port:'{{ev.DB_PORT}}',database:config.database,user:config.user,passwordSecret:secret,ssl:'{{gv.DB_TLS}}',verifyTls:true,poolMax:1}});
    const conn=await dbConnection(effectiveResource(resource.id)!,requireSecret);
    const marker="A-100' OR '1'='1";

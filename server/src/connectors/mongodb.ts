@@ -22,7 +22,7 @@ import { requireResource, type Resource } from '../resources.js';
 import { F, when } from '../palettes/common.js';
 import { enforceContract, contractDefinition } from '../contracts.js';
 import { mongoAuthMode } from './mongodb-kind.js';
-import { SECRET_NAME } from '../secrets.js';
+import { SECRET_NAME, SecretOutOfScope } from '../secrets.js';
 import { booleanSetting } from '../settings.js';
 import { pemFrom, keyFrom } from './tls-files.js';
 
@@ -56,7 +56,7 @@ export function mongoSettings(resource: Resource, secret: Secret) {
   const cfg = resource.config;
   const readSecret = (ref: unknown, label: string) => {
     if (typeof ref !== 'string' || !SECRET_NAME.test(ref)) throw new Error(`${label}: select a stored secret or enter its value in the connection; a secret reference is not a URI or password.`);
-    try { return secret(ref, label); } catch { throw new Error(`${label}: stored value is unavailable. Enter and store it in the connection, or select an existing secret.`); }
+    try { return secret(ref, label); } catch (e) { if (e instanceof SecretOutOfScope) throw e; throw new Error(`${label}: stored value is unavailable. Enter and store it in the connection, or select an existing secret.`); }
   };
   const mode = mongoAuthMode(cfg);
   if (!['URI secret', 'username/password', 'X.509'].includes(mode)) throw new Error('Unknown MongoDB authentication configuration.');

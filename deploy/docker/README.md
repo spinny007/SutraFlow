@@ -1,12 +1,12 @@
-# SutraFlow in Docker (2.1.7)
+# SutraFlow in Docker (2.1.8)
 
 ## The image
 
 | Where it comes from | How |
 | --- | --- |
-| The official image | `docker pull ghcr.io/spinny007/sutraflow:2.1.7`. Signed with cosign (keyless) and with an SBOM and provenance. Check the signature with `cosign verify ghcr.io/spinny007/sutraflow:2.1.7 --certificate-identity-regexp 'https://github.com/spinny007/SutraFlow/' --certificate-oidc-issuer https://token.actions.githubusercontent.com` |
-| Your own registry | Copy the official image (`docker pull`, `docker tag`, `docker push`), or build your own on top of it (`FROM ghcr.io/spinny007/sutraflow:2.1.7`) |
-| Offline, from this release package | `sutraflow image build` (uses `Dockerfile.package`: no npm registry needed), then `sutraflow image save sutraflow-2.1.7.tar` and `docker load -i sutraflow-2.1.7.tar` on the machine without internet |
+| The official image | `docker pull ghcr.io/spinny007/sutraflow:2.1.8`. Signed with cosign (keyless) and with an SBOM and provenance. Check the signature with `cosign verify ghcr.io/spinny007/sutraflow:2.1.8 --certificate-identity-regexp 'https://github.com/spinny007/SutraFlow/' --certificate-oidc-issuer https://token.actions.githubusercontent.com` |
+| Your own registry | Copy the official image (`docker pull`, `docker tag`, `docker push`), or build your own on top of it (`FROM ghcr.io/spinny007/sutraflow:2.1.8`) |
+| Offline, from this release package | `sutraflow image build` (uses `Dockerfile.package`: no npm registry needed), then `sutraflow image save sutraflow-2.1.8.tar` and `docker load -i sutraflow-2.1.8.tar` on the machine without internet |
 
 The image runs as the `node` user (uid 1000), keeps its data in `/data`, deploys `.sutra` packages found in `/deploy` on start, and answers `/health` (alive) and `/ready` (ready for work; not while draining) on port 4800. On `docker stop` it drains: running steps finish first, so give it a stop timeout (45 seconds here).
 
@@ -33,13 +33,13 @@ Without Compose:
 
 ```bash
 # A studio
-docker run -d --name sutra-studio -p 4800:4800 -v sutra-studio:/data -e SUTRA_ADMIN_TOKEN=change-me ghcr.io/spinny007/sutraflow:2.1.7
+docker run -d --name sutra-studio -p 4800:4800 -v sutra-studio:/data -e SUTRA_ADMIN_TOKEN=change-me ghcr.io/spinny007/sutraflow:2.1.8
 # A single engine with its own database
 docker run -d --name sutra-engine -p 4801:4800 -p 9080:8080 -v sutra-engine:/data --stop-timeout 45 \
-  -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=change-me -e SUTRA_MASTER_KEY=<base64 key> ghcr.io/spinny007/sutraflow:2.1.7
+  -e SUTRA_MODE=engine -e SUTRA_ADMIN_TOKEN=change-me -e SUTRA_MASTER_KEY=<base64 key> ghcr.io/spinny007/sutraflow:2.1.8
 # An engine joining a cluster: the same database and master key as the others
 docker run -d --name sutra-engine-3 -p 9082:8080 --stop-timeout 45 -e SUTRA_MODE=engine -e SUTRA_ENGINE_ID=engine-3 \
-  -e SUTRA_DB=postgres://sutra:password@db:5432/sutra -e SUTRA_ADMIN_TOKEN=change-me -e SUTRA_MASTER_KEY=<the cluster's key> ghcr.io/spinny007/sutraflow:2.1.7
+  -e SUTRA_DB=postgres://sutra:password@db:5432/sutra -e SUTRA_ADMIN_TOKEN=change-me -e SUTRA_MASTER_KEY=<the cluster's key> ghcr.io/spinny007/sutraflow:2.1.8
 ```
 
 ## Configuring and deploying

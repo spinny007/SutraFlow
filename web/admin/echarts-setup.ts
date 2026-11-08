@@ -16,13 +16,13 @@
  * @end-sutra-file-overview */
 import * as echarts from 'echarts/core';
 import { BarChart, LineChart } from 'echarts/charts';
-import { GridComponent, LegendComponent, MarkLineComponent, TooltipComponent, DataZoomComponent } from 'echarts/components';
+import { GridComponent, LegendComponent, MarkLineComponent, TooltipComponent, DataZoomComponent, GraphicComponent } from 'echarts/components';
 import { SVGRenderer } from 'echarts/renderers';
 
 /**
  * The ECharts parts the Admin Console uses, registered once. Loaded on demand by EChart.tsx (its own
  * file in the build), so pages without a chart do not download ECharts.
  */
-echarts.use([BarChart, LineChart, GridComponent, LegendComponent, MarkLineComponent, TooltipComponent, DataZoomComponent, SVGRenderer]);
+echarts.use([BarChart, LineChart, GridComponent, LegendComponent, MarkLineComponent, TooltipComponent, DataZoomComponent, GraphicComponent, SVGRenderer]);
 
 export { echarts };

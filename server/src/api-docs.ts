@@ -36,6 +36,12 @@ export const API_DOCS: Record<string, ApiDoc> = {
 
   // ---------- people, system accounts, roles ----------
   'GET /api/access/me': { does: 'The caller: name, kind (person, system account, admin token), roles and permissions per project.' },
+  'GET /api/access/me/tokens': { does: 'The own API tokens of the signed-in person (names, created, expiry, last use, expired; never the token), whether personal tokens are switched on, and the expiry choices (30, 60, 90 days).' },
+  'POST /api/access/me/tokens': { does: 'Creates a personal API token that acts as the signed-in person, with their roles. Body: `{name, expiresDays: 30|60|90}`. Only from a studio session (a token cannot make tokens); at most 20. The token is in the answer once and never again.' },
+  'POST /api/access/me/tokens/:id/renew': { does: 'Replaces an own token (expired or not) with a new value, the same name and period. Only from a studio session.' },
+  'DELETE /api/access/me/tokens/:id': { does: 'Revokes one of your own tokens at once.' },
+  'GET /api/access/personal-tokens': { does: 'Whether people may create and use their own API tokens.' },
+  'PUT /api/access/personal-tokens': { does: 'Switches personal API tokens on or off. Body: `{allowed}`. Off: people cannot create tokens and theirs stop working until switched on; system accounts are not affected.' },
   'GET /api/access/permissions': { does: 'Every permission with its scope (project or server) and meaning.' },
   'GET /api/access/roles': { does: 'Roles: built-in and your own, with their permissions.' },
   'POST /api/access/roles': { does: 'Creates a role. Body: `{name, description, perms: [...]}`.' },
@@ -51,7 +57,7 @@ export const API_DOCS: Record<string, ApiDoc> = {
   'POST /api/access/users/:name/password': { does: 'Sets a person\'s password. Body: `{password, mustChange}` (default: they choose a new one at the next sign-in).', cli: 'sutra user password <name> --password-from-env <VAR>' },
   'POST /api/access/users/:name/unlock': { does: 'Clears the lock after repeated wrong passwords.', cli: 'sutra user unlock <name>' },
   'POST /api/access/users/:name/sign-out': { does: 'Ends every session of the account.', cli: 'sutra user sign-out <name>' },
-  'GET /api/access/users/:name/tokens': { does: 'API tokens of a system account (names, created, expiry, last use; never the token).', cli: 'sutra token list <account>' },
+  'GET /api/access/users/:name/tokens': { does: 'API tokens of an account (own tokens of a person can be listed and revoked here, not created) (names, created, expiry, last use; never the token).', cli: 'sutra token list <account>' },
   'POST /api/access/users/:name/tokens': { does: 'Creates an API token for a system account. Body: `{name, expiresDays}`. The token is in the answer once and never again.', cli: 'sutra token create <account> [--expires-days n]' },
   'DELETE /api/access/users/:name/tokens/:id': { does: 'Revokes a token at once.', cli: 'sutra token revoke <account> <id>' },
 
@@ -111,13 +117,13 @@ export const API_DOCS: Record<string, ApiDoc> = {
 
   // ---------- Sutras (designer) ----------
   'GET /api/flows': { does: 'Sutras of a project. Query: `projectId`.', cli: 'sutra doc, sutra sutras (to find a Sutra by name)' },
-  'POST /api/flows': { does: 'Creates a Sutra. Body: `{projectId, doc, folder}`.' },
+  'POST /api/flows': { does: 'Creates a Sutra. Body: `{projectId, doc, folder}`. Without projectId it goes to the default project, which needs Design there.' },
   'GET /api/flows/:id': { does: 'One Sutra: its draft and its deployed version.' },
-  'PUT /api/flows/:id': { does: 'Saves a Sutra\'s draft.' },
+  'PUT /api/flows/:id': { does: 'Saves a Sutra\'s draft. It stays in its project: a body naming another project is refused.' },
   'DELETE /api/flows/:id': { does: 'Deletes a Sutra (undeployed first).' },
   'POST /api/flows/:id/rename': { does: 'Renames a Sutra. Body: `{name}`.' },
   'PUT /api/flows/:id/folder': { does: 'Moves a Sutra to a folder. Body: `{folder}`.' },
-  'POST /api/flows/validate': { does: 'Checks a Sutra document and lists errors and warnings. Query: `projectId`.' },
+  'POST /api/flows/validate': { does: 'Checks a Sutra document and lists errors and warnings. Query: `projectId` (required; Design on that project).' },
   'GET /api/flows/:id/versions': { does: 'The Sutra\'s published versions and which one is deployed.' },
   'POST /api/flows/:id/deploy': { does: 'Deploys a version of a Sutra (the draft when no `version`). Body: `{version, note}`. Refused on production servers, which take releases only.', cli: 'sutra sutras deploy <sutra> --project <name> --version <n>' },
   'DELETE /api/flows/:id/deploy': { does: 'Undeploys a Sutra: its triggers and addresses stop.' },
@@ -131,18 +137,18 @@ export const API_DOCS: Record<string, ApiDoc> = {
   'GET /api/projects/:id/folders/contents': { does: 'What a folder holds. Query: `path`, `area`.' },
 
   // ---------- design helpers ----------
-  'POST /api/design/schemas': { does: 'Design-time shapes of every step of a Sutra document (process data, inputs, outputs), for the mapper.' },
+  'POST /api/design/schemas': { does: 'Design-time shapes of every step of a Sutra document (process data, inputs, outputs), for the mapper. Body: `{projectId, doc}`; only schemas and called Sutras of that project are read.' },
   'POST /api/design/mapping-preview': { does: 'Runs a mapping against sample data and answers the result.' },
   'POST /api/design/schema-from-sample': { does: 'A schema made from a sample JSON or XML document.' },
   'POST /api/design/query-preview': { does: 'Runs one read-only SQL activity against its connection and answers at most ten rows.' },
   'POST /api/expr/eval': { does: 'Evaluates a formula against sample data.' },
-  'POST /api/soap/describe': { does: 'Reads a WSDL: services, operations and messages. Body: `{wsdlUrl | wsdlRef, connection, auth}`.' },
+  'POST /api/soap/describe': { does: 'Reads a WSDL: services, operations and messages. Body: `{projectId, wsdlUrl | wsdlRef, connection, auth}`. A WSDL, connection and security profile of that project (or shared ones), or an http(s) address such as the published service of another project.' },
 
   // ---------- schemas ----------
   'GET /api/schemas': { does: 'Shared schemas of a project. Query: `projectId`.' },
   'GET /api/schemas/:id': { does: 'One shared schema with its definition.' },
-  'POST /api/schemas': { does: 'Creates a schema.' },
-  'PUT /api/schemas/:id': { does: 'Saves a schema.' },
+  'POST /api/schemas': { does: 'Creates a schema. Body: `{project_id, name, kind, text, root}`. An id that already exists is refused (409): change it with PUT.' },
+  'PUT /api/schemas/:id': { does: 'Saves a schema. It stays in its project: a body naming another project is refused.' },
   'DELETE /api/schemas/:id': { does: 'Deletes a schema.' },
   'POST /api/schemas/:id/rename': { does: 'Renames a schema. Body: `{name}`.' },
   'PUT /api/schemas/:id/folder': { does: 'Moves a schema to a folder. Body: `{folder}`.' },
@@ -151,8 +157,8 @@ export const API_DOCS: Record<string, ApiDoc> = {
 
   // ---------- connections (resources) and secrets ----------
   'GET /api/resources': { does: 'Connections of a project (and knowledge bases granted to it). Query: `projectId`, `kind`.', cli: 'sutra connect (to find the connection)' },
-  'POST /api/resources': { does: 'Creates a connection. Body: `{project_id, kind, name, config}`; secrets as `{{gv.NAME}}` references.' },
-  'PUT /api/resources/:id': { does: 'Saves a connection.' },
+  'POST /api/resources': { does: 'Creates a connection. Body: `{project_id, kind, name, config}`; secrets as `{{gv.NAME}}` references. An id that already exists is refused (409): change it with PUT.' },
+  'PUT /api/resources/:id': { does: 'Saves a connection. It stays in its project: a body naming another project is refused.' },
   'DELETE /api/resources/:id': { does: 'Deletes a connection.' },
   'POST /api/resources/:id/rename': { does: 'Renames a connection. Body: `{name}`.' },
   'PUT /api/resources/:id/folder': { does: 'Moves a connection to a folder. Body: `{folder}`.' },
@@ -165,7 +171,7 @@ export const API_DOCS: Record<string, ApiDoc> = {
   'GET /api/oauth/:id': { does: 'Whether an OAuth connection is authorised, and the redirect address to register.', cli: 'sutra connect <connection> --project <name>' },
   'GET /api/oauth/:id/start': { does: 'The address where a person authorises the connection.', cli: 'sutra connect <connection> --project <name>' },
   'DELETE /api/oauth/:id': { does: 'Forgets the connection\'s OAuth tokens.' },
-  'GET /api/secrets': { does: 'Names of the vault\'s secrets (never values).' },
+  'GET /api/secrets': { does: 'Names of stored secrets (never values). With `?projectId=`: only the ones that project can use (behind its Secret properties and the engine\'s). Without: the whole list, for Secrets, Server settings or Alerts.' },
   'PUT /api/secrets/:name': { does: 'Stores a secret in the vault, encrypted with the master key. Body: `{value}`.', cli: 'sutra secret set <NAME> --from-env <VAR>' },
   'DELETE /api/secrets/:name': { does: 'Deletes a secret.' },
 
@@ -175,7 +181,7 @@ export const API_DOCS: Record<string, ApiDoc> = {
   'POST /api/runs/:id/resubmit': { does: 'Runs a failed run again from the step that failed, with the same input; earlier steps\' results are kept.', cli: 'sutra runs resubmit <run id>' },
   'POST /api/runs/:id/cancel': { does: 'Cancels a running or waiting run.', cli: 'sutra runs cancel <run id>' },
   'POST /api/runs/:id/debug': { does: 'Controls a debug run. Body: `{action: "step"|"continue"|"pause"|"breakpoints", breakpoints}`.' },
-  'GET /api/events': { does: 'Server-sent events: run status changes as they happen (`text/event-stream`).' },
+  'GET /api/events': { does: 'Server-sent events: run status changes as they happen (`text/event-stream`). Only runs the person may see when the event is sent: View on the project, Design for test and debug runs.' },
   'GET /api/approvals': { does: 'Approvals the caller may decide (or `mine=1`: assigned to them).', cli: 'sutra approvals list' },
   'GET /api/approvals/history': { does: 'Decided approvals. Query: `days` (at most 365).' },
   'POST /api/approvals/:id': { does: 'Decides an approval. Body: `{approved, comment, onBehalf}`.', cli: 'sutra approvals approve | reject <id> [--comment text]' },
@@ -197,6 +203,7 @@ export const API_DOCS: Record<string, ApiDoc> = {
 
   // ---------- Admin Console: applications ----------
   'GET /api/console/overview': { does: 'The Admin Console overview: engines, deployed Sutras, runs of the last day, approvals, queue, gateway, recent failures.' },
+  'GET /api/console/secret-scope': { does: 'Upgrade check (2.1.8): connections, Sutra drafts and deployed Sutras that name a stored secret their project can no longer read, because it is not behind a Secret property of the project or the engine. Names only.', cli: 'sutra secret check' },
   'GET /api/console/apps': { does: 'Projects and their deployed Sutras with state and runs of the last 24 hours.', cli: 'sutra sutras list [--project <name>]' },
   'PUT /api/console/sutras/:id/enabled': { does: 'Starts or stops a deployed Sutra\'s triggers. Body: `{enabled}`.', cli: 'sutra sutras start | stop <sutra> --project <name>' },
   'POST /api/console/sutras/:id/restart': { does: 'Stops and starts a deployed Sutra\'s triggers.', cli: 'sutra sutras restart <sutra> --project <name>' },
@@ -292,6 +299,10 @@ export const API_DOCS: Record<string, ApiDoc> = {
   'PUT /api/server/database/reconnect': { does: 'Saves the reconnect settings.' },
   'GET /api/scripts/policy': { does: 'Whether script steps (JavaScript, Python) may run on this server.' },
   'PUT /api/scripts/policy': { does: 'Allows or stops script steps. Body: `{allowed}`.' },
+  'GET /api/ai/cli-policy': { does: 'AI command-line tools (2.1.8): whether AI providers that use a command-line tool and MCP servers started by a command may run, the allowed command lines (the command line of a connection must start with one, word for word) and further environment variable names the programs get.' },
+  'PUT /api/ai/cli-policy': { does: 'Changes the AI command-line tools policy. Body: `{allowed, commands, env, approve, dismiss}`; any part may be left out. `approve` and `dismiss` name command lines waiting for approval (found in connections when the server was upgraded to 2.1.8): approved ones join the allowed commands. Server settings permission.' },
+  'GET /api/env-bindings': { does: 'Environment variables projects may read with `${env:NAME}` in their properties, deployment config, logging and connections (2.1.8), and `requested`: names projects use that are not allowed, with where (names only, never values). Server settings permission.' },
+  'PUT /api/env-bindings': { does: 'Sets the environment variables projects may read. Body: `{allowed: [names]}`. The server\'s own variables (SUTRA_...) are refused. Server settings permission.' },
   'GET /api/scripts/python': { does: 'Which Python runs Python steps here, and the path an administrator set.', cli: 'sutra python' },
   'PUT /api/scripts/python': { does: 'Sets the Python to use. Body: `{path}` (empty: find it).', cli: 'sutra python --set <path> | --clear' },
 

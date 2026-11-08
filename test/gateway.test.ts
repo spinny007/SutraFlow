@@ -20,13 +20,14 @@ import { Agent, request } from 'undici';
 import { SignJWT } from 'jose';
 import { generate } from 'selfsigned';
 import { createRequire } from 'node:module';
-import { testEnv, captureServer, node, edge } from './helpers.js';
+import { testEnv, captureServer, node, edge, engineSecrets } from './helpers.js';
 
 const env = testEnv(18210);
 const { boot } = await import('../server/src/index.js');
 const { engine, runState } = await import('../server/src/engine/engine.js');
 const { q } = await import('../server/src/db.js');
-const { setSecret } = await import('../server/src/secrets.js');
+// 2.1.8: a stored secret is used through a Secret property; these are engine Secret properties (helpers.ts).
+const setSecret = await engineSecrets();
 const { saveResource } = await import('../server/src/resources.js');
 const flows = await import('../server/src/flows.js');
 const projects = await import('../server/src/projects.js');

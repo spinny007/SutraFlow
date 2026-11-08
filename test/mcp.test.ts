@@ -16,14 +16,14 @@
  * @end-sutra-file-overview */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { testEnv, node, edge } from './helpers.js';
+import { testEnv, node, edge, engineSecrets } from './helpers.js';
 
 const env = testEnv(18950);
 const { boot } = await import('../server/src/index.js');
 const projects = await import('../server/src/projects.js');
 const flows = await import('../server/src/flows.js');
 const { saveResource } = await import('../server/src/resources.js');
-const { setSecret } = await import('../server/src/secrets.js');
+const setSecret = await engineSecrets(); // 2.1.8: policy keys only behind a Secret property
 const { rebuildRoutes } = await import('../server/src/gateway/gateway.js');
 
 let srv: Awaited<ReturnType<typeof boot>>;

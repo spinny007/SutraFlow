@@ -1,4 +1,4 @@
-# SutraFlow on Kubernetes (2.1.7)
+# SutraFlow on Kubernetes (2.1.8)
 
 Plain manifests with Kustomize (built into `kubectl`). A Helm chart is planned.
 

@@ -164,7 +164,7 @@ export function validateDoc(doc: FlowDoc, projectId?: string) {
     const from = doc.nodes.find(n => n.id === e.from)?.name || e.from, to = doc.nodes.find(n => n.id === e.to)?.name || e.to;
     errors.push(edgePathMessage(e.label ? `"${e.label}"` : `${from} to ${to}`, step));
   }
-  const designs = designSchemas(doc);
+  const designs = designSchemas(doc, undefined, projectId);
   for (const n of doc.nodes) if (!n.settings?.disabled) {
     if (n.config.validateBody === 'reject invalid' && !getSchema(String(n.config.bodySchema || '').split('::')[0])) errors.push(`${n.name}: request/message validation requires an existing body schema.`);
     for (const key of ['validateSchema', 'strictValidation', 'validateInput', 'validateResult']) {
@@ -200,6 +200,8 @@ export function saveFlow(id: string | undefined, raw: any, projectId?: string) {
   const doc = normalizeDoc(raw);
   const fid = id || crypto.randomUUID();
   const existing = id ? q.get<{ project_id: string }>('select project_id from flows where id = ?', id) : undefined;
+  // An existing Sutra stays in its project: saving it under another project is refused (audit 2.1.7 F4).
+  if (existing && projectId && projectId !== existing.project_id) throw new Error('This Sutra belongs to another project; it cannot be saved under this one.');
   const pid = projectId || existing?.project_id || ensureDefaultProject();
   if (q.get('select 1 from flows where project_id = ? and lower(name) = lower(?) and id != ?', pid, doc.name, fid)) {
     throw new Error(`This project already has a Sutra named "${doc.name}"`);
