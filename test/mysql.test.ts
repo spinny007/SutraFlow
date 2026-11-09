@@ -17,7 +17,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { testEnv, node, edge } from './helpers.js';
+import { testEnv, node, edge, engineSecrets } from './helpers.js';
 
 /**
  * DB Ops against a real MySQL server. Runs when SUTRA_TEST_MYSQL_URL is set, for example
@@ -43,7 +43,7 @@ before(async () => {
   const { engine, runState } = await import('../server/src/engine/engine.js');
   const { q } = await import('../server/src/db.js');
   const { saveResource } = await import('../server/src/resources.js');
-  const { setSecret } = await import('../server/src/secrets.js');
+  const setSecret = await engineSecrets(); // 2.1.8: a stored secret is read only behind a Secret property
   srv = await boot({ listenAdmin: false, gateway: false });
   if (u!.password) setSecret('MYSQL_TEST_PW', decodeURIComponent(u!.password));
   conn = saveResource({ kind: 'database', name: 'Laragon MySQL', config: { driver: 'mysql', host: u!.hostname, port: Number(u!.port) || 3306, database: dbName, user: decodeURIComponent(u!.username), passwordSecret: u!.password ? 'MYSQL_TEST_PW' : '', poolMax: 4 } }).id;

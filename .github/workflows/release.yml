@@ -188,9 +188,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ls -la out
+          # GitHub refuses a release text over 125000 characters (2.1.8 failed here): the release page gets
+          # this release's part of RELEASE-NOTES.md only, up to the first "## Previous release" heading.
+          # The whole file still ships inside every archive.
+          awk '/^## Previous release/ { exit } { print }' RELEASE-NOTES.md > release-body.md
+          echo "" >> release-body.md
+          echo "Earlier releases: see RELEASE-NOTES.md in the archive or in the repository." >> release-body.md
+          SIZE=$(wc -m < release-body.md)
+          echo "Release text: $SIZE characters"
+          test "$SIZE" -lt 125000 || { echo "::error::The release text is $SIZE characters; GitHub allows 125000. Shorten this release's part of RELEASE-NOTES.md."; exit 1; }
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             gh release upload "${GITHUB_REF_NAME}" out/* --clobber
-            gh release edit "${GITHUB_REF_NAME}" --title "SutraFlow ${GITHUB_REF_NAME#v}" --notes-file RELEASE-NOTES.md
+            gh release edit "${GITHUB_REF_NAME}" --title "SutraFlow ${GITHUB_REF_NAME#v}" --notes-file release-body.md
           else
-            gh release create "${GITHUB_REF_NAME}" out/* --title "SutraFlow ${GITHUB_REF_NAME#v}" --notes-file RELEASE-NOTES.md
+            gh release create "${GITHUB_REF_NAME}" out/* --title "SutraFlow ${GITHUB_REF_NAME#v}" --notes-file release-body.md
           fi

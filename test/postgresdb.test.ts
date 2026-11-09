@@ -16,7 +16,7 @@
  * @end-sutra-file-overview */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { testEnv, node, edge } from './helpers.js';
+import { testEnv, node, edge, engineSecrets } from './helpers.js';
 
 /**
  * DB Ops against a real PostgreSQL server (the MySQL suite's twin). Runs when SUTRA_TEST_PG_URL is
@@ -43,7 +43,7 @@ before(async () => {
   const { engine, runState } = await import('../server/src/engine/engine.js');
   const { q } = await import('../server/src/db.js');
   const { saveResource } = await import('../server/src/resources.js');
-  const { setSecret } = await import('../server/src/secrets.js');
+  const setSecret = await engineSecrets(); // 2.1.8: a stored secret is read only behind a Secret property
   srv = await boot({ listenAdmin: false, gateway: false });
   if (u.password) setSecret('PG_TEST_PW', decodeURIComponent(u.password));
   conn = saveResource({ kind: 'database', name: 'Laragon PostgreSQL', config: { driver: 'postgres', host: u.hostname, port: Number(u.port) || 5432, database: dbName, user: decodeURIComponent(u.username), passwordSecret: u.password ? 'PG_TEST_PW' : '', poolMax: 4 } }).id;
